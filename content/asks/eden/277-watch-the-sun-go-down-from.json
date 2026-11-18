@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":277,"group":"over-time","words":"watch the sun go down from the hill","obvious":2,"when":"at sunset","things":{"hill":"eden:hill"},"chain":[{"this":"me","form":"go_to","args":{"place":"hill"}},{"this":"me","form":"sit_down","args":{"spot":"hill"}},{"this":"me","form":"look_around"}]}

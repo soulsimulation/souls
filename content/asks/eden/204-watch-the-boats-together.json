@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":204,"group":"with-others","words":"watch the boats together","obvious":2,"things":{"her":"eden:humanoid","pier":"eden:pier","boat":"eden:sailboat"},"chain":[{"this":"me","form":"go_to","args":{"place":"pier"}},{"this":"me","form":"look_at","args":{"target":"boat"}}]}

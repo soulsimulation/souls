@@ -18,7 +18,7 @@ export const MOVE_FORMAT = 'souls-move/1';
 export const RESOURCE_CLASSES = Object.freeze(['locomotion', 'manipulator', 'gaze', 'voice']);
 export const CANCELS_ON = Object.freeze(['claim_taken', 'out_of_reach']);
 export const EFFECTORS = Object.freeze(['hand', 'held_point']);
-export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'pour_us', 'consume_us', 'recovery_us']);
+export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'pour_us', 'consume_us', 'strike_us', 'pump_us', 'recovery_us']);
 export const REACH_MAX_MM = 700;
 const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'phases'];
 const IDENT = /^[a-z][a-z0-9_]*$/;
@@ -57,9 +57,9 @@ export function validateMove(m) {
     for (const k of ['start_up_us', 'recovery_us']) if (m.phases[k] === undefined) err(`phases.${k}`, 'required');
     for (const [k, v] of Object.entries(m.phases)) if (!(Number.isSafeInteger(v) && v > 0)) err(`phases.${k}`, 'whole microseconds above zero');
   }
-  if (isObj(m.phases) && ['slide_us', 'pour_us', 'consume_us'].filter(k => m.phases[k] !== undefined).length > 1) err('phases', 'a move slides, pours or consumes, not more than one');
+  if (isObj(m.phases) && ['slide_us', 'pour_us', 'consume_us', 'strike_us', 'pump_us'].filter(k => m.phases[k] !== undefined).length > 1) err('phases', 'a move slides, pours, consumes, strikes or pumps, not more than one');
   if (isObj(m.phases) && m.phases.consume_us !== undefined && !(Array.isArray(m.claims) && m.claims.includes('voice'))) err('claims', 'a move that consumes claims the mouth (voice)');
-  if (isObj(m.phases) && (m.phases.pour_us !== undefined || m.phases.consume_us !== undefined) && m.effector !== 'held_point') err('effector', "a pour's or a consume's effector is a point of the held thing (held_point)");
+  if (isObj(m.phases) && (m.phases.pour_us !== undefined || m.phases.consume_us !== undefined || m.phases.strike_us !== undefined || m.phases.pump_us !== undefined) && m.effector !== 'held_point') err('effector', "a pour's, consume's, strike's or pump's effector is a point of the held thing (held_point)");
   return errors;
 }
 
