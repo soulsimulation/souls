@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `frozen`: K8, #2671; `timers`: K9, #2672; `moves`: B2, #2681; `seats`: B3, #2682."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `frozen`: K8, #2671; `timers`: K9, #2672; `moves`: B2, #2681; `view-tier`: R3, #2697; `seats`: B3, #2682."
 
 [[bin]]
 name = "seats"
@@ -12,6 +12,10 @@ path = "src/seats.rs"
 [[bin]]
 name = "tree"
 path = "src/tree.rs"
+
+[[bin]]
+name = "view-tier"
+path = "view-tier/main.rs"
 
 # R1, #2684: the replica's native and WASM builds compared (node.mjs beside it), and its three numbers.
 [[bin]]
@@ -40,6 +44,7 @@ replica = { path = "../../crates/replica" }
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
 sim = { path = "../../crates/sim" }
 testworld = { path = "../testworld" }
+worldd = { path = "../../crates/worldd" }
 import-eden = { path = "../import-eden" }
 skills = { path = "../../crates/skills" }
 # The `moves` bench places its bodies with the script driver's helpers (B2, #2681).
