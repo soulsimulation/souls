@@ -48,8 +48,13 @@ function clips(): THREE.AnimationClip[] {
   ];
 }
 
-/** The body, baked as the crowd bakes a body file. */
-export function model(): BakedModel {
+/** A clip of `seconds` that holds bone `bone` turned `deg` about `axis` (E11's stand-ins and real clips). */
+export function held(name: string, seconds: number, bone: string, deg: number, axis: Vec = [1, 0, 0]): THREE.AnimationClip {
+  return new THREE.AnimationClip(name, seconds, [quats(bone, [0, seconds], [deg, deg], axis)]);
+}
+
+/** The body, baked as the crowd bakes a body file, with `extra` clips after the three. */
+export function model(extra: THREE.AnimationClip[] = []): BakedModel {
   const scene = new THREE.Group();
   const bones = new Map<string, THREE.Bone>();
   for (const [name, parent, at] of BONES) {
@@ -75,7 +80,8 @@ export function model(): BakedModel {
   const mesh = new THREE.SkinnedMesh(g, new THREE.MeshStandardMaterial());
   scene.add(mesh);
   mesh.bind(new THREE.Skeleton(list));
-  return bakeModel('fixture', { scene } as GLTF, clips(), ['Idle', 'Walk', 'Sitting_Idle_Loop']);
+  const all = [...clips(), ...extra];
+  return bakeModel('fixture', { scene } as GLTF, all, all.map((c) => c.name));
 }
 
 const S = 1_000_000;

@@ -4,6 +4,7 @@
 pub mod clock;
 pub mod controller;
 pub mod frozen;
+pub mod gesture;
 pub mod ground;
 pub mod host;
 pub mod index;

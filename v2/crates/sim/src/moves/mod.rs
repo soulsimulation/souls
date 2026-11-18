@@ -128,6 +128,11 @@ impl Moves {
         self.live.get(&instance).map(|l| &l.record)
     }
 
+    /// The move a timer the due list handed back belongs to, before [`Moves::fire`] runs it.
+    pub fn instance_of(&self, t: &Timer) -> Option<Instance> {
+        self.by_timer.get(&t.id).copied()
+    }
+
     /// Starts `mv` on `body` toward point `mv.contact` of `target` at `now`, all or none: the reach is asked first
     /// (`out-of-reach`, `reach-unknown`), then the claim is made through the controller (T9's refusals by name), the
     /// move set on each resource it holds, and its first phase's end set as a timer (`id-counter-exhausted`).

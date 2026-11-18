@@ -13,6 +13,7 @@
 //   the recorded contact point (two-bone, rig.ts's arithmetic on arrays), a row of twelve floats a bone as the bake's.
 // - An arm whose contact point is out of reach hangs as the clip has it (rig.ts's `contact` fade).
 import type { BakedModel } from '../crowd/bake.ts';
+import { expressionAt, type GestureRecord, type MoodRecord, type Words } from './gesture.ts';
 
 export type Vec = readonly [number, number, number];
 /** A recorded place: world time in µs, metres in the body's frame. */
@@ -28,8 +29,12 @@ export type MoveRecord = {
   ends: readonly number[];
   ended?: { at: number; how: string };
 };
-/** What is recorded of one body: its samples in time order and its moves in start order. */
-export type BodyRecord = { id: string; samples: readonly Sample[]; moves: readonly MoveRecord[] };
+/** What is recorded of one body: its samples in time order, its moves in start order, and its gestures and moods
+ * (E11, `./gesture.ts`) in time order. */
+export type BodyRecord = {
+  id: string; samples: readonly Sample[]; moves: readonly MoveRecord[];
+  gestures?: readonly GestureRecord[]; moods?: readonly MoodRecord[];
+};
 /** A thing's named point (K3) in the body's frame, from the world at the move's time; null when unknown. */
 export type Points = (target: string, point: string) => Vec | null;
 /** What the pose reads of a baked model. */
@@ -58,6 +63,10 @@ export type BodyPose = {
   posture: number; posturePhase: number; postureWeight: number;
   /** The arm swung onto a contact point: the point in the model's space, its side and weight; side null for none. */
   reach: Vec | null; side: 'left' | 'right' | null; reachWeight: number;
+  /** A gesture's clip (its own for the words, else its stand-in), phase and weight, clip -1 for none (E11). */
+  gesture: number; gesturePhase: number; gestureWeight: number;
+  /** The gesture's words, else the mood's, as this viewer may see them; null for none. */
+  caption: string | null;
 };
 
 const smooth = (u: number) => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
@@ -139,11 +148,14 @@ function arm(model: PoseModel, side: 'left' | 'right'): [number, number, number]
 }
 
 /** The body's place, facing and weights at world time `t` (µs), from its record alone. */
-export function poseAt(rec: BodyRecord, model: PoseModel, t: number, points: Points): BodyPose {
+export function poseAt(rec: BodyRecord, model: PoseModel, t: number, points: Points, words: Words = () => null): BodyPose {
   const s = rec.samples, seed = hash(rec.id);
   const [x, y, z] = placeAt(s, t);
   const clip = (name: string) => model.clips.findIndex((c) => c.name === name);
-  const idle = clip('Idle'), walk = clip('Walk');
+  const walk = clip('Walk');
+  // A mood takes the idle's place; a gesture is drawn over everything by its weight (./gesture.ts).
+  const ex = expressionAt(rec.gestures ?? [], rec.moods ?? [], model, t, words, clip('Idle'));
+  const idle = ex.idle;
   const cycle = (k: number) => (k >= 0 ? model.clips[k].seconds : 1);
   // Facing: the way it moves over a window around t; else the way it last moved; else seeded from its id.
   const a = placeAt(s, t - FACE_HALF), b = placeAt(s, t + FACE_HALF);
@@ -203,6 +215,7 @@ export function poseAt(rec: BodyRecord, model: PoseModel, t: number, points: Poi
     walk, walkPhase, walkWeight,
     posture, posturePhase, postureWeight,
     reach, side, reachWeight,
+    gesture: ex.gesture, gesturePhase: ex.gesturePhase, gestureWeight: ex.gestureWeight, caption: ex.caption,
   };
 }
 
@@ -278,13 +291,17 @@ export function jointAt(model: PoseModel, bones: Float32Array, b: number): Vec {
 }
 
 /** The body's pose at `t` and its bones written into `out` (a row of twelve floats a bone, V6's live texture row). */
-export function poseBones(rec: BodyRecord, model: PoseModel, t: number, points: Points, out = new Float32Array(model.bones * 12)): BodyPose {
-  const p = poseAt(rec, model, t, points);
+export function poseBones(
+  rec: BodyRecord, model: PoseModel, t: number, points: Points, out = new Float32Array(model.bones * 12), words: Words = () => null,
+): BodyPose {
+  const p = poseAt(rec, model, t, points, words);
   out.fill(0);
+  const gw = p.gesture >= 0 ? p.gestureWeight : 0, rest = 1 - gw;
   const pw = p.postureWeight, ww = p.walkWeight * (1 - pw);
-  addClip(model, p.idle, p.idlePhase, 1 - pw - ww, out);
-  addClip(model, p.walk, p.walkPhase, ww, out);
-  addClip(model, p.posture, p.posturePhase, pw, out);
+  addClip(model, p.idle, p.idlePhase, (1 - pw - ww) * rest, out);
+  addClip(model, p.walk, p.walkPhase, ww * rest, out);
+  addClip(model, p.posture, p.posturePhase, pw * rest, out);
+  addClip(model, p.gesture, p.gesturePhase, gw, out);
   const chain = p.side && p.reach ? arm(model, p.side) : null;
   if (chain && p.reach && p.reachWeight > 0) {
     const [upper, lower, wrist] = chain;
