@@ -145,8 +145,8 @@ fn read_int(v: &Value) -> Option<i64> {
 }
 
 /// A route the world gave the body ([`F_ROUTE`]) after route `taken`: its count and legs.
-fn route_of(me: &replica::host::Seen, taken: u64) -> Option<(u64, Vec<Leg>)> {
-    let Value::Array(a) = me.fields.get(&F_ROUTE)? else {
+fn route_of(route: Option<Value>, taken: u64) -> Option<(u64, Vec<Leg>)> {
+    let Value::Array(a) = route? else {
         return None;
     };
     let [Value::Uint(n), Value::Array(legs)] = a.as_slice() else {
@@ -279,11 +279,12 @@ impl Skill for Route {
 
     fn step(&mut self, host: &mut dyn Host) -> Progress {
         let body = host.body();
-        let Some(me) = host.read(body) else {
+        // Its own body field by field, not a whole read: a read copies every field each tick.
+        let Some(p) = host.position(body) else {
             return Progress::Failed(name("souls:body-gone"));
         };
         // A new route from the world (N10's reroute): walked from its first leg.
-        if let Some((n, legs)) = route_of(&me, self.route) {
+        if let Some((n, legs)) = route_of(host.field(body, F_ROUTE), self.route) {
             (self.route, self.legs, self.leg) = (n, legs, 0);
             (self.crossing, self.last) = (None, None);
             // Taken: the legs are the walk's own now. The field keeps the count alone, so a read of this body (each
@@ -300,11 +301,11 @@ impl Skill for Route {
             );
         }
         // Held while the world walks it out: it stands, unmarked.
-        if me.fields.contains_key(&F_HELD) {
+        if host.field(body, F_HELD).is_some() {
             self.mark(host, body, None);
             return Progress::Going;
         }
-        let shoulder = me.fields.contains_key(&F_SHOULDER);
+        let shoulder = host.field(body, F_SHOULDER).is_some();
         let Some(leg) = self.legs.get(self.leg).copied() else {
             // Sent to a point: it stands until its route is given.
             if self.spot && self.route == 0 {
@@ -315,7 +316,7 @@ impl Skill for Route {
         };
         // A crossing: carried until the world stands it on the far side.
         if let Some(c) = self.crossing {
-            let carried = me.fields.contains_key(&F_CROSSING);
+            let carried = host.field(body, F_CROSSING).is_some();
             match (c, carried) {
                 (_, true) => {
                     self.crossing = Some(Crossing::Carried);
@@ -335,7 +336,6 @@ impl Skill for Route {
                 }
             }
         }
-        let p = me.position;
         let gap = len([leg.to.x - p.x, leg.to.z - p.z]);
         // Leave to enter: the link's owner names who it lets in (A3).
         let (narrow, granted) = match leg.link.and_then(|l| host.read(l)) {

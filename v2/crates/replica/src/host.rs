@@ -103,6 +103,10 @@ pub trait Host {
     fn field(&self, node: Id, field: u64) -> Option<Value> {
         self.read(node)?.fields.remove(&field)
     }
+    /// A node's position, as [`Host::read`] shows it.
+    fn position(&self, node: Id) -> Option<Vec3> {
+        self.read(node).map(|s| s.position)
+    }
     /// An answer about geometry, in integers, or none.
     fn ask(&self, q: &Ask) -> Option<Answer>;
     /// A timer on the body, due `after` microseconds of world time from now, named for what it is for (T6 rule 15).

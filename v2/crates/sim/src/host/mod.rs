@@ -71,6 +71,10 @@ pub trait Geometry {
     fn field(&self, node: Id, field: u64) -> Option<Option<Value>> {
         self.read(node).map(|mut s| s.fields.remove(&field))
     }
+    /// Such a node's position as [`Geometry::read`] shows it; `None` reads the tree.
+    fn position(&self, node: Id) -> Option<Vec3> {
+        self.read(node).map(|s| s.position)
+    }
 }
 
 /// The world's side of a crossing: the track a body is carried along across `link` at `speed`, or `None` while it
@@ -247,6 +251,15 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
         }
         let n = self.tree.node(self.tree.handle(node)?)?;
         n.fields().get(&field).cloned()
+    }
+
+    fn position(&self, node: Id) -> Option<Vec3> {
+        self.count();
+        if let Some(p) = self.geometry.position(node) {
+            return Some(p);
+        }
+        let n = self.tree.node(self.tree.handle(node)?)?;
+        Some(n.place().map_or(Vec3::ZERO, |p| p.position))
     }
 
     fn ask(&self, q: &Ask) -> Option<Answer> {
@@ -551,6 +564,13 @@ impl Geometry for Here<'_> {
             _ if field == F_SETTLED && self.settled.contains(&node) => Some(Value::Uint(1)),
             _ => self.fields.get(&node).and_then(|f| f.get(&field)).cloned(),
         })
+    }
+
+    fn position(&self, node: Id) -> Option<Vec3> {
+        match self.controller.seen(node) {
+            Some((b, _)) => Some(b.pose.position),
+            None => self.town.read_link(node).map(|s| s.position),
+        }
     }
 }
 
