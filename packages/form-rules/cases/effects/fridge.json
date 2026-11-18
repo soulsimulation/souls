@@ -58,8 +58,8 @@
      "receipt": "rtake0",
      "expect": {
       "verdict": "no",
-      "reason": "field_differs",
-      "need": 0
+      "reason": "closed",
+      "effect": 0
      }
     },
     {
