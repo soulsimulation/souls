@@ -19,25 +19,39 @@ const CATALOG = {
   acts: [], kinds: {},
 };
 
-/** The world: a seat goes to the first Soul that asks for it, and is refused to the rest. `souls` is token → {id, at}. */
-async function world(souls) {
-  const taken = new Map(), asked = [];
+/** The world: a seat goes to the first Soul that asks for it, and is refused to the rest. `souls` is token → {id, at}.
+ *  `lockstep`: the acts are answered in rounds, not as the machine happens to deliver them. A round closes when every Soul still
+ *  running (`done(id)` marks one finished) has an act waiting, and its acts are decided in the Souls' order. So the crowd asks
+ *  at the same time on every try, the hardest case, and the outcome is the client's alone, whatever the load (#3099 pattern). */
+async function world(souls, { lockstep = false } = {}) {
+  const taken = new Map(), asked = [], waiting = new Map(), running = new Set(lockstep ? Object.values(souls).map((s) => s.id) : []);
+  const decide = (me, body) => {
+    asked.push({ soul: me?.id, id: body.capability });
+    const seat = /^sit:(.+)$/.exec(body.capability ?? "")?.[1];
+    if (!seat || !me) return { accepted: false, code: "capability.unknown", reason: "no" };
+    if (taken.has(seat)) return { accepted: false, code: "seat.none-near", reason: "That seat is taken.", did_you_mean: [...Array(SEATS).keys()].filter((i) => !taken.has(`s${i}`)).sort((a, b) => Math.abs(seatAt(a)[0] - me.at[0]) - Math.abs(seatAt(b)[0] - me.at[0])).slice(0, 3).map((i) => ({ id: `sit:s${i}`, label: `Stool ${i}` })) };
+    taken.set(seat, me.id);
+    return { accepted: true, receipt: { id: `r_${me.id}`, capability: body.capability, phase: "started" }, channel: "body" };
+  };
+  const round = () => {
+    if (!waiting.size || waiting.size < running.size) return;
+    const now = [...waiting.values()].sort((a, b) => (a.me.id < b.me.id ? -1 : 1)); waiting.clear();
+    for (const w of now) w.send(decide(w.me, w.body));
+  };
   const server = createServer((req, res) => {
     let b = ""; req.on("data", (d) => b += d); req.on("end", () => {
       const send = (o, h = {}) => { res.writeHead(200, { "content-type": "application/json", ...h }); res.end(JSON.stringify(o)); };
       if (req.url === "/v1/edge/catalog") return send(CATALOG, { etag: '"c1"' });
       if (req.url === "/v1/edge/live") return send({ epoch: "e", seq: 1, souls: Object.values(souls).map((s) => ({ id: s.id, name: s.id, place: "hall", at: s.at })), things: {}, catalog: "c1" });
       const body = JSON.parse(b || "{}"), me = souls[(req.headers.authorization ?? "").slice(7)];
-      asked.push({ soul: me?.id, id: body.capability });
-      const seat = /^sit:(.+)$/.exec(body.capability ?? "")?.[1];
-      if (!seat || !me) return send({ accepted: false, code: "capability.unknown", reason: "no" });
-      if (taken.has(seat)) return send({ accepted: false, code: "seat.none-near", reason: "That seat is taken.", did_you_mean: [...Array(SEATS).keys()].filter((i) => !taken.has(`s${i}`)).sort((a, b) => Math.abs(seatAt(a)[0] - me.at[0]) - Math.abs(seatAt(b)[0] - me.at[0])).slice(0, 3).map((i) => ({ id: `sit:s${i}`, label: `Stool ${i}` })) });
-      taken.set(seat, me.id);
-      send({ accepted: true, receipt: { id: `r_${me.id}`, capability: body.capability, phase: "started" }, channel: "body" });
+      if (!running.has(me?.id)) return send(decide(me, body));
+      assert.ok(!waiting.has(me.id), `${me.id} sent a second act before the first was answered`);
+      waiting.set(me.id, { me, body, send }); round();
     });
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  return { server, taken, asked, url: `http://127.0.0.1:${server.address().port}` };
+  const done = (id) => { running.delete(id); round(); };
+  return { server, taken, asked, done, url: `http://127.0.0.1:${server.address().port}` };
 }
 const home = (url, soul, token) => { const dir = mkdtempSync(join(tmpdir(), "eden-ranked-")); writeFileSync(join(dir, ".eden-agent.json"), JSON.stringify({ world: url, token, soul })); return dir; };
 const run = (dir, ...args) => new Promise((res) => execFile(process.execPath, [CLI, ...args], { cwd: dir }, (e, out) => res({ code: e?.code ?? 0, out: out ? JSON.parse(out) : null })));
@@ -50,11 +64,11 @@ function crowd(seed) {
 }
 /** Every Soul sends one act at the same time, once. Returns how many were accepted on that one call. */
 export async function crowdRun({ seed, fallbacks }) {
-  const people = crowd(seed), souls = Object.fromEntries(people.map((p) => [`tok-${p.id}`, p])), w = await world(souls);
+  const people = crowd(seed), souls = Object.fromEntries(people.map((p) => [`tok-${p.id}`, p])), w = await world(souls, { lockstep: true });
   try {
     const got = await Promise.all(people.map((p) => {
       const order = nearest(p.at[0]), args = ["act", `sit:s${order[0]}`, ...(fallbacks ? ["--else", `sit:s${order[1]}`, "--else", `sit:s${order[2]}`, "--else", "any:sit"] : []), "--json"];
-      return run(home(w.url, p.id, `tok-${p.id}`), ...args);
+      return run(home(w.url, p.id, `tok-${p.id}`), ...args).finally(() => w.done(p.id));
     }));
     return { accepted: got.filter((g) => g.out.accepted === true).length, sent: w.asked.length, distinct: new Set(w.taken.values()).size, firsts: got.map((g) => g.out.fallback?.rank ?? 1) };
   } finally { w.server.close(); }
