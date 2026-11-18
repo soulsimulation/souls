@@ -76,3 +76,35 @@ test('A3: the library imports nothing from apps/, mars/ or packages/engine-*', (
     if (file === 'rules.ts') assert.deepEqual(specifiers, [], 'rules.ts imports nothing');
   }
 });
+
+// Entry-tool consolidation: one implementation of the fixes the content lanes each made (see the PR).
+test('a need on a field a closed kind names reads the container\'s audience, not the field\'s own', () => {
+  const box = {
+    kind: 'test:box',
+    closed: { audience: { rule: 'owner' as const }, fields: ['apples'] },
+    state: { apples: { n: 0, type: 'int', unit: 'count', min: 0, max: 4, default: 2 } as never, lid: { n: 1, type: 'bool', default: false, audience: { rule: 'everyone' as const } } },
+    forms: { take: { who: 'anyone', starts: 'act', needs: [{ need: 'state', field: 'apples', at_least: 1 }] }, peek: { who: 'anyone', starts: 'act', needs: [{ need: 'state', field: 'lid', is: false }] } },
+  };
+  const ask = (form: string, sees: string[]) => decide({ kinds: { 'test:box': box } as never, act: { this: 'b', form }, state: { actor: 'me', nodes: { b: { kind: 'test:box' }, me: {} } }, asker: { sees } });
+  assert.equal(ask('take', []).verdict, 'unknown', 'a stranger cannot read a closed count');
+  assert.equal(ask('take', ['owner']).verdict, 'yes', 'the owner reads it through the container\'s audience');
+  assert.equal(ask('peek', []).verdict, 'yes', 'a field the closed list does not name keeps its own audience');
+});
+
+test('a state need\'s fix passes over a form that would itself be refused now', () => {
+  const lamp = {
+    kind: 'test:lamp',
+    state: { level: { n: 0, type: 'int', unit: 'permille', min: 0, max: 1000, default: 0, audience: { rule: 'everyone' as const } } },
+    forms: {
+      bright: { who: 'anyone', starts: 'act', needs: [{ need: 'state', field: 'level', at_least: 1000 }] },
+      // a dimmer step: it reaches full only from a lamp already lit, so on a dark lamp it is no fix
+      dim_up: { who: 'anyone', starts: 'act', needs: [{ need: 'state', field: 'level', at_least: 1 }], effects: [{ change: 'set', field: 'level', to: 1000, event: 'brightened' }] },
+      switch_on: { who: 'anyone', starts: 'act', needs: [], effects: [{ change: 'set', field: 'level', to: 1000, event: 'lit' }] },
+    },
+  };
+  const ask = (level: number) => decide({ kinds: { 'test:lamp': lamp } as never, act: { this: 'l', form: 'bright' }, state: { actor: 'me', nodes: { l: { kind: 'test:lamp', fields: { level } }, me: {} } }, asker: { sees: [] } });
+  const dark = ask(0), lit = ask(500);
+  assert.equal(dark.verdict, 'no');
+  assert.deepEqual(dark.verdict === 'no' && dark.fix, { form: 'switch_on' }, 'dim_up needs a lit lamp, so the dark lamp is told to switch on');
+  assert.deepEqual(lit.verdict === 'no' && lit.fix, { form: 'dim_up' }, 'a lit lamp is dimmed up, the first form in order that is ready');
+});
