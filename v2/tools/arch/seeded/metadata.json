@@ -1,0 +1,1 @@
+{"packages": [{"name": "replica", "manifest_path": "crates/replica/Cargo.toml", "dependencies": [{"name": "wasm-bindgen", "kind": null}, {"name": "serde", "kind": null}]}]}
