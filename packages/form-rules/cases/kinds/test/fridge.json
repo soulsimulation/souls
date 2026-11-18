@@ -1,0 +1,71 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:fridge",
+  "owner": "thing",
+  "state": {
+    "milk": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 0,
+      "max": 4
+    }
+  },
+  "links": {
+    "opener": {
+      "n": 1,
+      "from": "soul",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "stock": {
+    "milk": {
+      "kind": "test:milk",
+      "count": "milk",
+      "take": "take_milk",
+      "refill": {
+        "every_us": 3600000000
+      }
+    }
+  },
+  "forms": {
+    "take_milk": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "milk",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "test:milk",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "text": {},
+  "closed": {
+    "audience": {
+      "rule": "linked",
+      "link": "opener"
+    },
+    "fields": [
+      "milk"
+    ]
+  }
+}
