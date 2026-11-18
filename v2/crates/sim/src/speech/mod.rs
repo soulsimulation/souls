@@ -10,17 +10,22 @@
 //!   answered from the bodies within [`LEAVE`] of it, never a scan of the hall ([`Hearing::holders`]).
 //! - **Resolved at write.** [`said`] gives the record for an utterance the controller started this tick: the words'
 //!   reference, the reach, the public audience and the hearers as they are at that instant.
+//! - **Each tick** (#3231): after the controller's step the world's tick calls [`heard`], which brings the sets up to
+//!   date from the bodies that moved and gives each started utterance's record, and writes each as [`entry`] says. The
+//!   view tier reads the entry from the log and addresses it to each hearer's subscription
+//!   (`worldd::views::subscription`, R4's addressed queue).
 //!
 //! Not here: a whisper, a shout and devices that carry a voice (E13: other values of the record's reach and audience,
-//! no change of format), conversations (the Soul Actions tranche), playing sound (lane V), delivering an utterance to
-//! each hearer's subscription (R4's addressed queue, `Hub::address`).
+//! no change of format), conversations (the Soul Actions tranche), playing sound (lane V).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::controller::Line;
 use crate::index::Index;
+use replica::effects::{Body, Effect, Envelope, Rest};
 use replica::ids::Id;
 use replica::speech::Said;
+use replica::time::Micros;
 use replica::world_model::Audience;
 
 /// A body enters a Soul's interest set closer than this, µm (talking distance and a step).
@@ -127,5 +132,36 @@ pub fn said(hearing: &Hearing, index: &Index, speaker: Id, line: &Line) -> Said 
         audience: Audience::Everyone,
         hearers: hearing.holders(index, speaker),
         length: line.length,
+    }
+}
+
+/// One tick of speech, run by the world's tick after the controller's step: brings every body's interest set up to
+/// date (`bodies` are every body the world holds; only those that moved, came or went are worked out again), then
+/// gives the record of each utterance the step started (`Stepped::said`), its hearers as they are now, in order.
+pub fn heard(
+    hearing: &mut Hearing,
+    index: &Index,
+    bodies: impl IntoIterator<Item = Id>,
+    started: &[(Id, Line, Micros)],
+) -> Vec<(Id, Said)> {
+    hearing.update(index, bodies);
+    started
+        .iter()
+        .map(|(speaker, line, _)| (*speaker, said(hearing, index, *speaker, line)))
+        .collect()
+}
+
+/// The log entry an utterance is written as: its `souls:said` event in an entry of no changes, written by the
+/// speaker's body (`node`) with the utterance's audience. Sequence, time, cause and actor are the writer's.
+pub fn entry(envelope: Envelope, speaker: Id, said: &Said) -> Effect {
+    Effect {
+        envelope: Envelope {
+            node: speaker,
+            audience: said.audience,
+            ..envelope
+        },
+        body: Body::Changes(Vec::new()),
+        events: Some(vec![said.event()]),
+        rest: Rest::new(),
     }
 }

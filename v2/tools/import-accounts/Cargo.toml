@@ -1,0 +1,13 @@
+[package]
+name = "import-accounts"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Engine v2 X11 (#2820): accounts, Souls and creators brought over from a stage's backup."
+
+[dependencies]
+directoryd = { path = "../../crates/directoryd" }
+replica = { path = "../../crates/replica" }
+ring = "0.17"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde_json = "1"

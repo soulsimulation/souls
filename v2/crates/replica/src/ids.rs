@@ -94,6 +94,26 @@ impl Minter {
         Minter { scope, next: 0 }
     }
 
+    /// A restarted writer's minter: its scope, and the next counter it gives out (from its checkpoint, K4b).
+    pub fn at(scope: Scope, next: u64) -> Minter {
+        Minter { scope, next }
+    }
+
+    pub fn scope(&self) -> Scope {
+        self.scope
+    }
+
+    /// The next counter it gives out: every counter below it has been given out.
+    pub fn next(&self) -> u64 {
+        self.next
+    }
+
+    /// Records that `counter` of its scope was given out (an id read back from the log after a checkpoint), so it is
+    /// never given out again.
+    pub fn past(&mut self, counter: u64) {
+        self.next = self.next.max(counter.saturating_add(1));
+    }
+
     /// The next id. A counter is never given out twice (rule 4).
     pub fn mint(&mut self) -> Result<Id, Exhausted> {
         let id = Id::new(self.scope, self.next).ok_or(Exhausted(self.scope))?;
@@ -191,6 +211,8 @@ pub enum Purpose {
     View,
     /// A redaction list: the references removed so far (contracts T7 and T8).
     Redactions,
+    /// An upload's stored bytes, after its check (G6, #2747, `v2/crates/assets`).
+    Upload,
     /// A stored model of a kind's picture: the binary glTF a page fetches (V17, #2717).
     Model,
 }
@@ -208,6 +230,7 @@ impl Purpose {
             Purpose::Fixture => "souls/fixture/1",
             Purpose::View => "souls/view/1",
             Purpose::Redactions => "souls/redactions/1",
+            Purpose::Upload => "souls/upload/1",
             Purpose::Model => "souls/model/1",
         }
     }

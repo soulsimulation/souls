@@ -157,6 +157,7 @@ type KindRow = { kind: string; ref: string; hash: string; things: number; builde
 const kinds = new Map<string, KindRow>();
 const models = new Map<string, { hash: string; bytes: number; tris: number; parts: number; effects: number; roles: string[]; kind: string; key: string; sha256: string }>();
 const keyed = new Map<string, string>(); // kind ref + key -> model hash
+const thingModels: Record<string, string> = {}; // today's thing id -> its model's hash (V8 #2718: the page's table)
 mkdirSync(join(OUT, 'worlds/models'), { recursive: true });
 let built = 0;
 for (const e of [...m.entities.values()].sort((a, b) => a.id.localeCompare(b.id))) {
@@ -174,7 +175,7 @@ for (const e of [...m.entities.values()].sort((a, b) => a.id.localeCompare(b.id)
   if (builder.world) { row.worldThings = (row.worldThings ?? 0) + 1; continue; }
   const key = keyOf(builder, e, def) ?? `thing:${e.id}`;
   const k = def.ref + '\u0000' + key;
-  if (keyed.has(k)) continue;
+  if (keyed.has(k)) { if (keyed.get(k)) thingModels[e.id] = keyed.get(k)!; continue; }
   try {
     const plainThing = { ...e, params: Object.fromEntries(Object.entries(e.params ?? {}).filter(([p]) => !ON_INSTANCE.has(p))) } as Entity;
     const obj = conditionalKit(def, plainThing) ?? builder.build(ctxOf(plainThing, def, undefined));
@@ -185,7 +186,7 @@ for (const e of [...m.entities.values()].sort((a, b) => a.id.localeCompare(b.id)
     const file = join(OUT, 'worlds/models', `${hash}.glb`);
     if (!existsSync(file)) writeFileSync(file, bytes, { flag: 'wx' });
     models.set(hash, { hash, bytes: bytes.length, ...s, kind: def.ref, key, sha256: sha256(bytes) });
-    keyed.set(k, hash); row.models[key] = hash; built++;
+    keyed.set(k, hash); row.models[key] = hash; thingModels[e.id] = hash; built++;
     const st = stateTable(def, s.roles); if (Object.keys(st).length) row.states = st; else delete row.states;
   } catch (err) { row.failed ??= {}; row.failed[key] = String(err).slice(0, 160); keyed.set(k, ''); }
 }
@@ -242,5 +243,5 @@ if (process.argv.includes('--write-records')) {
   g.models.sort((a, b) => a.path.localeCompare(b.path));
   writeFileSync(reviewedPath, JSON.stringify(reviewed, null, 2) + '\n');
 }
-writeFileSync(join(OUT, 'models.json'), JSON.stringify({ summary, kinds: rows, models: [...models.values()].sort((a, b) => a.hash.localeCompare(b.hash)) }, null, 1) + '\n');
+writeFileSync(join(OUT, 'models.json'), JSON.stringify({ summary, kinds: rows, models: [...models.values()].sort((a, b) => a.hash.localeCompare(b.hash)), things: thingModels }, null, 1) + '\n');
 console.log(JSON.stringify({ ...summary, built }, null, 1));

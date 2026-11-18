@@ -29,7 +29,12 @@
 //!   near (the controller's spatial index, N16 `crate::index`: the bodies as the mover left them at the last tick's
 //!   end), and reads of bodies and links.
 //!
-//! Not here: handing intents back after a restart (K13b #3119), entries to the log, timers (K9).
+//! - **After a restart** ([`restart`], K13b #3119): each order the log holds as accepted and not ended is handed to
+//!   its skill again, from where its body stands, or ended with a named reason.
+//!
+//! Not here: entries to the log, timers (K9).
+
+pub mod restart;
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -60,6 +65,15 @@ pub trait Geometry {
     /// A3), as of the tick's start; `None` reads the tree.
     fn read(&self, _node: Id) -> Option<Seen> {
         None
+    }
+    /// One field of such a node as [`Geometry::read`] shows it (the inner `None`: the node holds no such field);
+    /// `None` reads the tree.
+    fn field(&self, node: Id, field: u64) -> Option<Option<Value>> {
+        self.read(node).map(|mut s| s.fields.remove(&field))
+    }
+    /// Such a node's position as [`Geometry::read`] shows it; `None` reads the tree.
+    fn position(&self, node: Id) -> Option<Vec3> {
+        self.read(node).map(|s| s.position)
     }
 }
 
@@ -228,6 +242,24 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
             position: n.place().map_or(Vec3::ZERO, |p| p.position),
             fields: n.fields().clone(),
         })
+    }
+
+    fn field(&self, node: Id, field: u64) -> Option<Value> {
+        self.count();
+        if let Some(v) = self.geometry.field(node, field) {
+            return v;
+        }
+        let n = self.tree.node(self.tree.handle(node)?)?;
+        n.fields().get(&field).cloned()
+    }
+
+    fn position(&self, node: Id) -> Option<Vec3> {
+        self.count();
+        if let Some(p) = self.geometry.position(node) {
+            return Some(p);
+        }
+        let n = self.tree.node(self.tree.handle(node)?)?;
+        Some(n.place().map_or(Vec3::ZERO, |p| p.position))
     }
 
     fn ask(&self, q: &Ask) -> Option<Answer> {
@@ -517,6 +549,29 @@ impl Geometry for Here<'_> {
             fields,
         })
     }
+
+    /// As [`Here::read`] shows it, without copying the body's other fields: each walker reads the waiting mark of
+    /// every body near it each tick.
+    fn field(&self, node: Id, field: u64) -> Option<Option<Value>> {
+        let Some((_, carrying)) = self.controller.seen(node) else {
+            return self
+                .town
+                .read_link(node)
+                .map(|mut s| s.fields.remove(&field));
+        };
+        Some(match carrying {
+            Some(l) if field == F_CROSSING => Some(l.to_value()),
+            _ if field == F_SETTLED && self.settled.contains(&node) => Some(Value::Uint(1)),
+            _ => self.fields.get(&node).and_then(|f| f.get(&field)).cloned(),
+        })
+    }
+
+    fn position(&self, node: Id) -> Option<Vec3> {
+        match self.controller.seen(node) {
+            Some((b, _)) => Some(b.pose.position),
+            None => self.town.read_link(node).map(|s| s.position),
+        }
+    }
 }
 
 /// The other bodies not carried across a link, on `body`'s node within `radius` of it (x and z), in id order, as
@@ -526,18 +581,22 @@ fn near(controller: &Controller, body: Id, radius: i64) -> Vec<Near> {
         return Vec::new();
     };
     let (node, p) = crate::index::place_of(me);
-    controller
-        .near()
-        .bodies_within(node, p, radius)
-        .into_iter()
-        .filter(|&(id, _)| id != body)
-        .filter_map(|(id, _)| controller.body(id))
-        .map(|b| Near {
-            id: b.id,
-            position: b.pose.position,
-            velocity: b.linear,
-        })
-        .collect()
+    let found = controller.near().bodies_within(node, p, radius);
+    // Sized once: in a crowd each walker has many near it, every tick.
+    let mut out = Vec::with_capacity(found.len());
+    for (id, _) in found {
+        if id == body {
+            continue;
+        }
+        if let Some(b) = controller.body(id) {
+            out.push(Near {
+                id: b.id,
+                position: b.pose.position,
+                velocity: b.linear,
+            });
+        }
+    }
+    out
 }
 
 impl Runner {
