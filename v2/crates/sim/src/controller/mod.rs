@@ -29,6 +29,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
@@ -242,6 +243,8 @@ pub struct Controller {
     /// The last driver number given.
     drivers: Driver,
     log: Vec<Logged>,
+    /// Where each body not being carried stands, kept as the bodies move: "who is near" (N16).
+    near: Index,
 }
 
 impl Slot {
@@ -303,6 +306,7 @@ impl Controller {
             return refuse("body-duplicate", replica::world_model::show(moved.id));
         }
         let input = Input::neutral(moved.pose.orientation);
+        self.near.put_moved(&moved);
         self.bodies.insert(
             moved.id,
             Slot {
@@ -393,12 +397,18 @@ impl Controller {
         s.input.velocity = Vec3::ZERO;
         s.touched = true;
         s.track = Some(track);
+        self.near.remove_body(body);
         Ok(())
     }
 
     /// The link `body` is being carried across, if any.
     pub fn carrying(&self, body: Id) -> Option<Id> {
         self.bodies.get(&body)?.track.as_ref().map(|t| t.link)
+    }
+
+    /// The spatial index of the bodies not being carried, as the mover last left them (N16).
+    pub fn near(&self) -> &Index {
+        &self.near
     }
 
     /// The bodies as the mover last left them, in id order.
@@ -488,6 +498,9 @@ impl Controller {
                         out.refused.push((id, r));
                     }
                 }
+                if s.track.is_none() {
+                    self.near.put_moved(&s.moved);
+                }
                 continue;
             }
             let Support::Surface { surface, .. } = s.moved.pose.support else {
@@ -519,6 +532,7 @@ impl Controller {
                 Ok(None) => {}
                 Err(r) => out.refused.push((id, r)),
             }
+            self.near.put_moved(&s.moved);
         }
         out
     }

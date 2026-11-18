@@ -28,7 +28,10 @@
         {
           "act": {
             "this": "sh1",
-            "form": "prune_left_low"
+            "form": "prune",
+            "args": {
+              "shoot": "left_low"
+            }
           },
           "receipt": "rs1",
           "expect": {
@@ -71,7 +74,10 @@
         {
           "act": {
             "this": "sh1",
-            "form": "prune_left_low"
+            "form": "prune",
+            "args": {
+              "shoot": "left_low"
+            }
           },
           "receipt": "rs1b",
           "expect": {
@@ -83,7 +89,10 @@
         {
           "act": {
             "this": "sh1",
-            "form": "prune_right_low"
+            "form": "prune",
+            "args": {
+              "shoot": "right_low"
+            }
           },
           "receipt": "rs2",
           "expect": {
@@ -126,7 +135,10 @@
         {
           "act": {
             "this": "sh1",
-            "form": "prune_left_mid"
+            "form": "prune",
+            "args": {
+              "shoot": "left_mid"
+            }
           },
           "receipt": "rs3",
           "expect": {
@@ -169,7 +181,10 @@
         {
           "act": {
             "this": "sh1",
-            "form": "prune_right_mid"
+            "form": "prune",
+            "args": {
+              "shoot": "right_mid"
+            }
           },
           "receipt": "rs4",
           "expect": {
@@ -212,7 +227,10 @@
         {
           "act": {
             "this": "sh1",
-            "form": "prune_left_high"
+            "form": "prune",
+            "args": {
+              "shoot": "left_high"
+            }
           },
           "receipt": "rs5",
           "expect": {
@@ -255,7 +273,10 @@
         {
           "act": {
             "this": "sh1",
-            "form": "prune_right_high"
+            "form": "prune",
+            "args": {
+              "shoot": "right_high"
+            }
           },
           "receipt": "rs6",
           "expect": {

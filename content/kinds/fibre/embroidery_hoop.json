@@ -1,0 +1,361 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:embroidery_hoop",
+  "owner": "thing",
+  "state": {
+    "red": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {"rule": "everyone"}
+    },
+    "blue": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {"rule": "everyone"}
+    },
+    "gold": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {"rule": "everyone"}
+    },
+    "red_stitches": {
+      "n": 4,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {"rule": "everyone"}
+    },
+    "blue_stitches": {
+      "n": 5,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {"rule": "everyone"}
+    },
+    "gold_stitches": {
+      "n": 6,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [225, 15, 0]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 700]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [460, 50, 460]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "free": true}
+      ],
+      "steps": [
+        {"step": "take"}
+      ],
+      "effects": [
+        {"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}
+      ]
+    },
+    "stitch_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "full_or_spent"},
+        {
+          "need": "sum",
+          "fields": ["red_stitches", "blue_stitches", "gold_stitches"],
+          "at_most": 6,
+          "after_moves": true,
+          "says": "full_or_spent"
+        }
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "red",
+          "from": "this",
+          "into": "this",
+          "into_field": "red_stitches",
+          "amount": 1,
+          "event": "stitched"
+        }
+      ]
+    },
+    "stitch_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "full_or_spent"},
+        {
+          "need": "sum",
+          "fields": ["red_stitches", "blue_stitches", "gold_stitches"],
+          "at_most": 6,
+          "after_moves": true,
+          "says": "full_or_spent"
+        }
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "blue",
+          "from": "this",
+          "into": "this",
+          "into_field": "blue_stitches",
+          "amount": 1,
+          "event": "stitched"
+        }
+      ]
+    },
+    "stitch_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "full_or_spent"},
+        {
+          "need": "sum",
+          "fields": ["red_stitches", "blue_stitches", "gold_stitches"],
+          "at_most": 6,
+          "after_moves": true,
+          "says": "full_or_spent"
+        }
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "gold",
+          "from": "this",
+          "into": "this",
+          "into_field": "gold_stitches",
+          "amount": 1,
+          "event": "stitched"
+        }
+      ]
+    },
+    "unpick_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "red_stitches", "at_least": 1, "says": "no_stitch"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "red_stitches",
+          "from": "this",
+          "into": "this",
+          "into_field": "red",
+          "amount": 1,
+          "event": "unpicked"
+        }
+      ]
+    },
+    "unpick_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "blue_stitches", "at_least": 1, "says": "no_stitch"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "blue_stitches",
+          "from": "this",
+          "into": "this",
+          "into_field": "blue",
+          "amount": 1,
+          "event": "unpicked"
+        }
+      ]
+    },
+    "unpick_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "gold_stitches", "at_least": 1, "says": "no_stitch"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "gold_stitches",
+          "from": "this",
+          "into": "this",
+          "into_field": "gold",
+          "amount": 1,
+          "event": "unpicked"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:embroidery_hoop",
+    "table": [
+      {
+        "part": "arm.l",
+        "field": "red",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "arm.l",
+        "field": "red",
+        "do": "scale",
+        "axis": "y",
+        "range": [0, 3],
+        "to": [0, 1000]
+      },
+      {
+        "part": "arm.r",
+        "field": "blue",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "arm.r",
+        "field": "blue",
+        "do": "scale",
+        "axis": "y",
+        "range": [0, 3],
+        "to": [0, 1000]
+      },
+      {
+        "part": "fin",
+        "field": "gold",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "fin",
+        "field": "gold",
+        "do": "scale",
+        "axis": "y",
+        "range": [0, 3],
+        "to": [0, 1000]
+      },
+      {
+        "part": "leg.l",
+        "field": "red_stitches",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "leg.l",
+        "field": "red_stitches",
+        "do": "scale",
+        "axis": "z",
+        "range": [0, 3],
+        "to": [0, 1000]
+      },
+      {
+        "part": "leg.r",
+        "field": "blue_stitches",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "leg.r",
+        "field": "blue_stitches",
+        "do": "scale",
+        "axis": "z",
+        "range": [0, 3],
+        "to": [0, 1000]
+      },
+      {
+        "part": "tail",
+        "field": "gold_stitches",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "tail",
+        "field": "gold_stitches",
+        "do": "scale",
+        "axis": "z",
+        "range": [0, 3],
+        "to": [0, 1000]
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,15,0],"r":225,"h":30,"segments":16,"tint":"wood"},{"kind":"cyl","at":[0,31,0],"r":204,"h":8,"segments":16,"tint":"cloth"},{"kind":"cyl","at":[290,30,-80],"r":22,"h":60,"segments":8,"tint":"red","pivot":[290,0,-80],"role":"arm.l"},{"kind":"cyl","at":[290,30,0],"r":22,"h":60,"segments":8,"tint":"blue","pivot":[290,0,0],"role":"arm.r"},{"kind":"cyl","at":[290,30,80],"r":22,"h":60,"segments":8,"tint":"gold","pivot":[290,0,80],"role":"fin"},{"kind":"box","at":[-60,37,0],"size":[10,4,300],"tint":"red","pivot":[-60,37,-150],"role":"leg.l"},{"kind":"box","at":[0,37,0],"size":[10,4,300],"tint":"blue","pivot":[0,37,-150],"role":"leg.r"},{"kind":"box","at":[60,37,0],"size":[10,4,300],"tint":"gold","pivot":[60,37,-150],"role":"tail"}],"palette":{"wood":"#b18a52","cloth":"#eee3cb","red":"#b33c39","blue":"#315eaa","gold":"#d59a27"},"tags":["art","craft","embroidery","item"]}
+  },
+  "text": {
+    "card": "Cloth in an embroidery hoop with red, blue and gold thread: stitch, or unpick.",
+    "full_or_spent": "The cloth is full or that thread colour is spent. Unpick an actual stitch to reuse its thread.",
+    "no_stitch": "Choose an occupied stitch from inspection.",
+    "put_down_first": "Put down held items before embroidery work.",
+    "art": "art",
+    "embroidery": "embroidery",
+    "stitch": "stitch",
+    "sew": "sew"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": ["embroidery", "stitch", "sew"]
+  }
+}
