@@ -1,61 +1,31 @@
 //! Standing spots, approach, and a crowd around a point (Engine v2 N9, #2678) on N2's test world.
 //!
-//! `cargo test -p sim --release --test spots -- --nocapture`.
+//! `cargo test -p sim --release --test spots -- --nocapture`. The walkers run N7's walk skill through the host; a
+//! walker sent to a point is `skills::route::Route::sent`, given its route once its spot is granted (T9c #3127).
 
+mod common;
+
+use common::{arrived, id, send, stand, walk};
 use import_eden::Import;
-use replica::effects::{Actor, Cause, Header, schema_hash};
-use replica::encode::{Value, encode};
-use replica::ids::{Hash, Id, Purpose, Scope};
-use replica::pose::{Frame, Quat, Vec3};
+use replica::effects::{Actor, Cause};
+use replica::host::Progress;
+use replica::ids::Id;
+use replica::pose::Vec3;
 use replica::world_model::show;
-use sim::links::Doors;
-use sim::mover::Body;
+use sim::host::Runner;
 use sim::spots::{CLEAR, Entry, Target, to_segment};
-use sim::walk::Crowd;
 use sim::walk::town::Town;
 use std::collections::BTreeMap;
 
 const SPEED: i64 = 1_400_000; // µm a second: today's walking pace
 const TICK: i64 = 50_000; // µs: 20 ticks a second
 
-fn id(n: u64) -> Id {
-    Id::new(Scope([7; 16]), n).unwrap()
-}
-
 fn town() -> (Town, BTreeMap<String, Id>) {
-    let w = testworld::generate(1, 0).expect("the test world");
-    town_of(import_eden::load(&w.text).expect("the test world loads"))
+    common::town(b"souls/spots-test/1")
 }
 
 fn town_of(im: Import) -> (Town, BTreeMap<String, Id>) {
-    let Import {
-        tree, rules, nodes, ..
-    } = im;
-    let root = nodes["world"];
-    let v = Value::Map(BTreeMap::from([
-        (
-            1,
-            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/spots-test/1").to_bytes()),
-        ),
-        (2, Value::Bytes(schema_hash().to_bytes())),
-        (3, Value::Bytes(root.scope().0.to_vec())),
-        (4, root.to_value()),
-        (5, Value::Uint(0)),
-        (6, Value::Array(Vec::new())),
-        (7, Value::Array(Vec::new())),
-    ]));
-    let header = Header::read(&encode(&v).unwrap()).unwrap();
-    let next = tree.to_state().next;
-    let ground = nodes["ground"];
-    let t = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
-    (t, nodes)
-}
-
-fn stand(t: &Town, who: Id, node: Id, at: Vec3) -> Body {
-    let frame = Frame { node, slot: None };
-    t.surfaces[&node]
-        .place(who, frame, at, Quat::IDENTITY)
-        .unwrap_or_else(|e| panic!("{}: {}", e.name, e.detail))
+    common::town_of(im, b"souls/spots-test/1")
 }
 
 fn flat(a: Vec3, b: Vec3) -> i64 {
@@ -76,14 +46,20 @@ fn start(c: Vec3, k: i64) -> Vec3 {
 }
 
 /// The closest two centres of the crowd, µm.
-fn closest(c: &Crowd) -> i64 {
+fn closest(c: &Runner) -> i64 {
     let mut best = i64::MAX;
-    for (i, a) in c.walkers.iter().enumerate() {
-        for b in &c.walkers[i + 1..] {
-            best = best.min(flat(a.body.pose.position, b.body.pose.position));
+    let bodies: Vec<_> = c.controller.bodies().collect();
+    for (i, a) in bodies.iter().enumerate() {
+        for b in &bodies[i + 1..] {
+            best = best.min(flat(a.pose.position, b.pose.position));
         }
     }
     best
+}
+
+/// When each body's walk arrived, in id order.
+fn arrivals(c: &Runner) -> Vec<Option<i64>> {
+    c.controller.bodies().map(|b| arrived(c, b.id)).collect()
 }
 
 /// Step 0: thirty walkers sent to one point with N7 alone.
@@ -92,20 +68,20 @@ fn step0_thirty_walkers_to_one_point_with_the_walk_alone() {
     let (mut t, _) = town();
     let ground = t.ground;
     let target = Vec3::new(0, 0, 0);
-    let mut c = Crowd::new(TICK);
+    let mut c = Runner::new(TICK);
     for k in 0..30 {
         let b = stand(&t, id(k as u64 + 1), ground, start(target, k));
-        c.add(&mut t, b, SPEED, id(1000 + k as u64), ground, target)
+        walk(&mut c, &mut t, b, SPEED, ground, target)
             .unwrap_or_else(|e| panic!("no plan: {}: {}", e.name, e.detail));
     }
     for _ in 0..400 {
-        if c.done() {
+        if c.runs.is_empty() {
             break;
         }
-        c.step(&mut t).unwrap();
+        c.tick(&mut t).unwrap();
     }
-    let arrived = c.walkers.iter().filter(|w| w.arrived.is_some()).count();
-    let last = c.walkers.iter().filter_map(|w| w.arrived).max();
+    let arrived = arrivals(&c).iter().flatten().count();
+    let last = arrivals(&c).into_iter().flatten().max();
     println!(
         "step 0: {arrived} of 30 standing after {} ms; last stopped at {:?} ms; closest pair {} mm",
         c.now / 1000,
@@ -115,19 +91,26 @@ fn step0_thirty_walkers_to_one_point_with_the_walk_alone() {
 }
 
 /// Thirty walkers sent to `target` on the open ground by standing spots, for at most 20 s of world time.
-fn ring(target: Vec3) -> (Town, Crowd) {
+fn ring(target: Vec3) -> (Town, Runner) {
     let (mut t, _) = town();
     let ground = t.ground;
-    let mut c = Crowd::new(TICK);
+    let mut c = Runner::new(TICK);
     for k in 0..30 {
         let b = stand(&t, id(k as u64 + 1), ground, start(target, k));
-        c.send(b, SPEED, id(1000 + k as u64), Target::new(ground, target));
+        send(
+            &mut c,
+            b,
+            SPEED,
+            Target::new(ground, target),
+            id(1000 + k as u64),
+        )
+        .unwrap();
     }
     for _ in 0..400 {
-        if c.done() {
+        if c.runs.is_empty() {
             break;
         }
-        c.step(&mut t).unwrap();
+        c.tick(&mut t).unwrap();
     }
     (t, c)
 }
@@ -137,26 +120,26 @@ fn ring(target: Vec3) -> (Town, Crowd) {
 fn a1_a4_thirty_walkers_sent_to_one_point_form_a_ring() {
     let target = Vec3::new(0, 0, 0);
     let (t, c) = ring(target);
-    let arrived = c.walkers.iter().filter(|w| w.arrived.is_some()).count();
-    let last = c.walkers.iter().filter_map(|w| w.arrived).max();
+    let arrived = arrivals(&c).iter().flatten().count();
+    let last = arrivals(&c).into_iter().flatten().max();
     let near = closest(&c);
     println!(
         "A1: {arrived} of 30 standing; last stopped at {:?} ms; closest pair {} mm",
         last.map(|l| l / 1000),
         near / 1000
     );
-    for w in &c.walkers {
-        let p = w.body.pose.position;
-        let s = start(target, (w.body.id.counter() - 1) as i64);
+    for w in c.controller.bodies() {
+        let p = w.pose.position;
+        let s = start(target, (w.id.counter() - 1) as i64);
         println!(
             "  {} from ({}, {}) to ({}, {}) mm, {} mm from the target, stopped at {:?} ms",
-            show(w.body.id),
+            show(w.id),
             s.x / 1000,
             s.z / 1000,
             p.x / 1000,
             p.z / 1000,
             flat(p, target) / 1000,
-            w.arrived.map(|a| a / 1000)
+            common::arrived(&c, w.id).map(|a| a / 1000)
         );
     }
     picture(&c, target);
@@ -178,16 +161,16 @@ fn a1_a4_thirty_walkers_sent_to_one_point_form_a_ring() {
         else {
             unreachable!()
         };
-        let w = c.walkers.iter().find(|w| w.body.id == *who).unwrap();
+        let order = c.asks[who].1;
         assert_eq!(*actor, Actor::World);
-        assert_eq!(*cause, Cause::Intent(w.order));
+        assert_eq!(*cause, Cause::Intent(order));
     }
     let (t2, c2) = ring(target);
     assert_eq!(
         t.spots.record, t2.spots.record,
         "A4: two runs, the same spots"
     );
-    let at = |c: &Crowd| -> Vec<Vec3> { c.walkers.iter().map(|w| w.body.pose.position).collect() };
+    let at = |c: &Runner| -> Vec<Vec3> { c.controller.bodies().map(|w| w.pose.position).collect() };
     assert_eq!(at(&c), at(&c2));
     println!(
         "A4: two runs give the same {} grants and the same standing places",
@@ -196,7 +179,7 @@ fn a1_a4_thirty_walkers_sent_to_one_point_form_a_ring() {
 }
 
 /// Writes the ring as an SVG under the workspace's ignored `.local/` (the proof's picture).
-fn picture(c: &Crowd, target: Vec3) {
+fn picture(c: &Runner, target: Vec3) {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../.local/spots");
     let _ = std::fs::create_dir_all(dir);
     // 40 px a metre, the target at (200, 200).
@@ -210,8 +193,8 @@ fn picture(c: &Crowd, target: Vec3) {
             r * 28
         );
     }
-    for w in &c.walkers {
-        let p = w.body.pose.position;
+    for w in c.controller.bodies() {
+        let p = w.pose.position;
         svg += &format!(
             "<circle cx='{}' cy='{}' r='10' fill='#4a7' fill-opacity='0.6' stroke='#253'/>",
             px(p.x - target.x),
@@ -236,20 +219,20 @@ fn town_with_pond() -> (Town, BTreeMap<String, Id>) {
 }
 
 /// One walker `who` standing at `from` on `node`, sent to `target`: what the engine binds it to, after one tick.
-fn bind(
-    t: &mut Town,
-    who: u64,
-    node: Id,
-    from: Vec3,
-    target: Target,
-) -> Result<Vec3, &'static str> {
-    let mut c = Crowd::new(TICK);
-    c.send(stand(t, id(who), node, from), SPEED, id(5000 + who), target);
-    c.step(t).unwrap();
-    let w = &c.walkers[0];
-    match (w.spot, w.held) {
-        (Some(p), _) => Ok(p),
-        (None, Some(name)) => Err(name),
+fn bind(t: &mut Town, who: u64, node: Id, from: Vec3, target: Target) -> Result<Vec3, String> {
+    let mut c = Runner::new(TICK);
+    send(
+        &mut c,
+        stand(t, id(who), node, from),
+        SPEED,
+        target,
+        id(5000 + who),
+    )
+    .unwrap();
+    c.tick(t).unwrap();
+    match (c.granted.get(&id(who)), c.ended.get(&id(who))) {
+        (Some(p), _) => Ok(*p),
+        (None, Some((_, Progress::Failed(name)))) => Err(name.as_str().to_owned()),
         _ => panic!("no answer after a tick"),
     }
 }
@@ -304,7 +287,7 @@ fn no_place_in_a_passage(t: &Town) -> usize {
     n
 }
 
-fn shown(target: Vec3, got: Result<Vec3, &'static str>) -> String {
+fn shown(target: Vec3, got: Result<Vec3, String>) -> String {
     let g = got.map(|p| {
         format!(
             "({}, {}) mm, {} mm from the target",
@@ -317,7 +300,7 @@ fn shown(target: Vec3, got: Result<Vec3, &'static str>) -> String {
         "target ({}, {}) mm -> {}",
         target.x / 1000,
         target.z / 1000,
-        g.unwrap_or_else(|e| e.to_owned())
+        g.unwrap_or_else(|e| e)
     )
 }
 
@@ -353,7 +336,7 @@ fn a2_a3_eight_nearest_clear_point_cases() {
             .expect("a box on the square");
         let from = Vec3::new(b.x - 4_000_000, 0, b.z);
         let got = bind(&mut tb, 1, ground, from, Target::new(ground, b));
-        rows.push(format!("in a box: {}", shown(b, got)));
+        rows.push(format!("in a box: {}", shown(b, got.clone())));
         let p = got.expect("bound");
         assert!(!tb.spots.table(&Target::new(ground, b)).unwrap().clear);
         assert!(
@@ -373,7 +356,7 @@ fn a2_a3_eight_nearest_clear_point_cases() {
         Vec3::new(500_000, 0, -3_000_000),
         Target::new(f0, corner),
     );
-    rows.push(format!("in a corner: {}", shown(corner, got)));
+    rows.push(format!("in a corner: {}", shown(corner, got.clone())));
     let p = got.expect("bound");
     assert!(inside(p, r0b) && flat(p, corner) <= 1_000_000);
 
@@ -389,7 +372,7 @@ fn a2_a3_eight_nearest_clear_point_cases() {
     );
     rows.push(format!(
         "in a wall, its far side nearer: {}",
-        shown(wall, got)
+        shown(wall, got.clone())
     ));
     let p = got.expect("bound");
     assert!(inside(p, r0b), "the asker's side of the wall");
@@ -404,7 +387,7 @@ fn a2_a3_eight_nearest_clear_point_cases() {
         Vec3::new(500_000, 0, -3_000_000),
         Target::new(f0, doorway),
     );
-    rows.push(format!("in a doorway: {}", shown(doorway, got)));
+    rows.push(format!("in a doorway: {}", shown(doorway, got.clone())));
     let p = got.expect("bound");
     assert!(!t.spots.table(&Target::new(f0, doorway)).unwrap().clear);
     assert!(inside(p, r0b) && flat(p, doorway) <= 2_100_000);
@@ -418,7 +401,7 @@ fn a2_a3_eight_nearest_clear_point_cases() {
         Vec3::new(-5_400_000, 0, -3_500_000),
         Target::new(f0, stair),
     );
-    rows.push(format!("on a stair: {}", shown(stair, got)));
+    rows.push(format!("on a stair: {}", shown(stair, got.clone())));
     let p = got.expect("bound");
     assert!(!t.spots.table(&Target::new(f0, stair)).unwrap().clear);
     assert!(inside(p, r0a) && flat(p, stair) <= 2_100_000);
@@ -427,25 +410,27 @@ fn a2_a3_eight_nearest_clear_point_cases() {
     // (the stair hall or the east room), never through the wall into the north room.
     let middle = Vec3::new(500_000, 0, -3_000_000);
     let target = Target::new(f0, middle);
-    let mut c = Crowd::new(TICK);
+    let mut c = Runner::new(TICK);
     for k in 0..60 {
-        c.send(
+        send(
+            &mut c,
             stand(&t, id(100 + k), f0, middle),
             SPEED,
-            id(6100 + k),
             target,
-        );
+            id(6100 + k),
+        )
+        .unwrap();
     }
-    c.step(&mut t).unwrap();
+    c.tick(&mut t).unwrap();
     let table = t.spots.table(&target).unwrap();
     let in_room = table.places.iter().filter(|p| inside(p.at, r0b)).count();
-    let k = c
-        .walkers
+    // The places granted, in the askers' id order.
+    let spots: Vec<Vec3> = c.granted.values().copied().collect();
+    let k = spots
         .iter()
-        .filter_map(|w| w.spot)
-        .position(|p| !inside(p, r0b))
+        .position(|p| !inside(*p, r0b))
         .expect("the room fills and an asker is bound outside it");
-    let p = c.walkers[k].spot.unwrap();
+    let p = spots[k];
     rows.push(format!(
         "in a full room: {} ({in_room} places in the room, all held before; asker {})",
         shown(middle, Ok(p)),
@@ -463,13 +448,11 @@ fn a2_a3_eight_nearest_clear_point_cases() {
             .all(|p| p.holder.is_some())
     );
     let r0c = [-1_900_000, 2_900_000, 100_000, 5_900_000];
-    for w in &c.walkers {
-        if let Some(s) = w.spot {
-            assert!(
-                !inside(s, r0c),
-                "never through the wall into the north room"
-            );
-        }
+    for s in c.granted.values() {
+        assert!(
+            !inside(*s, r0c),
+            "never through the wall into the north room"
+        );
     }
     no_place_in_a_passage(&t);
 
@@ -483,7 +466,7 @@ fn a2_a3_eight_nearest_clear_point_cases() {
         Vec3::new(0, 0, -25_000_000),
         Target::new(ground, off),
     );
-    rows.push(format!("outside the world: {}", shown(off, got)));
+    rows.push(format!("outside the world: {}", shown(off, got.clone())));
     let p = got.expect("bound");
     assert!(t.map.spot(ground, off).is_none());
     assert!(flat(p, off) <= 2_800_000);
@@ -496,8 +479,11 @@ fn a2_a3_eight_nearest_clear_point_cases() {
         Vec3::new(0, 0, -25_000_000),
         Target::new(ground, far),
     );
-    rows.push(format!("far outside the world: {}", shown(far, got)));
-    assert_eq!(got, Err("spot-none-near"));
+    rows.push(format!(
+        "far outside the world: {}",
+        shown(far, got.clone())
+    ));
+    assert_eq!(got, Err("spot-none-near".to_owned()));
     no_place_in_a_passage(&t);
 
     // 8. On water, 2 m into a pond from its west shore, asked from the west: on the shore.
@@ -511,7 +497,7 @@ fn a2_a3_eight_nearest_clear_point_cases() {
         Vec3::new(5_000_000, 0, -14_000_000),
         Target::new(ground, wet),
     );
-    rows.push(format!("on water: {}", shown(wet, got)));
+    rows.push(format!("on water: {}", shown(wet, got.clone())));
     let p = got.expect("bound");
     assert!(
         tp.map.spot(ground, wet).is_none(),
@@ -544,33 +530,35 @@ fn a3_a_body_staying_in_a_doorway_is_left_there() {
         .and_then(|l| l.ends.iter().flatten().find(|e| e.floor == f0).copied())
         .expect("the doorway a-b, an end on the floor")
         .middle();
-    let mut c = Crowd::new(TICK);
+    let mut c = Runner::new(TICK);
     let body = stand(&t, id(1), f0, mouth);
-    c.add(&mut t, body, SPEED, id(7001), f0, mouth).unwrap();
-    c.walkers[0].staying = true;
+    c.add_body(common::humanoid(), body).unwrap();
+    c.stay(id(1));
     for k in 0..6u64 {
         let from = Vec3::new(500_000, 0, -4_500_000 + k as i64 * 600_000);
-        c.send(
+        send(
+            &mut c,
             stand(&t, id(10 + k), f0, from),
             SPEED,
-            id(7010 + k),
             Target::new(f0, mouth),
-        );
+            id(7010 + k),
+        )
+        .unwrap();
     }
     for _ in 0..200 {
-        c.step(&mut t).unwrap();
+        c.tick(&mut t).unwrap();
     }
-    let still = &c.walkers[0];
+    let still = c.controller.body(id(1)).unwrap();
     assert_eq!(
-        still.body.pose.position, mouth,
+        still.pose.position, mouth,
         "the staying body was never moved"
     );
-    assert!(still.held.is_none() && still.staying, "nor refused");
+    assert!(
+        !c.ended.contains_key(&id(1)) && c.staying.contains(&id(1)),
+        "nor refused"
+    );
     let n = no_place_in_a_passage(&t);
-    let standing = c.walkers[1..]
-        .iter()
-        .filter(|w| w.arrived.is_some())
-        .count();
+    let standing = (10..16).filter(|k| arrived(&c, id(*k)).is_some()).count();
     println!(
         "A3: a body stays at the doorway's mouth; {standing} of 6 sent there stand round it; {n} places, none in a passage"
     );
@@ -584,20 +572,33 @@ fn a5_a_spot_is_released_when_its_holder_leaves() {
     let ground = t.ground;
     let point = Vec3::new(5_000_000, 0, 5_000_000);
     let target = Target::new(ground, point);
-    let mut c = Crowd::new(TICK);
+    let mut c = Runner::new(TICK);
     let from = Vec3::new(5_000_000, 0, -5_000_000);
-    c.send(stand(&t, id(1), ground, from), SPEED, id(8001), target);
+    send(
+        &mut c,
+        stand(&t, id(1), ground, from),
+        SPEED,
+        target,
+        id(8001),
+    )
+    .unwrap();
     for _ in 0..40 {
-        c.step(&mut t).unwrap();
+        c.tick(&mut t).unwrap();
     }
-    let a = &c.walkers[0];
-    assert!(a.arrived.is_none(), "mid-walk");
-    let held = a.spot.expect("granted");
+    assert!(arrived(&c, id(1)).is_none(), "mid-walk");
+    let held = *c.granted.get(&id(1)).expect("granted");
     // Its order ends mid-walk: the place is released at the start of the next tick, and the next asker gets it.
-    c.end(id(1));
+    c.end_order(id(1));
     let from = Vec3::new(-5_000_000, 0, 5_000_000);
-    c.send(stand(&t, id(2), ground, from), SPEED, id(8002), target);
-    c.step(&mut t).unwrap();
+    send(
+        &mut c,
+        stand(&t, id(2), ground, from),
+        SPEED,
+        target,
+        id(8002),
+    )
+    .unwrap();
+    c.tick(&mut t).unwrap();
     let released = |t: &Town, who: Id| {
         t.spots
             .record
@@ -618,22 +619,22 @@ fn a5_a_spot_is_released_when_its_holder_leaves() {
         "{rel:?}"
     );
     assert_eq!(
-        c.walkers[0].spot,
+        c.granted.get(&id(2)).copied(),
         Some(held),
         "the next asker is granted the released place"
     );
     // It arrives, then leaves for another point: released again, by `spot-left`.
     for _ in 0..400 {
-        if c.done() {
+        if c.runs.is_empty() {
             break;
         }
-        c.step(&mut t).unwrap();
+        c.tick(&mut t).unwrap();
     }
-    assert!(c.walkers[0].arrived.is_some());
-    let b = c.end(id(2)).unwrap();
+    assert!(arrived(&c, id(2)).is_some());
+    let b = *c.controller.body(id(2)).unwrap();
     let elsewhere = Target::new(ground, Vec3::new(-5_000_000, 0, -5_000_000));
-    c.send(b.body, SPEED, id(8003), elsewhere);
-    c.step(&mut t).unwrap();
+    send(&mut c, b, SPEED, elsewhere, id(8003)).unwrap();
+    c.tick(&mut t).unwrap();
     let rel = released(&t, id(2));
     assert!(
         matches!(

@@ -3,13 +3,17 @@ name = "directoryd"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "The directory (Engine v2, #2635): where a world runs, when it wakes, where a Soul is (W8, #2729)."
+description = "The directory (Engine v2, #2635): where a world runs, when it wakes, where a Soul is (W8, #2729); its accounts (W1, #2704)."
 
 [dependencies]
 replica = { path = "../replica" }
-# The object store's request signature (AWS SigV4: SHA-256 and HMAC) and the in-memory store's ETags.
+# RS256 signatures (the session check), the random account and principal ids (W1); the object store's request
+# signature (AWS SigV4: SHA-256 and HMAC) and the in-memory store's ETags (W8).
 ring = "0.17"
-# The object store over HTTP(S).
+# The account store: one SQLite file, with SQLite's online backup for a consistent copy (W1).
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+serde_json = "1"
+# The provider's public keys, fetched over HTTPS when its key id changes (W1); the object store over HTTP(S) (W8).
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
