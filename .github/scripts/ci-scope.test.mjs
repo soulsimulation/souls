@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { CONTENT_JOBS, CONTENT_WEB, FULL_EVENTS, GOD_SKILL_TESTS, JOBS, LIGHT_LABEL, LOW_RISK, SERVER_READER, WINDOW_LABELS, assignLight, changedFiles, contentOnly, greenAtHead, idleRunners, jobsFor, lowRisk, runnerFor, serverReaders, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { CONTENT_JOBS, CONTENT_WEB, FULL_EVENTS, GOD_SKILL_TESTS, JOBS, LIGHT_LABEL, LIGHT_MAX_AGE_S, LOW_RISK, SERVER_READER, WINDOW_LABELS, assignLight, changedFiles, contentOnly, greenAtHead, jobsFor, lightIdle, lowRisk, runnerFor, serverReaders, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -89,71 +89,55 @@ test('ci.yml: qualify runs-on reads the matrix flag, and smoke stays hosted (#11
 });
 
 // The light pool: a fake runner list (GET /repos/{repo}/actions/runners) and a fetch that records its calls.
-const runner = (name, label, status, busy) => ({ name, status, busy, labels: [{ name: 'self-hosted' }, { name: label }] });
-const listing = (...runners) => { const calls = []; return { calls, fetchImpl: async (url, init) => { calls.push({ url, auth: init.headers.authorization }); return Response.json({ total_count: runners.length, runners }); } }; };
 const lightPlan = () => jobsFor(['tools/entry/check.mjs', 'packages/form-rules/src/index.ts']).include;
+const NOW = 1_800_000_000;
 
-test('light pool: soul-tools is the light job; an idle online souls-light runner takes it, and nothing else moves', async () => {
+test('light pool: soul-tools is the light job; a fresh idle count places at most that many, and nothing else moves', () => {
   assert.deepEqual(JOBS.filter(j => j.light).map(j => j.name), ['soul-tools']);
-  const api = listing(runner('souls-light-1', LIGHT_LABEL, 'online', true), runner('souls-light-2', LIGHT_LABEL, 'online', false),
-    runner('souls-light-3', LIGHT_LABEL, 'offline', false), runner('souls-timed-1', 'souls-timed', 'online', false));
-  const got = await idleRunners({ repo: 'o/r', token: 'tok-FAKE', fetchImpl: api.fetchImpl });
-  assert.deepEqual(got, { idle: 1, online: 2, why: '1 of 2 online souls-light runner(s) idle' });
-  assert.deepEqual(api.calls, [{ url: 'https://api.github.com/repos/o/r/actions/runners?per_page=100', auth: 'Bearer tok-FAKE' }]);
+  const got = lightIdle(`2@${NOW - 30}`, NOW);
+  assert.deepEqual(got, { idle: 2, why: '2 idle souls-light runner(s), published 30 s ago' });
   const before = lightPlan(), after = assignLight(before, got.idle);
   assert.deepEqual(after.map(j => [j.name, runnerFor(j)]), [['types-web', 'ubuntu-latest'], ['web', 'ubuntu-latest'], ['soul-tools', 'souls-light']]);
   // the same matrix entry apart from `runner`: the steps, which ci.yml picks by kind, are the same on either runner
   const { runner: label, ...rest } = after.find(j => j.name === 'soul-tools');
-  assert.equal(label, 'souls-light');
+  assert.equal(label, LIGHT_LABEL);
   assert.deepEqual(rest, before.find(j => j.name === 'soul-tools'));
+  // at most the count: two light jobs and one idle runner place one
+  const two = [{ name: 'a', light: true }, { name: 'b', light: true }];
+  assert.deepEqual(assignLight(two, 1).map(runnerFor), ['souls-light', 'ubuntu-latest']);
   // only light jobs take the light label; heavy jobs keep CI_HEAVY_RUNNER
   const full = assignLight(jobsFor(null).include, 5);
   assert.deepEqual(full.filter(j => j.runner).map(j => j.name), ['soul-tools']);
   assert.equal(runnerFor(full.find(j => j.name === 'server-0'), 'souls-ci'), 'souls-ci');
 });
 
-test('light pool: busy or offline runners, none labelled, or no token leave every job hosted', async () => {
-  for (const runners of [[runner('souls-light-1', LIGHT_LABEL, 'online', true), runner('souls-light-2', LIGHT_LABEL, 'offline', false)], [runner('souls-ci-1', 'souls-ci', 'online', false)], []]) {
-    const got = await idleRunners({ repo: 'o/r', token: 'tok-FAKE', fetchImpl: listing(...runners).fetchImpl });
-    assert.equal(got.idle, 0, JSON.stringify(runners));
-    assert.ok(assignLight(lightPlan(), got.idle).every(j => runnerFor(j) === 'ubuntu-latest'));
+test('light pool: a missing, zero, stale, future or unreadable count runs every job hosted', () => {
+  for (const [value, why] of [[undefined, /not set/], ['', /not set/], [`0@${NOW}`, /^0 idle/], [`3@${NOW - LIGHT_MAX_AGE_S - 1}`, /601 s old \(over 600 s\)/],
+    [`3@${NOW + 120}`, /in the future/], ['3', /unreadable/], ['three@1800000000', /unreadable/], [`-1@${NOW}`, /unreadable/], [`3@${NOW} extra`, /unreadable/]]) {
+    const got = lightIdle(value, NOW);
+    assert.equal(got.idle, 0, String(value));
+    assert.match(got.why, why, String(value));
+    assert.ok(assignLight(lightPlan(), got.idle).every(j => runnerFor(j) === 'ubuntu-latest'), String(value));
   }
-  const api = listing(runner('souls-light-1', LIGHT_LABEL, 'online', false));
-  assert.deepEqual(await idleRunners({ repo: 'o/r', token: '', fetchImpl: api.fetchImpl }), { idle: 0, online: 0, why: 'no runner token (MERGE_TRAIN_TOKEN unset)' });
-  assert.equal(api.calls.length, 0, 'no token: the API is not asked');
+  assert.equal(lightIdle(`3@${NOW - LIGHT_MAX_AGE_S}`, NOW).idle, 3, 'exactly the limit is still fresh');
 });
 
-test('light pool: an API failure (refused, server error, network error, timeout, unreadable) falls back to hosted', async () => {
-  const cases = [
-    [async () => new Response('{"message":"Resource not accessible by personal access token"}', { status: 403 }), /^runners not readable with MERGE_TRAIN_TOKEN \(needs Administration: Read\)$/],
-    [async () => new Response('', { status: 401 }), /HTTP 401/],
-    [async () => new Response('', { status: 502 }), /HTTP 502/],
-    [async () => { throw new TypeError('fetch failed'); }, /runner list failed: fetch failed/],
-    [(url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))), /timed out/],
-    [async () => new Response('not json'), /runner list failed/],
-    [async () => Response.json({ message: 'odd' }), /unreadable answer/],
-  ];
-  for (const [fetchImpl, why] of cases) {
-    const got = await idleRunners({ repo: 'o/r', token: 'tok-FAKE', fetchImpl, timeoutMs: 50 });
-    assert.equal(got.idle, 0);
-    assert.match(got.why, why);
-    assert.ok(!got.why.includes('tok-FAKE'), 'the token never reaches the log');
-    assert.ok(assignLight(lightPlan(), got.idle).every(j => runnerFor(j) === 'ubuntu-latest'));
-  }
+test('light pool: the scope command reads LIGHT_RUNNERS_IDLE; without it every job runs hosted and the output says why', () => {
+  const run = (value) => JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./ci-scope.mjs', import.meta.url)), '--files', 'tools/entry/check.mjs', '--event', 'pull_request', '--labels', '["ci:run"]'],
+    { encoding: 'utf8', env: { ...process.env, LIGHT_RUNNERS_IDLE: value, GITHUB_OUTPUT: '', GITHUB_STEP_SUMMARY: '' } }));
+  const none = run('');
+  assert.ok(none.matrix.includes('soul-tools'));
+  assert.deepEqual(none.light.placed, []);
+  assert.match(none.light.why, /not set/);
+  assert.deepEqual(run(`1@${Math.floor(Date.now() / 1000)}`).light.placed, ['soul-tools']);
 });
 
-test('light pool: the scope command with no token runs every job hosted and says why', () => {
-  const env = { ...process.env, MERGE_TRAIN_TOKEN: '', GITHUB_OUTPUT: '', GITHUB_STEP_SUMMARY: '' };
-  const out = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./ci-scope.mjs', import.meta.url)), '--files', 'tools/entry/check.mjs', '--event', 'pull_request', '--labels', '["ci:run"]'], { encoding: 'utf8', env }));
-  assert.ok(out.matrix.includes('soul-tools'));
-  assert.deepEqual(out.light.placed, []);
-  assert.match(out.light.why, /no runner token/);
-});
-
-test('ci.yml: the runner reaches only runs-on; the scope step passes the runner token', () => {
+test('ci.yml: no token reaches it; the runner reaches only runs-on; the scope step reads the published count', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  assert.doesNotMatch(workflow, /secrets\.MERGE_TRAIN_TOKEN/, 'MERGE_TRAIN_TOKEN (contents and workflows: write) never enters ci.yml, which runs PR code');
+  assert.doesNotMatch(workflow, /MERGE_TRAIN_TOKEN/);
   assert.equal(workflow.match(/matrix\.runner/g)?.length, 1, 'matrix.runner is read once, in runs-on, and by no step');
-  assert.match(workflow, /^          MERGE_TRAIN_TOKEN: \$\{\{ secrets\.MERGE_TRAIN_TOKEN \}\}$/m);
+  assert.match(workflow, /^          LIGHT_RUNNERS_IDLE: \$\{\{ vars\.LIGHT_RUNNERS_IDLE \}\}$/m);
 });
 
 test('the soul-actions job runs on its own paths, full scope included, and on nothing else (#1061)', () => {

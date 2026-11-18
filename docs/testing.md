@@ -235,14 +235,13 @@ commands, which need a core plan there, and `settled`. Viewer arms above 2,000 a
   delete the runner on GitHub (`gh api -X DELETE repos/soulsimulation/souls/actions/runners/<id>`).
 
 **Light runners.** The `qualify` legs that `ci-scope.mjs` marks `light: true` (`soul-tools`: the Soul runtime, trace,
-entry and form-rules tests) run on a self-hosted runner labelled `souls-light` when one is online and idle, and on
-`ubuntu-latest` otherwise, with the same steps either way. `runs-on` cannot fall back by itself, so the `scope` job asks
-the runner list (`GET /repos/{owner}/{repo}/actions/runners`) and gives each light job the label while idle runners last
-(`idleRunners`, `assignLight`); its step summary says where each went and why. Listing runners needs a token with
-Administration: Read, which the workflow's own token cannot have, so the scope job reads it with the existing
-fine-grained `MERGE_TRAIN_TOKEN`. If that token lacks the permission, the call returns 403 and the step summary says
-"runners not readable with MERGE_TRAIN_TOKEN (needs Administration: Read)". On that, any other API error, a timeout
-(10 s) or no token, every light job runs hosted, as before.
+entry and form-rules tests) run on a self-hosted runner labelled `souls-light` when one is idle, and on `ubuntu-latest`
+otherwise, with the same steps either way. `runs-on` cannot fall back by itself, so the `scope` job picks: it reads the
+repository variable `LIGHT_RUNNERS_IDLE`, `<idle>@<unix seconds>`, and gives at most that many light jobs the label
+(`lightIdle`, `assignLight`); its step summary says where each went and why. A missing, unreadable or zero count, or one
+older than 10 minutes, runs every light job hosted. ci.yml holds no token for this: it runs a PR's own code, so listing
+runners (which needs Administration: Read) happens outside it, and only the count reaches CI. Nothing publishes the count
+yet, so every light job runs hosted until something does.
 - **Where.** Three instances on the timed-runner host, pinned to every CPU the six `souls-timed` instances do not own
   (physical cores 18-23 and their siblings: 6 physical, 12 logical), so the timed runs keep their cores. Set them up with
   `tools/ci/setup-runners.sh --count 3 --prefix souls-light --label souls-light --no-playwright --cpus-except

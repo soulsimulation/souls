@@ -67,31 +67,23 @@ export function runnerFor(job, heavyRunner = '') {
 }
 
 /** The self-hosted label of the light pool (tools/ci/setup-runners.sh --label souls-light, docs/testing.md#self-hosted-runners).
- * A job with `light: true` runs there only while one of its runners is online and idle when the scope job looks; otherwise
- * it runs on ubuntu-latest, with the same steps either way. `runs-on` cannot fall back by itself, so the scope job picks. */
+ * A job with `light: true` runs there only while a fresh published count says one of its runners is idle; otherwise it
+ * runs on ubuntu-latest, with the same steps either way. `runs-on` cannot fall back by itself, so the scope job picks. */
 export const LIGHT_LABEL = 'souls-light';
 
-/** How many runners labelled `label` are online and idle, from the repository's runner list. Listing runners needs a token
- * with Administration: read, which the workflow's own token cannot have; ci.yml passes the MERGE_TRAIN_TOKEN secret.
- * No token, a 403 (the token lacks that permission), another HTTP error, a timeout or an unreadable answer is 0 idle,
- * so every job stays hosted. */
-export async function idleRunners({ repo, label = LIGHT_LABEL, token, fetchImpl = globalThis.fetch, timeoutMs = 10_000 }) {
-  if (!token) return { idle: 0, online: 0, why: 'no runner token (MERGE_TRAIN_TOKEN unset)' };
-  try {
-    const res = await fetchImpl(`https://api.github.com/repos/${repo}/actions/runners?per_page=100`, {
-      headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (res.status === 403) return { idle: 0, online: 0, why: 'runners not readable with MERGE_TRAIN_TOKEN (needs Administration: Read)' };
-    if (!res.ok) return { idle: 0, online: 0, why: `runner list: HTTP ${res.status}` };
-    const { runners } = await res.json();
-    if (!Array.isArray(runners)) return { idle: 0, online: 0, why: 'runner list: unreadable answer' };
-    const mine = runners.filter(r => r.labels?.some(l => l.name === label) && r.status === 'online');
-    const idle = mine.filter(r => r.busy === false).length;
-    return { idle, online: mine.length, why: `${idle} of ${mine.length} online ${label} runner(s) idle` };
-  } catch (e) {
-    return { idle: 0, online: 0, why: `runner list failed: ${e?.name === 'TimeoutError' ? 'timed out' : e?.message ?? e}` };
-  }
+/** How long a published idle count stays good: older than this, every light job runs hosted. */
+export const LIGHT_MAX_AGE_S = 600;
+
+/** The idle souls-light runners, from the repository variable LIGHT_RUNNERS_IDLE (`<idle>@<unix seconds>`), which is
+ * written outside ci.yml so that no token reaches the code a PR runs. Missing, unreadable, 0, older than LIGHT_MAX_AGE_S
+ * or more than a minute in the future: 0, so every light job runs hosted. */
+export function lightIdle(value, nowS = Math.floor(Date.now() / 1000), maxAgeS = LIGHT_MAX_AGE_S) {
+  const m = /^(\d{1,3})@(\d{9,11})$/.exec(String(value ?? '').trim());
+  if (!m) return { idle: 0, why: value ? 'LIGHT_RUNNERS_IDLE unreadable' : 'LIGHT_RUNNERS_IDLE not set' };
+  const idle = Number(m[1]), age = nowS - Number(m[2]);
+  if (age > maxAgeS) return { idle: 0, why: `LIGHT_RUNNERS_IDLE is ${age} s old (over ${maxAgeS} s)` };
+  if (age < -60) return { idle: 0, why: 'LIGHT_RUNNERS_IDLE is stamped in the future' };
+  return { idle, why: `${idle} idle ${LIGHT_LABEL} runner(s), published ${Math.max(age, 0)} s ago` };
 }
 
 /** Gives the light jobs the light label, one per idle runner in matrix order; the rest, and every other job, keep their
@@ -229,10 +221,8 @@ async function main(argv) {
   try { const l = JSON.parse(opt('--labels') || '[]'); if (Array.isArray(l)) labels = l; } catch { /* unreadable labels: none */ }
   const win = windowFor({ event, draft: opt('--draft') === 'true', labels });
   const plan = { ...full, ...windowed({ include: full.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
-  // The light pool is asked only when a light job will run; any failure keeps it hosted (idleRunners).
-  const light = plan.include.some(j => j.light)
-    ? await idleRunners({ repo: process.env.GITHUB_REPOSITORY, token: process.env.MERGE_TRAIN_TOKEN })
-    : { idle: 0, why: 'no light job selected' };
+  // At most as many light jobs as the published idle count; a missing, stale or unreadable count keeps them hosted.
+  const light = plan.include.some(j => j.light) ? lightIdle(process.env.LIGHT_RUNNERS_IDLE) : { idle: 0, why: 'no light job selected' };
   plan.include = assignLight(plan.include, light.idle);
   const placed = plan.include.filter(j => j.runner).map(j => j.name);
   const out = { matrix: JSON.stringify({ include: plan.include }), any: String(plan.include.length > 0), scope: plan.scope, smoke: String(plan.smoke), deferred: String(plan.deferred), window: plan.why };

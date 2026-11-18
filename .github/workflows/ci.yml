@@ -82,9 +82,9 @@ jobs:
           DRAFT: ${{ github.event.pull_request.draft || false }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           GREEN: ${{ steps.green.outputs.green || steps.queued.outputs.covered || false }}
-          # Read only here: the runner list, to find an idle souls-light runner for the light jobs (needs Administration: Read;
-          # docs/testing.md#self-hosted-runners). Unset, refused (403) or unreachable: every light job runs hosted.
-          MERGE_TRAIN_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN }}
+          # `<idle>@<unix seconds>`: how many souls-light runners were idle, published outside this workflow so no token
+          # reaches PR code (docs/testing.md#self-hosted-runners). Missing, stale (over 10 minutes) or 0: light jobs run hosted.
+          LIGHT_RUNNERS_IDLE: ${{ vars.LIGHT_RUNNERS_IDLE }}
         # A push to main and a manual run check everything (FULL_EVENTS); the merge train reads those runs.
         run: node .github/scripts/ci-scope.mjs --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --draft "$DRAFT" --labels "$LABELS" --green-at-head "$GREEN"
 
@@ -133,8 +133,9 @@ jobs:
     # CI_HEAVY_RUNNER when it is set; every other job, and every job while it is unset, runs on ubuntu-latest, so a run
     # uses both pools at once. The value is one runner label (`souls-ci`) or a JSON array (`["self-hosted","souls-ci"]`).
     # `native` is never heavy: its camera perf budget is wall time, and a shared host under load misses it (#1162).
-    # A light job (soul-tools) carries `runner: souls-light` only when the scope job found an idle online runner with that
-    # label (ci-scope.mjs assignLight); otherwise it has none and runs hosted. The steps never depend on the runner.
+    # A light job (soul-tools) carries `runner: souls-light` only while a fresh LIGHT_RUNNERS_IDLE count says a runner with
+    # that label is idle (ci-scope.mjs lightIdle, assignLight); otherwise it has none and runs hosted. The steps never depend
+    # on the runner.
     runs-on: ${{ matrix.runner || (matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER)) || 'ubuntu-latest' }}
     # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
     timeout-minutes: ${{ matrix.kind == 'server' && 45 || 60 }}
