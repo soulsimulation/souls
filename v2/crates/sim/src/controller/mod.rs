@@ -214,7 +214,12 @@ impl Track {
             node: self.to,
             slot: None,
         };
-        *body = on.place(body.id, frame, self.arrive.unwrap_or(p), body.pose.orientation)?;
+        *body = on.place(
+            body.id,
+            frame,
+            self.arrive.unwrap_or(p),
+            body.pose.orientation,
+        )?;
         body.linear = linear;
         Ok(true)
     }

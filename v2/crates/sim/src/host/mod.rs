@@ -54,7 +54,13 @@ pub trait Geometry {
 /// The world's side of a crossing: the track a body is carried along across `link` at `speed`, or `None` while it
 /// stands (a shut door being opened for it, written by the world with the body as the acting Soul).
 pub trait Links {
-    fn track(&mut self, body: &Moved, link: Id, speed: i64, at: Micros) -> Result<Option<Track>, Refusal>;
+    fn track(
+        &mut self,
+        body: &Moved,
+        link: Id,
+        speed: i64,
+        at: Micros,
+    ) -> Result<Option<Track>, Refusal>;
 }
 
 /// A running skill on a body.
@@ -342,7 +348,11 @@ pub fn carry(
         };
         let r = match links.track(&b, link, speed, at) {
             Ok(Some(t)) => controller.cross(body, driver, t),
-            Ok(None) => controller.set(body, driver, Part::Velocity(Vec3::ZERO, replica::pose::Mode::Surface)),
+            Ok(None) => controller.set(
+                body,
+                driver,
+                Part::Velocity(Vec3::ZERO, replica::pose::Mode::Surface),
+            ),
             Err(r) => Err(r),
         };
         if let Err(r) = r {

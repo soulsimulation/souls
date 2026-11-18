@@ -24,6 +24,10 @@
 //! - **Integers.** Positions in µm, velocities in µm a second, time in µs; square roots by `isqrt`. Nothing is hashed
 //!   or decided by a float.
 //!
+//! **Retiring** (T9b #3120): the walk now runs as a skill through the host (`skills::route`, the same algorithm). This
+//! `Crowd` keeps its own bodies, stepped by the controller's dry run, until T9c moves N10's ladder and these tests onto
+//! the skill.
+//!
 //! Not here: standing spots (N9), the ladder (N10), the neighbour index proper (N16), the transfer records
 //! of a crossing (N6's `mover::cross` needs the zone's pose scene, which no caller holds yet).
 

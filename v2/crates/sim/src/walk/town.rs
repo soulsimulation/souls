@@ -18,17 +18,17 @@
 //!   enter. Without turns ([`Town::turns`] `None`) every link is free, as N7 walked them.
 
 use super::{Leg, Mark, Pass, World, node_of};
+use crate::controller::{Controller, Track};
 use crate::ground::scene::FLOOR;
 use crate::ground::{HUMAN_RADIUS, OpenGround, Scene};
+use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
-use crate::controller::{Controller, Track};
-use crate::host::Links;
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map};
 use replica::effects::{Actor, Cause, Refusal};
-use replica::host::{Answer, Ask, F_GRANTED, F_TURNS, Near, Seen};
 use replica::encode::Value;
+use replica::host::{Answer, Ask, F_GRANTED, F_TURNS, Near, Seen};
 use replica::ids::Id;
 use replica::pose::{ControllerInput, Mode, Vec3};
 use replica::time::Micros;
@@ -305,7 +305,11 @@ impl World for Town {
         dt: Micros,
         at: Micros,
     ) -> Result<bool, Refusal> {
-        if self.crossings.get(&body.id).is_none_or(|c| c.track.is_none()) {
+        if self
+            .crossings
+            .get(&body.id)
+            .is_none_or(|c| c.track.is_none())
+        {
             let (from, track) = self.track_of(body, link, Cause::Intent(order), speed, at)?;
             let start = body.pose.position;
             let stand = track.is_none();
@@ -454,7 +458,11 @@ impl Town {
         match q {
             Ask::Distance { .. } => None,
             Ask::Toward { to, .. } => self.corner_of(me, *to).ok().map(|[x, z]| {
-                Answer::Point(Vec3::new(x, if [x, z] == [to.x, to.z] { to.y } else { 0 }, z))
+                Answer::Point(Vec3::new(
+                    x,
+                    if [x, z] == [to.x, to.z] { to.y } else { 0 },
+                    z,
+                ))
             }),
             Ask::Near { radius } => {
                 let (node, p) = (node_of(me), me.pose.position);
