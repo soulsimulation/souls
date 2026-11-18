@@ -6469,7 +6469,14 @@ async function here() {
   const d = ok(await call("/v1/edge/here?include=doHere"), "here");
   const h = d.here ?? clean(d);
   if (h.me?.body) h.me.body = h.me.body.family; // the full look is under `body`
+  if (h.objects?.length) await withPurpose(h.objects);
   return h;
+}
+/** SA-C1/SA-C3: each nearby thing's purpose line, from its kind's card in this machine's copy of the catalog (no call once there is a copy). */
+async function withPurpose(rows) {
+  const c = await worldCopy({ local: true }).catch(() => null) ?? await worldCopy().catch(() => null); if (!c) return rows;
+  for (const r of rows) { const p = r?.id && soulCatalog.cardOf(c.ix, r.id)?.purpose; if (p) r.purpose = p; }
+  return rows;
 }
 
 // ---------------------------------------------------------------- the world on this machine (#1737)
@@ -9504,7 +9511,9 @@ async function inspect(id, ...flags) {
   const r = ok(await call(`/v1/edge/inspect/${encodeURIComponent(id)}${flags.includes("--all") ? "?all=1" : ""}`), "inspect").inspect;
   // #2225: a thing's position and level come from this machine's copy of the world, with no call
   const copy = r?.id ? await worldCopy({ local: true }).catch(() => null) : null, pos = copy ? soulCatalog.thingAt(copy.ix, r.id) : null;
-  return pos ? { ...r, ...pos } : r;
+  // SA-C1/SA-C3: what its kind is for, from the card in the same copy
+  const card = copy ? soulCatalog.cardOf(copy.ix, r.id) : null;
+  return pos || card ? { ...r, ...(pos ?? {}), ...(card ? { card } : {}) } : r;
 }
 
 // ---------------------------------------------------------------- the Souls home
