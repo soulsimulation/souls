@@ -27,6 +27,10 @@ path = "src/timers.rs"
 name = "moves"
 path = "src/moves.rs"
 
+[[bin]]
+name = "walkers"
+path = "walkers/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
