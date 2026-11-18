@@ -21,6 +21,11 @@
 //! - **One trait.** Everything the skill reads of the world or asks of it (the route's legs, the next corner, a step
 //!   of the mover, a tick of crossing a link, the marks read and the leave to enter) goes through [`World`], so K13
 //!   can re-link it. [`town::Town`] is the trait over N5's map, N6's mover and N4's links, doors and turns.
+//! - **Shores** (#3225). A route for a body that may wade or swim crosses shore links (`souls:wade`, `souls:swim`,
+//!   N11c): the walker crosses one as any link, at its near end, and its gait changes with the ground it stands on
+//!   ([`World::ground`]): free speed on dry ground, [`crate::gaits::WADE`]'s on wading ground, [`crate::gaits::SWIM`]'s
+//!   in water. A crossing the body may not make ([`World::may_cross`]: into water it may not use) ends its order by
+//!   that name where it stands, on dry ground, before it starts.
 //! - **Integers.** Positions in µm, velocities in µm a second, time in µs; square roots by `isqrt`. Nothing is hashed
 //!   or decided by a float.
 //!
@@ -29,6 +34,7 @@
 
 pub mod town;
 
+use crate::gaits::{Ground, SWIM, WADE};
 use crate::mover::Body;
 use replica::effects::Refusal;
 use replica::ids::Id;
@@ -120,6 +126,24 @@ pub trait World {
     /// Whether `who` may enter `link` now.
     fn pass(&self, _link: Id, _who: Id) -> Pass {
         Pass::Free
+    }
+    /// The ground `body` stands on, which sets its gait. A world with no water: dry.
+    fn ground(&self, _body: &Body) -> Ground {
+        Ground::Dry
+    }
+    /// Whether `body` may cross `link` from where it stands, or the refusal naming why not (a shore into water it may
+    /// not use). A world with no water: always.
+    fn may_cross(&self, _body: &Body, _link: Id) -> Result<(), Refusal> {
+        Ok(())
+    }
+}
+
+/// A walker's speed on `ground`, µm a second: its free speed on dry ground, else the gait's there.
+fn speed_on(free: i64, ground: Ground) -> i64 {
+    match ground {
+        Ground::Dry => free,
+        Ground::Wading => WADE.speed,
+        Ground::Water => SWIM.speed,
     }
 }
 
@@ -364,9 +388,10 @@ impl Crowd {
             if w.arrived.is_some() || w.staying || w.held.is_some() {
                 continue;
             }
+            let speed = speed_on(w.speed, world.ground(&w.body));
             if w.crossing {
                 let link = w.legs[w.leg].link.expect("a crossing leg");
-                if world.cross(&mut w.body, link, w.order, w.speed, dt, at)? {
+                if world.cross(&mut w.body, link, w.order, speed, dt, at)? {
                     w.crossing = false;
                     w.leg += 1;
                 }
@@ -396,9 +421,15 @@ impl Crowd {
             }
             match leg.link {
                 Some(link) if gap <= AT_LINK && pass != Pass::Wait => {
-                    w.crossing = true;
                     w.waiting = None;
-                    if world.cross(&mut w.body, link, w.order, w.speed, dt, at)? {
+                    // A crossing it may not make ends its order by name, where it stands.
+                    if let Err(r) = world.may_cross(&w.body, link) {
+                        w.held = Some(r.name);
+                        w.body.linear = Vec3::ZERO;
+                        continue;
+                    }
+                    w.crossing = true;
+                    if world.cross(&mut w.body, link, w.order, speed, dt, at)? {
                         w.crossing = false;
                         w.leg += 1;
                     }
@@ -419,7 +450,7 @@ impl Crowd {
             } else if pass != Pass::Wait {
                 near.retain(|(n, _)| n.waiting.is_none());
             }
-            let v = wanted(w.body.id, [p.x, p.z], aim, w.speed, dt, &near);
+            let v = wanted(w.body.id, [p.x, p.z], aim, speed, dt, &near);
             // Along an edge: a step the mover cuts to nothing is tried turned by 45 and then 70 degrees, either way
             // (the mover cuts a step at the ground's edge and does not slide).
             let before = w.body;

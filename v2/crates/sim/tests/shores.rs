@@ -6,14 +6,22 @@
 //! crossed, into the sea and back, a pier, a bridge, a shore) need N1's exported facts file
 //! (`node v2/tools/import-eden/export/export.ts` from the repository root) and run with
 //! `cargo test -p sim --release --test shores -- --ignored --nocapture`.
+//!
+//! The walk skill across shores (#3225): `walkers_cross_the_pond` walks bodies over the bowl, and
+//! `walkers_cross_eden_waters` (ignored, the facts file) over Eden's west lake and river.
 
 use import_eden::Import;
-use replica::ids::Id;
-use replica::pose::Vec3;
-use sim::gaits::Ground;
+use replica::effects::{Header, schema_hash};
+use replica::encode::{Value, encode};
+use replica::ids::{Hash, Id, Purpose, Scope};
+use replica::pose::{Frame, Quat, Vec3};
+use sim::gaits::{Ground, SWIM as SWIM_GAIT, WADE as WADE_GAIT};
 use sim::ground::{SQUARE, Scene};
-use sim::links::Kind;
-use sim::routes::{ALL, CLIMB, HANDS, Hop, Map, Mask, Route, Spot, WADE};
+use sim::links::{Doors, Kind};
+use sim::routes::{ALL, CLIMB, HANDS, Hop, Map, Mask, Route, Spot, WADE, may_stand};
+use sim::walk::town::Town;
+use sim::walk::{Crowd, Leg, World};
+use std::collections::BTreeMap;
 
 /// A body that may walk, open doors and climb, but neither wade nor swim.
 const DRY: Mask = HANDS | CLIMB;
@@ -586,5 +594,354 @@ fn eden_shores_and_crossings() {
             Ok(r) => Err(format!("routed: {}", path(&map, &r).join(" > "))),
         },
     );
+    assert!(failed.is_empty(), "failed: {failed:?}");
+}
+
+// The walk skill across shores (#3225): walkers walked through the controller (the walk skill's world, the mover's
+// steps and its crossings), not routes alone.
+
+const TICK: i64 = 50_000;
+/// A walker's free speed on dry ground, µm a second.
+const SPEED: i64 = 1_400_000;
+
+fn id(n: u64) -> Id {
+    Id::new(Scope([7; 16]), n).unwrap()
+}
+
+/// A loaded world as the walk skill reads it, with a door writer.
+fn town_of(im: Import) -> (Town, Id) {
+    let Import {
+        tree, rules, nodes, ..
+    } = im;
+    let root = nodes["world"];
+    let v = Value::Map(BTreeMap::from([
+        (
+            1,
+            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/shores-test/1").to_bytes()),
+        ),
+        (2, Value::Bytes(schema_hash().to_bytes())),
+        (3, Value::Bytes(root.scope().0.to_vec())),
+        (4, root.to_value()),
+        (5, Value::Uint(0)),
+        (6, Value::Array(Vec::new())),
+        (7, Value::Array(Vec::new())),
+    ]));
+    let header = Header::read(&encode(&v).unwrap()).unwrap();
+    let next = tree.to_state().next;
+    let ground = nodes["ground"];
+    let t = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
+    (t, ground)
+}
+
+/// What a walk did, tick by tick.
+#[derive(Debug)]
+struct Walked {
+    /// The grounds it stood on, each run written once.
+    grounds: Vec<Ground>,
+    /// Per ground (dry, wading, water): the median move in a tick, µm, over ticks on that ground and not crossing.
+    median: [i64; 3],
+    arrived: bool,
+    held: Option<&'static str>,
+    ticks: u32,
+    at: Vec3,
+}
+
+fn slot(g: Ground) -> usize {
+    match g {
+        Ground::Dry => 0,
+        Ground::Wading => 1,
+        Ground::Water => 2,
+    }
+}
+
+/// The speed of a walker on ground `g`, µm a second: its own on dry ground, else the gait's.
+fn gait(g: Ground) -> i64 {
+    match g {
+        Ground::Dry => SPEED,
+        Ground::Wading => WADE_GAIT.speed,
+        Ground::Water => SWIM_GAIT.speed,
+    }
+}
+
+/// Walks a body with `has` from `from` to `to` (mm spots of the town's map) through the walk skill, with `legs`
+/// in place of its own when given (a route offered to it), checking every tick that it moves no further than the
+/// gait it started the tick in allows and stands only on ground it may stand on.
+fn walk(
+    t: &mut Town,
+    ground: Id,
+    has: Mask,
+    from: Spot,
+    to: Spot,
+    legs: Option<Vec<Leg>>,
+) -> Walked {
+    let who = id(900);
+    t.abilities.insert(who, has);
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let start = Vec3::new(from.at[0] * 1000, 0, from.at[2] * 1000);
+    let body = t.surfaces[&ground]
+        .place(who, frame, start, Quat::IDENTITY)
+        .expect("a start on dry ground");
+    let goal = Vec3::new(to.at[0] * 1000, to.at[1] * 1000, to.at[2] * 1000);
+    let mut c = Crowd::new(TICK);
+    c.add(t, body, SPEED, id(10_900), ground, goal)
+        .expect("a walk");
+    if let Some(l) = legs {
+        c.walkers[0].legs = l;
+    }
+    let mut grounds = vec![Ground::Dry];
+    let mut moves: [Vec<i64>; 3] = Default::default();
+    let mut ticks = 0;
+    while !c.done() && ticks < 6_000 {
+        let (was, g0, crossing) = (
+            c.walkers[0].body.pose.position,
+            t.ground(&c.walkers[0].body),
+            c.walkers[0].crossing,
+        );
+        c.step(t).expect("a tick");
+        let w = &c.walkers[0];
+        let (p, g1) = (w.body.pose.position, t.ground(&w.body));
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        let step = (d(was.x, p.x) + d(was.y, p.y) + d(was.z, p.z)).isqrt() as i64;
+        // Within 1 %: on terrain that curves, the mover's one walk again for the slope (N11a) is not exact.
+        assert!(
+            step * 100 <= gait(g0) * TICK / 10_000 * 101,
+            "tick {ticks}: {step} µm on {g0:?}, faster than its gait"
+        );
+        assert!(may_stand(g1, has), "tick {ticks}: on {g1:?} with {has:#b}");
+        if g1 != *grounds.last().unwrap() {
+            grounds.push(g1);
+        }
+        if g0 == g1 && !crossing && !w.crossing && step > 0 {
+            moves[slot(g0)].push(step);
+        }
+        ticks += 1;
+    }
+    let median = moves.map(|mut m| {
+        m.sort_unstable();
+        m.get(m.len() / 2).copied().unwrap_or(0)
+    });
+    let w = &c.walkers[0];
+    Walked {
+        grounds,
+        median,
+        arrived: w.arrived.is_some(),
+        held: w.held,
+        ticks,
+        at: w.body.pose.position,
+    }
+}
+
+/// The walk crossed water as the gaits say: in and out across the shores, wading at the wading gait, swimming at the
+/// swimming gait (median move in a tick within 2 % of the gait's), and arrived on the far shore.
+fn judge_walk(w: &Walked, want: &[Ground]) -> Result<String, String> {
+    let s = format!(
+        "{:?} in {:.1} s; median speed dry {:.2}, wading {:.2}, water {:.2} m/s",
+        w.grounds,
+        f64::from(w.ticks) * TICK as f64 / 1e6,
+        w.median[0] as f64 / TICK as f64,
+        w.median[1] as f64 / TICK as f64,
+        w.median[2] as f64 / TICK as f64
+    );
+    let near = |g: Ground| {
+        let (m, want) = (w.median[slot(g)], gait(g) * TICK / 1_000_000);
+        !w.grounds.contains(&g) || (m - want).abs() * 50 <= want
+    };
+    if w.arrived
+        && w.grounds == want
+        && [Ground::Dry, Ground::Wading, Ground::Water]
+            .into_iter()
+            .all(near)
+    {
+        Ok(s)
+    } else {
+        Err(format!("{s}; arrived {}, held {:?}", w.arrived, w.held))
+    }
+}
+
+const ACROSS_ON: [Ground; 5] = [
+    Ground::Dry,
+    Ground::Wading,
+    Ground::Water,
+    Ground::Wading,
+    Ground::Dry,
+];
+
+/// A1 and A2 on the bowl, through the walk skill: a swimmer wades in, swims the middle and wades out at the gaits'
+/// speeds; a body that cannot swim walks round on dry ground; one offered the swimmer's route anyway is refused at the
+/// first shore by name and stays on dry ground; and one sent into the water is refused by name before it moves.
+#[test]
+fn walkers_cross_the_pond() {
+    let (mut t, ground) = town_of(world(Pond::Bowl));
+    let at = |t: &Town, m: [f64; 2], g: Ground| find(&t.map, ground, m, g, 0.5).unwrap();
+    let (west, east) = (
+        at(&t, [1.5, 8.0], Ground::Dry),
+        at(&t, [14.5, 8.0], Ground::Dry),
+    );
+    let swum = walk(&mut t, ground, ALL, west, east, None);
+    println!("a swimmer across the pond: {swum:?}");
+    let r = judge_walk(&swum, &ACROSS_ON);
+    println!("  {}", r.as_ref().unwrap_or_else(|e| e));
+    assert!(r.is_ok());
+
+    let (mut t, ground) = town_of(world(Pond::Bowl));
+    let round = walk(&mut t, ground, DRY, west, east, None);
+    println!("a body that cannot swim: {round:?}");
+    assert!(round.arrived && round.grounds == [Ground::Dry], "round it");
+
+    // The swimmer's route, offered to a body that cannot swim.
+    let (mut t, ground) = town_of(world(Pond::Bowl));
+    let who = id(900);
+    t.abilities.insert(who, ALL);
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let start = Vec3::new(west.at[0] * 1000, 0, west.at[2] * 1000);
+    let body = t.surfaces[&ground]
+        .place(who, frame, start, Quat::IDENTITY)
+        .unwrap();
+    let goal = Vec3::new(east.at[0] * 1000, 0, east.at[2] * 1000);
+    let legs = t.plan(&body, ground, goal).expect("the swimmer's route");
+    assert!(legs.len() > 1, "a route across the water");
+    let offered = walk(&mut t, ground, DRY, west, east, Some(legs));
+    println!("offered the swimmer's route: {offered:?}");
+    assert_eq!(offered.held, Some("link-needs-wade"), "refused by name");
+    assert_eq!(offered.grounds, [Ground::Dry], "never in the water");
+    assert!(
+        t.map.spot_near(ground, offered.at, 20).is_some(),
+        "standing on dry ground"
+    );
+
+    // Sent into the water: refused by name before it moves.
+    let (mut t, ground) = town_of(world(Pond::Bowl));
+    t.abilities.insert(who, DRY);
+    let mid = Vec3::new(8_000_000, LEVEL as i64 * 1000, 8_000_000);
+    let body = t.surfaces[&ground]
+        .place(who, frame, start, Quat::IDENTITY)
+        .unwrap();
+    let e = Crowd::new(TICK)
+        .add(&mut t, body, SPEED, id(10_900), ground, mid)
+        .expect_err("refused");
+    println!("sent into the water: {}: {}", e.name, e.detail);
+    assert!(e.name == "no-route" && e.detail.ends_with(": link-needs-wade"));
+}
+
+/// A1 on Eden, through the walk skill: a swimmer walks the west lake shore to shore and the river bank to bank where
+/// it wades and where it swims, at the gaits' speeds, and leaves the water on the far shore; a body that cannot swim
+/// walks round the lake on dry ground.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn walkers_cross_eden_waters() {
+    let (mut t, ground) = town_of(eden());
+    let scene = Scene::of(&t.tree, ground).unwrap();
+    let spot = |t: &Town, m: [f64; 2], g: Ground| {
+        find(&t.map, ground, m, g, 4.0).unwrap_or_else(|| panic!("no {g:?} ground near {m:?}"))
+    };
+    let mut failed = Vec::new();
+    let mut check = |name: &str, r: Result<String, String>| {
+        println!(
+            "{:<4} {name}: {}",
+            if r.is_ok() { "pass" } else { "FAIL" },
+            r.as_ref().unwrap_or_else(|e| e)
+        );
+        if r.is_err() {
+            failed.push(name.to_owned());
+        }
+    };
+    // The west lake, its west shore to its east shore.
+    let (w, e) = (
+        spot(&t, [-196.5, 2.0], Ground::Dry),
+        spot(&t, [-99.5, 2.0], Ground::Dry),
+    );
+    let lake = walk(&mut t, ground, ALL, w, e, None);
+    check(
+        "the west lake walked shore to shore by a swimmer",
+        judge_walk(&lake, &ACROSS_ON),
+    );
+    let round = walk(&mut t, ground, DRY, w, e, None);
+    check(
+        "the west lake: a body that cannot swim walks round it on dry ground",
+        if round.arrived && round.grounds == [Ground::Dry] {
+            Ok(format!(
+                "{:.1} s against {:.1} s swum",
+                f64::from(round.ticks) / 20.0,
+                f64::from(lake.ticks) / 20.0
+            ))
+        } else {
+            Err(format!("{round:?}"))
+        },
+    );
+    // The river, bank to bank, where a route wades it and where a route swims it (as N11c's routes found them).
+    let river = scene
+        .waters
+        .iter()
+        .find(|w| !w.line.is_empty())
+        .expect("the river");
+    let (mut waded, mut swum) = (None, None);
+    for k in (10..river.line.len() - 10).step_by(6) {
+        let (a, b) = (river.line[k], river.line[k + 1]);
+        let (dx, dz) = ((b[0] - a[0]) as f64, (b[1] - a[1]) as f64);
+        let l = dx.hypot(dz);
+        let (nx, nz) = (-dz / l, dx / l);
+        let mid = [a[0] as f64 / 1e6, a[1] as f64 / 1e6];
+        let half = river.width as f64 / 2e6 + 1.5;
+        let bank = |s: f64| {
+            find(
+                &t.map,
+                ground,
+                [mid[0] + nx * half * s, mid[1] + nz * half * s],
+                Ground::Dry,
+                1.5,
+            )
+        };
+        let (Some(u), Some(v)) = (bank(1.0), bank(-1.0)) else {
+            continue;
+        };
+        let Ok(r) = t.map.route(&t.tree, u, v, ALL) else {
+            continue;
+        };
+        let p = path(&t.map, &r);
+        if !p.iter().any(|s| s == "wading" || s == "water") || r.length > 30_000 {
+            continue;
+        }
+        if p.iter().any(|s| s == "water") {
+            swum.get_or_insert((mid, u, v));
+        } else {
+            waded.get_or_insert((mid, u, v));
+        }
+        if waded.is_some() && swum.is_some() {
+            break;
+        }
+    }
+    for (what, c, want) in [
+        (
+            "wading",
+            waded,
+            &[Ground::Dry, Ground::Wading, Ground::Dry][..],
+        ),
+        ("swimming", swum, &[][..]),
+    ] {
+        let (m, u, v) = c.unwrap_or_else(|| panic!("a river crossing by {what}"));
+        let r = walk(&mut t, ground, ALL, u, v, None);
+        let ok = if want.is_empty() {
+            // Swum: into the water from a bank or from wading ground, and out again.
+            let ok = r.grounds.contains(&Ground::Water)
+                && r.grounds.first() == Some(&Ground::Dry)
+                && r.grounds.last() == Some(&Ground::Dry);
+            judge_walk(&r, &r.grounds.clone()).and_then(|s| if ok { Ok(s) } else { Err(s) })
+        } else {
+            judge_walk(&r, want)
+        };
+        check(
+            &format!(
+                "the river walked bank to bank by {what} at ({:.1}, {:.1}) m",
+                m[0], m[1]
+            ),
+            ok,
+        );
+    }
     assert!(failed.is_empty(), "failed: {failed:?}");
 }

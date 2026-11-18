@@ -36,8 +36,8 @@
 //!   search came to and could not use, the one whose far end is nearest the goal.
 //!
 //! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), other body sizes (B12), a gait's speed
-//! as cost (a route is the shortest, not the quickest), walking a shore link (the walk skill crosses tree links and
-//! steps only). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
+//! as cost (a route is the shortest, not the quickest), walking a shore link (the walk skill's, `crate::walk::town`,
+//! #3225, reading [`Map::shore`]). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
 use crate::gaits::Ground;
 use crate::ground::scene::Xform;
@@ -783,6 +783,17 @@ impl Map {
                 }),
             })
             .collect()
+    }
+
+    /// Link number `k` of [`Map::links`], when it is a shore: its two pieces (the drier first) and the stretch of edge
+    /// they share, both its ends (mm, the ground's frame). For the walk skill to cross it (#3225).
+    pub fn shore(&self, k: usize) -> Option<([u32; 2], [i64; 2], [i64; 2])> {
+        let l = self
+            .links
+            .get(k)
+            .filter(|l| matches!(l.kind, Kind::Wade | Kind::Swim))?;
+        let [p, r] = [&l.ends[0], &l.ends[1]].map(|e| &self.portals[e[0] as usize]);
+        Some(([p.pieces[0], r.pieces[0]], p.a, p.b))
     }
 
     /// A piece of the map.

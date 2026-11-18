@@ -1,0 +1,1 @@
+- The walk skill crosses shores (Engine v2, #3225): a body that may wade or swim walks routes through water, wading and swimming at the gaits' speeds; one that may not is refused by name on dry ground.
