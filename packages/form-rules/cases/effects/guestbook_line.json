@@ -132,6 +132,96 @@
      }
     }
    }
+  },
+  {
+   "name": "one_signature_per_book",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "g1",
+       "b1"
+      ]
+     },
+     "g1": {
+      "kind": "eden:guestbook",
+      "children": [
+       "t1",
+       "t2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "t2": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "sign",
+      "args": {
+       "words": "w_garden"
+      }
+     },
+     "receipt": "gb1",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t2",
+      "form": "sign",
+      "args": {
+       "words": "w_again"
+      }
+     },
+     "receipt": "gb2",
+     "expect": {
+      "verdict": "no",
+      "reason": "already_linked",
+      "need": 2,
+      "detail": {
+       "link": "signer",
+       "most_per": 1,
+       "on": [
+        "t1"
+       ]
+      },
+      "says": "already_signed"
+     }
+    }
+   ]
   }
  ]
 }
