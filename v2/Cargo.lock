@@ -18,6 +18,7 @@ dependencies = [
  "sim",
  "skills",
  "testworld",
+ "worldd",
 ]
 
 [[package]]
