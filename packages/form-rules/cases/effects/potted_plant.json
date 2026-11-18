@@ -1,0 +1,546 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:potted_plant over days, by the rules alone. Sown moist it sprouts, leafs and flowers a world day apart and stops there (a pot has no fruit). Carried: a Soul holding a watering can in its right hand picks the pot up in its free left hand (it is carried in one hand); at day 1 the soil, 1 L at 5 mg a second from 0, is 568 000 mg, under the dry line, so the pot cannot flower; watered in the hand it is soaked full and its three stage timers armed, and a day later only the flower timer, the one for its stage, is done.",
+ "cases": [
+  {
+   "name": "potted_sown_moist_flowers_on_day_3_with_no_soul",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "p1",
+      "form": "sow"
+     },
+     "now_us": 0,
+     "receipt": "rs1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "seed"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 0
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sown",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:sprout_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "sprout",
+        "after_us": 86400000000,
+        "event": 2
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "sprout"
+     },
+     "now_us": 86400000000,
+     "receipt": "rs2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "sprout"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 86400000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sprouted",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:leaf_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "leaf",
+        "after_us": 86400000000,
+        "event": 2
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "leaf"
+     },
+     "now_us": 172800000000,
+     "receipt": "rs3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "leafy"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 172800000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:leafed",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:flower_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "flower",
+        "after_us": 86400000000,
+        "event": 2
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "flower"
+     },
+     "now_us": 259200000000,
+     "receipt": "rs4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "flowering"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 259200000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:flowered",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "p1": {
+     "kind": "eden:potted_plant",
+     "fields": {
+      "stage": "flowering",
+      "water": {
+       "value": 4000000,
+       "per_s": -5,
+       "set_us": 0
+      },
+      "ripening": {
+       "value": 0,
+       "per_s": 1,
+       "set_us": 259200000000
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_carried_in_one_hand_watered_and_flowers_a_day_later",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "pp1"
+      ]
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": "c1"
+      }
+     },
+     "c1": {
+      "kind": "eden:watering_can"
+     },
+     "pp1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "b1",
+      "form": "pick_up",
+      "args": {
+       "thing": "pp1"
+      }
+     },
+     "now_us": 0,
+     "receipt": "rp1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "pp1",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:picked_up",
+        "node": "b1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "pp1",
+      "form": "flower"
+     },
+     "now_us": 86400000000,
+     "receipt": "rp2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "pp1",
+      "form": "water"
+     },
+     "now_us": 86400000000,
+     "receipt": "rp3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "pp1",
+        "field": "water",
+        "n": 1,
+        "to": {
+         "value": 4000000,
+         "per_s": -5,
+         "set_us": 86400000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:watered",
+        "node": "pp1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:sprout_due",
+        "node": "pp1",
+        "changes": []
+       },
+       {
+        "event": "eden:leaf_due",
+        "node": "pp1",
+        "changes": []
+       },
+       {
+        "event": "eden:flower_due",
+        "node": "pp1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "pp1",
+        "form": "sprout",
+        "after_us": 86400000000,
+        "event": 1
+       },
+       {
+        "node": "pp1",
+        "form": "leaf",
+        "after_us": 86400000000,
+        "event": 2
+       },
+       {
+        "node": "pp1",
+        "form": "flower",
+        "after_us": 86400000000,
+        "event": 3
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "pp1",
+      "form": "sprout"
+     },
+     "now_us": 172800000000,
+     "receipt": "rp4",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "pp1",
+      "form": "leaf"
+     },
+     "now_us": 172800000000,
+     "receipt": "rp5",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "pp1",
+      "form": "flower"
+     },
+     "now_us": 172800000000,
+     "receipt": "rp6",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "pp1",
+        "field": "stage",
+        "n": 2,
+        "to": "flowering"
+       },
+       {
+        "change": "set",
+        "node": "pp1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 172800000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:flowered",
+        "node": "pp1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "pp1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "pp1": {
+     "kind": "eden:potted_plant",
+     "fields": {
+      "stage": "flowering",
+      "water": {
+       "value": 4000000,
+       "per_s": -5,
+       "set_us": 86400000000
+      },
+      "ripening": {
+       "value": 0,
+       "per_s": 1,
+       "set_us": 172800000000
+      }
+     }
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,663 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:potted_plant",
+  "owner": "thing",
+  "state": {
+    "water": {
+      "n": 1,
+      "type": "timed",
+      "unit": "mg",
+      "default": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+      },
+      "min": 0,
+      "max": 4000000,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "stage": {
+      "n": 2,
+      "type": "enum",
+      "values": [
+        "bare",
+        "seed",
+        "sprout",
+        "leafy",
+        "flowering"
+      ],
+      "default": "leafy",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ripening": {
+      "n": 3,
+      "type": "timed",
+      "unit": "count",
+      "default": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+      },
+      "min": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "soil": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        435,
+        0
+      ]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        500
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      640,
+      900,
+      640
+    ]
+  },
+  "forms": {
+    "sow": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "bare"
+        },
+        {
+          "need": "within_reach",
+          "point": "soil"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "soil"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "seed",
+          "event": "sown"
+        },
+        {
+          "change": "set",
+          "field": "ripening",
+          "to": 0,
+          "rate": 1,
+          "event": "ripening_restarted"
+        },
+        {
+          "change": "timer",
+          "form": "sprout",
+          "after_us": 86400000000,
+          "event": "sprout_due"
+        }
+      ]
+    },
+    "water": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "holds": "eden:watering_can"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "pour",
+          "at": "soil"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "water",
+          "to": 4000000,
+          "rate": -5,
+          "event": "watered"
+        },
+        {
+          "change": "timer",
+          "form": "sprout",
+          "after_us": 86400000000,
+          "event": "sprout_due"
+        },
+        {
+          "change": "timer",
+          "form": "leaf",
+          "after_us": 86400000000,
+          "event": "leaf_due"
+        },
+        {
+          "change": "timer",
+          "form": "flower",
+          "after_us": 86400000000,
+          "event": "flower_due"
+        }
+      ]
+    },
+    "sprout": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        {
+          "need": "state",
+          "field": "water",
+          "at_least": 1360000
+        },
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "seed"
+        },
+        {
+          "need": "state",
+          "field": "ripening",
+          "at_least": 86400
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "sprout",
+          "event": "sprouted"
+        },
+        {
+          "change": "set",
+          "field": "ripening",
+          "to": 0,
+          "rate": 1,
+          "event": "ripening_restarted"
+        },
+        {
+          "change": "timer",
+          "form": "leaf",
+          "after_us": 86400000000,
+          "event": "leaf_due"
+        }
+      ]
+    },
+    "leaf": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        {
+          "need": "state",
+          "field": "water",
+          "at_least": 1360000
+        },
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "sprout"
+        },
+        {
+          "need": "state",
+          "field": "ripening",
+          "at_least": 86400
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "leafy",
+          "event": "leafed"
+        },
+        {
+          "change": "set",
+          "field": "ripening",
+          "to": 0,
+          "rate": 1,
+          "event": "ripening_restarted"
+        },
+        {
+          "change": "timer",
+          "form": "flower",
+          "after_us": 86400000000,
+          "event": "flower_due"
+        }
+      ]
+    },
+    "flower": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        {
+          "need": "state",
+          "field": "water",
+          "at_least": 1360000
+        },
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "leafy"
+        },
+        {
+          "need": "state",
+          "field": "ripening",
+          "at_least": 86400
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "flowering",
+          "event": "flowered"
+        },
+        {
+          "change": "set",
+          "field": "ripening",
+          "to": 0,
+          "rate": 1,
+          "event": "ripening_restarted"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:potted_plant",
+    "table": [
+      {
+        "part": "fill",
+        "field": "water",
+        "do": "tint",
+        "range": [
+          1359999,
+          1360000
+        ],
+        "to": [
+          "#b8a184",
+          "#3b2b1d"
+        ]
+      },
+      {
+        "part": "blade",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "bare": 0,
+          "seed": 0,
+          "sprout": 1,
+          "leafy": 0,
+          "flowering": 0
+        }
+      },
+      {
+        "part": "canopy",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "bare": 0,
+          "seed": 0,
+          "sprout": 0,
+          "leafy": 1,
+          "flowering": 1
+        }
+      },
+      {
+        "part": "canopy",
+        "field": "water",
+        "do": "tint",
+        "range": [
+          1359999,
+          1360000
+        ],
+        "to": [
+          "#b39a4a",
+          "#5f9142"
+        ]
+      },
+      {
+        "part": "head",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "bare": 0,
+          "seed": 0,
+          "sprout": 0,
+          "leafy": 0,
+          "flowering": 1
+        }
+      }
+    ],
+    "shape": {
+      "shapes": [
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "profile": [
+            [
+              0,
+              0
+            ],
+            [
+              170,
+              0
+            ],
+            [
+              240,
+              360
+            ],
+            [
+              270,
+              380
+            ],
+            [
+              270,
+              440
+            ],
+            [
+              235,
+              440
+            ],
+            [
+              225,
+              400
+            ],
+            [
+              0,
+              400
+            ]
+          ],
+          "segments": 12,
+          "tint": "pot"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            410,
+            0
+          ],
+          "r": 228,
+          "h": 20,
+          "segments": 12,
+          "tint": "soil",
+          "role": "fill",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            500,
+            0
+          ],
+          "r": 40,
+          "h": 120,
+          "segments": 5,
+          "tint": "leaf",
+          "role": "blade",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            168,
+            600,
+            0
+          ],
+          "r": 154,
+          "segments": 6,
+          "tint": "leaf",
+          "role": "canopy",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -124,
+            670,
+            113
+          ],
+          "r": 154,
+          "segments": 6,
+          "tint": "leaf",
+          "role": "canopy",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            15,
+            740,
+            -167
+          ],
+          "r": 154,
+          "segments": 6,
+          "tint": "leaf",
+          "role": "canopy",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            102,
+            600,
+            133
+          ],
+          "r": 154,
+          "segments": 6,
+          "tint": "leaf",
+          "role": "canopy",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -165,
+            670,
+            -29
+          ],
+          "r": 154,
+          "segments": 6,
+          "tint": "leaf",
+          "role": "canopy",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            142,
+            740,
+            -90
+          ],
+          "r": 154,
+          "segments": 6,
+          "tint": "leaf",
+          "role": "canopy",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            190,
+            820,
+            0
+          ],
+          "r": 65,
+          "segments": 6,
+          "tint": "bloom",
+          "role": "head",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            50,
+            880,
+            180
+          ],
+          "r": 65,
+          "segments": 6,
+          "tint": "bloom",
+          "role": "head",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -160,
+            820,
+            95
+          ],
+          "r": 65,
+          "segments": 6,
+          "tint": "bloom",
+          "role": "head",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -135,
+            880,
+            -125
+          ],
+          "r": 65,
+          "segments": 6,
+          "tint": "bloom",
+          "role": "head",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            85,
+            820,
+            -165
+          ],
+          "r": 65,
+          "segments": 6,
+          "tint": "bloom",
+          "role": "head",
+          "pivot": [
+            0,
+            435,
+            0
+          ]
+        }
+      ],
+      "round": 10,
+      "palette": {
+        "pot": "#c46a43",
+        "soil": "#4a3628",
+        "leaf": "#5f9142",
+        "bloom": "#e05a8a"
+      },
+      "tags": [
+        "garden",
+        "plant",
+        "pot",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A plant in a terracotta pot to carry in one hand; water it and it flowers.",
+    "plant": "plant",
+    "flower_pot": "flower pot",
+    "pot_plant": "pot plant",
+    "houseplant": "houseplant",
+    "water": "water"
+  },
+  "card": {
+    "text": "card",
+    "category": "plant",
+    "synonyms": [
+      "flower_pot",
+      "pot_plant",
+      "houseplant",
+      "water"
+    ]
+  }
+}
