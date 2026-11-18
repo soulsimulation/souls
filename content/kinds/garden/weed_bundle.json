@@ -7,6 +7,8 @@
   },
   "geometry": { "bounds_mm": [220, 110, 250] },
   "forms": {},
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:weed_bundle",
     "shape": {"round":2,"shapes":[{"kind":"box","at":[-60,35,0],"size":[30,50,250],"tint":"stem"},{"kind":"box","at":[0,35,0],"size":[30,50,230],"tint":"stem"},{"kind":"box","at":[60,35,0],"size":[30,50,210],"tint":"stem"},{"kind":"box","at":[0,70,40],"size":[200,40,120],"tint":"leaf","roll":11000},{"kind":"box","at":[0,85,-30],"size":[40,30,30],"tint":"tie"}],"palette":{"stem":"#8a7950","leaf":"#829543","tie":"#c9b48a"},"tags":["garden","weeds","bundle","object"]}
