@@ -54,7 +54,8 @@ export const ALLOWED = {
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
   skills: ['replica'],
   // W8 (#2729): the object store's SigV4 signature (ring) and HTTP (ureq); sim's tick loop in a test (dev only).
-  directoryd: ['replica', 'ring', 'ureq', 'sim'],
+  // W1 (#2704): RS256 checks and random ids (ring), the one-file account store (rusqlite), JWKS (serde_json, ureq).
+  directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim'],
   // O1 (#2730): the launcher reads a world's pin from its directory record.
   supervisor: ['replica', 'directoryd'],
 };
