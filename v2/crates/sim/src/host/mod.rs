@@ -357,13 +357,7 @@ pub fn lend<T>(
 /// inputs go on (B1 #2680). An input whose driver does not hold the body's locomotion is refused by the controller and
 /// changes nothing; the refusals are returned with their bodies.
 pub fn hand_on(staged: &Staged, controller: &mut Controller) -> Vec<(Id, Refusal)> {
-    let mut refused = Vec::new();
-    for &(body, driver, input) in &staged.controls {
-        if let Err(r) = controller.set(body, driver, Part::Velocity(input.velocity, input.mode)) {
-            refused.push((body, r));
-        }
-    }
-    refused
+    controller.set_velocities(&staged.controls)
 }
 
 /// Hands a tick's staged crossings on: for each, the world's [`Links`] gives the track (or opens a shut door, and the
@@ -423,6 +417,9 @@ pub struct Runner {
     pub asks: BTreeMap<Id, (Target, Id)>,
     /// The place each asker was granted (µm, the target node's frame).
     pub granted: BTreeMap<Id, Vec3>,
+    /// The last tick's refusals, each of one body (the tick went on for the others), in the order they came; each
+    /// refused body's run ended by the first one's name.
+    pub refused: Vec<(Id, Refusal)>,
     /// The routes the world gave each body (`F_ROUTE`), counted.
     routes: BTreeMap<Id, u64>,
     seed: u64,
@@ -481,6 +478,8 @@ struct Here<'a> {
     controller: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
     settled: BTreeSet<Id>,
+    /// A body's kind, named once a tick, not at each read (#3213).
+    kind: Name,
 }
 
 impl Geometry for Here<'_> {
@@ -500,11 +499,11 @@ impl Geometry for Here<'_> {
     }
 
     fn read(&self, node: Id) -> Option<Seen> {
-        let Some(b) = self.controller.body(node) else {
+        let Some((b, carrying)) = self.controller.seen(node) else {
             return self.town.read_link(node);
         };
         let mut fields = self.fields.get(&node).cloned().unwrap_or_default();
-        if let Some(l) = self.controller.carrying(node) {
+        if let Some(l) = carrying {
             fields.insert(F_CROSSING, l.to_value());
         }
         if self.settled.contains(&node) {
@@ -512,7 +511,7 @@ impl Geometry for Here<'_> {
         }
         Some(Seen {
             id: node,
-            kind: body_kind(),
+            kind: self.kind.clone(),
             parent: Some(node_of(b)),
             position: b.pose.position,
             fields,
@@ -554,6 +553,7 @@ impl Runner {
             ended: BTreeMap::new(),
             asks: BTreeMap::new(),
             granted: BTreeMap::new(),
+            refused: Vec::new(),
             routes: BTreeMap::new(),
             seed: 1,
             minter: Minter::new(Scope([0x9b; 16])),
@@ -577,12 +577,15 @@ impl Runner {
         self.start(who, skill)
     }
 
-    /// Runs `skill` on `body`, under a new driver claiming what the skill's shape claims.
+    /// Runs `skill` on `body`, under a new driver claiming what the skill's shape claims. The marks a run before it
+    /// left on the body go (#3168): a route the world gave it (`F_ROUTE`; a new walk would take it for its own and
+    /// walk the old route's legs from wherever it stands now), its waiting mark and the shoulder turn.
     pub fn start(&mut self, body: Id, skill: Box<dyn Skill>) -> Result<(), Refusal> {
         let driver = self.controller.claim(body, &skill.shape())?;
-        // A route the world gave an earlier walk is not this one's (#3167: a new walk took it, and ended at once).
         if let Some(f) = self.fields.get_mut(&body) {
             f.remove(&F_ROUTE);
+            f.remove(&F_WAITING);
+            f.remove(&F_SHOULDER);
         }
         self.ended.remove(&body);
         self.asks.remove(&body);
@@ -634,6 +637,11 @@ impl Runner {
         self.runs.iter().any(|r| r.body == body)
     }
 
+    /// The bodies a skill runs on: [`Runner::running`] for many bodies at once, without a scan of the runs each.
+    pub fn running_bodies(&self) -> BTreeSet<Id> {
+        self.runs.iter().map(|r| r.body).collect()
+    }
+
     /// The world ends `body`'s run by `name` (N10's last rung): its driver ends, and its walk's marks go.
     pub fn end(&mut self, body: Id, name: Name) {
         let Some(k) = self.runs.iter().position(|r| r.body == body) else {
@@ -677,7 +685,13 @@ impl Runner {
 
     /// One tick over `town`: the marks read for the turns, every skill stepped against the bodies as they stood at
     /// the tick's start, inputs and crossings handed on, the skills' entries set on their bodies, and the controller
-    /// stepped. The first refusal is returned once the tick is done; the others went on.
+    /// stepped.
+    ///
+    /// A refusal of one body mid-tick (its input, its crossing's track, the carry or its landing, its step on the
+    /// surface) is that body's fault alone (#3275): it is kept in [`Runner::refused`], and the body's run ends by the
+    /// refusal's name ([`Runner::end`]), so it does not ask again into the same refusal; every other body's tick is
+    /// as it would be without it, and the tick returns `Ok`. A refusal of the world's own (the turns' or the spot
+    /// tables' write) does not stop the tick either: the tick goes on to its end and returns it.
     pub fn tick(&mut self, town: &mut Town) -> Result<(), Refusal> {
         let at = self.now + self.tick;
         let marks: Vec<Mark> = self
@@ -703,13 +717,15 @@ impl Runner {
                     .copied(),
             })
             .collect();
-        town.turns(&marks, at)?;
-        town.spots(&marks, at)?;
+        // The world's own refusals: the tick goes on, and the first is returned at its end.
+        let world = town.turns(&marks, at).err();
+        let world = world.or(town.spots(&marks, at).err());
         // A walk sent to a point gets its route once its place is granted; a refusal ends it by name.
+        let running = self.running_bodies();
         let waiting: Vec<(Id, Target)> = self
             .asks
             .iter()
-            .filter(|(who, _)| self.running(**who) && !self.granted.contains_key(who))
+            .filter(|(who, _)| running.contains(*who) && !self.granted.contains_key(who))
             .map(|(who, (t, _))| (*who, *t))
             .collect();
         for (who, target) in waiting {
@@ -743,6 +759,7 @@ impl Runner {
                 controller: &self.controller,
                 fields: &self.fields,
                 settled,
+                kind: body_kind(),
             };
             step(
                 tree,
@@ -777,9 +794,16 @@ impl Runner {
         }
         let stepped = self.controller.step(&town.surfaces, self.tick, at);
         refused.extend(stepped.refused);
+        // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
+        for (who, r) in &refused {
+            if self.running(*who) {
+                self.end(*who, named(r.name));
+            }
+        }
         self.now = at;
-        match refused.into_iter().next() {
-            Some((_, r)) => Err(r),
+        self.refused = refused;
+        match world {
+            Some(r) => Err(r),
             None => Ok(()),
         }
     }

@@ -1,0 +1,12 @@
+[package]
+name = "stream-check"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "A live world written as the viewer's stream, played in a headless browser by run.mjs (Engine v2 V1, #2710)."
+
+[dependencies]
+replica = { path = "../../crates/replica" }
+sim = { path = "../../crates/sim" }
+worldd = { path = "../../crates/worldd" }
+import-eden = { path = "../import-eden" }

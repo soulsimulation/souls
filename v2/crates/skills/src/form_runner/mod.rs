@@ -24,7 +24,11 @@
 //!   writes the effect, keyed by intent, and never twice (`sim::forms`). Stopped before that instant, a run has no
 //!   effect; stopped after, its effect stays. [`bind_effects`] binds a form's effects as generic sets, one field each.
 //!
-//! Not here: amounts, making and removing (F4), reserving and stopping (F3), who may (F6), stages of long forms (F11).
+//! - **Leaving** (F3, #2768). The Soul's leave ([`Woke::Leave`]) is taken at once and ends the run `left` at the next
+//!   stable moment: at once during a walk or a pause, and during a move at its next phase boundary (its contact or its
+//!   end, within the step's deadline). A run left before its effect's instant has no effect.
+//!
+//! Not here: amounts, making and removing (F4), who may (F6), stages of long forms (F11).
 
 use replica::effects::Refusal;
 use replica::encode::{self, Name};
@@ -241,6 +245,8 @@ pub enum Woke {
     Moved(Name),
     /// The move the runner asked for reached its contact instant (B2: the end of its first phase).
     Contact,
+    /// The Soul leaves the run.
+    Leave,
 }
 
 /// What the runner asks of the world after a wake.
@@ -271,6 +277,8 @@ pub struct Runner {
     /// The effect's instant came and the world has not taken it; `effected` once it came.
     effect: bool,
     effected: bool,
+    /// The Soul left during a move: the run ends `left` at the move's next phase boundary.
+    leaving: bool,
 }
 
 impl Runner {
@@ -286,6 +294,7 @@ impl Runner {
             hand,
             effect: false,
             effected: false,
+            leaving: false,
         }
     }
 
@@ -308,6 +317,11 @@ impl Runner {
         } else {
             self.steps.get(self.at)
         }
+    }
+
+    /// The number of the step in progress, if the run has not ended.
+    pub fn at(&self) -> Option<usize> {
+        self.step().map(|_| self.at)
     }
 
     fn end(&mut self, host: &mut dyn Host, how: Name) -> Next {
@@ -375,6 +389,24 @@ impl Runner {
             return Next::Sleep;
         }
         let step = self.steps.get(self.at).cloned();
+        // A move is left at its next phase boundary; anything else at once. A run left has no effect from then on.
+        if why == Woke::Leave {
+            if matches!(step, Some(Step::Move { .. })) {
+                self.leaving = true;
+                return Next::Sleep;
+            }
+            return self.end(host, name("left"));
+        }
+        if self.leaving {
+            return match why {
+                Woke::Timer(id) if self.timer == Some(id) => {
+                    self.timer = None;
+                    self.end(host, name("left"))
+                }
+                Woke::Contact | Woke::Moved(_) => self.end(host, name("left")),
+                _ => Next::Sleep,
+            };
+        }
         match (why, step) {
             (Woke::Start, _) if self.at == 0 && self.timer.is_none() => self.begin(host),
             (Woke::Timer(id), Some(step)) if self.timer == Some(id) => {

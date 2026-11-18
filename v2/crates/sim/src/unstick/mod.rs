@@ -6,7 +6,8 @@
 //!   nearer its leg's end than it has ever been is progress and takes the second off its time without progress (to
 //!   no less than none); any other second adds itself. A new leg starts the clock again, and so does, while it waits for a link taken in turns
 //!   (N8), that link's owner letting someone in or turning it (the queue moves). The rungs go by this time, so a
-//!   walker circling a goal it cannot reach, or nudged forward now and then, still climbs them.
+//!   walker circling a goal it cannot reach, or nudged forward now and then, still climbs them. A new route
+//!   to the same leg's end (the reroute rung) keeps its least distance to it, so one going to and fro climbs too.
 //! - **The rungs** (the declared timings, [`REROUTE`], [`MAKE_WAY`], [`SHOULDER`], [`END`]): at 3 s it is routed
 //!   again once from where it stands; at 6 s a `make-way` is sent to the agent of each still body in its way (within
 //!   [`NEAR`] of it, or within [`ROOM`] of the far end of the link it waits for) that has no order to stay
@@ -36,7 +37,7 @@ use crate::walk::town::Town;
 use crate::walk::{Leg, World, node_of};
 use replica::effects::Refusal;
 use replica::encode::Value;
-use replica::host::{F_HELD, F_SHOULDER};
+use replica::host::{F_HELD, F_SHOULDER, Progress};
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::time::Micros;
@@ -167,6 +168,12 @@ impl Ladder {
         );
     }
 
+    /// The leg `who` walks as the ladder keeps it: its index in the route and the leg.
+    pub fn leg(&self, who: Id) -> Option<(usize, Leg)> {
+        let w = self.walkers.get(&who)?;
+        Some((w.leg, *w.legs.get(w.leg)?))
+    }
+
     /// Whether every walk has ended (arrived or by name) and no walk-out is under way.
     pub fn done(&self, runner: &Runner) -> bool {
         self.outs.is_empty() && runner.runs.is_empty()
@@ -261,13 +268,46 @@ impl Ladder {
         Ok(())
     }
 
-    /// One tick: the runner's tick (the walk-outs under way are carried in it), then the walk-outs ended, then each
-    /// walker's clock and rungs. A refusal in the runner's tick (one body's) is returned once the rungs are climbed:
-    /// it never stops the ladder for the others.
+    /// One tick: the runner's tick (the walk-outs under way are carried in it), then each walker the tick refused
+    /// ended, then the walk-outs ended, then each walker's clock and rungs. A refusal of one walker in the runner's
+    /// tick (`Runner::refused`, #3275) is its fault alone: a walk-out under way is dropped, and its order ends by the
+    /// refusal's name, with its record ([`Rung::Ended`]); it never stops the ladder for the others. A refusal of the
+    /// world's own in the runner's tick is returned once the rungs are climbed.
     pub fn step(&mut self, runner: &mut Runner, town: &mut Town) -> Result<(), Refusal> {
         let ticked = runner.tick(town);
+        self.faults(runner);
         self.climb(runner, town);
         ticked
+    }
+
+    /// Each walker refused in the last tick (its first refusal) whose walk the tick ended or whose walk-out was under
+    /// way: the walk-out dropped, its order ended by name. A body with neither (it stood still) has nothing to end.
+    fn faults(&mut self, runner: &mut Runner) {
+        if runner.refused.is_empty() {
+            return;
+        }
+        let start = runner.now - runner.tick;
+        let mut seen = BTreeSet::new();
+        let refused: Vec<(Id, Refusal)> = runner
+            .refused
+            .iter()
+            .filter(|(who, _)| {
+                self.walkers.contains_key(who)
+                    && (self.outs.contains(who)
+                        || matches!(runner.ended.get(who), Some((t, Progress::Failed(_))) if *t == start))
+                    && seen.insert(*who)
+            })
+            .cloned()
+            .collect();
+        for (who, r) in refused {
+            if self.outs.remove(&who)
+                && let Some(f) = runner.fields.get_mut(&who)
+            {
+                f.remove(&F_HELD);
+            }
+            let order = self.walkers[&who].order;
+            self.end(runner, who, order, r.name, r.detail);
+        }
     }
 
     fn climb(&mut self, runner: &mut Runner, town: &mut Town) {
@@ -292,13 +332,15 @@ impl Ladder {
                 self.reroute(runner, town, who);
             }
         }
+        // Who runs, taken once (each walker below changes only its own run, after it is read).
+        let running = runner.running_bodies();
         // Still bodies, as they stand now: no order (arrived, or ended by name), not staying, not walking out.
         let still: Vec<(Id, Id, Vec3)> = runner
             .controller
             .bodies()
             .filter(|b| {
                 !runner.staying.contains(&b.id)
-                    && !runner.running(b.id)
+                    && !running.contains(&b.id)
                     && !self.outs.contains(&b.id)
             })
             .map(|b| (b.id, node_of(b), b.pose.position))
@@ -316,7 +358,7 @@ impl Ladder {
                 w.leg += 1;
             }
             w.carried = carried;
-            if !runner.running(who)
+            if !running.contains(&who)
                 || self.outs.contains(&who)
                 || runner.staying.contains(&who)
                 || carried
@@ -409,10 +451,15 @@ impl Ladder {
                 c.rung = 1;
                 self.record(now, who, order, Rung::Reroute);
                 self.reroute(runner, town, who);
+                // A new route to the same leg's end keeps the least distance to it: measured again from where the
+                // walker stands, a walker going to and fro would count each swing back as progress, and be routed
+                // again every few seconds without ever climbing further (#3168).
                 if let (Some(c), Some(w)) = (self.clocks.get_mut(&who), self.walkers.get(&who)) {
                     c.leg = 0;
-                    c.best = len(body.pose.position, w.legs[0].to);
-                    c.mark = c.best;
+                    if w.legs[0].to != leg.to {
+                        c.best = len(body.pose.position, w.legs[0].to);
+                        c.mark = c.best;
+                    }
                 }
             }
         }

@@ -14,17 +14,22 @@ pub mod encode;
 pub mod hash;
 pub mod host;
 pub mod ids;
+pub mod intent_decode;
 pub mod intents;
 pub mod kinds;
 pub mod moves;
 pub mod pose;
 pub mod query;
 pub mod read;
+pub mod refusals;
 pub mod rules;
+pub mod speech;
+pub mod stream;
 pub mod time;
 pub mod timed;
 pub mod tree;
 pub mod views;
+pub mod who_may;
 // R1's bindings import wasm-bindgen's glue, so the checker (T10, no imports) leaves them out.
 #[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
 mod wasm;

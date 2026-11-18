@@ -325,12 +325,42 @@ fn f5_a3_a_kettle_boils_and_whistles_once_with_the_world_as_actor() {
     }
     assert_eq!(runs, 1, "one crossing");
 
-    // The log's writer numbers the effect and hands it back.
-    let out: Vec<Effect> = std::mem::take(&mut forms.out);
-    assert_eq!(out.len(), 1, "the effect once");
-    let mut e = out[0].clone();
-    e.envelope.sequence = 1;
-    forms.logged(&e);
+    // The log's writer numbers the run's entries and hands each back. F3's lifecycle holds: one start entry (the
+    // reserve), one effect, one end; only the effect counts as the form's effect.
+    let mut out: Vec<Effect> = std::mem::take(&mut forms.out);
+    let named = |e: &Effect, n: &str| {
+        e.events
+            .as_ref()
+            .is_some_and(|v| v.iter().any(|ev| ev.name.as_str() == n))
+    };
+    for (seq, e) in (1u64..).zip(out.iter_mut()) {
+        e.envelope.sequence = seq;
+        forms.logged(e);
+    }
+    let count = |n: &str| out.iter().filter(|e| named(e, n)).count();
+    assert_eq!(count("souls:form-started"), 1, "one reserve entry");
+    assert_eq!(count("souls:effect"), 1, "the effect once");
+    assert_eq!(count("souls:form-ended"), 1, "one end entry");
+    for e in &out {
+        assert_eq!(
+            e.envelope.actor,
+            Actor::World,
+            "the world acts in every entry"
+        );
+        let what = ["souls:form-started", "souls:effect", "souls:form-ended"]
+            .into_iter()
+            .find(|n| named(e, n))
+            .unwrap_or("other");
+        say(
+            e.envelope.at,
+            &format!("entry {}: {what}, actor the world", e.envelope.sequence),
+        );
+    }
+    let e = out
+        .iter()
+        .find(|e| named(e, "souls:effect"))
+        .expect("the effect")
+        .clone();
     assert_eq!(e.envelope.actor, Actor::World, "the world acts");
     assert!(matches!(e.envelope.cause, Cause::Intent(_)));
     assert_eq!(e.envelope.node, kettle);
@@ -354,7 +384,10 @@ fn f5_a3_a_kettle_boils_and_whistles_once_with_the_world_as_actor() {
     );
     say(
         e.envelope.at,
-        "entry 1: set whistled to 1, actor the world, cause the crossing's entry; the run ended done",
+        &format!(
+            "entry {}: set whistled to 1, cause the crossing's entry; the run ended done",
+            e.envelope.sequence
+        ),
     );
     say(now, "heat held at 100000 mC (full): nothing pending");
 }
