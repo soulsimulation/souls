@@ -61,6 +61,10 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
+A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
+thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
+chain with a wake entry of its own; the world never waits for a time or a condition.
+
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
 (SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
 
@@ -192,6 +196,28 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   whose needs are the time (`ends` at most 0) and that no role is linked. The engine's timer runs it then. While
   anyone is in it, the form is refused and nothing changes.
   The example is `packages/form-rules/cases/kinds/test/talk.json`.
+
+## A move
+
+A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
+(SA-D4, [#2856](https://github.com/soulsimulation/souls/issues/2856); feeds Engine v2 B2, [#2681](https://github.com/soulsimulation/souls/issues/2681),
+and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
+classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
+`effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
+`start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
+includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
+point and then to a second one.
+
+```sh
+node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
+node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/entry/cases/moves.json
+```
+
+`tools/entry/pose.mjs` gives the hand's position in whole millimetres at any time from a move, a record
+(`start_us`, `from_mm`, `contact_mm`, and `to_mm` for a slide) and a time. It has no imports and uses whole-number
+arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
+rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
+move the thing's frame into the world's: the caller passes world positions.
 
 ## The looks table
 
