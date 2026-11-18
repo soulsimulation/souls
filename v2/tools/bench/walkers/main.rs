@@ -314,30 +314,29 @@ fn main() {
     let load_ms = t0.elapsed().as_millis();
 
     // Each surface's frame on the open ground, and its floor.
-    let frames: BTreeMap<Id, Xform> =
-        w.surfaces
-            .keys()
-            .map(|&s| {
-                let x = if s == ground {
-                    Xform::IDENTITY
-                } else {
-                    xform_to(&w.tree, w.tree.handle(s).expect("a floor"), gh)
-                        .expect("on the ground")
-                };
-                (s, x)
-            })
-            .collect();
-    let lowest: Vec<Id> =
-        w.buildings
-            .iter()
-            .flat_map(|b| {
-                b.floors
-                    .iter()
-                    .filter(|(_, (l, _))| *l == 0)
-                    .map(|(f, _)| *f)
-            })
-            .filter(|f| w.surfaces.contains_key(f))
-            .collect();
+    let frames: BTreeMap<Id, Xform> = w
+        .surfaces
+        .keys()
+        .map(|&s| {
+            let x = if s == ground {
+                Xform::IDENTITY
+            } else {
+                xform_to(&w.tree, w.tree.handle(s).expect("a floor"), gh).expect("on the ground")
+            };
+            (s, x)
+        })
+        .collect();
+    let lowest: Vec<Id> = w
+        .buildings
+        .iter()
+        .flat_map(|b| {
+            b.floors
+                .iter()
+                .filter(|(_, (l, _))| *l == 0)
+                .map(|(f, _)| *f)
+        })
+        .filter(|f| w.surfaces.contains_key(f))
+        .collect();
 
     // The places.
     let lj = json::parse(&std::fs::read_to_string(labels).expect("the labels file"))
@@ -348,9 +347,9 @@ fn main() {
     };
     let walker_id = |k: u64| Id::new(Scope([7; 16]), k + 1).expect("an id");
     let order_id = |k: u64| Id::new(Scope([8; 16]), k + 1).expect("an id");
-    let start =
-        w.nearest(ground, arrival)
-            .expect("ground at the arrival point");
+    let start = w
+        .nearest(ground, arrival)
+        .expect("ground at the arrival point");
     let probe = w.surfaces[&ground]
         .place(
             walker_id(1_000_000),
@@ -910,7 +909,9 @@ fn main() {
         rungs,
         ended_names
     );
-    println!("walkers: ticks with a refusal {faulty_ticks} (the first of each, by name): {fault_kinds:?}");
+    println!(
+        "walkers: ticks with a refusal {faulty_ticks} (the first of each, by name): {fault_kinds:?}"
+    );
     // The next corner's parts: straight-walk checks and route searches, a tick and in all.
     let sp = w.spent.get();
     let part = |i: usize| {
@@ -923,13 +924,19 @@ fn main() {
     let (stm, st99) = part(3);
     let minutes = (tick_us.len() as u64 * TICK as u64).max(1) as f64 / 60e6;
     println!(
-        "walkers: corner: {} calls; straight-walk checks {} ({} ns each), a tick median {cm} / p99 {c99}, {ctm} / {ct99} us; route searches {} ({} ns each), a tick median {sm} / p99 {s99}, {stm} / {st99} us; searches a walker a minute {:.2}",
+        "walkers: corner: {} calls; straight-walk checks {} ({} ns each), a tick median {cm} / p99 {c99}, {ctm} / {ct99} us; route searches {} ({} ns each), a tick median {sm} / p99 {s99}, {stm} / {st99} us; searches a walker a minute {:.2}; lines searched for {} (new leg, order or target {}; pushed off the line {}; at a piece's end {}; straight walk refused {}), a walker a minute {:.2}",
         sp.corners,
         sp.clears,
         sp.clear_ns / sp.clears.max(1),
         sp.searches,
         sp.search_ns / sp.searches.max(1),
-        sp.searches as f64 / n as f64 / minutes
+        sp.searches as f64 / n as f64 / minutes,
+        sp.lines_new + sp.lines_off + sp.lines_end + sp.lines_blocked,
+        sp.lines_new,
+        sp.lines_off,
+        sp.lines_end,
+        sp.lines_blocked,
+        (sp.lines_new + sp.lines_off + sp.lines_end + sp.lines_blocked) as f64 / n as f64 / minutes
     );
     if arm == "event" {
         println!("walkers: crowd moments {moments}, reactions {reacted}");
