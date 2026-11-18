@@ -1,0 +1,65 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:class",
+  "owner": "thing",
+  "state": {
+    "phase": { "n": 1, "type": "enum", "values": ["idle", "sitting"], "default": "idle", "audience": "public" },
+    "left_us": { "n": 2, "type": "timed", "unit": "us", "default": { "value": 2592000000000, "per_s": -1000000, "set_us": 0 }, "min": 0, "audience": "public" }
+  },
+  "links": {
+    "member": { "n": 1, "from": "body", "most": 5, "audience": "public" },
+    "present": { "n": 2, "from": "body", "most": 5, "audience": "public" }
+  },
+  "roles": {
+    "member": { "need": "optional" },
+    "present": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } }
+  },
+  "standing": { "members": "member", "present": "present", "enough": 3, "stage": "phase", "sitting": "sitting", "idle": "idle" },
+  "now": { "floor": "present", "stage": "phase", "ends": "left_us" },
+  "forms": {
+    "join": {
+      "who": "anyone",
+      "starts": "act",
+      "steps": [],
+      "effects": [{ "change": "link", "link": "member", "from": "actor", "event": "joined" }]
+    },
+    "part": {
+      "who": { "link": "member" },
+      "starts": "act",
+      "steps": [],
+      "effects": [{ "change": "unlink", "link": "member", "from": "actor", "event": "parted" }]
+    },
+    "arrive": {
+      "who": { "link": "member" },
+      "starts": "act",
+      "takes": { "seat": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [
+        { "change": "link", "link": "present", "from": "actor", "event": "arrived" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }
+      ]
+    },
+    "rise": {
+      "who": { "link": "present" },
+      "starts": "act",
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "present", "from": "actor", "event": "rose" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_up" }
+      ]
+    },
+    "lapse": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{ "need": "state", "field": "left_us", "at_most": 0 }],
+      "steps": [],
+      "effects": [{ "change": "remove", "what": "this", "event": "lapsed" }]
+    }
+  },
+  "text": { "card": "A standing class: its members keep their place from day to day, a sitting starts when three of them are present, and it ends on its stated date." },
+  "card": { "text": "card" }
+}

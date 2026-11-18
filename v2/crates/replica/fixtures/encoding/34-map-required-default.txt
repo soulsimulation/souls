@@ -1,0 +1,2 @@
+{1: 0, 2: ""} # a record whose required fields 1 and 2 are at their defaults (0 and empty text): both written
+a201000260

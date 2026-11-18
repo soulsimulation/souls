@@ -109,6 +109,8 @@ export type PerceiveHost = {
   log(m: string): void;
   /** Entry 34 (watering.ts): "water <plant>" with a watering can from its hook. */
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, and whether a thing is whole (a whole one is no built object). */
+  /** SA-F3a (forms-adapter.ts): the actions this world's forms adapter offers for an entry thing's def. */
+  formActions?: (def: StoredDef) => StoredDef['actions'];
   mending?: { plan(soul: { entityId: string }, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; whole(id: string): boolean };
   watering?: { plan(soul: { entityId: string }, plant: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** Entry 43 (tea.ts): the kettle and cup acts. */
@@ -173,7 +175,7 @@ export class GodPerceive {
   private registerBuiltKind(k: string, def?: StoredDef, short = k) {
     if (!this.objs!.kindOf(k)) {
       const kind = builtKindFor(key => this.desired.get(key), k,
-        def && actionsOf(def).length && this.h.commit ? kindActions(def, this.actHost(), st => {
+        def && actionsOf(def, this.h.formActions).length && this.h.commit ? kindActions(def, this.actHost(), st => {
           const id = (st as BuiltState).key, e = id ? this.h.model.entities.get(id) : undefined;
           return e?.name ? this.h.model.pathOf(e.id) : short;
         }) : {});
@@ -197,6 +199,7 @@ export class GodPerceive {
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
       deferContacts: !!this.h.edge?.contactActuator,
+      formActions: this.h.formActions,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
@@ -275,11 +278,11 @@ export class GodPerceive {
     // #1900: held action-bearing carryables still publish their acts while the native body owns their pose.
     // On restart the projection is rebuilt from scratch; excluding the held object marks its saved facade gone.
     const native = this.h.engine.world.entities[e.id], support = native?.support;
-    const heldActionTool = !!c.carryable && actionsOf(def).length > 0 && support?.kind === 'in-hand'
+    const heldActionTool = !!c.carryable && actionsOf(def, this.h.formActions).length > 0 && support?.kind === 'in-hand'
       && e.in.parent === support.by && !!this.h.engine.world.entities[support.by]?.human;
     if (c.body || c.behavior || c.hover || /^core[-/]flag@/.test(def.ref) || (this.h.engineOwned(e) && !heldActionTool)) return null;
     if (keptShut(m, e)) return null;   // entry 42: kept in a shut drawer or locker: not a thing anyone sees until it is opened
-    const text = signText(e, def), acts = this.h.commit ? actionsOf(def).some((a) => a.name !== 'repair' || !this.h.mending?.whole(e.id)) : false;
+    const text = signText(e, def), acts = this.h.commit ? actionsOf(def, this.h.formActions).some((a) => a.name !== 'repair' || !this.h.mending?.whole(e.id)) : false;
     // LAYERS: an owned, priced or scheduled thing is seen as such (a loaf for sale, Ana's door, the café's hours)
     const lay = layersOn && layered(e) ? this.h.layers!.tag(e) : '';
     if (!e.name && text === null && !acts && !lay) return null;
