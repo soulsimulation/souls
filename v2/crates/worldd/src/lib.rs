@@ -2,6 +2,7 @@
 //! #2686) and its view tier (R3, #2697), which `v2/tools/bench/view-tier` drives. The binary is `main.rs`.
 #![forbid(unsafe_code)]
 
+pub mod answers;
 pub mod checkers;
 pub mod view_out;
 pub mod views;
