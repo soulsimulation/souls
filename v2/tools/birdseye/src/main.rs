@@ -17,6 +17,9 @@
 //!
 //! Integers only: µm and µs in the tree, centimetres in the trace.
 
+// Times its own runs: the wall-clock rule (K7) binds the engine, not this tool.
+#![allow(clippy::disallowed_methods)]
+
 use import_eden::{F_LEVEL, F_NAME, F_OUTLINE, Import, PLACE, ROOM};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, schema_hash,

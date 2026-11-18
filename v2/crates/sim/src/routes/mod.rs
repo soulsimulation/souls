@@ -62,7 +62,7 @@ const LACKS: [(Mask, &str); 4] = [
 pub fn needs(kind: Kind) -> Mask {
     match kind {
         Kind::Ladder => HANDS | CLIMB,
-        Kind::Doorway | Kind::Stairs | Kind::Ramp => 0,
+        Kind::Doorway | Kind::Stairs | Kind::Ramp | Kind::Step => 0,
     }
 }
 
@@ -480,14 +480,14 @@ impl Map {
         let mut out = Vec::new();
         if let Some(&first) = base.get(&e.floor) {
             let n = b.floors[&e.floor].1.pieces.len() as u32;
-            let q = if l.kind == Kind::Doorway {
+            let q = if matches!(l.kind, Kind::Doorway | Kind::Step) {
                 on(self, &mut (first..first + n), [mm(mid.x), mm(mid.z)])
             } else {
                 (first..first + n).find(|&q| self.locate(q, [mm(mid.x), mm(mid.z)], y).is_some())
             };
             match q {
                 Some(q) => out.push(self.add_portal([q, NONE], a, b2, li, k)),
-                None if l.kind == Kind::Doorway => self.meets_elsewhere += 1,
+                None if matches!(l.kind, Kind::Doorway | Kind::Step) => self.meets_elsewhere += 1,
                 None => {}
             }
             return out;
