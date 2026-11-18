@@ -49,6 +49,8 @@ export const ALLOWED = {
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld'],
   worldd: ['replica', 'sim'],
   gatewayd: [],
+  // The built-in skills reach the world through replica's host interface alone (T9, #2663).
+  skills: ['replica'],
 };
 
 const rsFiles = dir => readdirSync(dir, { recursive: true }).filter(f => /\.rs$/.test(f)).map(f => join(dir, f));

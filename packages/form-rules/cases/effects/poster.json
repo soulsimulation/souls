@@ -1,0 +1,262 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "A poster's three days (from entry 38, #493): Ana puts up \"Jumble sale\" with its detail and a timer three world days on; Ben cannot put one over it or take it down; the timer's form marks it out of date; Ana takes it down and the place is clear.",
+ "cases": [
+  {
+   "name": "put_up_goes_out_of_date_taken_down",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:poster",
+      "links": {
+       "author": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       206
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       206
+      ]
+     },
+     "w": {}
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "put_up",
+      "args": {
+       "title": "w_jumble",
+       "detail": "w_saturday"
+      }
+     },
+     "receipt": "rp1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "t1",
+        "link": "author",
+        "n": 1,
+        "end": "b1"
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "title",
+        "n": 1,
+        "to": {
+         "text": "w_jumble"
+        }
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "detail",
+        "n": 2,
+        "to": {
+         "text": "w_saturday"
+        }
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "out_of_date",
+        "n": 3,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:poster_put_up",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:title_written",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:detail_written",
+        "node": "t1",
+        "changes": [
+         2
+        ]
+       },
+       {
+        "event": "eden:poster_fresh",
+        "node": "t1",
+        "changes": [
+         3
+        ]
+       },
+       {
+        "event": "eden:will_go_out_of_date",
+        "node": "t1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "t1",
+        "form": "goes_out_of_date",
+        "after_us": 259200000000,
+        "event": 4
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "put_up",
+      "args": {
+       "title": "w_lost_cat",
+       "detail": "w_saturday"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rp2",
+     "expect": {
+      "verdict": "no",
+      "reason": "already_linked",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "take_down"
+     },
+     "actor": "b2",
+     "receipt": "rp3",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_linked",
+      "effect": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "goes_out_of_date"
+     },
+     "actor": "w",
+     "now_us": 259200000000,
+     "receipt": "rp4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "out_of_date",
+        "n": 3,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:went_out_of_date",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "take_down"
+     },
+     "receipt": "rp5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "t1",
+        "link": "author",
+        "n": 1,
+        "end": "b1"
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "title",
+        "n": 1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "detail",
+        "n": 2
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "out_of_date",
+        "n": 3,
+        "to": 0
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:poster",
+     "links": {
+      "author": []
+     },
+     "fields": {
+      "out_of_date": 0
+     }
+    }
+   }
+  }
+ ]
+}
