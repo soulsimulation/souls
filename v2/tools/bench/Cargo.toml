@@ -19,6 +19,12 @@ path = "replica-equal/main.rs"
 name = "frozen"
 path = "src/frozen.rs"
 
+# I3, #2686: the clock's time per committed act, with checks on checker threads.
+[[bin]]
+name = "commit-cost"
+path = "commit-cost/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 sim = { path = "../../crates/sim" }
+worldd = { path = "../../crates/worldd" }
