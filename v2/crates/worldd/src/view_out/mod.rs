@@ -20,6 +20,16 @@
 //! 7. **The view's gaps are declared.** A view skips the entries it does not hold (another audience's, or outside its
 //!    node), so its records' sequences jump. Each jump is written in the part that holds the record after it
 //!    (`replica::stream` rule 6), and the writer's copy applies the part with those gaps and no others.
+//! 8. **A fork's stream starts at its head** (#3300; [`Writer::fork`]). A fork (K6) starts mid-sequence, with a state
+//!    that a reader starting from the root alone has never seen. Its part 0 carries that state as ordinary T6
+//!    entries: one that sets the root's fields, creates the view's nodes (parents first) and its links; one with the
+//!    zone's time effects; one per node with timers. They are numbered just below the fork's next sequence, the
+//!    sequences before them declared as one gap (rule 7), so any reader plays part 0 as it plays any part, and part 0
+//!    always carries the state hash. The header written is the fork's, with the kinds the state rests on added, the
+//!    root's first, when it does not list them (K6's head lists none). The view's nodes are its key's subtree in its
+//!    audience, as a snapshot holds them (R3 rule 6), so the key must be the zone's root (`stream-start-node`); a node
+//!    in motion is refused as `stream-start-moving` (a fork has removed its bodies), and a link whose owning end is
+//!    not in the view is left out.
 //!
 //! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, the words path (W4), and a
 //! subtree carried in on an arrival whose leave the view did not hold (T7 rule 4): its record holds the subtree as it
@@ -38,11 +48,17 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use replica::apply::Replica;
-use replica::effects::{Header, Part, Refusal};
-use replica::encode::{Value, decode, encode};
+use replica::effects::{
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, NodeState, Part, Refusal,
+    Rest, State, TimerRec,
+};
+use replica::encode::{Name, Value, decode, encode};
+use replica::ids::Id;
+use replica::pose::Pose;
 use replica::stream::{self, HASH_EVERY, POINTER, Pointer, StreamPart};
-use replica::time::Micros;
+use replica::time::{Micros, TimeEffect};
 use replica::views::Key;
+use replica::world_model::{Audience, End};
 
 use crate::views::{Delivery, Subscriber};
 
@@ -124,6 +140,168 @@ impl Writer {
             written: Written::default(),
         };
         w.pointer()?;
+        Ok(w)
+    }
+
+    /// A writer of `key`'s stream for a world whose log continues from `state` (a fork's state after the head of its
+    /// log), and its part 0, which holds that state (rule 8). The records it is handed next start at `state.next`.
+    pub fn fork(
+        root: &Path,
+        header: &Header,
+        key: &Key,
+        anchor: (Micros, u64),
+        state: &State,
+    ) -> R<Writer> {
+        if key.node != state.root {
+            return Err(fault(
+                "stream-start-node",
+                "a fork's stream starts at the zone's root",
+            ));
+        }
+        let top = state
+            .nodes
+            .get(&state.root)
+            .ok_or_else(|| fault("stream-start-root", "the state has no root"))?;
+        if !top.kind.as_str().starts_with("souls:place@") {
+            return Err(fault("stream-start-root", "the root is not a souls:place"));
+        }
+        // The view's nodes, parents first.
+        let mut viewed: Vec<(usize, Id, &NodeState)> = state
+            .nodes
+            .iter()
+            .filter(|(id, n)| **id != state.root && n.audience == key.audience)
+            .filter_map(|(id, n)| depth(state, *id).map(|d| (d, *id, n)))
+            .collect();
+        viewed.sort_by_key(|(d, id, _)| (*d, *id));
+        if viewed.iter().any(|(_, _, n)| n.motion.is_some()) {
+            return Err(fault(
+                "stream-start-moving",
+                "a node of the view is in motion",
+            ));
+        }
+        let header = with_kinds(header, &top.kind, viewed.iter().map(|(_, _, n)| &n.kind))?;
+        let mut w = Writer::create(root, &header, key, anchor)?;
+
+        let at = state
+            .time
+            .iter()
+            .rev()
+            .find_map(|t| match t {
+                TimeEffect::Mapping(m) => Some(m.world_us),
+                _ => None,
+            })
+            .unwrap_or(0);
+        let everyone = key.audience == Audience::Everyone;
+        let mut changes = Vec::new();
+        if everyone {
+            for (f, v) in &top.fields {
+                changes.push(Change::Set {
+                    node: state.root,
+                    field: *f,
+                    to: v.clone(),
+                    by: None,
+                });
+            }
+        }
+        for (_, id, n) in &viewed {
+            let mut frame = vec![n.parent.unwrap_or(state.root).to_value()];
+            frame.extend(n.slot.map(Value::Uint));
+            let Some(Value::Map(mut place)) = n.place.clone() else {
+                return Err(fault("stream-start-place", "a node with no place"));
+            };
+            place.insert(1, Value::Array(frame));
+            let pose = Pose::from_value(&Value::Map(place))
+                .map_err(|e| fault("stream-start-place", e.name()))?;
+            changes.push(Change::Create {
+                node: *id,
+                kind: n.kind.clone(),
+                pose,
+                audience: n.audience,
+                fields: n.fields.clone(),
+            });
+        }
+        let made =
+            |e: &Id| viewed.iter().any(|(_, id, _)| id == e) || (everyone && *e == state.root);
+        for (id, l) in &state.links {
+            let owning = l.ends[usize::from(l.owner == End::Second)];
+            if l.audience == key.audience && made(&owning) {
+                changes.push(Change::Link {
+                    link: *id,
+                    ty: l.ty.clone(),
+                    ends: l.ends,
+                    owner: l.owner,
+                    audience: l.audience,
+                });
+            }
+        }
+        let mut seed: Vec<(Id, Audience, Body)> = Vec::new();
+        if !changes.is_empty() {
+            let recs = changes.into_iter().map(|change| ChangeRec {
+                change,
+                rest: Rest::new(),
+            });
+            seed.push((state.root, key.audience, Body::Changes(recs.collect())));
+        }
+        if everyone && !state.time.is_empty() {
+            seed.push((
+                state.root,
+                Audience::Everyone,
+                Body::Time(state.time.clone()),
+            ));
+        }
+        let mut timers: std::collections::BTreeMap<Id, Vec<TimerRec>> = Default::default();
+        for (timer, t) in &state.timers {
+            if made(&t.node) {
+                timers.entry(t.node).or_default().push(TimerRec::Set {
+                    timer: *timer,
+                    due: t.due,
+                    name: t.name.clone(),
+                });
+            }
+        }
+        for (node, list) in timers {
+            let audience = state.nodes.get(&node).map_or(key.audience, |n| n.audience);
+            seed.push((node, audience, Body::Timers(list)));
+        }
+
+        let k = u64::try_from(seed.len()).unwrap_or(u64::MAX);
+        let first = state.next.checked_sub(k).ok_or_else(|| {
+            fault(
+                "stream-start-short",
+                format!("{k} entries of state below sequence {}", state.next),
+            )
+        })?;
+        if seed.is_empty() {
+            // The root alone: the first part declares the sequences before the fork (rule 7).
+            return Ok(w);
+        }
+        let records = seed
+            .into_iter()
+            .zip(first..)
+            .map(|((node, audience, body), sequence)| {
+                Effect {
+                    envelope: Envelope {
+                        sequence,
+                        at,
+                        cause: Cause::World,
+                        actor: Actor::World,
+                        audience,
+                        node,
+                    },
+                    body,
+                    events: None,
+                    rest: Rest::new(),
+                }
+                .to_value()
+            })
+            .collect();
+        let gaps = if first > 0 {
+            vec![(0, first)]
+        } else {
+            Vec::new()
+        };
+        w.write(at.div_euclid(stream::PERIOD_US), records, gaps, true)?;
+        w.expect = state.next;
         Ok(w)
     }
 
@@ -220,6 +398,11 @@ impl Writer {
         if records.is_empty() {
             return Ok(());
         }
+        self.write(w, records, gaps, false)
+    }
+
+    /// Writes one part of `records` in world-time window `w`, carrying the state hash when due or when `hashed`.
+    fn write(&mut self, w: i64, records: Vec<Value>, gaps: Vec<(u64, u64)>, hashed: bool) -> R<()> {
         let first = match records.first() {
             Some(Value::Map(m)) => match m.get(&1) {
                 Some(Value::Uint(s)) => *s,
@@ -240,7 +423,7 @@ impl Writer {
         let part = Part::read(&raw)?;
         self.copy.apply_gaps(&part, &gaps)?;
         let number = self.written.parts;
-        let hash = if (number + 1).is_multiple_of(HASH_EVERY) {
+        let hash = if hashed || (number + 1).is_multiple_of(HASH_EVERY) {
             Some(replica::hash::state_hash(self.copy.tree())?.to_bytes())
         } else {
             None
@@ -269,6 +452,45 @@ impl Writer {
     }
 }
 
+/// How far `id` is below the root, or none when it is not in the state's tree.
+fn depth(state: &State, id: Id) -> Option<usize> {
+    let mut at = id;
+    for d in 0..=state.nodes.len() {
+        if at == state.root {
+            return Some(d);
+        }
+        at = state.nodes.get(&at)?.parent?;
+    }
+    None
+}
+
+/// `h` with `root` as its first kind and every kind in `used` listed (rule 8); `h` itself when it already is so.
+fn with_kinds<'a>(h: &Header, root: &Name, used: impl Iterator<Item = &'a Name>) -> R<Header> {
+    let mut missing: Vec<&Name> = Vec::new();
+    for k in used {
+        if !h.kinds.contains(k) && !missing.contains(&k) && k != root {
+            missing.push(k);
+        }
+    }
+    let first = h
+        .kinds
+        .iter()
+        .find(|k| k.as_str().starts_with("souls:place@"));
+    if first == Some(root) && missing.is_empty() {
+        return Ok(h.clone());
+    }
+    let kinds = std::iter::once(root)
+        .chain(h.kinds.iter().filter(|k| *k != root))
+        .chain(missing)
+        .map(|k| Value::Text(k.clone()))
+        .collect();
+    let Value::Map(mut m) = h.to_value() else {
+        return Err(fault("encoding", "a header is a map"));
+    };
+    m.insert(6, Value::Array(kinds));
+    Header::read(&encode(&Value::Map(m)).map_err(|e| fault("encoding", e.to_string()))?)
+}
+
 /// Follows `sub`, writing each frame, on its own thread, until `stop` is set and the queue is empty; then writes the
 /// open stretch and gives the writer back. A snapshot delivery ends it with `stream-gap` (rule 6).
 pub fn follow(mut writer: Writer, sub: Subscriber, stop: Arc<AtomicBool>) -> JoinHandle<R<Writer>> {
@@ -282,6 +504,8 @@ pub fn follow(mut writer: Writer, sub: Subscriber, stop: Arc<AtomicBool>) -> Joi
                         "the writer fell behind the tier and was handed a snapshot",
                     ));
                 }
+                // A view's subscriber is never sent the index (E1).
+                Some(Delivery::Index { .. }) => {}
                 None if stop.load(Ordering::Relaxed) => break,
                 None => {}
             }

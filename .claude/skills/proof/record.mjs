@@ -101,8 +101,10 @@ async function clipTools() {
   return { ...arrival, ...setup };
 }
 
-/** #2294: the Chromium flag sets tried, in order, for a hardware GL renderer on Linux (headless; no display). */
+/** #2294: the Chromium flag sets tried, in order, for a hardware GL renderer on Linux (headless; no display); on macOS,
+ *  ANGLE's Metal backend first (#2715: the Linux sets all fall back to SwiftShader there). */
 export const GPU_CANDIDATES = [
+  ...(process.platform === 'darwin' ? [{ label: 'angle-metal', args: ['--use-angle=metal'] }] : []),
   { label: 'angle-vulkan', args: ['--use-gl=angle', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface'] },
   { label: 'angle-gl-egl', args: ['--use-gl=angle', '--use-angle=gl-egl'] },
   { label: 'egl', args: ['--use-gl=egl'] },
