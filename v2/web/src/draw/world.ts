@@ -2,8 +2,9 @@
 // small box when it has none), each body as a capsule placed between its recorded samples, in the frame they were
 // recorded in (T4), and never past the newest. Rooms, floors, windows and places are structure, not drawn.
 import * as THREE from 'three';
-import type { NodeRec } from '../source/source.ts';
+import type { NodeRec, SampleRec } from '../source/source.ts';
 import { Track } from '../clock/samples.ts';
+import type { CrowdBodies } from '../crowd/bodies.ts';
 
 const UM = 1e-6, MM = 1e-3;
 const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
@@ -25,6 +26,8 @@ export class WorldView {
   private bodies: THREE.InstancedMesh;
   private bodyIds: string[] = [];
   private thingsDirty = false;
+  /** Bodies as V6's crowd once its body files have loaded; capsules until then. */
+  private crowdBodies: CrowdBodies | null = null;
   private terrainDone = false;
   extent: [number, number, number, number] | null = null;
 
@@ -37,21 +40,28 @@ export class WorldView {
     this.group.add(this.bodies);
   }
 
-  /** Applies a part's node records: bodies' samples go into their tracks, everything else into the scene. */
-  apply(nodes: NodeRec[], removed: string[]): void {
+  attach(c: CrowdBodies): void {
+    this.crowdBodies = c;
+    this.group.add(c.crowd.group);
+    this.bodies.visible = false;
+  }
+
+  /** Applies a part's node records: bodies' samples (every one the part carried, V6) go into their tracks, everything
+   *  else into the scene. */
+  apply(nodes: NodeRec[], removed: string[], samples: SampleRec[] = []): void {
     for (const n of nodes) {
       this.nodes.set(n.id, n);
       if (n.at !== null) {
-        let tr = this.tracks.get(n.id);
-        if (!tr) {
-          tr = new Track();
-          this.tracks.set(n.id, tr);
+        if (!this.tracks.has(n.id)) {
+          this.tracks.set(n.id, new Track());
           this.bodyIds.push(n.id);
         }
-        tr.add(n.at, n.pos, `${n.parent}/${n.slot}`);
       } else if (!STRUCTURE.has(plain(n.kind))) this.thingsDirty = true;
       if (n.tiles && !this.terrainDone) this.terrain(n);
     }
+    // Every sample in entry order, then the state after the part (the newest, so a no-op when it was the last sample).
+    for (const [id, parent, slot, at, x, y, z] of samples) this.tracks.get(id)?.add(at, [x, y, z], `${parent}/${slot}`);
+    for (const n of nodes) if (n.at !== null) this.tracks.get(n.id)!.add(n.at, n.pos, `${n.parent}/${n.slot}`);
     for (const id of removed) {
       this.nodes.delete(id);
       if (this.tracks.delete(id)) this.bodyIds = this.bodyIds.filter((b) => b !== id);
@@ -165,7 +175,7 @@ export class WorldView {
   }
 
   /** Places every body at world time `t` and returns how many were drawn. */
-  draw(t: number): number {
+  draw(t: number, camera?: THREE.Camera): number {
     if (this.thingsDirty) this.rebuildThings();
     if (this.bodyIds.length > this.bodies.instanceMatrix.count) {
       const grown = new THREE.InstancedMesh(this.bodies.geometry, this.bodies.material, this.bodyIds.length * 2);
@@ -175,6 +185,8 @@ export class WorldView {
       this.group.add(grown);
     }
     const m = new THREE.Matrix4(), v = new THREE.Vector3();
+    const crowd = camera ? this.crowdBodies : null;
+    crowd?.begin(t);
     let k = 0;
     for (const id of this.bodyIds) {
       const tr = this.tracks.get(id)!;
@@ -183,7 +195,12 @@ export class WorldView {
       const n = this.nodes.get(id);
       if (!p || !n) continue;
       v.set(p[0] * UM, p[1] * UM, p[2] * UM).applyMatrix4(this.frame(n.parent));
-      this.bodies.setMatrixAt(k++, m.makeTranslation(v.x, v.y, v.z));
+      if (crowd) (crowd.place(id, v.x, v.y, v.z), k++);
+      else this.bodies.setMatrixAt(k++, m.makeTranslation(v.x, v.y, v.z));
+    }
+    if (crowd) {
+      crowd.end(camera!);
+      return k;
     }
     this.bodies.count = k;
     this.bodies.instanceMatrix.needsUpdate = true;
