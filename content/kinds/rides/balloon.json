@@ -1,0 +1,86 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:balloon",
+  "owner": "thing",
+  "state": {"under_way":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "points": {"door":{"role":"stand","at_mm":[-1600,0,0],"yaw_mdeg":90000}},
+  "slots": {
+    "rider_1": {"admits":"body","most":1,"at_mm":[300,100,-300],"stand":"door"},
+    "rider_2": {"admits":"body","most":1,"at_mm":[300,100,300],"stand":"door"},
+    "rider_3": {"admits":"body","most":1,"at_mm":[-200,100,-300],"stand":"door"},
+    "rider_4": {"admits":"body","most":1,"at_mm":[-200,100,300],"stand":"door"}
+  },
+  "geometry": {"bounds_mm":[6140,9550,6000]},
+  "forms": {
+    "ride": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"state","field":"under_way","is":false},{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"},
+        {"change":"set","field":"under_way","to":true,"event":"set_off"}
+      ]
+    },
+    "board": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"state","field":"under_way","is":false},{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}}],
+      "effects": [{"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"}]
+    }
+  },
+  "ride": {
+    "seats": ["rider_1","rider_2","rider_3","rider_4"],
+    "stops": ["door","door"],
+    "returns": false,
+    "start": "ride",
+    "speed_mm_s": 3000,
+    "ground": "air"
+  },
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:balloon",
+    "table": [
+      {"part":"flame","field":"under_way","do":"flame","at":{"false":0,"true":800}},
+      {"sound":"fire","field":"under_way","at":{"false":0,"true":350},"reach_mm":30000}
+    ],
+    "shape": {
+      "shapes": [
+        {"kind":"lathe","at":[0,3200,0],"profile":[[400,0],[1200,500],[2600,2200],[3000,3600],[2700,5000],[1700,6000],[0,6350]],"segments":12,"tint":"env"},
+        {"kind":"capsule","at":[2950,6800,0],"r":120,"h":1300,"segments":5,"tint":"stripe"},
+        {"kind":"capsule","at":[1476,6800,2554],"r":120,"h":1300,"segments":5,"tint":"stripe"},
+        {"kind":"capsule","at":[-1474,6800,2555],"r":120,"h":1300,"segments":5,"tint":"stripe"},
+        {"kind":"capsule","at":[-2950,6800,2],"r":120,"h":1300,"segments":5,"tint":"stripe"},
+        {"kind":"capsule","at":[-1477,6800,-2554],"r":120,"h":1300,"segments":5,"tint":"stripe"},
+        {"kind":"capsule","at":[1472,6800,-2556],"r":120,"h":1300,"segments":5,"tint":"stripe"},
+        {"kind":"extrude","at":[0,20,0],"polygon":[[-630,-630],[630,-630],[630,630],[-630,630]],"h":960,"tint":"basket"},
+        {"kind":"extrude","at":[0,1000,0],"polygon":[[-670,-670],[670,-670],[670,670],[-670,670]],"h":40,"tint":"rim"},
+        {"kind":"cyl","at":[-510,2150,-510],"r":20,"h":2215,"segments":3,"tint":"rope","pitch":6589,"yaw":44977},
+        {"kind":"cyl","at":[510,2150,-510],"r":20,"h":2215,"segments":3,"tint":"rope","pitch":6589,"yaw":-44977},
+        {"kind":"cyl","at":[-510,2150,510],"r":20,"h":2215,"segments":3,"tint":"rope","pitch":6589,"yaw":134989},
+        {"kind":"cyl","at":[510,2150,510],"r":20,"h":2215,"segments":3,"tint":"rope","pitch":6589,"yaw":-134989},
+        {"kind":"cyl","at":[0,2600,0],"r":250,"h":600,"segments":6,"tint":"burner","glow":500,"role":"flame"}
+      ],
+      "round": 20,
+      "palette": {"env":"#e8643a","stripe":"#f1c84b","basket":"#b08b5a","rim":"#6e4a30","rope":"#5a4632","burner":"#ffb36a"},
+      "tags": ["transport","vehicle","balloon","air","ride","moving","large"]
+    }
+  },
+  "text": {
+    "card": "A hot-air balloon: step into the basket and it lifts off on a flight and lands.",
+    "getting_around": "transport",
+    "hot_air_balloon": "hot-air balloon",
+    "flight": "flight",
+    "howto_fly": "Step into the basket through its door while it is on the ground; it flies and comes back down."
+  },
+  "card": {"text":"card","category":"getting_around","synonyms":["hot_air_balloon","flight"]},
+  "howtos": {"fly":{"text":"howto_fly","steps":[{"form":"ride"}]}}
+}

@@ -1,0 +1,138 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:golf_flag (SA-X34, #2924): take the pin out of the hole to putt, then put it back.",
+  "cases": [
+    {
+      "name": "golf_flag_take_out_in",
+      "act": {
+        "this": "t1",
+        "form": "take_out"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:golf_flag"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "golf_flag_take_out_out",
+      "act": {
+        "this": "t1",
+        "form": "take_out"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:golf_flag",
+            "fields": {
+              "out": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "put_back"
+        }
+      }
+    },
+    {
+      "name": "golf_flag_put_back_out",
+      "act": {
+        "this": "t1",
+        "form": "put_back"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:golf_flag",
+            "fields": {
+              "out": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "golf_flag_put_back_in",
+      "act": {
+        "this": "t1",
+        "form": "put_back"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:golf_flag"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "take_out"
+        }
+      }
+    }
+  ]
+}

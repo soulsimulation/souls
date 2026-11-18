@@ -1,0 +1,561 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:clay_relief (SA-X7, #2902; from #1674): three columns, each shaped to a height of 0 to 4; carried in both hands, so it is put down to be shaped.",
+  "cases": [
+    {
+      "name": "left_column_up_to_4_and_back_to_0",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "left_to_0"
+          },
+          "receipt": "rc0x",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "left_to_1"
+          },
+          "receipt": "rc00",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "left",
+                "n": 1,
+                "to": "level1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "left_to_2"
+          },
+          "receipt": "rc01",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "left",
+                "n": 1,
+                "to": "level2"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "left_to_3"
+          },
+          "receipt": "rc02",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "left",
+                "n": 1,
+                "to": "level3"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "left_to_4"
+          },
+          "receipt": "rc03",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "left",
+                "n": 1,
+                "to": "level4"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "left_to_0"
+          },
+          "receipt": "rc04",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "left",
+                "n": 1,
+                "to": "level0"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "c1": {
+          "kind": "eden:clay_relief",
+          "fields": {
+            "left": "level0"
+          }
+        }
+      }
+    },
+    {
+      "name": "middle_column_up_to_4_and_back_to_0",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "middle_to_0"
+          },
+          "receipt": "rc1x",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "middle_to_1"
+          },
+          "receipt": "rc10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "middle",
+                "n": 2,
+                "to": "level1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "middle_to_2"
+          },
+          "receipt": "rc11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "middle",
+                "n": 2,
+                "to": "level2"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "middle_to_3"
+          },
+          "receipt": "rc12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "middle",
+                "n": 2,
+                "to": "level3"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "middle_to_4"
+          },
+          "receipt": "rc13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "middle",
+                "n": 2,
+                "to": "level4"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "middle_to_0"
+          },
+          "receipt": "rc14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "middle",
+                "n": 2,
+                "to": "level0"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "c1": {
+          "kind": "eden:clay_relief",
+          "fields": {
+            "middle": "level0"
+          }
+        }
+      }
+    },
+    {
+      "name": "right_column_up_to_4_and_back_to_0",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "right_to_0"
+          },
+          "receipt": "rc2x",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "right_to_1"
+          },
+          "receipt": "rc20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "right",
+                "n": 3,
+                "to": "level1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "right_to_2"
+          },
+          "receipt": "rc21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "right",
+                "n": 3,
+                "to": "level2"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "right_to_3"
+          },
+          "receipt": "rc22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "right",
+                "n": 3,
+                "to": "level3"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "right_to_4"
+          },
+          "receipt": "rc23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "right",
+                "n": 3,
+                "to": "level4"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "right_to_0"
+          },
+          "receipt": "rc24",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "right",
+                "n": 3,
+                "to": "level0"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shaped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "c1": {
+          "kind": "eden:clay_relief",
+          "fields": {
+            "right": "level0"
+          }
+        }
+      }
+    }
+  ]
+}

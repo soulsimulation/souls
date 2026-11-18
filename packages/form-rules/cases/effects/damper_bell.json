@@ -1,0 +1,231 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The bell damper (from #1898): the bell is rung; the damper is fitted while it still sounds (the ring is not stopped); the world fades the ring at its timer; a pull with the damper fitted is refused; the damper is removed and the bell rings again.",
+ "cases": [
+  {
+   "name": "ring_fit_fade_refuse_remove_ring",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "d1"
+      ]
+     },
+     "d1": {
+      "kind": "eden:damper_bell"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "d1",
+      "form": "ring"
+     },
+     "now_us": 0,
+     "receipt": "rb1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "d1",
+        "field": "ringing",
+        "n": 2,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:rang",
+        "node": "d1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:will_fade",
+        "node": "d1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "d1",
+        "form": "fade",
+        "after_us": 4000000,
+        "event": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "d1",
+      "form": "fit_damper"
+     },
+     "now_us": 1000000,
+     "receipt": "rb2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "d1",
+        "field": "damped",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:damper_fitted",
+        "node": "d1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "d1",
+      "form": "fade"
+     },
+     "now_us": 4000000,
+     "receipt": "rb3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "d1",
+        "field": "ringing",
+        "n": 2,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:faded",
+        "node": "d1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "d1",
+      "form": "ring"
+     },
+     "now_us": 5000000,
+     "receipt": "rb4",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "fix": {
+       "form": "remove_damper"
+      },
+      "says": "remove_damper_first"
+     }
+    },
+    {
+     "act": {
+      "this": "d1",
+      "form": "remove_damper"
+     },
+     "now_us": 6000000,
+     "receipt": "rb5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "d1",
+        "field": "damped",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:damper_removed",
+        "node": "d1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "d1",
+      "form": "ring"
+     },
+     "now_us": 10000000,
+     "receipt": "rb6",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "d1",
+        "field": "ringing",
+        "n": 2,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:rang",
+        "node": "d1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:will_fade",
+        "node": "d1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "d1",
+        "form": "fade",
+        "after_us": 4000000,
+        "event": 1
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "d1": {
+     "kind": "eden:damper_bell",
+     "fields": {
+      "damped": 0,
+      "ringing": 1
+     }
+    }
+   }
+  }
+ ]
+}

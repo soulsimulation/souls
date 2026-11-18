@@ -1,0 +1,48 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:hall_board, the lecture's board (SA-X17, #2878): one presenter at a time shows pages on it, each page a reference to words kept elsewhere. A case where every need of each form is met, and one per need unmet. Who may show, clear and stop is in who/hall_board.json.",
+  "cases": [
+    {
+      "name": "present_every_need_met",
+      "act": { "this": "w1", "form": "present" },
+      "state": { "actor": "b1", "nodes": { "w1": { "kind": "eden:hall_board" }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["w1/link/1", 0]] }
+    },
+    {
+      "name": "present_while_someone_else_presents",
+      "act": { "this": "w1", "form": "present" },
+      "state": { "actor": "b1", "nodes": { "w1": { "kind": "eden:hall_board", "links": { "presenter": ["b2"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "already_linked", "need": 0, "detail": { "link": "presenter", "count": 1 }, "fix": null }
+    },
+    {
+      "name": "show_page_by_the_presenter",
+      "act": { "this": "w1", "form": "show_page", "args": { "page": "p_tides_1" } },
+      "state": { "actor": "b1", "nodes": { "w1": { "kind": "eden:hall_board", "links": { "presenter": ["b1"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "clear_every_need_met",
+      "act": { "this": "w1", "form": "clear" },
+      "state": { "actor": "b1", "nodes": { "w1": { "kind": "eden:hall_board", "fields": { "page": { "text": "p_tides_1" } }, "links": { "presenter": ["b1"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "clear_a_blank_board",
+      "act": { "this": "w1", "form": "clear" },
+      "state": { "actor": "b1", "nodes": { "w1": { "kind": "eden:hall_board", "links": { "presenter": ["b1"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "page", "found": null, "wanted": { "not": null } } }
+    },
+    {
+      "name": "stop_presenting_by_the_presenter",
+      "act": { "this": "w1", "form": "stop_presenting" },
+      "state": { "actor": "b1", "nodes": { "w1": { "kind": "eden:hall_board", "fields": { "page": { "text": "p_tides_2" } }, "links": { "presenter": ["b1"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    }
+  ]
+}

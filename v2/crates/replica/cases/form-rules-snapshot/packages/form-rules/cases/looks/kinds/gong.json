@@ -1,0 +1,18 @@
+{
+  "format": "souls-entry/1",
+  "kind": "looks:gong",
+  "owner": "thing",
+  "state": {
+    "swing": { "n": 1, "type": "int", "unit": "permille", "default": 0, "min": 0, "max": 1000, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [900, 1200, 200] },
+  "looks": {
+    "model": "look:looks_gong",
+    "table": [
+      { "part": "disc", "field": "swing", "do": "rotate", "axis": "z", "range": [0, 1000], "to": [0, 6000] },
+      { "part": "disc", "event": "struck", "do": "sound", "sound": "bell", "mode": "once", "level": 800, "reach_mm": 40000 }
+    ]
+  },
+  "text": { "card": "A gong that rings out once each time it is struck, and carries across the whole yard." },
+  "card": { "text": "card" }
+}

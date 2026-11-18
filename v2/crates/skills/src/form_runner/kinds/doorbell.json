@@ -1,0 +1,26 @@
+{
+  "format": "souls-entry/1",
+  "kind": "f1:doorbell",
+  "owner": "thing",
+  "state": {
+    "rung": { "n": 1, "type": "int", "unit": "count", "min": 0, "max": 1000000, "default": 0, "audience": { "rule": "everyone" } }
+  },
+  "geometry": { "bounds_mm": [200, 1300, 200] },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, -350], "yaw_mdeg": 0 },
+    "button": { "role": "contact", "at_mm": [0, 1050, -90] }
+  },
+  "forms": {
+    "ring": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "button" },
+        { "step": "wait", "us": 2000000 }
+      ],
+      "effects": [{ "change": "set", "field": "rung", "by": 1, "event": "rang" }]
+    }
+  }
+}

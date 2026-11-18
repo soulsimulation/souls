@@ -1,0 +1,19 @@
+{
+  "about": "Where a carried or pushed thing is put down, in the words a person uses (Soul Actions SA-F11, #2883). One closed list, read by the entry tools and by Engine v2 E2 (#2709, described spots) and E4 (#2772, putting a thing down); a word is added here and nowhere else. The rules decide only what plain data can: the anchor is named, a front exists where the word needs one, the thing may be moved. Whether the spot is free and legal is the world's answer, and the spot itself is the engine's choice, recorded.",
+  "words": {
+    "on": { "anchor": true },
+    "in": { "anchor": true },
+    "here": {},
+    "next_to": { "anchor": true },
+    "in_front_of": { "anchor": true, "front_of_anchor": true },
+    "behind": { "anchor": true, "front_of_anchor": true },
+    "against": { "anchor": true },
+    "facing": { "anchor": true, "front_of_thing": true, "turns_only": true },
+    "middle": { "room": true }
+  },
+  "facings": {
+    "toward": { "anchor": true, "front_of_thing": true },
+    "as_it_was": {},
+    "to_wall": { "front_of_thing": true }
+  }
+}
