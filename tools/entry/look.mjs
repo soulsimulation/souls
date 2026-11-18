@@ -34,10 +34,11 @@ const MAX_COLS = 6;
 
 /** The values one state field takes in a sheet, its default first. A field with nothing to vary is its default alone. */
 export function valuesOf(f) {
-  const d = f.default, more = [];
+  // a timed value is drawn at a value it holds, from its default to its bounds (the sheet stops the clock)
+  const d = f.type === 'timed' ? f.default.value : f.default, more = [];
   if (f.type === 'bool') more.push(!d);
   else if (f.type === 'enum') more.push(...f.values.filter(v => v !== d));
-  else if (f.type === 'int' && Number.isInteger(f.min) && Number.isInteger(f.max)) more.push(f.min, f.min + Math.floor((f.max - f.min) / 2), f.max);
+  else if ((f.type === 'int' || f.type === 'timed') && Number.isInteger(f.min) && Number.isInteger(f.max)) more.push(f.min, f.min + Math.floor((f.max - f.min) / 2), f.max);
   return [d, ...more.filter((v, i) => v !== d && more.indexOf(v) === i)];
 }
 
