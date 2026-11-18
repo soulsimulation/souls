@@ -71,6 +71,12 @@ pub fn run(args: &[String]) -> i32 {
             return 1;
         }
     };
+    // K7's watchdog on the world's own loop (K18): no tick for the limit ends the process by name.
+    crate::watchdog::watch(
+        world.beat.clone(),
+        crate::watchdog::Real::start(),
+        crate::watchdog::LIMIT_MS,
+    );
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,

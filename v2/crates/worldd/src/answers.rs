@@ -31,36 +31,67 @@
 //! intent carrying words is refused `intent.text-not-stored` and logged without its intent: none of their bytes
 //! reach the log (`a5_` test).
 //!
-//! World time is the machine's clock in microseconds until the tick loop runs on K7's ticker.
-// worldd's real clock: the tick loop and world time read the machine's clocks until K7's ticker drives them.
+//! **The world's tick** (K18, #3160). One loop per zone, run by K7's ticker at the clock's rate (one tick each
+//! [`Config::tick`]; world time is real time in µs from the Unix epoch, rate one). Each tick, in the trunk's order
+//! (T1: everything reads the state as of the tick's start, and what a tick writes is seen from the next):
+//!
+//! 0. the intents that arrived since the last tick are taken (the recorder's inputs, K12);
+//! 1. due timers: acts whose deadline passed end `act.timed-out` (K9's due list); a move's phase timers fire;
+//! 2. skills step through the host, each one unit in K11's wrapper (K13a, T9b/T9c; a panic ends that skill only);
+//! 3. the controller steps the bodies (B1), moves and seats included (B2, B3);
+//! 4. committed acts: the checks that came back are committed (I3, I4) and new moves start (I4b);
+//! 5. the tick's input record, then its part, go to the log (K4, K12): the part carries the answers ([`ANSWERED`]),
+//!    the bodies that moved ([`BODIES`]), the tick ([`TICK`]) and the zone's state hash after it ([`STATE`]);
+//! 6. the frozen copy is published (K8);
+//! 7. the answers thread appends and syncs the records, then hands the synced tick to the view tier (R3) and sends
+//!    the answers;
+//! 8. the auditor checks a slice of the tree (K11).
+//!
+//! A checkpoint is taken by K5's rule (amount of log), between ticks. **Lockstep** ([`Config::lockstep`]) runs the
+//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check before a tick, so a run fed
+//! the same inputs at the same ticks writes the same log: how K12's replay is checked on the real loop.
+//!
+//! Not here (K18's known limits): a route search and a move's checks still run on the clock thread (`sim::host`'s
+//! runner plans a walk's route when its spot is granted; B3 checks a seat at commit); a seated body is logged only
+//! while it stands, so a restart stands it where it last stood; one zone a process.
+// worldd's real clock (`Real`): the one place the process reads time.
 #![allow(clippy::disallowed_methods)]
 
-use crate::bodies::{self, Asked, Bodies};
+use crate::bodies::{self, Asked, Bodies, Placed};
 use crate::checkers::{self, Act, Candidate, Rules};
+use crate::views::Tier;
 use replica::apply::Replica;
 use replica::effects::{Actor, Body, Cause, Effect, Envelope, Event as Named, Part, Refusal};
 use replica::encode::{Name, Value, decode, encode};
-use replica::ids::{Id, Scope, Version};
+use replica::ids::{Hash, Id, Purpose, Scope, Version};
 use replica::intents::{Answer, INTENT_MOST, Intent, Target};
-use replica::time::Micros;
+use replica::pose::Pose;
+use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
+use replica::views::Redactions;
 use replica::world_model::Audience;
+use sim::audit::Auditor;
+use sim::checkpoint::{Blobs, Checkpoints};
+use sim::clock::{Clock as Pace, Heartbeat, Ticker};
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
 use sim::frozen::Publisher;
 use sim::log::{Log, Storage};
-use std::collections::{BTreeMap, HashMap};
+use sim::recorder::{self, Input};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 type R<T> = Result<T, Refusal>;
 
-/// Makes the world's bodies on the thread that steps them (a skill is not sent between threads).
-pub type MakeBodies = Box<dyn FnOnce() -> R<Bodies> + Send>;
+/// Makes the world's bodies on the thread that steps them (a skill is not sent between threads), each standing where
+/// the log last had it (`Placed`, empty on a first start; [`Bodies::add_body_at`]).
+pub type MakeBodies = Box<dyn FnOnce(&Placed) -> R<Bodies> + Send>;
 
 /// Where an answer frame goes: the connection the intent came on.
 pub type Reply = Sender<Vec<u8>>;
@@ -69,20 +100,49 @@ pub type Reply = Sender<Vec<u8>>;
 /// answer frame, 5: intent}]`, 3 left out for an intent refused before it got an id, 5 for one whose intent holds
 /// words.
 pub const ANSWERED: u64 = 3;
+/// The field of a tick's part that lists the bodies standing on a surface whose pose changed in the tick: `[[body,
+/// pose], ...]` (K18): what a restart stands them at.
+pub const BODIES: u64 = 4;
+/// The field of a tick's part holding its tick number (K18): where a restart's ticker resumes.
+pub const TICK: u64 = 5;
+/// The field of a tick's part holding the zone's state hash after the tick (K18): [`state_hash`].
+pub const STATE: u64 = 6;
 
 pub enum Event {
-    /// An intent's bytes as they came off the gateway's socket.
+    /// An intent's bytes as they came off the gateway's socket: taken at the start of the next tick.
     Arrival {
         bytes: Vec<u8>,
         reply: Reply,
+    },
+    /// An intent taken at the start of tick `tick` (lockstep: a script or a replay of the recorder's inputs).
+    ArrivalAt {
+        tick: i64,
+        bytes: Vec<u8>,
+        reply: Reply,
+    },
+    /// Lockstep: run every tick up to and including `tick`, then report the zone's state on `done`.
+    RunTo {
+        tick: i64,
+        done: Sender<Ran>,
     },
     Checked(Box<(Act, Checks)>),
     Stop,
 }
 
+/// Where a lockstep run stands after [`Event::RunTo`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ran {
+    pub tick: i64,
+    pub state: [u8; 32],
+    /// Faults the auditor named so far, and units ended by a panic.
+    pub faults: u64,
+    pub panicked: u64,
+}
+
 pub struct Config {
     pub lineage: Scope,
     pub epoch: u64,
+    /// The tick's length (K7: the loop runs at this rate).
     pub tick: Duration,
     /// The longest an act stays open, from its arrival, when its expiry is later.
     pub deadline: Micros,
@@ -92,6 +152,16 @@ pub struct Config {
     /// Makes the world's bodies, on the clock thread, for move intents (I4b, #3156); without them a move is refused
     /// `intent.not-a-form-on-a-node`.
     pub bodies: Option<MakeBodies>,
+    /// The clock that paces the loop; `None` is the machine's ([`Real`]). Ignored in lockstep.
+    pub clock: Option<Box<dyn Pace + Send>>,
+    /// Lockstep: ticks run only when asked ([`Event::RunTo`]), each after every check is back (K18).
+    pub lockstep: bool,
+    /// K5's checkpoints: their folder and the log bytes between two.
+    pub checkpoints: Option<(PathBuf, u64)>,
+    /// Starts the view tier (R3) on the log, which each synced tick is handed to.
+    pub views: bool,
+    /// Nodes the auditor checks a tick (K11).
+    pub audit: usize,
 }
 
 impl Config {
@@ -104,6 +174,11 @@ impl Config {
             checkers: 2,
             arrivals: None,
             bodies: None,
+            clock: None,
+            lockstep: false,
+            checkpoints: None,
+            views: false,
+            audit: 64,
         }
     }
 }
@@ -111,6 +186,10 @@ impl Config {
 /// The running world: send it [`Event`]s; [`World::stop`] ends it once the answers already due are sent.
 pub struct World {
     pub events: Sender<Event>,
+    /// The tick and real time the last tick ended (K7): a watchdog reads it.
+    pub beat: Arc<Heartbeat>,
+    /// The view tier, when [`Config::views`]: subscribe to it.
+    pub tier: Option<Arc<Tier>>,
     clock: Option<JoinHandle<()>>,
 }
 
@@ -123,11 +202,77 @@ impl World {
     }
 }
 
-/// World time: the machine's clock, in microseconds.
+/// The machine's clock, in µs from the Unix epoch.
 pub fn now() -> Micros {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
+}
+
+/// The wall clock read once, at start, carried on by the monotonic clock (K7): µs from the Unix epoch, never a step.
+#[derive(Clone, Copy, Debug)]
+pub struct Real {
+    wall0: Micros,
+    mono0: Instant,
+}
+
+impl Real {
+    /// Reads the wall clock, once.
+    pub fn start() -> Real {
+        Real {
+            wall0: now(),
+            mono0: Instant::now(),
+        }
+    }
+}
+
+impl Pace for Real {
+    fn now(&mut self) -> Micros {
+        self.wall0 + self.mono0.elapsed().as_micros() as Micros
+    }
+
+    fn sleep_until(&mut self, t: Micros) {
+        let wait = t - self.now();
+        if wait > 0 {
+            std::thread::sleep(Duration::from_micros(wait as u64));
+        }
+    }
+}
+
+/// Lockstep's clock: real time is what the caller last asked to run to; it never sleeps.
+struct Stepped(Arc<Mutex<Micros>>);
+
+impl Pace for Stepped {
+    fn now(&mut self) -> Micros {
+        *self.0.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn sleep_until(&mut self, _: Micros) {}
+}
+
+/// The zone's state hash (K18): `souls/fixture/1` over `[tree state hash, [[body, pose], ...]]`, the bodies the
+/// controller holds included, since the tree does not hold them yet.
+pub fn state_hash(replica: &Replica, bodies: &[(Id, Pose)]) -> [u8; 32] {
+    let tree = replica
+        .tree()
+        .to_state()
+        .hash()
+        .map(|h| h.to_bytes())
+        .unwrap_or_default();
+    let v = Value::Array(vec![
+        Value::Bytes(tree),
+        Value::Array(
+            bodies
+                .iter()
+                .map(|(id, p)| Value::Array(vec![id.to_value(), p.to_value()]))
+                .collect(),
+        ),
+    ]);
+    // The digest itself, past the multihash's two bytes.
+    let h = Hash::of(Purpose::Fixture, &encode(&v).unwrap_or_default()).to_bytes();
+    let mut out = [0; 32];
+    out.copy_from_slice(&h[h.len() - 32..]);
+    out
 }
 
 struct Open {
@@ -140,8 +285,9 @@ struct Open {
     waiters: Vec<Reply>,
 }
 
-/// One tick's record and the answers it releases once it is on the disk.
+/// One tick's records (its input record, then its part) and the answers they release once they are on the disk.
 struct Tick {
+    inputs: Option<Vec<u8>>,
     record: Option<Vec<u8>>,
     replies: Vec<(Vec<Reply>, Vec<u8>)>,
 }
@@ -154,8 +300,8 @@ struct Clock {
     sequences: Sequences,
     receipts: Receipts,
     deadlines: Deadlines,
-    open: HashMap<Id, Open>,
-    in_flight: HashMap<(Vec<u8>, u64), Id>,
+    open: BTreeMap<Id, Open>,
+    in_flight: BTreeMap<(Vec<u8>, u64), Id>,
     next_intent: u64,
     lineage: Scope,
     zone: Id,
@@ -170,6 +316,20 @@ struct Clock {
     bodies: Option<Bodies>,
     /// Move intents taken since the last tick, committed at the next (I4b).
     moving: Vec<(Id, Asked)>,
+    /// Intents arrived since the last tick, taken at the start of the next; and those a script set for a tick.
+    pending: Vec<(Vec<u8>, Reply)>,
+    scheduled: BTreeMap<i64, Vec<(Vec<u8>, Reply)>>,
+    /// The tick's inputs, for the recorder (K12).
+    inputs: Vec<Input>,
+    /// Acts on the checkers' queue, not yet back (lockstep waits for none).
+    outstanding: usize,
+    auditor: Auditor,
+    audit: usize,
+    faults: u64,
+    checkpoints: Option<Checkpoints>,
+    /// Log records written, the input records included.
+    records: u64,
+    tick: i64,
 }
 
 /// What an intent becomes: a form's act for the checkers, or a move for the bodies.
@@ -371,6 +531,13 @@ impl Clock {
             Taken::Move(m) => m.body,
         };
         self.next_intent += 1;
+        // The recorder's input (K12): the intent by id and verb; its words, were there any, by reference only.
+        self.inputs.push(Input::Intent {
+            id,
+            soul: body,
+            verb: intent.verb.clone(),
+            words: None,
+        });
         self.deadlines.open(
             body,
             id,
@@ -391,6 +558,7 @@ impl Clock {
         );
         match taken {
             Taken::Form(act) => {
+                self.outstanding += 1;
                 let _ = self.acts.send(act);
             }
             Taken::Move(m) => self.moving.push((id, m)),
@@ -452,9 +620,19 @@ impl Clock {
         }
     }
 
-    /// The tick's moves (I4b): those taken since the last tick start, the bodies step to `now`, and each move that
+    /// Steps 1 to 3 for the bodies (I4b): their due timers, skills and controller, to world time `now`; each move that
     /// ended is answered: a receipt naming its entries when done, else its reason by name.
-    fn moves(&mut self, now: Micros) {
+    fn step_bodies(&mut self, now: Micros) {
+        let Some(b) = self.bodies.as_mut() else {
+            return;
+        };
+        for (id, how) in b.step(now) {
+            self.settle(id, how, now);
+        }
+    }
+
+    /// Step 4 for moves (I4b): those taken since the last tick start, each refused by name or begun.
+    fn start_moves(&mut self, now: Micros) {
         let Some(mut b) = self.bodies.take() else {
             return;
         };
@@ -477,12 +655,6 @@ impl Clock {
                 Ok(()) => self.note(id, MOVE_STARTED, None, now),
                 Err(r) => self.settle(id, Err(r.name.to_owned()), now),
             }
-        }
-        let Some(b) = self.bodies.as_mut() else {
-            return;
-        };
-        for (id, how) in b.step(now) {
-            self.settle(id, how, now);
         }
     }
 
@@ -507,7 +679,37 @@ impl Clock {
         }
     }
 
-    fn tick(&mut self, now: Micros) {
+    /// The zone's state hash now ([`state_hash`]).
+    fn state(&self) -> [u8; 32] {
+        let poses = self.bodies.as_ref().map(Bodies::poses).unwrap_or_default();
+        state_hash(&self.replica, &poses)
+    }
+
+    /// One tick, `n`, at world time `now` (its start), in the trunk's order (the module's list).
+    fn tick(&mut self, n: i64, now: Micros) {
+        self.tick = n;
+        // 0. What arrived since the last tick, and what a script set for this one, is taken now.
+        for (bytes, reply) in std::mem::take(&mut self.pending) {
+            self.arrival(&bytes, reply, now);
+        }
+        if let Some(due) = self.scheduled.remove(&n) {
+            for (bytes, reply) in due {
+                self.arrival(&bytes, reply, now);
+            }
+        }
+        // 1. Due timers: acts whose deadline passed.
+        while let Some(id) = self.deadlines.due(now) {
+            if let Some(b) = self.bodies.as_mut() {
+                b.cancel(id);
+            }
+            if let Some(o) = self.open.get(&id) {
+                let (actor, sequence) = (o.actor, o.sequence);
+                self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
+            }
+        }
+        // 1-3. The bodies' own timers, skills through the host, the controller.
+        self.step_bodies(now);
+        // 4. Committed acts: the checks back since the last tick, then the moves taken.
         for (mut act, checks) in std::mem::take(&mut self.checked) {
             let Some(id) = Id::new(self.lineage, act.id) else {
                 continue;
@@ -535,6 +737,7 @@ impl Clock {
                 }
                 Outcome::Recheck { version } => {
                     act.recheck = Some(version);
+                    self.outstanding += 1;
                     let _ = self.acts.send(act);
                 }
                 Outcome::Refused { reason } => {
@@ -542,43 +745,117 @@ impl Clock {
                 }
             }
         }
-        self.moves(now);
-        while let Some(id) = self.deadlines.due(now) {
-            if let Some(b) = self.bodies.as_mut() {
-                b.cancel(id);
-            }
-            if let Some(o) = self.open.get(&id) {
-                let (actor, sequence) = (o.actor, o.sequence);
-                self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
-            }
-        }
-        let record = (!self.rows.is_empty() || !self.effects.is_empty()).then(|| {
-            let v = Value::Map(BTreeMap::from([
-                (1, Value::Bytes(self.replica.header().hash().to_bytes())),
-                (
-                    2,
-                    Value::Array(self.effects.drain(..).map(|e| e.to_value()).collect()),
-                ),
-                (ANSWERED, Value::Array(std::mem::take(&mut self.rows))),
-            ]));
-            encode(&v).unwrap_or_default()
-        });
+        self.start_moves(now);
+        // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
+        let inputs = match std::mem::take(&mut self.inputs) {
+            i if i.is_empty() => None,
+            i => recorder::record(u64::try_from(n).unwrap_or(0), &i).ok(),
+        };
+        let moved = self.bodies.as_mut().map(Bodies::moved).unwrap_or_default();
+        let record =
+            (!self.rows.is_empty() || !self.effects.is_empty() || !moved.is_empty()).then(|| {
+                let state = self.state();
+                let v = Value::Map(BTreeMap::from([
+                    (1, Value::Bytes(self.replica.header().hash().to_bytes())),
+                    (
+                        2,
+                        Value::Array(self.effects.drain(..).map(|e| e.to_value()).collect()),
+                    ),
+                    (ANSWERED, Value::Array(std::mem::take(&mut self.rows))),
+                    (
+                        BODIES,
+                        Value::Array(
+                            moved
+                                .iter()
+                                .map(|(id, p)| Value::Array(vec![id.to_value(), p.to_value()]))
+                                .collect(),
+                        ),
+                    ),
+                    (TICK, Value::Uint(u64::try_from(n).unwrap_or(0))),
+                    (STATE, Value::Bytes(state.to_vec())),
+                ]));
+                encode(&v).unwrap_or_default()
+            });
+        // 6. The frozen copy, for the checkers and readers.
         if !self.parts.is_empty() {
             self.publisher.publish(std::mem::take(&mut self.parts));
         }
+        // 7. The answers thread appends, syncs, hands the synced tick to the view tier, then answers.
         let replies = std::mem::take(&mut self.replies);
-        if record.is_some() || !replies.is_empty() {
-            let _ = self.answers.send(Tick { record, replies });
+        let bytes = inputs.as_ref().map_or(0, Vec::len) + record.as_ref().map_or(0, Vec::len);
+        let written = u64::from(inputs.is_some()) + u64::from(record.is_some());
+        if written > 0 || !replies.is_empty() {
+            let _ = self.answers.send(Tick {
+                inputs,
+                record,
+                replies,
+            });
+        }
+        self.records += written;
+        // 8. A slice of the auditor: faults named, nothing repaired, the clock never stopped.
+        let slice = self.auditor.slice(self.replica.tree(), self.audit);
+        for f in &slice.faults {
+            eprintln!("worldd: audit: {f:?}");
+        }
+        self.faults += slice.faults.len() as u64;
+        // K5: a checkpoint once enough log has been written since the last, taken between ticks.
+        if let Some(c) = self.checkpoints.as_mut() {
+            c.appended(bytes as u64);
+            if c.due() {
+                let version = Version {
+                    lineage: self.lineage,
+                    zone: self.zone,
+                    epoch: self.epoch,
+                    sequence: self.replica.version(),
+                };
+                if let Err(e) = c.take(self.replica.tree_for_seal(), version, self.records, &[]) {
+                    eprintln!("worldd: a checkpoint was not taken: {e}");
+                }
+            }
+        }
+    }
+
+    fn ran(&self) -> Ran {
+        let panicked = self
+            .bodies
+            .as_ref()
+            .map_or(0, |b| b.runner.units.ended.len() as u64);
+        Ran {
+            tick: self.tick,
+            state: self.state(),
+            faults: self.faults,
+            panicked,
         }
     }
 }
 
-/// The answers thread: each tick's record appended and on the disk before its answers leave. A log that fails
-/// stops it for good: nothing is answered that is not on the disk.
-fn answer_loop<S: Storage + 'static>(mut log: Log<S>, ticks: Receiver<Tick>) {
+/// The answers thread: each tick's records appended and on the disk before its answers leave, then the part handed to
+/// the view tier. A log that fails stops it for good: nothing is answered that is not on the disk.
+fn answer_loop<S: Storage + 'static>(
+    mut log: Log<S>,
+    ticks: Receiver<Tick>,
+    tier: Option<Arc<Tier>>,
+) {
     for t in ticks {
-        if let Some(record) = t.record
-            && let Err(e) = log.append(record).and_then(|n| log.wait_durable(n + 1))
+        let mut last = None;
+        for (k, bytes) in [t.inputs, t.record].into_iter().enumerate() {
+            let Some(bytes) = bytes else { continue };
+            let copy = (k == 1 && tier.is_some()).then(|| bytes.clone());
+            match log.append(bytes) {
+                Ok(n) => {
+                    last = Some(n);
+                    if let (Some(tier), Some(b)) = (&tier, copy) {
+                        tier.offer(n, b);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("worldd: the log failed, nothing more is answered: {e}");
+                    return;
+                }
+            }
+        }
+        if let Some(n) = last
+            && let Err(e) = log.wait_durable(n + 1)
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
@@ -591,8 +868,33 @@ fn answer_loop<S: Storage + 'static>(mut log: Log<S>, ticks: Receiver<Tick>) {
     }
 }
 
+/// What a restart reads back from the log besides the tree: each body's last pose and the last tick logged.
+fn read_back(part: &Part, placed: &mut Placed, last: &mut Option<i64>) {
+    if let Some(Value::Array(bodies)) = part.rest.get(&BODIES) {
+        for b in bodies {
+            if let Value::Array(p) = b
+                && let [id, pose] = p.as_slice()
+                && let (Ok(id), Ok(pose)) = (replica::effects::read_id(id), Pose::from_value(pose))
+            {
+                placed.insert(id, pose);
+            }
+        }
+    }
+    if let Some(Value::Uint(n)) = part.rest.get(&TICK) {
+        *last = Some(i64::try_from(*n).unwrap_or(i64::MAX));
+    }
+}
+
+fn time(e: replica::time::TimeRefusal) -> Refusal {
+    Refusal {
+        name: "time",
+        detail: e.name().to_string(),
+    }
+}
+
 /// Opens the log in `storage`, replays it onto `world` (the world as built, before any record), and starts the
-/// clock, answers and checker threads.
+/// clock, answers and checker threads. The bodies are made standing where the log last had them, and the ticker
+/// resumes after the last tick logged.
 pub fn start<S: Storage + 'static>(
     mut world: Replica,
     rules: Rules,
@@ -603,12 +905,19 @@ pub fn start<S: Storage + 'static>(
     let mut sequences = Sequences::default();
     let mut receipts = Receipts::default();
     let mut next_intent = 1;
+    let mut placed = Placed::new();
+    let mut last = None;
     for record in &found.records {
+        // The recorder's input records are what the world was handed, not what it did (K12): passed by.
+        if recorder::is_input(record) {
+            continue;
+        }
         let part = Part::read(record)?;
         if !part.effects.is_empty() {
             world.apply(&part)?;
         }
         receipts.index(&part.effects);
+        read_back(&part, &mut placed, &mut last);
         let Some(Value::Array(rows)) = part.rest.get(&ANSWERED) else {
             continue;
         };
@@ -630,6 +939,49 @@ pub fn start<S: Storage + 'static>(
     })?;
     let mut cfg = cfg;
     let make = cfg.bodies.take();
+    let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
+    if 1_000_000 % tick_us != 0 {
+        return Err(Refusal {
+            name: "tick-rate",
+            detail: format!("a tick of {tick_us} µs is not a whole number of ticks a second"),
+        });
+    }
+    // World time is real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it.
+    let mapping = Mapping::new(0, 0, 1, 1).map_err(time)?;
+    let line = Timeline::start(
+        mapping,
+        TickRate::new(0, 0, 1_000_000 / tick_us).map_err(time)?,
+        Tempo::per_minute(0, 0, 120).map_err(time)?,
+    )
+    .map_err(time)?;
+    let shared = Arc::new(Mutex::new(0));
+    let mut pace: Box<dyn Pace + Send> = match (cfg.lockstep, cfg.clock.take()) {
+        (true, _) => Box::new(Stepped(Arc::clone(&shared))),
+        (false, Some(c)) => c,
+        (false, None) => Box::new(Real::start()),
+    };
+    let real0 = pace.now();
+    // A first start begins at the tick due now, not at the epoch's.
+    let last = match (last, cfg.lockstep) {
+        (Some(n), _) => Some(n),
+        (None, true) => None,
+        (None, false) => Some(real0.div_euclid(tick_us) - 1),
+    };
+    let mut ticker = Ticker::new(line, mapping, last, real0).map_err(time)?;
+    let beat = Arc::new(Heartbeat::new(real0));
+    let tier = match cfg.views {
+        true => Some(Arc::new(Tier::start(
+            world.header().clone(),
+            world.tree().to_state(),
+            Redactions::new([]),
+            log.durable_mark(),
+        )?)),
+        false => None,
+    };
+    let checkpoints = match &cfg.checkpoints {
+        Some((dir, every)) => Some(Checkpoints::open(dir, *every, Blobs::default())?),
+        None => None,
+    };
     let publisher = Arc::new(Publisher::new(&world));
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let (events, rx) = channel();
@@ -645,10 +997,12 @@ pub fn start<S: Storage + 'static>(
         })
         .map_err(io)?;
     let (answers, ticks) = channel();
+    let answer_tier = tier.clone();
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks))
+        .spawn(move || answer_loop(log, ticks, answer_tier))
         .map_err(io)?;
+    let records = found.records.len() as u64;
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let build = move || Clock {
         replica: world,
@@ -658,8 +1012,8 @@ pub fn start<S: Storage + 'static>(
         sequences,
         receipts,
         deadlines: Deadlines::default(),
-        open: HashMap::new(),
-        in_flight: HashMap::new(),
+        open: BTreeMap::new(),
+        in_flight: BTreeMap::new(),
         next_intent,
         lineage: cfg.lineage,
         zone,
@@ -673,45 +1027,119 @@ pub fn start<S: Storage + 'static>(
         parts: Vec::new(),
         bodies: None,
         moving: Vec::new(),
+        pending: Vec::new(),
+        scheduled: BTreeMap::new(),
+        inputs: Vec::new(),
+        outstanding: 0,
+        auditor: Auditor::new(),
+        audit: cfg.audit,
+        faults: 0,
+        checkpoints,
+        records,
+        tick: last.unwrap_or(-1),
     };
-    let tick = cfg.tick;
+    let lockstep = cfg.lockstep;
+    let thread_beat = Arc::clone(&beat);
     let clock = thread::Builder::new()
         .name("clock".into())
         .spawn(move || {
             mark_clock_thread();
+            let beat = thread_beat;
             let mut c = build();
             if let Some(make) = make {
-                match make() {
+                match make(&placed) {
                     Ok(mut b) => {
-                        b.begin(now());
+                        b.begin(ticker.due().unwrap_or(0));
                         c.bodies = Some(b);
                     }
                     Err(e) => eprintln!("worldd: the bodies did not start, moves are refused: {e}"),
                 }
             }
-            let mut next = Instant::now() + tick;
+            // Takes one event; false once the world is to stop.
+            let take = |c: &mut Clock, e: Event| -> Option<Sender<Ran>> {
+                match e {
+                    Event::Arrival { bytes, reply } => c.pending.push((bytes, reply)),
+                    Event::ArrivalAt { tick, bytes, reply } => {
+                        c.scheduled.entry(tick).or_default().push((bytes, reply))
+                    }
+                    Event::Checked(k) => {
+                        c.outstanding = c.outstanding.saturating_sub(1);
+                        c.checked.push(*k);
+                    }
+                    Event::RunTo { done, .. } => return Some(done),
+                    Event::Stop => {}
+                }
+                None
+            };
             loop {
-                // A tick is due before any more events are taken, so a busy queue never starves it.
-                let at = Instant::now();
-                if at >= next {
-                    c.tick(now());
-                    next = (next + tick).max(at);
+                if lockstep {
+                    let Ok(e) = rx.recv() else { break };
+                    let (to, done) = match e {
+                        Event::Stop => break,
+                        Event::RunTo { tick, done } => (tick, done),
+                        e => {
+                            take(&mut c, e);
+                            continue;
+                        }
+                    };
+                    let mut stop = false;
+                    while ticker.next_tick() <= to && !stop {
+                        // Every check back before the tick, so the same inputs commit at the same ticks.
+                        while c.outstanding > 0 {
+                            match rx.recv() {
+                                Ok(Event::Stop) | Err(_) => {
+                                    stop = true;
+                                    break;
+                                }
+                                Ok(e) => {
+                                    take(&mut c, e);
+                                }
+                            }
+                        }
+                        let Ok(due) = ticker.due() else { break };
+                        *shared.lock().unwrap_or_else(|p| p.into_inner()) = due;
+                        if let Err(e) = ticker.run_due(&mut *pace, &beat, &mut |n, s| c.tick(n, s))
+                        {
+                            eprintln!("worldd: {}", e.name());
+                            stop = true;
+                        }
+                    }
+                    let _ = done.send(c.ran());
+                    if stop {
+                        break;
+                    }
                     continue;
                 }
-                match rx.recv_timeout(next - at) {
-                    Ok(Event::Arrival { bytes, reply }) => c.arrival(&bytes, reply, now()),
-                    Ok(Event::Checked(k)) => c.checked.push(*k),
+                // The ticks due by the clock run first, back to back when behind (K7), so a busy queue never starves
+                // them; then events are taken until the next is due.
+                if let Err(e) = ticker.run_due(&mut *pace, &beat, &mut |n, s| c.tick(n, s)) {
+                    eprintln!("worldd: {}", e.name());
+                    break;
+                }
+                let Ok(due) = ticker.due() else { break };
+                let wait = due - pace.now();
+                if wait <= 0 {
+                    continue;
+                }
+                match rx.recv_timeout(Duration::from_micros(wait as u64)) {
                     Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => break,
+                    Ok(Event::RunTo { done, .. }) => {
+                        let _ = done.send(c.ran());
+                    }
+                    Ok(e) => {
+                        take(&mut c, e);
+                    }
                     Err(RecvTimeoutError::Timeout) => {}
                 }
             }
-            c.tick(now());
             drop(c);
             let _ = answering.join();
         })
         .map_err(io)?;
     Ok(World {
         events,
+        beat,
+        tier,
         clock: Some(clock),
     })
 }
@@ -902,6 +1330,7 @@ mod tests {
             .unwrap()
             .records
             .iter()
+            .filter(|r| !recorder::is_input(r))
             .flat_map(|r| Part::read(r).unwrap().effects)
             .filter(|e| e.envelope.cause == Cause::Intent(id))
             .map(|e| e.envelope.sequence)

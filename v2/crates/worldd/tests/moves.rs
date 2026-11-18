@@ -181,7 +181,12 @@ fn logged(log: &[u8]) -> BTreeMap<Id, Logged> {
         _ => panic!("an int"),
     };
     let mut out: BTreeMap<Id, Logged> = BTreeMap::new();
-    for r in recover(log).unwrap().records {
+    for r in recover(log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+    {
         for e in Part::read(&r).unwrap().effects {
             let Cause::Intent(id) = e.envelope.cause else {
                 continue;
@@ -217,7 +222,7 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.tick = Duration::from_millis(50);
-    cfg.bodies = Some(Box::new(bodies));
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     let world = answers::start(
         lamps::World::build(0, 0, 0).replica,
         lamps::rules(),

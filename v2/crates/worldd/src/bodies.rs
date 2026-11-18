@@ -17,8 +17,11 @@
 //!   time at each tick: a late tick steps them more than once, never skips a step. Move phases are timers on K9's due
 //!   list, fired against the same time.
 //!
-//! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9), bodies in the log (a restart puts
-//! them back where the world was built).
+//! - **In the log** (K18, #3160). Each tick's part lists the bodies whose standing pose changed ([`Bodies::moved`]);
+//!   a restart builds each where the log last had it standing ([`Bodies::add_body_at`]). A body in a seat is logged
+//!   only while it stands, so a restart stands it where it last stood.
+//!
+//! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
 use std::collections::BTreeMap;
 
@@ -29,7 +32,7 @@ use replica::host::Progress;
 use replica::ids::{Id, Minter, Scope};
 use replica::intents::{Intent, Target as Aim};
 use replica::moves::{Effector, Move};
-use replica::pose::{Support, Vec3};
+use replica::pose::{Pose, Support, Vec3};
 use replica::time::Micros;
 use sim::controller::Stance;
 use sim::host::Runner;
@@ -159,7 +162,12 @@ pub struct Bodies {
     live: BTreeMap<Id, (Id, Live)>,
     /// Intents ended between steps (a walk replaced): the intent and how.
     ended: Vec<(Id, Result<(), String>)>,
+    /// Each body's pose as last written to the log ([`Bodies::moved`]).
+    logged: BTreeMap<Id, Pose>,
 }
+
+/// Where the log last had each body standing: the poses a restart builds its bodies at (K18, #3160).
+pub type Placed = BTreeMap<Id, Pose>;
 
 fn load(text: &str) -> R<Move> {
     let v = decode(&fixture_bytes(text)?)
@@ -185,6 +193,7 @@ impl Bodies {
             rise: load(RISE)?,
             live: BTreeMap::new(),
             ended: Vec::new(),
+            logged: BTreeMap::new(),
         })
     }
 
@@ -202,6 +211,48 @@ impl Bodies {
     pub fn pose(&self, body: Id) -> Option<(Id, Vec3)> {
         let p = self.runner.controller.body(body)?.pose;
         Some((p.frame.node, p.position))
+    }
+
+    /// Adds a body of `family`: where the log last had it standing (`placed`, K18 #3160), else as the mover placed it.
+    pub fn add_body_at(&mut self, family: Family, body: Moved, placed: &Placed) -> R<()> {
+        let body = match placed.get(&body.id) {
+            Some(p) => match p.support {
+                Support::Surface { surface, .. } => match self.town.surfaces.get(&surface) {
+                    Some(s) => s.place(body.id, p.frame, p.position, p.orientation)?,
+                    None => body,
+                },
+                _ => body,
+            },
+            None => body,
+        };
+        self.logged.insert(body.id, body.pose);
+        self.add_body(family, body)
+    }
+
+    /// The bodies standing on a surface whose pose changed since the last call, in id order: what the tick's record
+    /// keeps of them (K18), so a restart stands each where it last stood. A body in a seat is not listed while it
+    /// sits.
+    pub fn moved(&mut self) -> Vec<(Id, Pose)> {
+        let mut out = Vec::new();
+        for b in self.runner.controller.bodies() {
+            if !matches!(b.pose.support, Support::Surface { .. }) {
+                continue;
+            }
+            if self.logged.get(&b.id) != Some(&b.pose) {
+                self.logged.insert(b.id, b.pose);
+                out.push((b.id, b.pose));
+            }
+        }
+        out
+    }
+
+    /// Every body's pose as the controller holds it, in id order: part of the zone's state hash.
+    pub fn poses(&self) -> Vec<(Id, Pose)> {
+        self.runner
+            .controller
+            .bodies()
+            .map(|b| (b.id, b.pose))
+            .collect()
     }
 
     /// Body time starts at world time `now`.
@@ -334,8 +385,8 @@ impl Bodies {
     pub fn step(&mut self, now: Micros) -> Vec<(Id, Result<(), String>)> {
         let mut out = std::mem::take(&mut self.ended);
         while self.runner.now + self.runner.tick <= now {
-            // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
-            let _ = self.runner.tick(&mut self.town);
+            // The tick's order (K18, #3160): due timers first, at the tick's start, then the skills through the
+            // host and the controller.
             let at = self.runner.now;
             while let Some(t) = self.due.fire(at + 1) {
                 let geo = self.geo(
@@ -368,6 +419,9 @@ impl Bodies {
                 self.live.remove(&t.node);
                 out.push((id, if how == "done" { Ok(()) } else { Err(how) }));
             }
+            // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
+            // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
+            let _ = self.runner.tick(&mut self.town);
             let walks: Vec<(Id, Id)> = self
                 .live
                 .iter()

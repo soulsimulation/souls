@@ -49,6 +49,7 @@ use replica::world_model::End;
 use crate::controller::{Controller, Driver, Part, Track};
 use crate::mover::Body as Moved;
 use crate::spots::Target;
+use crate::unit::{Ran, Units};
 use crate::walk::town::{Town, View};
 use crate::walk::{Leg, Mark, World, node_of};
 
@@ -295,23 +296,61 @@ pub fn step(
     minter: &mut Minter,
     runs: &mut Vec<Run>,
 ) -> Staged {
+    step_in_units(tree, geometry, now, seed, minter, runs, &mut Units::new())
+}
+
+/// [`step`], each skill's step one unit in K11's wrapper (`crate::unit`; K18 #3160): it stages into a [`Staged`] of
+/// its own, kept only if it returns. A panic drops that stage and ends the run `unit-panicked`, its body idle; the
+/// other runs and the tick go on. A skill whose unit is retired (its third panic) ends `unit-retired`.
+pub fn step_in_units(
+    tree: &Tree,
+    geometry: &impl Geometry,
+    now: Micros,
+    seed: u64,
+    minter: &mut Minter,
+    runs: &mut Vec<Run>,
+    units: &mut Units,
+) -> Staged {
     let mut staged = Staged::default();
     runs.sort_by_key(|r| r.body);
     runs.retain_mut(|r| {
-        let mut host = WorldHost {
-            tree,
-            geometry,
-            now,
-            seed,
-            body: r.body,
-            driver: r.driver,
-            minter: &mut *minter,
-            staged: &mut staged,
-            calls: Cell::new(0),
+        let unit = r.skill.shape().name;
+        let draws = staged.draws;
+        let ran = units.run(
+            unit.as_str(),
+            r.body,
+            &(),
+            |_, out: &mut Vec<(Staged, Progress)>| {
+                let mut own = Staged {
+                    draws,
+                    ..Staged::default()
+                };
+                let mut host = WorldHost {
+                    tree,
+                    geometry,
+                    now,
+                    seed,
+                    body: r.body,
+                    driver: r.driver,
+                    minter: &mut *minter,
+                    staged: &mut own,
+                    calls: Cell::new(0),
+                };
+                let progress = r.skill.step(&mut host);
+                let calls = host.calls.get();
+                own.calls += calls;
+                out.push((own, progress));
+            },
+        );
+        let (own, progress) = match ran {
+            Ran::Done(mut v) => match v.pop() {
+                Some(x) => x,
+                None => return true,
+            },
+            Ran::Failed(e) => (Staged::default(), Progress::Failed(named(e.reason))),
+            Ran::Refused(name) => (Staged::default(), Progress::Failed(named(name))),
         };
-        let progress = r.skill.step(&mut host);
-        let calls = host.calls.get();
-        staged.calls += calls;
+        staged.merge(own);
         match progress {
             Progress::Going => true,
             ended => {
@@ -321,6 +360,20 @@ pub fn step(
         }
     });
     staged
+}
+
+impl Staged {
+    /// Adds one run's stage to the tick's, in order; its draws count on from where the tick's stood.
+    fn merge(&mut self, own: Staged) {
+        self.controls.extend(own.controls);
+        self.crossings.extend(own.crossings);
+        self.emits.extend(own.emits);
+        self.timers.extend(own.timers);
+        self.cleared.extend(own.cleared);
+        self.ended.extend(own.ended);
+        self.calls += own.calls;
+        self.draws = self.draws.max(own.draws);
+    }
 }
 
 /// Hands a tick's staged controller inputs to the controller, each under its run's driver: the one place a skill's
@@ -402,6 +455,8 @@ pub struct Runner {
     minter: Minter,
     /// The bodies not carried across a link, by node and cell of [`CELL`], as of the end of the last tick.
     grid: BTreeMap<(Id, i64, i64), Vec<Near>>,
+    /// Each skill's step is a unit in K11's wrapper: a panic ends that run, a third retires the skill (K18 #3160).
+    pub units: Units,
 }
 
 fn decode_int(v: &Value) -> Option<i64> {
@@ -549,6 +604,7 @@ impl Runner {
             seed: 1,
             minter: Minter::new(Scope([0x9b; 16])),
             grid: BTreeMap::new(),
+            units: Units::new(),
         }
     }
 
@@ -756,13 +812,14 @@ impl Runner {
                 grid: &self.grid,
                 settled,
             };
-            step(
+            step_in_units(
                 tree,
                 &here,
                 self.now,
                 self.seed,
                 &mut self.minter,
                 &mut self.runs,
+                &mut self.units,
             )
         };
         let mut refused = hand_on(&staged, &mut self.controller);
