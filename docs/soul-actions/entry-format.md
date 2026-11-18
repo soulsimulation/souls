@@ -48,7 +48,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
-| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
+| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
@@ -60,7 +60,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 14 | `ride` | A set trip between stops that nobody steers (below) |
 | 15 | `stock` | The things a container is known to hold, yielded when taken (below) |
 | 16 | `areas` | What a kind says about resting on it, or about a named part of its surroundings, where its shape cannot (below) |
-| 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
+| 17 | `roles` | An activity's roles: how much each is needed and where its members may be, and its "now" line, `now` (below) |
 | 18 | `motion` | How a thing moves: `{"how"}`, one of `one_hand`, `two_hands`, `pushed_by_one`, `two_souls`, `wheeled`, `fixed` (below) |
 | 19 | `loose` | How long it lasts once nobody holds or owns it: `{"ever": true}` or `{"us": <microseconds>}` (below) |
 | 20 | `looks` | How it looks: `model` (a look id), `table`, the looks table, and `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
@@ -173,7 +173,9 @@ or a stall is always open). The cases are `packages/form-rules/cases/stock/stock
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
 the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
 `from` ends one of these takes (a slot has one signer; a lecture one speaker), `most_per` how many of these one `from`
-end may be linked to (a Soul signs up to three slots). A record that points at a Soul or a thing is never a list item:
+end may be linked to (a Soul signs up to three slots). With `"per": "parent"`, `most_per` is counted among the things of
+this kind under one parent, not across the world: one signature per Soul per guestbook, one vote per poll. The
+`most_per` need reads it (below); a world-wide `most_per` is not read from one thing. A record that points at a Soul or a thing is never a list item:
 it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
 `eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
 the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
@@ -186,7 +188,7 @@ body's family declares it.
 **Bounds and timed values.** `min` / `max`: whole bounds of an `int` field (or a timed value); an amount moved never
 takes it past them. A `transfer` fills to `max` and draws down to `min`. A `timed` field is a value that changes with
 time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit: `count`, `mm`,
-`g`, `mg`, `mC` or `permille`), and a default
+`g`, `mg`, `mC` or `permille`, or `us` for a countdown), and a default
 of three whole numbers, `{"value", "per_s", "set_us"}`: the value in that unit, its rate in that unit per second, and the
 world time it was set, in microseconds. A slow process takes a small unit so its rate stays a whole number a second:
 the planter's water (SA-V4a) is in mg and dries at 5 mg a second (18 g an hour), and its stages come from timers a
@@ -289,14 +291,28 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   be described with `select`: a candidate set (`of`: `things` or `free_slots`, optional `kind`, `in`: `this`,
   `here` or `parent`), an `anchor` (`me`, `this`), an `order` (`nearest`, `furthest`) and a `rank` (1, 2, ... or
   `last`), the same closed list as Engine v2 E2 ([#2709](https://github.com/soulsimulation/souls/issues/2709)).
-  Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument.
+  Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument. Two more types are a **choice from
+  the form's own closed list**, `of`: `field` (two or more of this kind's state fields, of one type) and `value` (two
+  or more values). A `set` or a `state` need may name a field argument as its `field`, and a value argument as its
+  `to`, `is` or `not`: every choice is checked against every field it may meet, and the rules refuse an act whose
+  choice is not in the list (`bad_input`, `not_a_choice`), so a form never writes a field it does not name. A field
+  argument used as a place (`walk_to`, a move's `at`) needs a point, slot or placed area of the same name for each
+  choice. A pruning shrub's one `prune` takes `{"shoot": {"type": "field", "of": ["left_low", ..., "right_high"]}}`
+  and sets `{"field": {"arg": "shoot"}, "to": false}`; a sand garden's `brush` takes a `cell` (field) and a `pattern`
+  (value, `along` or `across`). A refusal of a need compared with a value argument names as its fix the same act with
+  another choice of that value (brush the other way); another choice of a field is another act, never a fix.
 - **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
   a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor` (this thing,
   or `{"thing": {"arg": ...}}`), `moves` (`{"thing": {"arg": ...}, "by": "carry" | "push"}`: the thing's kind moves
   that way by its section 18 `motion.how`; carrying takes as many free hands as it says, a push by one body is refused
   for `two_souls`; refused as `moves_by`, `motion_unsaid`, `needs_souls` or `no_free_hand`), `hand`
   (`{"free": true}`, one hand free; `{"empty": true}`, every hand empty; or `{"holds": "<namespace:name>"}`, a kind
-  the hash follows), `linked`, `unlinked`, `room`
+  the hash follows), `linked`, `unlinked` (whether the link has any end; with `"end": "actor"`, whether the actor is
+  one of its ends, so "only its author takes a note down" refuses with the original's words), `most_per` (the actor is
+  linked by this link to fewer than its `most_per` things of this kind under this thing's parent, the link declared
+  `"per": "parent"`; a thing under no parent counts alone; a refusal is `already_linked` with `on`, the things that hold
+  the actor, so moving a vote is taking it back there first), `not_in_hand` (this thing is in nobody's hand, else
+  `in_hand`; the actor's own hold names `put` as the fix: a lantern is set down before its wick is worked), `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
   `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less), `sum` (below). A range
@@ -314,6 +330,10 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   "well_mint"], "at_most": 4}` (`at_least` and/or `at_most`, whole numbers). With `"after_moves": true` it adds them as
   the form's transfers would leave them, so a capacity shared by several fields is never overfilled: a tea caddy's well
   holds four portions across its green and mint.
+  An `any` need asks that at least one of two or more fields of this kind is `not` a value written out:
+  `{"need": "any", "fields": ["back_left", "back_right", "front_left", "front_right"], "not": "smooth"}`; a refusal is
+  `field_differs` with every field's value (`detail: {fields, found, wanted}`). A sand garden that is smooth everywhere
+  refuses to be smoothed ("The sand is already smooth.").
   Any need may name its refusal's words with `says`, a key of the `text` table (words by reference, SA-F6b), so a
   conversion keeps the original's wording: `{"need": "hand", "empty": true, "says": "put_down_first"}`.
   SA-F2 evaluates them. **Reach to another thing** is read in this order: (1) the walk, taken as done: entries store
@@ -334,12 +354,17 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   timer's form still checks its own needs when it fires.
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor, this thing or a
   `thing` argument, into a slot, the actor's hand or `here`, loose in the actor's place: holding is a change of
-  parent), `link`, `unlink`, `create` (a kind, `here`, in a slot or in the hand), `remove` (the actor, this thing or a
-  `thing` argument), `timer`, `transfer`, `draw`. The body's `pick_up` and `push` reparent a thing argument into a free
-  hand (a push holds the thing while it moves), and its `put` sets a held one down `here` by a placement word and an
-  anchor described by a selector; another body has no `motion`, so it is never picked up or pushed. `packages/form-rules/README.md` ("What a form does")
-  defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
-  per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
+  parent), `link`, `unlink` (`from`: `actor`, or `all`, every end of the link on this thing: anyone takes down an
+  out-of-date poster; it writes only this thing's own links, Engine v2 T6's rule that an entry writes its own node),
+  `create` (a kind, `here`, in a slot or in the hand; `set`, a list of `{field, to}`, gives the made thing fields chosen at
+  the bench, each a value or a value argument: a candle's shape and colour; T6's create carries its fields, and the check
+  gate checks them against the made kind), `remove` (the actor, this thing or a `thing` argument), `timer`, `transfer`,
+  `draw`. The body's `pick_up` and `push` reparent a thing argument into a free hand (a push holds the thing while it
+  moves), and its `put` sets a held one down `here` by a placement word and an anchor described by a selector; another
+  body has no `motion`, so it is never picked up or pushed. `packages/form-rules/README.md` ("What a form does")
+  defines what each does. A `set` on a timed value gives its new `rate` (a whole number, in the field's unit per second)
+  and, if it gives no `to`, its value is settled at the act's time; a `to` (a whole number) is the value from the act's
+  time on (SA-V4b: watering soaks the planter's soil full). The kettle's switch gives its heat a rate and a timer for the
   boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
   an `int` field may give `by` (signed, never 0) instead of `to`: it adds to the value, within the field's bounds, for a
   count or an amount used up that nothing balances. A cup's `sip` lowers its `water` by 50 and raises its `sips` by 1.
@@ -396,20 +421,22 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   seated. A body still in the activity's own slots is moved out to the place the activity is in, so removing the
   activity removes no body. Then the activity is removed. The rules name the two events `released` and `ended`.
   Nothing removes a member for being quiet.
-- **The "now" line** (proposed: a `now` section) names the parts of the activity's state that say what is happening
+- **The "now" line** (`roles.now`: a member of the activity's own section, 17, so no role is named `now`) names the parts of the activity's state that say what is happening
   now. Souls read it as a fact and schedule themselves by it; the engine never waits on their behalf.
 
   ```json
-  "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" }
+  "roles": { ..., "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" } }
   ```
 
   `floor` is the link type whose ends have the floor. `stage` is an enum field. `ends` is a timed field (SA-F5a)
   counting down in microseconds; the activity ends at the first microsecond it reaches 0. A part the asker may not
-  see is left out and named as unseen.
-- **Unattended**, an activity is removed at that time by its own world form (`who: "world"`, `starts: "timer"`),
+  see is left out and named as unseen. The check gate takes a role for `floor`, an enum field for `stage` and a
+  timed field for `ends`.
+- **Unattended**, an activity is removed at that time by its own world form (`who: "world"`, `starts: "timer"`; the
+  check gate counts the crossing as what arms it),
   whose needs are the time (`ends` at most 0) and that no role is linked. The engine's timer runs it then. While
   anyone is in it, the form is refused and nothing changes.
-  The example is `packages/form-rules/cases/kinds/test/talk.json`.
+  The examples are `packages/form-rules/cases/kinds/test/talk.json` and the lecture, `content/kinds/hall/lecture.json`.
 
 - **A standing activity** (proposed: a `standing` section; SA-G2, [#2874](https://github.com/soulsimulation/souls/issues/2874))
   outlasts a sitting: a course or a job. It names `members`, a link type for those who belong across days; `present`,
@@ -464,7 +491,9 @@ includes its start and excludes its end. A key or unit in ticks is refused. `pre
 point and then to a second one. Five more hand moves share that shape (SA-D4b, [#2857](https://github.com/soulsimulation/souls/issues/2857)):
 `swing` (a hinged leaf pushed through its arc), `stroke` (a hand drawn along a line), `tug` (a handle drawn down) and
 `knock` and `lock` (one contact, like `press`, with their own timing). The middle phase of the first three is named
-`slide_us` and is the same straight path; an arc or a rotation is the viewer's to draw. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
+`slide_us` and is the same straight path; an arc or a rotation is the viewer's to draw. `turn` grips a thing and
+holds there while it turns over in place (a sand timer): its middle phase keeps the hand on the grip (the record's
+second point is the grip). A rope pull is a `tug`. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
 `held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
 contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
 the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free. `strike` and `pump` (SA-D5b, [#2859](https://github.com/soulsimulation/souls/issues/2859)) are the same shape with the effector at the tool's head (a hammer's face, a pump's nozzle): a window `strike_us` per blow or `pump_us` per stroke, `count` of them in the record, claiming the hand only. `craft` is hand work at a point in front
@@ -493,7 +522,10 @@ of a plume leaving the part, so a kettle steams only above the level its range s
 burning on the part, 0 is out), `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting; a value with no
 amount draws no plants) and `wilt` (permille of how far those plants hang, 0 fresh to 1000 wilted; the planter's falls as its
 water runs out, `content/kinds/garden/planter.json`). The part
-is a role of the model (the closed list of roles of the shape language), not the thing's name. The amount comes from `at` (field value to amount, for a bool or enum) or from
+is a role of the model (the closed list of roles of the shape language, the one the look gate draws with), not the
+thing's name. A plant draws on plant roles (`stem`, `leaf`, `bloom`, `fruit`, `root`, and `shoot.1` to `shoot.6`
+for shoots that go one by one), raked sand or soil on `furrow.1` to `furrow.4`; never on a creature's limbs (`arm`,
+`wing`, `ear`, `leg`), which creature gaits move. The amount comes from `at` (field value to amount, for a bool or enum) or from
 `range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
 `over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
 only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
@@ -556,4 +588,5 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 | `refs` | a kind that is not loaded, or kinds in a circle | no |
 
 A state field that no form of the kind sets to some declared value is taken as set from outside, so a need on it is not
-a dead end (the kettle's water is filled by something else).
+a dead end (the kettle's water is filled by something else). A field or value argument stands for each of its choices,
+so a `set` through one reaches each field it lists, with each value it lists.
