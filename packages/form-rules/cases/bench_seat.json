@@ -1,0 +1,42 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:bench_seat (SA-X24): two seats side by side.",
+  "cases": [
+    {
+      "name": "bench_seat_sit_free",
+      "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bench_seat", "slots": { "seat_1": [], "seat_2": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "bench_seat_sit_when_full",
+      "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bench_seat", "slots": { "seat_1": ["o0"], "seat_2": ["o1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "detail": { "node": "t1", "slot": "seat_1" },
+        "fix": null
+      }
+    }
+  ]
+}

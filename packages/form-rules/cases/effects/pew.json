@@ -1,0 +1,85 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:pew (SA-X24): three seats; its kneeler folds up and down. Two Souls move it.",
+  "cases": [
+    {
+      "name": "pew_two_souls_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:pew" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_1" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "seat_1" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_1" } },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 0,
+            "fix": { "form": "sit", "args": { "seat": "seat_2" } }
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_2" } },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b2", "to": { "node": "t1", "slot": "seat_2" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:pew", "slots": { "seat_1": ["b1"], "seat_2": ["b2"] } } }
+    },
+    {
+      "name": "pew_raise_lower_kneeler",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "t1"] },
+          "t1": { "kind": "eden:pew" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "raise_kneeler" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "kneeler_down", "n": 1, "to": 0 }],
+            "events": [{ "event": "eden:kneeler_raised", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "lower_kneeler" },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "kneeler_down", "n": 1, "to": 1 }],
+            "events": [{ "event": "eden:kneeler_lowered", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:pew", "fields": { "kneeler_down": 1 } } }
+    }
+  ]
+}

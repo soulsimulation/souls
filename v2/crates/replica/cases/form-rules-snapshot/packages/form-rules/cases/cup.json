@@ -1,0 +1,76 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:cup. Anyone with a free hand takes it (a change of parent, out of a saucer here). Its water is an amount in grams, 0 to 250, poured in by the kettle; its holder sips 50 g at a time and its sips are a count. An empty cup names no fix of its own: the water comes from the kettle's pour.",
+  "cases": [
+    {
+      "name": "take_every_need_met",
+      "act": { "this": "c1", "form": "take" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": { "kind": "eden:saucer", "slots": { "cup": ["c1"] } },
+          "c1": { "kind": "eden:cup" },
+          "b1": { "hands": { "left": null, "right": "k1" } },
+          "k1": { "kind": "eden:kettle" }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", null], ["b1/hand/right", "k1"]] }
+    },
+    {
+      "name": "take_no_free_hand",
+      "act": { "this": "c1", "form": "take" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": { "kind": "eden:saucer", "slots": { "cup": ["c1"] } },
+          "c1": { "kind": "eden:cup" },
+          "c2": { "kind": "eden:cup" },
+          "k1": { "kind": "eden:kettle" },
+          "b1": { "hands": { "left": "c2", "right": "k1" } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": { "step": "put" } }
+    },
+    {
+      "name": "sip_every_need_met",
+      "act": { "this": "c1", "form": "sip" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:cup", "fields": { "water": 250 } },
+          "b1": { "hands": { "left": "c1", "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", "c1"], ["b1/hand/right", null], ["c1/field/1", 250]] }
+    },
+    {
+      "name": "sip_not_held",
+      "act": { "this": "c1", "form": "sip" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:cup", "fields": { "water": 250 } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": { "step": "take", "thing": "c1" } }
+    },
+    {
+      "name": "sip_less_than_a_sip_left",
+      "act": { "this": "c1", "form": "sip" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:cup", "fields": { "water": 40, "sips": 4 } },
+          "b1": { "hands": { "left": "c1", "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "detail": { "field": "water", "found": 40, "wanted": { "at_least": 50 } }, "fix": null }
+    }
+  ]
+}
