@@ -106,4 +106,25 @@ test('an entry thing on today\'s engine: its entry in the catalog, and the rules
   const later = valueAt(kh, state().heat, nowUs()) as number;
   assert.ok(later > first && later < 100_000, `heat rises over world time: ${first} then ${later}`);
   assert.equal(valueAt(kh, state().heat, Number(heat.set_us) + 150_000_000), 100_000, 'boiled 150 s after it was switched on');
+
+  // A crossing that is due: past the boil, the next plan runs the kettle's `boiled` once, at the time it crossed, as the
+  // world; `heating` reads false and the heat cools from the boil, so the kettle can be switched on again
+  const boil = Number(heat.set_us) + 150_000_000;
+  while (nowUs() < boil + 20_000_000) await tick(100);
+  assert.equal(state().heating, true, 'nothing written between events');
+  const planned = (bridge as unknown as {forms: {plan(s: {entityId: string}, id: string, a: string): unknown}}).forms.plan(soul, kettleId, 'switch_on');
+  assert.ok(planned && 'steps' in (planned as object), JSON.stringify(planned).slice(0, 400));
+  assert.equal(state().heating, false, 'boiled: switched itself off');
+  assert.deepEqual(state().heat, {value: 100_000, per_s: -50, set_us: boil}, 'cooling from the moment it boiled');
+  const cooled = state().heat;
+  (bridge as unknown as {forms: {plan(s: {entityId: string}, id: string, a: string): unknown}}).forms.plan(soul, kettleId, 'switch_on');
+  assert.equal(state().heat, cooled, 'each crossing runs once');
+  const again = await act(`object:${kettleId}:switch_on`) as {accepted: boolean; receipt?: {id: string}};
+  assert.equal(again.accepted, true, JSON.stringify(again).slice(0, 400));
+  const againReceipt = () => edge.receipt(soul.soulId, again.receipt!.id)! as Record<string, any>;
+  for (let i = 0; i < 300 && ['waiting', 'started'].includes(againReceipt().phase); i++) await tick(20);
+  assert.equal(againReceipt().phase, 'completed', JSON.stringify(againReceipt()).slice(0, 400));
+  assert.equal(state().heating, true, 'switched on again');
+  assert.equal(state().heat.per_s, 500);
+  assert.ok((state().heat.value as number) < 100_000 && (state().heat.value as number) > 25_000, `warming again from where it cooled to: ${JSON.stringify(state().heat)}`);
 });
