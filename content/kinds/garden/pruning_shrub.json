@@ -72,7 +72,7 @@
         800
       ]
     },
-    "left_low_tip": {
+    "left_low": {
       "role": "contact",
       "at_mm": [
         -240,
@@ -80,7 +80,7 @@
         0
       ]
     },
-    "right_low_tip": {
+    "right_low": {
       "role": "contact",
       "at_mm": [
         240,
@@ -88,7 +88,7 @@
         0
       ]
     },
-    "left_mid_tip": {
+    "left_mid": {
       "role": "contact",
       "at_mm": [
         -195,
@@ -96,7 +96,7 @@
         0
       ]
     },
-    "right_mid_tip": {
+    "right_mid": {
       "role": "contact",
       "at_mm": [
         195,
@@ -104,7 +104,7 @@
         0
       ]
     },
-    "left_high_tip": {
+    "left_high": {
       "role": "contact",
       "at_mm": [
         -150,
@@ -112,7 +112,7 @@
         0
       ]
     },
-    "right_high_tip": {
+    "right_high": {
       "role": "contact",
       "at_mm": [
         150,
@@ -129,13 +129,28 @@
     ]
   },
   "forms": {
-    "prune_left_low": {
+    "prune": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "shoot": {
+          "type": "field",
+          "of": [
+            "left_low",
+            "right_low",
+            "left_mid",
+            "right_mid",
+            "left_high",
+            "right_high"
+          ]
+        }
+      },
       "needs": [
         {
           "need": "state",
-          "field": "left_low",
+          "field": {
+            "arg": "shoot"
+          },
           "is": true
         },
         {
@@ -151,7 +166,9 @@
         {
           "step": "move",
           "move": "press",
-          "at": "left_low_tip"
+          "at": {
+            "arg": "shoot"
+          }
         },
         {
           "step": "wait",
@@ -161,227 +178,9 @@
       "effects": [
         {
           "change": "set",
-          "field": "left_low",
-          "to": false,
-          "event": "pruned"
-        },
-        {
-          "change": "set",
-          "field": "cuttings",
-          "by": 1,
-          "event": "cutting_kept"
-        }
-      ]
-    },
-    "prune_right_low": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "right_low",
-          "is": true
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "press",
-          "at": "right_low_tip"
-        },
-        {
-          "step": "wait",
-          "us": 4000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "right_low",
-          "to": false,
-          "event": "pruned"
-        },
-        {
-          "change": "set",
-          "field": "cuttings",
-          "by": 1,
-          "event": "cutting_kept"
-        }
-      ]
-    },
-    "prune_left_mid": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "left_mid",
-          "is": true
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "press",
-          "at": "left_mid_tip"
-        },
-        {
-          "step": "wait",
-          "us": 4000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "left_mid",
-          "to": false,
-          "event": "pruned"
-        },
-        {
-          "change": "set",
-          "field": "cuttings",
-          "by": 1,
-          "event": "cutting_kept"
-        }
-      ]
-    },
-    "prune_right_mid": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "right_mid",
-          "is": true
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "press",
-          "at": "right_mid_tip"
-        },
-        {
-          "step": "wait",
-          "us": 4000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "right_mid",
-          "to": false,
-          "event": "pruned"
-        },
-        {
-          "change": "set",
-          "field": "cuttings",
-          "by": 1,
-          "event": "cutting_kept"
-        }
-      ]
-    },
-    "prune_left_high": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "left_high",
-          "is": true
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "press",
-          "at": "left_high_tip"
-        },
-        {
-          "step": "wait",
-          "us": 4000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "left_high",
-          "to": false,
-          "event": "pruned"
-        },
-        {
-          "change": "set",
-          "field": "cuttings",
-          "by": 1,
-          "event": "cutting_kept"
-        }
-      ]
-    },
-    "prune_right_high": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "right_high",
-          "is": true
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "press",
-          "at": "right_high_tip"
-        },
-        {
-          "step": "wait",
-          "us": 4000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "right_high",
+          "field": {
+            "arg": "shoot"
+          },
           "to": false,
           "event": "pruned"
         },
@@ -400,7 +199,7 @@
     "model": "look:pruning_shrub",
     "table": [
       {
-        "part": "arm.l",
+        "part": "shoot.1",
         "field": "left_low",
         "do": "show",
         "at": {
@@ -409,7 +208,7 @@
         }
       },
       {
-        "part": "arm.r",
+        "part": "shoot.2",
         "field": "right_low",
         "do": "show",
         "at": {
@@ -418,7 +217,7 @@
         }
       },
       {
-        "part": "wing.l",
+        "part": "shoot.3",
         "field": "left_mid",
         "do": "show",
         "at": {
@@ -427,7 +226,7 @@
         }
       },
       {
-        "part": "wing.r",
+        "part": "shoot.4",
         "field": "right_mid",
         "do": "show",
         "at": {
@@ -436,7 +235,7 @@
         }
       },
       {
-        "part": "ear.l",
+        "part": "shoot.5",
         "field": "left_high",
         "do": "show",
         "at": {
@@ -445,7 +244,7 @@
         }
       },
       {
-        "part": "ear.r",
+        "part": "shoot.6",
         "field": "right_high",
         "do": "show",
         "at": {
@@ -568,7 +367,7 @@
             25
           ],
           "tint": "wood",
-          "role": "arm.l"
+          "role": "shoot.1"
         },
         {
           "kind": "box",
@@ -583,7 +382,7 @@
             200
           ],
           "tint": "leaf",
-          "role": "arm.l"
+          "role": "shoot.1"
         },
         {
           "kind": "box",
@@ -598,7 +397,7 @@
             25
           ],
           "tint": "wood",
-          "role": "arm.r"
+          "role": "shoot.2"
         },
         {
           "kind": "box",
@@ -613,7 +412,7 @@
             200
           ],
           "tint": "leaf",
-          "role": "arm.r"
+          "role": "shoot.2"
         },
         {
           "kind": "box",
@@ -628,7 +427,7 @@
             25
           ],
           "tint": "wood",
-          "role": "wing.l"
+          "role": "shoot.3"
         },
         {
           "kind": "box",
@@ -643,7 +442,7 @@
             200
           ],
           "tint": "leaf",
-          "role": "wing.l"
+          "role": "shoot.3"
         },
         {
           "kind": "box",
@@ -658,7 +457,7 @@
             25
           ],
           "tint": "wood",
-          "role": "wing.r"
+          "role": "shoot.4"
         },
         {
           "kind": "box",
@@ -673,7 +472,7 @@
             200
           ],
           "tint": "leaf",
-          "role": "wing.r"
+          "role": "shoot.4"
         },
         {
           "kind": "box",
@@ -688,7 +487,7 @@
             25
           ],
           "tint": "wood",
-          "role": "ear.l"
+          "role": "shoot.5"
         },
         {
           "kind": "box",
@@ -703,7 +502,7 @@
             200
           ],
           "tint": "leaf",
-          "role": "ear.l"
+          "role": "shoot.5"
         },
         {
           "kind": "box",
@@ -718,7 +517,7 @@
             25
           ],
           "tint": "wood",
-          "role": "ear.r"
+          "role": "shoot.6"
         },
         {
           "kind": "box",
@@ -733,7 +532,7 @@
             200
           ],
           "tint": "leaf",
-          "role": "ear.r"
+          "role": "shoot.6"
         },
         {
           "kind": "box",
@@ -792,7 +591,7 @@
       "text": "howto_prune",
       "steps": [
         {
-          "form": "prune_left_low"
+          "form": "prune"
         }
       ]
     }
