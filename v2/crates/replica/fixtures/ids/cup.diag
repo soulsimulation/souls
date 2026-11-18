@@ -1,0 +1,5 @@
+# The cup: the kind the kettle refers to (Engine v2 T3, #2640).
+{
+  1: "souls:cup",
+  3: {1: {1: "water_g", 2: "int", 3: 0, 4: "public"}}
+}

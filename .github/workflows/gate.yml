@@ -1,6 +1,8 @@
 # The full Modal release gate as a dispatchable workflow, separate from shipping (#519, #1133 itinerary §2b).
 #   gate   tools/test-harness/release-gate.sh <sha> --baseline <ref> [--scope full|auto] [--dry-run]
-#          against the newest v* tag by default; uploads gate.log and receipt.json as the `gate-<sha12>` artifact
+#          against the last release tag reachable from the candidate by default (release-pin.mjs last: git describe
+#          --tags --abbrev=0 --match 'v0.*' <sha>, so a pinned candidate behind main and a stray tag such as v4.18 both
+#          get the release it builds on); uploads gate.log and receipt.json as the `gate-<sha12>` artifact
 #
 # Why: the laptop path is denied for agents (.claude/settings.json denies release-gate.sh, modal and ssh), so every
 # gate has needed Gene's terminal. This runs it where MODAL_TOKEN_ID/SECRET already live (repo secrets). It ships
@@ -22,7 +24,7 @@ on:
         description: Candidate commit (full sha, or a ref on origin)
         required: true
       baseline:
-        description: Baseline ref; default is the newest v* tag
+        description: Baseline ref; default is the last release tag (v0.*) reachable from the candidate
         required: false
       scope:
         description: full (release head; the only scope that qualifies a ship) or auto (lane candidate)
@@ -65,8 +67,8 @@ jobs:
         run: |
           sha=$(git rev-parse -q --verify "$SHA_IN^{commit}") || { echo "::error::'$SHA_IN' is not a commit on origin"; exit 1; }
           baseline="$BASELINE_IN"
-          [ -n "$baseline" ] || baseline=$(git tag --list 'v*' --sort=-v:refname | head -1)
-          [ -n "$baseline" ] || { echo "::error::No v* tag to gate against; pass the baseline input"; exit 1; }
+          [ -n "$baseline" ] || baseline=$(node tools/world-launcher/deploy/ship/release-pin.mjs last "$sha" || true)
+          [ -n "$baseline" ] || { echo "::error::No v0.* release tag reachable from the candidate; pass the baseline input"; exit 1; }
           bsha=$(git rev-parse -q --verify "$baseline^{commit}") || { echo "::error::baseline '$baseline' is not a commit"; exit 1; }
           cap=$(grep -E '^\s*modal_gates_per_day:' docs/process/PROOF-POLICY.yml | grep -oE '[0-9]+' | head -1)
           cap=${cap:-3}

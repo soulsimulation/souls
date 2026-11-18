@@ -3,7 +3,7 @@
   "kind": "test:kettle",
   "owner": "thing",
   "state": {
-    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 0, "max": 1700, "audience": "public" }
+    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 0, "max": 1700, "audience": {"rule": "everyone"} }
   },
   "points": {
     "handle": { "role": "grip", "at_mm": [0, 220, 0] },
