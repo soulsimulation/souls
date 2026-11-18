@@ -1,0 +1,117 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:climbing_frame. One sits on top at a time: anyone climbs up to the free top (linked as the climber) and climbs down again.",
+  "cases": [
+    {
+      "name": "climb_to_the_free_top",
+      "act": {
+        "this": "t1",
+        "form": "climb",
+        "args": {
+          "place": "top"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:climbing_frame"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "climb_while_someone_sits_on_top",
+      "act": {
+        "this": "t1",
+        "form": "climb",
+        "args": {
+          "place": "top"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:climbing_frame",
+            "slots": {
+              "top": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "fix": null
+      }
+    },
+    {
+      "name": "climb_down",
+      "act": {
+        "this": "t1",
+        "form": "climb_down"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:climbing_frame",
+            "slots": {
+              "top": [
+                "b1"
+              ]
+            },
+            "links": {
+              "climber": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}

@@ -1,0 +1,196 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:pot (core/pot@1, 4 placed): a two-handled pot; held, it serves a bowlful (four spoonfuls) into the nearest bowl. Less than a bowlful in the pot is refused (enough), and so is a bowl without room for it (room). What fills the pot (cooking) is handed back.",
+ "cases": [
+  {
+   "name": "pot_serves_two_bowlfuls_refuses_a_full_bowl_then_runs_short",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:pot",
+      "fields": {
+       "food": 8
+      }
+     },
+     "w1": {
+      "kind": "eden:bowl",
+      "fields": {
+       "food": 0
+      }
+     },
+     "w2": {
+      "kind": "eden:bowl",
+      "fields": {
+       "food": 0
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1",
+       "w2"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    },
+    "now_us": 0
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "serve",
+      "args": {
+       "bowl": "w1"
+      }
+     },
+     "now_us": 0,
+     "receipt": "rserve0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "food",
+        "n": 1,
+        "to": 4,
+        "by": -4
+       },
+       {
+        "change": "set",
+        "node": "w1",
+        "field": "food",
+        "n": 1,
+        "to": 4,
+        "by": 4
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:served",
+        "node": "t1",
+        "changes": [
+         0,
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "serve",
+      "args": {
+       "bowl": "w1"
+      }
+     },
+     "now_us": 1000000,
+     "receipt": "rserve1000000",
+     "expect": {
+      "verdict": "no",
+      "reason": "no_room",
+      "need": 2
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "serve",
+      "args": {
+       "bowl": "w2"
+      }
+     },
+     "now_us": 2000000,
+     "receipt": "rserve2000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "food",
+        "n": 1,
+        "to": 0,
+        "by": -4
+       },
+       {
+        "change": "set",
+        "node": "w2",
+        "field": "food",
+        "n": 1,
+        "to": 4,
+        "by": 4
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "serve",
+      "args": {
+       "bowl": "w2"
+      }
+     },
+     "now_us": 3000000,
+     "receipt": "rserve3000000",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_enough",
+      "need": 1
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:pot",
+     "fields": {
+      "food": 0
+     }
+    },
+    "w1": {
+     "kind": "eden:bowl",
+     "fields": {
+      "food": 4
+     }
+    },
+    "w2": {
+     "kind": "eden:bowl",
+     "fields": {
+      "food": 4
+     }
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,167 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:big_wheel (eden-big-wheel@1, 1 placed): sixteen gondolas, two to a gondola, so two Souls ride together; boarding only while it stands still.",
+ "cases": [
+  {
+   "name": "big_wheel_board_then_set_off_then_nobody_gets_on",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "b2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:big_wheel",
+      "fields": {
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "gondola_2"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rbig_wheel_bo0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "t1",
+         "slot": "gondola_2"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "ride",
+      "args": {
+       "seat": "gondola_1"
+      }
+     },
+     "receipt": "rbig_wheel_bo1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "gondola_1"
+        }
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "under_way",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:set_off",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "gondola_2"
+      }
+     },
+     "receipt": "rbig_wheel_bo2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:big_wheel",
+     "fields": {
+      "under_way": 1
+     },
+     "slots": {
+      "gondola_2": [
+       "b2"
+      ],
+      "gondola_1": [
+       "b1"
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

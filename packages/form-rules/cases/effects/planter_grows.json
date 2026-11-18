@@ -1,0 +1,373 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:planter over ten world days, by the rules alone. A Soul sows it at 0; after that only its own timers act. Sown moist (4 L), each timer finds the soil above the dry line and a stage follows a day apart: sprout, leafy, flowering, fruiting on day 4; the last arms no timer, so nothing changes through day 10 while its water runs out (dry from day 6.1, empty from day 9.3, its plants hanging by the looks table). Sown dry (1 L), the sprout timer on day 1 is refused and nothing more is armed: it stays seed, dry all along and empty from day 2.3, its plants hanging. Each act carries its own world time.",
+ "cases": [
+  {
+   "name": "sown_moist_fruits_on_day_4_with_no_soul",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "p1",
+      "form": "sow"
+     },
+     "now_us": 0,
+     "receipt": "rs1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "seed"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sown",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:sprout_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "sprout",
+        "after_us": 86400000000,
+        "event": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "sprout"
+     },
+     "now_us": 86400000000,
+     "receipt": "rs2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "sprout"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sprouted",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:leaf_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "leaf",
+        "after_us": 86400000000,
+        "event": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "leaf"
+     },
+     "now_us": 172800000000,
+     "receipt": "rs3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "leafy"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:leafed",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:flower_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "flower",
+        "after_us": 86400000000,
+        "event": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "flower"
+     },
+     "now_us": 259200000000,
+     "receipt": "rs4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "flowering"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:flowered",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:fruit_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "fruit",
+        "after_us": 86400000000,
+        "event": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "fruit"
+     },
+     "now_us": 345600000000,
+     "receipt": "rs5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "fruiting"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fruited",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "p1": {
+     "kind": "eden:planter",
+     "fields": {
+      "stage": "fruiting",
+      "water": {
+       "value": 4000000,
+       "per_s": -5,
+       "set_us": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "sown_dry_never_sprouts",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "p1",
+      "form": "sow"
+     },
+     "now_us": 0,
+     "receipt": "rs1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "seed"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sown",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:sprout_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "sprout",
+        "after_us": 86400000000,
+        "event": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "sprout"
+     },
+     "now_us": 86400000000,
+     "receipt": "rs2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "p1": {
+     "kind": "eden:planter",
+     "fields": {
+      "stage": "seed",
+      "water": {
+       "value": 1000000,
+       "per_s": -5,
+       "set_us": 0
+      }
+     }
+    }
+   }
+  }
+ ]
+}

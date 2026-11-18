@@ -6,6 +6,7 @@ version = 4
 name = "bench"
 version = "0.0.0"
 dependencies = [
+ "import-eden",
  "replica",
  "sim",
 ]
@@ -18,6 +19,14 @@ dependencies = [
  "replica",
  "sim",
  "testworld",
+]
+
+[[package]]
+name = "body-script"
+version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
 ]
 
 [[package]]
@@ -150,6 +159,7 @@ dependencies = [
  "i_triangle",
  "import-eden",
  "replica",
+ "skills",
  "testworld",
 ]
 

@@ -1,0 +1,93 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:fountain",
+  "owner": "thing",
+  "points": {
+    "edge_1": {
+      "role": "stand",
+      "at_mm": [
+        2250,
+        0,
+        0
+      ]
+    },
+    "edge_2": {
+      "role": "stand",
+      "at_mm": [
+        1125,
+        0,
+        1949
+      ]
+    },
+    "edge_3": {
+      "role": "stand",
+      "at_mm": [
+        -1125,
+        0,
+        1949
+      ]
+    },
+    "edge_4": {
+      "role": "stand",
+      "at_mm": [
+        -2250,
+        0,
+        0
+      ]
+    },
+    "edge_5": {
+      "role": "stand",
+      "at_mm": [
+        -1125,
+        0,
+        -1949
+      ]
+    },
+    "edge_6": {
+      "role": "stand",
+      "at_mm": [
+        1125,
+        0,
+        -1949
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      4100,
+      2360,
+      4100
+    ]
+  },
+  "areas": {
+    "basin_edge": {
+      "allows": {
+        "sit": "edge"
+      }
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:fountain",
+    "shape": {"round":30,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[1950,0],[2050,100],[2050,550],[1800,600],[1800,200],[0,200]],"segments":12,"tint":"stone"},{"kind":"cyl","at":[0,500,0],"r":1800,"h":40,"segments":12,"tint":"water","material":"water"},{"kind":"cyl","at":[0,1000,0],"r":220,"h":1000,"segments":8,"r2":160,"tint":"stone2"},{"kind":"lathe","at":[0,1350,0],"profile":[[0,0],[850,300],[800,350],[0,180]],"segments":10,"tint":"stone"},{"kind":"cyl","at":[0,1660,0],"r":700,"h":30,"segments":10,"tint":"water","material":"water"},{"kind":"cyl","at":[0,1900,0],"r":80,"h":500,"segments":6,"tint":"stone2"},{"kind":"sphere","at":[0,2200,0],"r":160,"segments":5,"tint":"stone"}],"palette":{"stone":"#b9b3a6","stone2":"#a39b8c","water":"#5d8fa6"},"tags":["civic","fountain","object"]}
+  },
+  "text": {
+    "card": "A round stone fountain with a two-tier bowl: sit on its edge or meet by it.",
+    "plaza_fountain": "plaza fountain",
+    "water_feature": "water feature",
+    "water": "water"
+  },
+  "card": {
+    "text": "card",
+    "category": "water",
+    "synonyms": [
+      "plaza_fountain",
+      "water_feature"
+    ]
+  }
+}
