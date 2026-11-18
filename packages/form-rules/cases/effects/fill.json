@@ -1,0 +1,35 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "The published kettle is filled at a tap, then boiled: fill sets water to cold from the default state.",
+  "cases": [
+    {
+      "name": "kettle_fill_from_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "t1"] },
+          "t1": { "kind": "eden:tap" },
+          "k1": { "kind": "eden:kettle" },
+          "b1": { "hands": { "left": null, "right": "k1" } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "k1", "form": "fill", "args": { "from": "t1" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "k1", "field": "water", "n": 1, "to": "cold" }],
+            "events": [{ "event": "eden:filled", "node": "k1", "changes": [0] }]
+          }
+        },
+        {
+          "act": { "this": "k1", "form": "fill", "args": { "from": "t1" } },
+          "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "field_differs" }
+        }
+      ],
+      "after": { "k1": { "kind": "eden:kettle", "fields": { "water": "cold" } } }
+    }
+  ]
+}

@@ -56,9 +56,11 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 10 | (reserved) | Engine v2 T3's hashed table of referenced kinds ([#2640](https://github.com/soulsimulation/souls/issues/2640), rule 14); not used here |
 | 11 | `children` | Kinds it admits as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
 | 12 | (reserved) | `reactions` (SA-F15) |
+| 13 | `vehicle` | A thing a Soul sits in or on and steers (below) |
+| 14 | `ride` | A set trip between stops that nobody steers (below) |
 | 20 | `looks` | How it looks: `model` (a look id), and `table`, the looks table (below). `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
-| 22 | `card` | `{"text": <key>}`: one line of purpose |
+| 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
 A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
@@ -66,7 +68,19 @@ thing of this kind, at most six, each checked with `can`. A form that starts a t
 chain with a wake entry of its own; the world never waits for a time or a condition.
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
-(SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
+(SA-F10), `stock` (SA-F12), `areas` (SA-D6), `hatch` (SA-F9).
+
+**Vehicles and rides** (SA-F14, [#2884](https://github.com/soulsimulation/souls/issues/2884)). A kind says what a vehicle
+is, never how the engine moves it. `vehicle`: `drive` (a slot admitting one body, posture `sit`: the drive seat; every
+other body slot is a passenger seat), `steer` (a form of this kind, `who` is `holder`, with a `move` step: whoever holds
+the drive seat steers), `speed_mm_s` (whole millimetres per second above zero), `ground` (`level`: ground without doors,
+stairs or ladders; `deep_water`: water deep enough to swim in). Its size is `geometry.bounds_mm`, which is required.
+Getting on and off is only while it stands still, and only where the rider could stand (`level`, `shallow`) or swim
+(`deep_water`): `dismount(entry, {moving, spot})` answers with the code `moving` or `no_footing` and a reason naming the
+spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/vehicle.json`.
+`ride` is for a boat that is not rowed, a sail: `seats` (body slots), `stops` (two or more `stand` points in the order
+of the trip), `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
+`speed_mm_s` and `ground`. A kind is a vehicle or a ride, not both. Sections 13 and 14 are meaning, so covered by the hash.
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
@@ -83,6 +97,22 @@ named fields, each `bool`, `enum`, `int` or `duration`; never text and never an 
 record), an optional `key` (a field of the record; the rules add, remove or set one item by it) and an empty default.
 `stateAtMax(entry)` counts a kind's state with every list full and every child kind at its bound; the check gate uses
 it rather than the empty default.
+
+**Schedules are data** (SA-F16, [#2854](https://github.com/soulsimulation/souls/issues/2854); feeds Engine v2 E7, R15).
+Every "when" the world knows is a state field of type `schedule`, never part of a form: `{"n", "type": "schedule",
+"most": 1 to 100, "default": [entries], "audience"}`. An entry is `{"repeat": "once", "from_us", "to_us"}` (two world
+times, whole microseconds) or `{"repeat": "weekly", "days": ["mon", ...], "from_us", "to_us"}` (one to seven different
+days of `mon` to `sun`, between two local times of day in whole microseconds, `to_us` after `from_us` and at most a day;
+an evening past midnight is two entries). Local time is the clock of the place the thing stands in. A shop states its
+hours as weekly entries; a weekly class states its sittings the same way; a one-off opening is a `once`. The default
+is the hours a copy starts with; its owner sets the list whole. A form never writes a schedule. A ride's timetable is not
+stored: it follows from its track (Engine v2 E7, N12). The world never waits for a time, reminds a mind or starts a
+form at one: the client reads the schedule and acts when it chooses. A form that carries a start time (`at`, `start`,
+`until`, `when`, `schedule`, ...), a step or need that waits for a time or a condition (`wait_until`, `time`, ...) is
+refused, naming the field. Its only waits are a stated pause (`wait`, `us`) and a timer the world itself sets
+(`timer`, `after_us`). A calendar entry is a kind (`content/kinds/calendar/entry.json`): `start` and `end` (durations
+as world times), `words` (by reference), links `place`, `poster` and `interested`; `post` is a form, interest a link. No
+new section number: a schedule is a field type in `state` (3). `stateAtMax` counts three values an entry.
 
 **Audience** is a rule on every state field and link type, written out (there is no implied default), from one closed
 list (`AUDIENCE_RULES` in `tools/entry/format.mjs`): `{"rule": "everyone"}`, `{"rule": "owner"}` (the thing's owner),
@@ -136,8 +166,12 @@ draws; a text, list or schedule field changes no part, so it is not drawn.
   `here` or `parent`), an `anchor` (`me`, `this`), an `order` (`nearest`, `furthest`) and a `rank` (1, 2, ... or
   `last`), the same closed list as Engine v2 E2 ([#2709](https://github.com/soulsimulation/souls/issues/2709)).
   Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument.
-- **needs**: `state` (a field `is` or is `not` a value), `slot_free`, `within_reach` (of a point), `held_by_actor`,
-  `linked`, `unlinked`. SA-F2 evaluates them.
+- **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
+  a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
+  (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`.
+  SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
+  water comes from a thing in the world, never from a refill the kettle does by itself. Reach to another thing's point
+  is not a need the rules can read yet, so `fill` holds the kettle and needs it empty.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`).
