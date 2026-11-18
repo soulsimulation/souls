@@ -250,3 +250,82 @@ fn a_body_enters_the_set_at_one_distance_and_leaves_at_a_larger() {
     assert!(step(between), "between: stays");
     assert!(!step(LEAVE), "at LEAVE: out");
 }
+
+/// R4b (#3151) A1: the counts by cell come whole once, on join, and as changes after; a client applying them holds
+/// the hub's table every world second, and a cell that empties is sent as 0.
+#[test]
+fn r4b_counts_by_cell_come_whole_on_join_then_as_changes_that_rebuild_the_table() {
+    use replica::encode::decode;
+    use worldd::views::subscription::GRID;
+    let (hall, me) = (id(1), id(10));
+    let mut w = w();
+    let mut hub = Hub::new();
+    let mut make = vec![w.body(me, hall, 0)];
+    for i in 0..20 {
+        make.push(w.body(id(100 + i), hall, i as i64 * 3_000_000));
+    }
+    let p = w.part(make);
+    hub.tick(&p).expect("a tick");
+    let s = hub
+        .subscribe(Request {
+            scopes: vec![Scope::Follow(me)],
+            level: Level::Full,
+            budget: 8_000,
+        })
+        .expect("subscribed");
+    let num = |v: &Value| match v {
+        Value::Uint(n) => *n as i64,
+        Value::Nint(n) => -1 - *n as i64,
+        _ => panic!("an integer"),
+    };
+    let mut table: BTreeMap<(i64, i64), u32> = BTreeMap::new();
+    let (mut whole, mut changes, mut emptied) = (0, 0, 0);
+    for t in 1..=100i64 {
+        // Everyone but me walks 0.5 m a tick, so cells fill and empty.
+        let moves = (0..20)
+            .map(|i| w.walk(id(100 + i), hall, i as i64 * 3_000_000 + t * 500_000))
+            .collect();
+        let p = w.part(moves);
+        hub.tick(&p).expect("a tick");
+        let mut got = false;
+        for o in hub.drain(s) {
+            if !matches!(o.kind, Kind::Cells | Kind::Changes) {
+                continue;
+            }
+            got = true;
+            let Value::Map(m) = decode(&o.bytes).expect("an item").value else {
+                panic!("a map")
+            };
+            if o.kind == Kind::Cells {
+                whole += 1;
+                table.clear();
+            } else {
+                changes += 1;
+            }
+            let Value::Array(rows) = &m[&4] else {
+                panic!("rows")
+            };
+            for r in rows {
+                let Value::Array(r) = r else { panic!("a row") };
+                let c = (num(&r[0]), num(&r[1]));
+                match num(&r[2]) as u32 {
+                    0 => {
+                        emptied += 1;
+                        table.remove(&c)
+                    }
+                    n => table.insert(c, n),
+                };
+            }
+        }
+        if got {
+            let want = hub.places().cells(GRID).remove(&hall).expect("the hall").1;
+            assert_eq!(table, want, "the client's table at tick {t}");
+        }
+    }
+    println!(
+        "R4b A1: {whole} whole table, {changes} changes, {emptied} cells emptied; the table rebuilt equals the hub's every second"
+    );
+    assert!(emptied > 0, "a cell that empties is sent as 0");
+    assert_eq!(whole, 1, "whole only on join");
+    assert!(changes >= 4, "changes every second after: {changes}");
+}
