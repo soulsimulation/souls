@@ -548,6 +548,39 @@ impl Controller {
         Ok(())
     }
 
+    /// Sets each control's velocity and mode, as [`Controller::set`] with [`Part::Velocity`] does one at a time, and
+    /// returns the refusals with their bodies, in order. Controls in body id order (as a tick stages them) are matched
+    /// along the bodies in one walk, not looked up each (#3213); any other order is set one at a time.
+    pub fn set_velocities(
+        &mut self,
+        controls: &[(Id, Driver, ControllerInput)],
+    ) -> Vec<(Id, Refusal)> {
+        let mut refused = Vec::new();
+        if !controls.is_sorted_by_key(|c| c.0) {
+            for &(body, driver, input) in controls {
+                if let Err(r) = self.set(body, driver, Part::Velocity(input.velocity, input.mode)) {
+                    refused.push((body, r));
+                }
+            }
+            return refused;
+        }
+        let mut slots = self.bodies.iter_mut().peekable();
+        for &(body, driver, input) in controls {
+            while slots.next_if(|(id, _)| **id < body).is_some() {}
+            let set = match slots.peek_mut() {
+                Some((id, s)) if **id == body => s.steers(driver).map(|()| {
+                    s.input.velocity = input.velocity;
+                    s.input.mode = input.mode;
+                }),
+                _ => refuse("body-unknown", replica::world_model::show(body)),
+            };
+            if let Err(r) = set {
+                refused.push((body, r));
+            }
+        }
+        refused
+    }
+
     /// One tick: each body, in id order, has its input logged if it changed, takes its facing, and is stepped by
     /// the mover of the surface it stands on. A body refused here is listed and stays where it was; the others go on.
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {

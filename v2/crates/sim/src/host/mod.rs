@@ -327,13 +327,7 @@ pub fn step(
 /// inputs go on (B1 #2680). An input whose driver does not hold the body's locomotion is refused by the controller and
 /// changes nothing; the refusals are returned with their bodies.
 pub fn hand_on(staged: &Staged, controller: &mut Controller) -> Vec<(Id, Refusal)> {
-    let mut refused = Vec::new();
-    for &(body, driver, input) in &staged.controls {
-        if let Err(r) = controller.set(body, driver, Part::Velocity(input.velocity, input.mode)) {
-            refused.push((body, r));
-        }
-    }
-    refused
+    controller.set_velocities(&staged.controls)
 }
 
 /// Hands a tick's staged crossings on: for each, the world's [`Links`] gives the track (or opens a shut door, and the
