@@ -23,6 +23,7 @@ pub mod query;
 pub mod read;
 pub mod refusals;
 pub mod rules;
+pub mod speech;
 pub mod stream;
 pub mod time;
 pub mod tree;

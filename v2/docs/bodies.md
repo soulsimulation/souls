@@ -90,6 +90,15 @@ the driver holding all the body's locomotion, and one move per resource, set by 
 is `resource-not-held` or `resource-missing`. An unheld resource gets the neutral input (still, hands down, facing
 kept), which never moves a body. An input is logged only when it changes.
 
+Gaze and voice (B11 #2742). Where a body looks is part of its input (a node, a point or ahead, record field 8), set
+by the driver holding its gaze and logged when it changes. Its voice carries one utterance at a time: a new one
+replaces the one under way or waits behind it, by the intent's `replace`, and lasts its length from its words, one
+timer. The world writes each as `souls:said {1: {21: words}, 2: reach mm, 3: [hearer, ...], 4: length µs}` in an
+entry whose audience says who may read it ([audience.md](audience.md) rule 4, `replica::speech`). Its hearers are
+resolved when it is written and recorded (`sim::speech`): for ordinary talk, the Souls whose interest set (R4) holds
+the speaker, found from the bodies within the set's leave distance, never a scan. So a body walks, carries and talks
+at once, each under its own driver.
+
 ## Moves (B2)
 
 A move (`v2/crates/replica/src/moves.rs`, B2 #2681) is data: its claims, blocks and cancels in rule 2 to 4's terms,

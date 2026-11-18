@@ -109,6 +109,6 @@ const result = {
 result.a1 = seen.hashes === tenths && seen.hashEqual === tenths;
 result.a2 = seen.played === done.parts && seen.errors.length === 0;
 result.a3 = result.delayMs.p50 !== null && result.delayMs.p50 >= 1500 && result.delayMs.p50 <= 2500;
-result.a5 = /, 0 of \d+ lines said found/.test(scan);
+result.a5 = /, 0 of \d+ lines said found/.test(scan) && /, 0 of \d+ private ids found/.test(scan);
 console.log(`result ${JSON.stringify(result)}`);
 process.exit(result.a1 && result.a2 && result.a3 && result.a5 ? 0 : 1);
