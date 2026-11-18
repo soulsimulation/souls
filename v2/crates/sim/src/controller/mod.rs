@@ -363,12 +363,15 @@ impl Track {
             node: self.to,
             slot: None,
         };
+        // A hovering body (B12) stands held at its height on the far side too.
+        let lift = crate::mover::lift_of(body);
         *body = on.place(
             body.id,
             frame,
             self.arrive.unwrap_or(p),
             body.pose.orientation,
         )?;
+        crate::mover::lift(body, lift);
         body.linear = linear;
         Ok(true)
     }
@@ -737,8 +740,19 @@ impl Controller {
     /// One tick: each body, in id order, has its input logged if it changed, takes its facing, and is stepped by
     /// the mover of the surface it stands on. A body refused here is listed and stays where it was; the others go on.
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {
+        self.step_on(&|_| surfaces, dt, at)
+    }
+
+    /// As [`Controller::step`], each body on the surfaces `surfaces_of` gives for it (B12: those of its size class).
+    pub fn step_on<'s>(
+        &mut self,
+        surfaces_of: &dyn Fn(Id) -> &'s BTreeMap<Id, Surface>,
+        dt: Micros,
+        at: Micros,
+    ) -> Stepped {
         let mut out = Stepped::default();
         for (&id, s) in self.bodies.iter_mut() {
+            let surfaces = surfaces_of(id);
             if s.voice.now.as_ref().is_some_and(|(_, ends)| *ends <= at) {
                 s.voice.now = None;
             }

@@ -7,16 +7,21 @@
 // Times its own runs: the wall-clock rule (K7) binds the engine, not this test.
 #![allow(clippy::disallowed_methods)]
 
+mod common;
+
 use import_eden::Import;
 use replica::ids::Id;
 use replica::kinds::Kinds;
 use replica::kinds::sizes::{Build, Size};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::time::Micros;
 use replica::world_model::{plain, show};
-use sim::ground::sizes::change_size;
+use sim::ground::sizes::{Ready, change_size};
 use sim::ground::{OpenGround, Patch, Scene, Turn, cut_floor};
+use sim::host::Runner;
 use sim::links::{Building, Kind};
 use sim::routes::{ALL, Hop, Map, Spot};
+use sim::walk::town::Cut;
 use std::collections::BTreeMap;
 
 fn eden() -> Import {
@@ -157,6 +162,7 @@ fn a3_a_change_to_a_larger_size_that_does_not_fit_or_has_no_exit_is_refused() {
         im.nodes["building/floor-2"],
     );
     let map = Map::build(&im.tree, ground, &|_| 0).unwrap();
+    let cuts = cuts(&im);
     let who = replica::pose::fixture(1);
     // A radius takes the class at or above it; one over the largest is refused.
     assert_eq!(Size::for_radius(250).unwrap(), Size::Standard);
@@ -177,19 +183,35 @@ fn a3_a_change_to_a_larger_size_that_does_not_fit_or_has_no_exit_is_refused() {
     ] {
         let mut body = family("walker", "standard", 1_750, 0);
         let before = body;
-        let no =
-            change_size(&im.tree, ground, node, who, um(at), &mut body, Size::Large).unwrap_err();
+        let no = change_size(
+            ready(&cuts, Size::Large),
+            ground,
+            node,
+            who,
+            um(at),
+            &mut body,
+            Size::Large,
+        )
+        .unwrap_err();
         println!("A3 standard to large, {place}: {}: {}", no.name, no.detail);
         assert_eq!(no.name, name);
         assert_eq!(body, before, "the old body is kept");
         let mut small = before;
-        change_size(&im.tree, ground, node, who, um(at), &mut small, Size::Small)
-            .expect("smaller fits");
+        change_size(
+            ready(&cuts, Size::Small),
+            ground,
+            node,
+            who,
+            um(at),
+            &mut small,
+            Size::Small,
+        )
+        .expect("smaller fits");
         assert_eq!(small.size, Size::Small);
     }
     let mut body = family("walker", "standard", 1_750, 0);
     change_size(
-        &im.tree,
+        ready(&cuts, Size::Large),
         ground,
         ground,
         who,
@@ -200,6 +222,98 @@ fn a3_a_change_to_a_larger_size_that_does_not_fit_or_has_no_exit_is_refused() {
     .expect("the open square");
     println!("A3 standard to large, the open square: made");
     assert_eq!(body.size, Size::Large);
+}
+
+/// Every class's cut of a world, as the walk's town keeps them.
+fn cuts(im: &Import) -> BTreeMap<Size, Cut> {
+    let ground = im.nodes["ground"];
+    Size::ALL
+        .into_iter()
+        .map(|s| (s, Cut::new(&im.tree, ground, s).expect("a cut")))
+        .collect()
+}
+
+/// The cut of the class `size`, as a size change reads it.
+fn ready(cuts: &BTreeMap<Size, Cut>, size: Size) -> Ready<'_> {
+    let c = &cuts[&size];
+    Ready {
+        squares: &c.squares,
+        buildings: &c.buildings,
+    }
+}
+
+/// The test world with a solid block 8 m by 2 m standing 0.9 m outside each of the hall's 2.4 m doors (front and
+/// back): a standard body passes between wall and block, a large one does not.
+fn testworld_blocked_hall() -> Import {
+    let w = testworld::generate(1, 0).expect("the test world");
+    // The hall's walls' outer faces are 20.2 m either side of its centre, 62 m north of the square's.
+    let block = |id: &str, z: i64| {
+        format!(
+            r#"{{"id":"{id}","def":"testworld-ring@1","ref":"testworld-ring@1","parent":null,"pose":[0,0,{z},0],"scale_ppm":1000000,"name":"{id}","solids":[[0,0,4000,1000,0,0,3000,1,0]]}},"#
+        )
+    };
+    let blocks = block("block-front", 62_000 - 20_200 - 900 - 1_000)
+        + &block("block-back", 62_000 + 20_200 + 900 + 1_000);
+    let at = w.text.find(r#""things":["#).expect("the things") + r#""things":["#.len();
+    let text = format!("{}{blocks}{}", &w.text[..at], &w.text[at..]);
+    import_eden::load(&text).expect("the blocked test world loads")
+}
+
+/// A2 (the follow-up): a change to large in the hall, whose doors all open onto the open ground, is refused as
+/// `size-no-way-out` when the open ground outside each door is too tight for a large body, and made when it is not.
+#[test]
+fn a2_a_door_to_open_ground_too_tight_for_the_new_size_is_no_way_out() {
+    let who = replica::pose::fixture(1);
+    for (world, im, want) in [
+        ("the test world", testworld(), None),
+        (
+            "blocks outside the hall's doors",
+            testworld_blocked_hall(),
+            Some("size-no-way-out"),
+        ),
+    ] {
+        let (ground, hall) = (im.nodes["ground"], im.nodes["hall/floor-0"]);
+        let map = Map::build(&im.tree, ground, &|_| 0).unwrap();
+        let cuts = cuts(&im);
+        let at = piece_near(&map, hall, [0, 0]).at;
+        let mut body = family("walker", "standard", 1_750, 0);
+        let before = body;
+        let got = change_size(
+            ready(&cuts, Size::Large),
+            ground,
+            hall,
+            who,
+            um(at),
+            &mut body,
+            Size::Large,
+        );
+        match (&got, want) {
+            (Ok(()), None) => {
+                println!("A2 standard to large in the hall, {world}: made");
+                assert_eq!(body.size, Size::Large);
+            }
+            (Err(no), Some(name)) => {
+                println!(
+                    "A2 standard to large in the hall, {world}: {}: {}",
+                    no.name, no.detail
+                );
+                assert_eq!(no.name, name);
+                assert_eq!(body, before, "the old body is kept");
+            }
+            _ => panic!("{world}: {got:?}, wanted {want:?}"),
+        }
+        let mut small = before;
+        change_size(
+            ready(&cuts, Size::Small),
+            ground,
+            hall,
+            who,
+            um(at),
+            &mut small,
+            Size::Small,
+        )
+        .expect("smaller fits");
+    }
 }
 
 /// A1: a small, a standard, a large and a hovering body each cross Eden by route, west to east between the same two
@@ -295,6 +409,184 @@ fn a1_four_bodies_cross_eden_by_route() {
             );
         }
     }
+}
+
+/// A1 (the follow-up): a small, a standard, a large and a hovering body each walk Eden west to east between the
+/// same two points as B12's A1, end to end, by N7's walk skill (`skills::route`) run through the host (T9c's
+/// runner): its route, next corners and crossings read ground and links cut for its own class, and every step is
+/// the controller's, on the surfaces of the body's class (`Town::surfaces_of`). One town keeps one cut per class;
+/// the floater is held at its hover height at every tick.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn a1_four_bodies_walk_eden_through_the_controller() {
+    let im = eden();
+    let ground = im.nodes["ground"];
+    // B12's A1 ends: the westmost and eastmost standing points of the open ground in the largest part of the large
+    // class's map.
+    let large = Map::build_for(&im.tree, ground, Size::Large, &|_| 0).unwrap();
+    let parts = large.parts(ALL);
+    let (n, ..) = large.counts();
+    let mut count: BTreeMap<u32, usize> = BTreeMap::new();
+    for &p in &parts {
+        *count.entry(p).or_default() += 1;
+    }
+    let main = *count
+        .iter()
+        .max_by_key(|(k, c)| (**c, std::cmp::Reverse(**k)))
+        .unwrap()
+        .0;
+    let pts: Vec<[i64; 3]> = (0..n as u32)
+        .filter(|&q| parts[q as usize] == main && large.patch_of(q).node == ground)
+        .flat_map(|q| large.standing(q).into_iter().map(move |p| (q, p)))
+        .map(|(q, p)| large.world(q, p))
+        .collect();
+    let west = *pts.iter().min_by_key(|p| p[0]).unwrap();
+    let east = *pts.iter().max_by_key(|p| p[0]).unwrap();
+    drop(large);
+    let (mut town, _) = common::town_of(im, b"souls/size-walk-test/1");
+    // A size change to a class not cut yet is refused, to retry once it is cut off the tick.
+    let mut b = family("small", "small", 1_000, 0);
+    let no = town
+        .change_size(
+            ground,
+            replica::pose::fixture(9),
+            Vec3::ZERO,
+            &mut b,
+            Size::Small,
+        )
+        .unwrap_err();
+    assert_eq!(no.name, "size-not-ready");
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    const SPEED: i64 = 1_400_000;
+    const TICK: Micros = 100_000;
+    println!(
+        "A1 from ({}, {}) m to ({}, {}) m",
+        west[0] / 1000,
+        west[2] / 1000,
+        east[0] / 1000,
+        east[2] / 1000
+    );
+    println!(
+        "A1 | body | class | hover mm | cut ms | ground pieces | ticks | walked s | logged inputs | path sum mm | ends mm from the goal"
+    );
+    for (k, (label, build)) in [
+        ("small", family("small", "small", 1_000, 0)),
+        ("standard", family("walker", "standard", 1_750, 0)),
+        ("large", family("large", "large", 2_400, 0)),
+        ("hovering", family("floater", "standard", 1_200, 400)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let who = replica::pose::fixture(10 + k as u64);
+        let t = std::time::Instant::now();
+        town.size(who, build.size).expect("the class's cut");
+        let cut = t.elapsed().as_millis();
+        let at = Vec3::new(west[0] * 1000, west[1] * 1000, west[2] * 1000);
+        let mut body = town.surfaces_of(who)[&ground]
+            .place(who, frame, at, Quat::IDENTITY)
+            .unwrap_or_else(|e| panic!("{label}: {}: {}", e.name, e.detail));
+        sim::mover::lift(&mut body, build.hover_mm * 1000);
+        assert_eq!(body.pose.support, build.support(ground));
+        let goal = Vec3::new(east[0] * 1000, east[1] * 1000, east[2] * 1000);
+        let mut runner = Runner::new(TICK);
+        common::walk(&mut runner, &mut town, body, SPEED, ground, goal)
+            .unwrap_or_else(|e| panic!("{label}: {}: {}", e.name, e.detail));
+        let (mut ticks, mut path) = (0u64, 0i128);
+        while runner.running(who) {
+            runner
+                .tick(&mut town)
+                .unwrap_or_else(|e| panic!("{label} at tick {ticks}: {}: {}", e.name, e.detail));
+            assert!(
+                runner.refused.is_empty(),
+                "{label} at tick {ticks}: {:?}",
+                runner.refused
+            );
+            ticks += 1;
+            assert!(ticks < 40_000, "{label}: not arrived");
+            let b = runner.controller.body(who).unwrap();
+            path += i128::from(b.pose.position.x) + i128::from(b.pose.position.z);
+            assert_eq!(
+                b.pose.support,
+                build.support(ground),
+                "{label}: its support"
+            );
+            b.pose.check().expect("a legal pose");
+            if build.hover_mm > 0 {
+                let floor = town.surfaces[&ground]
+                    .place(who, frame, b.pose.position, Quat::IDENTITY)
+                    .unwrap();
+                assert_eq!(
+                    b.pose.position.y - floor.pose.position.y,
+                    build.hover_mm * 1000,
+                    "{label}: held at its hover height"
+                );
+            }
+        }
+        assert!(common::arrived(&runner, who).is_some(), "{label}: arrived");
+        let end = runner.controller.body(who).unwrap().pose.position;
+        let off = ((end.x - goal.x).pow(2) + (end.z - goal.z).pow(2)).isqrt();
+        let logged = runner.controller.log().len();
+        println!(
+            "A1 | {label} | {} | {} | {cut} | {} | {ticks} | {} | {logged} | {} | {}",
+            build.size.name(),
+            build.hover_mm,
+            town.surfaces_of(who)[&ground].pieces().len(),
+            ticks * TICK as u64 / 1_000_000,
+            path / 1_000,
+            off / 1000
+        );
+    }
+    assert_eq!(town.cut_sizes(), Size::ALL.to_vec(), "one cut per class");
+    // A size change with the cut warm: on the open ground at the west end, and on the first 50 floors of the large
+    // cut, each at its first triangle's middle; 20 repeats each. It reads the kept cut and cuts nothing.
+    let who = replica::pose::fixture(9);
+    let mut spots = vec![(
+        ground,
+        Vec3::new(west[0] * 1000, west[1] * 1000, west[2] * 1000),
+    )];
+    for b in town.ready(Size::Large).unwrap().buildings {
+        for (&floor, (_, patch)) in &b.floors {
+            if let Some(pc) = patch.pieces.first()
+                && let Some(t) = pc.triangles.first()
+            {
+                let v = |k: usize, a: usize| i64::from(pc.vertices[t[k] as usize][a]);
+                let mid = |a: usize| (v(0, a) + v(1, a) + v(2, a)) * 1000 / 3;
+                spots.push((floor, Vec3::new(mid(0), mid(1), mid(2))));
+            }
+        }
+    }
+    spots.truncate(51);
+    let mut took = Vec::new();
+    let (mut made, mut refused) = (0, 0);
+    for &(node, at) in &spots {
+        for _ in 0..20 {
+            let mut b = family("walker", "standard", 1_750, 0);
+            let t = std::time::Instant::now();
+            let r = town.change_size(node, who, at, &mut b, Size::Large);
+            took.push(t.elapsed().as_nanos());
+            match r {
+                Ok(()) => made += 1,
+                Err(e) => {
+                    assert_ne!(e.name, "size-not-ready");
+                    refused += 1;
+                }
+            }
+        }
+    }
+    took.sort();
+    let us = |n: u128| n as f64 / 1000.0;
+    println!(
+        "A1 size change, warm, {} spots x 20 ({made} made, {refused} refused): median {:.1} us, p99 {:.1} us, max {:.1} us",
+        spots.len(),
+        us(took[took.len() / 2]),
+        us(took[took.len() * 99 / 100]),
+        us(*took.last().unwrap())
+    );
+    assert!(*took.last().unwrap() < 1_000_000, "under 1 ms");
 }
 
 /// A4: every floor node of Eden and every square of its open ground cut for each size class, two repeats: time and

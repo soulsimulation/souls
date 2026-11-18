@@ -29,11 +29,19 @@
 //!   their targets' nodes. A place is never in a doorway or on a stair: none within `spots::CLEAR` of a link's end on
 //!   the target's node, or within half the link's width and half that of its line (placed on the open ground by its
 //!   building's frame).
+//! - **Sizes** (B12). A body walks on ground, routes and links cut for its own size class ([`Town::size`]): each
+//!   class is cut once, when a body of it is first sized, and kept ([`Cut`]). A body never sized is standard, the
+//!   class of the town's own map, surfaces and buildings. Its route, its next corner, its crossing's track and
+//!   landing, and the controller's step ([`Town::surfaces_of`]) read its class's cut. Turns and standing spots read
+//!   the standard cut: a link's width is the same for every class. A size change reads the new class's kept cut and
+//!   cuts nothing ([`Town::change_size`]): a class is cut off the world's tick ([`Town::prepare`]), and a change to
+//!   a class not cut yet is refused as `size-not-ready`.
 
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, Scene, exits};
+use crate::ground::sizes::{Ready, change_size};
+use crate::ground::{HUMAN_RADIUS, OpenGround, Patch, Scene, exits};
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
@@ -44,6 +52,7 @@ use replica::effects::{Actor, Cause, Refusal};
 use replica::encode::Value;
 use replica::host::{F_GRANTED, F_TURNS, Seen};
 use replica::ids::Id;
+use replica::kinds::sizes::{Build, Size};
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
@@ -122,6 +131,23 @@ pub struct Town {
     /// Where each link is in `buildings` (building, link), the first that holds it: read every tick by each walker
     /// with a link ahead, so not searched for (#3213).
     link_at: BTreeMap<Id, (usize, usize)>,
+    /// The standard class's squares of the open ground (the other classes' are in their cuts).
+    squares: BTreeMap<(i32, i32), Patch>,
+    /// The cuts for the classes other than standard, each made once (B12).
+    cuts: BTreeMap<Size, Cut>,
+    /// Each sized body's class.
+    sizes: BTreeMap<Id, Size>,
+}
+
+/// The ground and links cut for one size class (B12): N5's map, each node's surface, the links read for it, and the
+/// open ground's squares as cut.
+pub struct Cut {
+    pub map: Map,
+    pub surfaces: BTreeMap<Id, Surface>,
+    pub buildings: Vec<Building>,
+    /// Each square of the open ground, as cut: what a size change reads ([`crate::ground::sizes::Ready`]).
+    pub squares: BTreeMap<(i32, i32), Patch>,
+    link_at: BTreeMap<Id, (usize, usize)>,
 }
 
 /// Where each link is in `buildings`: the first building, and its first link, with that id.
@@ -145,20 +171,23 @@ fn find_link<'b>(
     buildings.get(i)?.links.get(j).filter(|l| l.id == id)
 }
 
-impl Town {
-    /// Everything on the open ground `ground`; openings are written by `doors`.
-    pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
-        let map = Map::build(&tree, ground, &|_| 0)?;
+impl Cut {
+    /// Everything on the open ground `ground`, cut for a body of the class `size`.
+    pub fn new(tree: &Tree, ground: Id, size: Size) -> Result<Cut, String> {
+        let r = size.radius_mm();
+        let map = Map::build_for(tree, ground, size, &|_| 0)?;
         let mut surfaces = BTreeMap::new();
-        let open = OpenGround::prepare(&Scene::of(&tree, ground)?, HUMAN_RADIUS)?;
+        let open = OpenGround::prepare(&Scene::of(tree, ground)?, r)?;
         let (mut pieces, mut meets) = (Vec::new(), Vec::new());
+        let mut squares = BTreeMap::new();
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
-            pieces.extend(p.pieces);
-            meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
+            pieces.extend(p.pieces.iter().cloned());
+            meets.extend(p.meets.iter().map(|m| ((i, j), m.clone())));
+            squares.insert((i, j), p);
         }
         let gh = tree.handle(ground).ok_or("no such ground")?;
-        let gdoors = ground_doors(&tree, ground)?;
+        let gdoors = ground_doors(tree, ground)?;
         surfaces.insert(ground, Surface::new(ground, pieces));
         let mut buildings = Vec::new();
         let mut stack = vec![gh];
@@ -172,12 +201,12 @@ impl Town {
                 let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
                 let open = Open {
                     ground,
-                    place: crate::ground::scene::xform_to(&tree, h, gh)?,
+                    place: crate::ground::scene::xform_to(tree, h, gh)?,
                     meets: &meets,
                     on: &on,
                     doors: &gdoors,
                 };
-                if let Ok(b) = Building::read_on(&tree, id, Some(open)) {
+                if let Ok(b) = Building::read_sized(tree, id, Some(open), r) {
                     for (&floor, (_, patch)) in &b.floors {
                         surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
                     }
@@ -199,8 +228,28 @@ impl Town {
             on: &on,
             doors: &gdoors,
         };
-        buildings.push(Building::of_ground(&tree, open, &known)?);
+        buildings.push(Building::of_ground(tree, open, &known)?);
         let link_at = link_index(&buildings);
+        Ok(Cut {
+            map,
+            surfaces,
+            buildings,
+            squares,
+            link_at,
+        })
+    }
+}
+
+impl Town {
+    /// Everything on the open ground `ground`; openings are written by `doors`.
+    pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
+        let Cut {
+            map,
+            surfaces,
+            buildings,
+            squares,
+            link_at,
+        } = Cut::new(&tree, ground, Size::Standard)?;
         Ok(Town {
             tree,
             ground,
@@ -215,15 +264,105 @@ impl Town {
             spent: Cell::new(Spent::default()),
             lines: BTreeMap::new(),
             crossings: BTreeMap::new(),
+            squares,
+            cuts: BTreeMap::new(),
+            sizes: BTreeMap::new(),
         })
     }
 
-    fn link(&self, id: Id) -> Option<&crate::links::Link> {
-        find_link(&self.link_at, &self.buildings, id)
+    /// Cuts the class `size` if it is not cut yet: up to a second or two on Eden, so never on the world's tick.
+    pub fn prepare(&mut self, size: Size) -> Result<(), String> {
+        if size != Size::Standard && !self.cuts.contains_key(&size) {
+            let cut = Cut::new(&self.tree, self.ground, size)?;
+            self.cuts.insert(size, cut);
+        }
+        Ok(())
     }
 
-    fn building(&self, link: Id) -> Option<&Building> {
-        self.buildings.iter().find(|b| b.link(link).is_some())
+    /// From now on `body` walks as a body of the class `size`, on that class's cut, made here on its first use.
+    pub fn size(&mut self, body: Id, size: Size) -> Result<(), String> {
+        self.prepare(size)?;
+        self.sizes.insert(body, size);
+        Ok(())
+    }
+
+    /// The cut of the class `size` as a size change reads it, if it is cut.
+    pub fn ready(&self, size: Size) -> Option<Ready<'_>> {
+        if size == Size::Standard {
+            return Some(Ready {
+                squares: &self.squares,
+                buildings: &self.buildings,
+            });
+        }
+        self.cuts.get(&size).map(|c| Ready {
+            squares: &c.squares,
+            buildings: &c.buildings,
+        })
+    }
+
+    /// Changes `build` to the class `to` for `body` standing at `at` (µm, the frame of `node`), reading the class's
+    /// kept cut and cutting nothing (`crate::ground::sizes::change_size`). A class not cut yet is refused as
+    /// `size-not-ready`: [`Town::prepare`] it off the tick, then retry.
+    pub fn change_size(
+        &self,
+        node: Id,
+        body: Id,
+        at: Vec3,
+        build: &mut Build,
+        to: Size,
+    ) -> Result<(), Refusal> {
+        let ready = self.ready(to).ok_or_else(|| {
+            refusal(
+                "size-not-ready",
+                format!("{} is not cut yet for {}; retry", to.name(), show(body)),
+            )
+        })?;
+        change_size(ready, self.ground, node, body, at, build, to)
+    }
+
+    /// The class `body` walks as.
+    pub fn size_of(&self, body: Id) -> Size {
+        self.sizes.get(&body).copied().unwrap_or(Size::Standard)
+    }
+
+    /// The classes cut so far, standard always among them.
+    pub fn cut_sizes(&self) -> Vec<Size> {
+        let mut v: Vec<Size> = self.cuts.keys().copied().collect();
+        v.push(Size::Standard);
+        v.sort();
+        v
+    }
+
+    /// The cut `body` walks on, when its class is not standard.
+    fn cut_of(&self, body: Id) -> Option<&Cut> {
+        self.sizes.get(&body).and_then(|s| self.cuts.get(s))
+    }
+
+    /// The surfaces a body of `body`'s class walks on: the controller steps it on these.
+    pub fn surfaces_of(&self, body: Id) -> &BTreeMap<Id, Surface> {
+        self.cut_of(body).map_or(&self.surfaces, |c| &c.surfaces)
+    }
+
+    /// The map `body`'s class routes on, and the tree.
+    fn routes_of(&mut self, body: Id) -> (&Tree, &mut Map) {
+        let map = match self.sizes.get(&body).and_then(|s| self.cuts.get_mut(s)) {
+            Some(c) => &mut c.map,
+            None => &mut self.map,
+        };
+        (&self.tree, map)
+    }
+
+    /// Link `id` as `body`'s class reads it: its ends lie on that class's ground.
+    fn link_for(&self, body: Id, id: Id) -> Option<&crate::links::Link> {
+        match self.cut_of(body) {
+            Some(c) => find_link(&c.link_at, &c.buildings, id),
+            None => find_link(&self.link_at, &self.buildings, id),
+        }
+    }
+
+    fn building_for(&self, body: Id, link: Id) -> Option<&Building> {
+        let buildings = self.cut_of(body).map_or(&self.buildings, |c| &c.buildings);
+        buildings.iter().find(|b| b.link(link).is_some())
     }
 
     /// The town as the host's questions read it in a tick: the map behind a cell (a route is cached as it is
@@ -233,6 +372,12 @@ impl Town {
             tree: &self.tree,
             map: RefCell::new(&mut self.map),
             surfaces: &self.surfaces,
+            cuts: self
+                .cuts
+                .iter_mut()
+                .map(|(&s, c)| (s, (RefCell::new(&mut c.map), &c.surfaces)))
+                .collect(),
+            sizes: &self.sizes,
             buildings: &self.buildings,
             link_at: &self.link_at,
             turns: self.turns.as_ref(),
@@ -249,6 +394,9 @@ pub struct View<'a> {
     pub tree: &'a Tree,
     map: RefCell<&'a mut Map>,
     surfaces: &'a BTreeMap<Id, Surface>,
+    /// The other classes' maps and surfaces (B12), and each sized body's class.
+    cuts: BTreeMap<Size, OfSize<'a>>,
+    sizes: &'a BTreeMap<Id, Size>,
     buildings: &'a [Building],
     link_at: &'a BTreeMap<Id, (usize, usize)>,
     turns: Option<&'a Turns>,
@@ -257,6 +405,9 @@ pub struct View<'a> {
     lines: RefCell<&'a mut BTreeMap<Id, Line>>,
     ground: Id,
 }
+
+/// One size class's map and surfaces, as a tick's questions read them.
+type OfSize<'a> = (RefCell<&'a mut Map>, &'a BTreeMap<Id, Surface>);
 
 /// A corner is reached within this, µm.
 pub const AT_CORNER: i64 = 100_000;
@@ -525,20 +676,19 @@ impl World for Town {
 
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
         let here = node_of(body);
-        let from = self
-            .map
+        let (tree, map) = self.routes_of(body.id);
+        let from = map
             .spot_near(here, body.pose.position, AT_EDGE)
             .ok_or_else(|| refusal("off-ground", show(here)))?;
-        let to = self
-            .map
+        let to = map
             .spot(node, goal)
             .ok_or_else(|| refusal("off-ground", show(node)))?;
-        let route = self.map.route(&self.tree, from, to, HANDS)?;
+        let route = map.route(tree, from, to, HANDS)?;
         let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
         for h in &route.hops {
             let Hop::Link { id, .. } = h else { continue };
             let l = self
-                .link(*id)
+                .link_for(body.id, *id)
                 .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
             let near = (0..2)
                 .filter(|&k| l.ends[k].is_some_and(|e| e.floor == on))
@@ -559,6 +709,16 @@ impl World for Town {
             link: None,
         });
         Ok(legs)
+    }
+}
+
+impl<'a> View<'a> {
+    /// The map and surfaces of `body`'s class (B12).
+    fn of(&self, body: Id) -> (&RefCell<&'a mut Map>, &'a BTreeMap<Id, Surface>) {
+        match self.sizes.get(&body).and_then(|s| self.cuts.get(s)) {
+            Some((map, surfaces)) => (map, surfaces),
+            None => (&self.map, self.surfaces),
+        }
     }
 }
 
@@ -589,7 +749,8 @@ impl View<'_> {
     fn straight(&self, body: &Body, to: [i64; 2], within: i64) -> Result<bool, Refusal> {
         let node = node_of(body);
         let s = self
-            .surfaces
+            .of(body.id)
+            .1
             .get(&node)
             .ok_or_else(|| refusal("no-surface", show(node)))?;
         let p = body.pose.position;
@@ -669,7 +830,7 @@ impl View<'_> {
         if self.clear(body, [to.x, to.z], 0)? {
             return Ok(line(vec![p, [to.x, to.z]], true));
         }
-        let mut map = self.map.borrow_mut();
+        let mut map = self.of(body.id).0.borrow_mut();
         let (Some(from), Some(goal)) = (
             map.spot_near(node, body.pose.position, AT_EDGE),
             // A link's near end lies on its piece's edge, within the grid's rounding.
@@ -735,7 +896,7 @@ impl Town {
         at: Micros,
     ) -> Result<(u8, Option<Track>), Refusal> {
         let l = self
-            .link(link)
+            .link_for(body.id, link)
             .ok_or_else(|| refusal("link-missing", show(link)))?;
         if let Some(why) = l.blocked {
             return Err(refusal(why, show(link)));
@@ -760,20 +921,20 @@ impl Town {
         let mut arrive = None;
         if here == self.ground || to == self.ground {
             let place = self
-                .building(link)
+                .building_for(body.id, link)
                 .map(|b| b.place)
                 .ok_or_else(|| refusal("link-missing", show(link)))?;
             let out = |e: String| refusal("out-of-range", e);
             if let Some(e) = far {
                 // Where the map stands it, else the end's middle; then on the mover's surface (#3168).
-                let stand = self
-                    .map
+                let map = self.cut_of(body.id).map_or(&self.map, |c| &c.map);
+                let stand = map
                     .spot_near(to, e.middle(), AT_EDGE)
                     .map_or(e.middle(), |s| {
                         Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
                     });
                 let stand = self
-                    .landing(to, stand)
+                    .landing(body.id, to, stand)
                     .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
                 let last = if to == self.ground {
                     back(&place, stand).map_err(out)?
@@ -792,7 +953,7 @@ impl Town {
             }
         } else if let Some(last) = line.last_mut() {
             *last = self
-                .landing(to, *last)
+                .landing(body.id, to, *last)
                 .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
         }
         // The carry starts at the near end: a body asking from further off would be carried there in a straight
@@ -846,11 +1007,11 @@ impl Town {
         )
     }
 
-    /// Where a crossing stands a body on `node` for the point `at` (µm, its frame): `at` when the mover's surface
-    /// holds it, else the surface's nearest legal point within [`LAND`] (N5's map and N6's mover cut the ground
-    /// apart, so a link's end on a map piece's edge can lie just off the mover's), else none (#3168).
-    fn landing(&self, node: Id, at: Vec3) -> Option<Vec3> {
-        let s = self.surfaces.get(&node)?;
+    /// Where a crossing stands `body` on `node` for the point `at` (µm, its frame): `at` when the mover's surface (of
+    /// the body's class) holds it, else the surface's nearest legal point within [`LAND`] (N5's map and N6's mover
+    /// cut the ground apart, so a link's end on a map piece's edge can lie just off the mover's), else none (#3168).
+    fn landing(&self, body: Id, node: Id, at: Vec3) -> Option<Vec3> {
+        let s = self.surfaces_of(body).get(&node)?;
         let frame = Frame { node, slot: None };
         if s.place(node, frame, at, Quat::IDENTITY).is_ok() {
             return Some(at);
