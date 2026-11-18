@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":296,"group":"open-ended","words":"have a quiet night in","obvious":3,"things":{"sofa":"eden:sofa","lamp":"eden:floor_lamp","door":"eden:door"},"given":{"door":{"open":1}},"chain":[{"this":"door","form":"close"},{"this":"lamp","form":"switch_on"},{"this":"me","form":"sit_down","args":{"spot":"sofa"}}]}

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":72,"group":"object","words":"browse the bookshelf","obvious":3,"things":{"bookshelf":"eden:bookshelf"},"chain":[{"this":"me","form":"look_at","args":{"target":"bookshelf"}},{"read":"bookshelf","field":"stock"}]}

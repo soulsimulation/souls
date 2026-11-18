@@ -13,6 +13,12 @@
 // workflow's own commit, like the counted kits) names a template and steps; the ref boots a fake-mind dev world of it, and
 // the proof recorder, also from the workflow's commit, records the kit's steps (SIM_PROOF_GPU=hardware). The clip, its
 // sidecar and its frame timing are the artifact; nothing is uploaded with a token.
+// `runner=souls-wide` (D5) is one instance on the cores of four souls-timed ones, 12 or more physical cores, for the gates'
+// wide runs: the split commands with a core plan, and settled; viewer arms above 2,000 run there only. It and the narrow
+// instances share CPUs, so the start gate is the soft mutex between them (docs/testing.md, "Wide runner").
+// `v2-bench` runs an Engine v2 bench (a [[bin]] of the ref's v2/tools/bench/Cargo.toml) in release from v2/, `repeats`
+// times, on the runner's own cores as walk does; its stdout goes to the job summary. The Rust toolchain the ref's
+// v2/rust-toolchain.toml pins is installed in the per-run directory by the workflow.
 //
 //   node timed-run.mjs inputs                                        validate INPUT_* env; write step outputs (`target`)
 //   node timed-run.mjs load   --record <file>                        starting load; refuse to start above the gate
@@ -31,18 +37,26 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
 
-export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'load', 'settled', 'hundred', 'colocate', 'viewers', 'counted', 'clip', 'page'];
+export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'load', 'settled', 'hundred', 'colocate', 'viewers', 'counted', 'clip', 'page', 'v2-bench'];
 /** Proof clip kits live here in the workflow's commit; each holds kit.json ({template, eden?, viewport?, localStorage?}) and steps.mjs. */
 export const CLIP_KITS = 'tools/proof/clips';
 /** Counted scenarios: name → kit directory (repository-relative) and its files. Each kit runs one cell with
  *  `run.mjs <arm> <tree> <port> <outDir>`, scores it with `score-frozen.mjs <run.json>`, and classifies it with
  *  `classify-frozen.mjs <outDir> <tree> <port>`. The files are the kit as declared on #1367 (sha256s recorded per run). */
 export const COUNTED = { 'stair-foot': { dir: 'tools/playtest/counted/stair-foot', files: ['run.mjs', 'score-frozen.mjs', 'classify-frozen.mjs', 'replay.mjs', 'probe.mjs'] } };
-/** The runner sets: `souls-timed` for everything; the GitHub-hosted runners only for what scores pass/fail per item. */
-export const RUNNERS = ['souls-timed', 'hosted'];
+/** The runner sets: `souls-timed` for everything; the GitHub-hosted runners only for what scores pass/fail per item;
+ *  `souls-wide` (D5, #2505), one instance on the cores of four souls-timed ones, for the gates' wide runs. */
+export const RUNNERS = ['souls-timed', 'hosted', 'souls-wide'];
 /** #1970: the commands whose world runs on two of the runner's physical cores and whose load generator on the other two. */
 export const SPLIT = ['eval-load', 'bench-client', 'meetup', 'slopes-profile', 'viewers', 'page'];
+/** D5: what may run on `souls-wide`: the split commands (with a core plan) and settled. */
+export const WIDE = [...SPLIT, 'settled'];
+/** D5: viewer arms above this run on `souls-wide` only (the driver needs about 0.18 cores per 1,000 viewers, #2512). */
+export const NARROW_VIEWERS_MAX = 2000;
 export const LOAD_GATE = 0.25;      // mean busy fraction of the runner's own cores above which a run does not start
+// D5: souls-wide also refuses while any one of its CPUs is busier than this. It shares its CPUs with four souls-timed
+// instances, and one narrow job busy on its six CPUs barely moves the mean of twenty-four.
+export const WIDE_MAX_GATE = 0.5;
 export const SETTLE_WAIT_S = 300;
 export const SAMPLE_S = 5;
 const WALK_WORLDS = ['eden-2026', 'bench-eden', 'eden-2026-genesis', 'bench-hamlet', 'fuzz'];
@@ -73,6 +87,37 @@ export const ARG_ALLOW = {
   page: { '--souls': list(/^(500|[1-4]\d\d|[1-9]\d?)$/, 4), '--shape': (v) => v === 'event' || v === 'uniform', '--warm-sec': int(1, 120), '--measure-sec': int(5, 300), '--settle-sec': int(1, 600), '--profile-sec': int(1, 60), '--short': FLAG },
 };
 
+/** v2-bench: the bench crate's manifest in the ref, and what may follow `--`: plain tokens only, never shell syntax. */
+export const V2_BENCH = 'v2/tools/bench/Cargo.toml';
+const BENCH_BIN = /^[a-z0-9][a-z0-9_-]{0,40}$/, BENCH_TOKEN = /^[A-Za-z0-9._=/-]{1,200}$/;
+/** v2-bench `args`: `--bin <name>`, then optionally `--` and up to 20 plain tokens for the bench. The name is checked
+ *  against the ref's manifest when the run starts (benchBins). */
+export function checkBenchArgs(args) {
+  const t = String(args ?? '').trim().split(/\s+/).filter(Boolean), pass = t.slice(3);
+  if (t[0] !== '--bin' || !BENCH_BIN.test(t[1] ?? '')) throw new Error(`input args: v2-bench needs --bin <name> first (a [[bin]] of ${V2_BENCH})`);
+  if (t.length > 2 && t[2] !== '--') throw new Error(`input args: ${JSON.stringify(t[2])}: the bench's own arguments follow --`);
+  if (pass.length > 20) throw new Error('input args: at most 20 arguments for the bench');
+  for (const x of pass) if (!BENCH_TOKEN.test(x)) throw new Error(`input args: ${JSON.stringify(x)} is not a plain token (letters, digits, . _ = / -)`);
+  return ['--bin', t[1], ...(t.length > 2 ? ['--', ...pass] : [])];
+}
+/** The binaries a Cargo.toml declares: the name of each [[bin]] table. */
+export function benchBins(toml) {
+  const bins = [];
+  let inBin = false;
+  for (const l of String(toml).split('\n')) {
+    const h = /^\s*(\[\[?)\s*([^\]]+?)\s*\]\]?\s*(#.*)?$/.exec(l);
+    if (h) { inBin = h[1] === '[[' && h[2] === 'bin'; continue; }
+    const m = inBin && /^\s*name\s*=\s*"([^"]+)"/.exec(l);
+    if (m) bins.push(m[1]);
+  }
+  return bins;
+}
+/** v2-bench: cargo's arguments for the build (untimed) and for each timed repeat (cwd: the ref's v2/). */
+export function benchLines(inp) {
+  const bin = inp.args[1], pass = inp.args.slice(2);
+  return { build: ['build', '-p', 'bench', '--release', '--locked', '--bin', bin], run: ['run', '-p', 'bench', '--release', '--locked', '--bin', bin, ...pass] };
+}
+
 /** `args` → a checked argument list for `command`: whitespace-separated `--flag value` pairs (or bare flags) from its
  *  allowlist, once each. */
 export function checkArgs(command, args) {
@@ -101,10 +146,14 @@ export function parseInputs(env) {
   const runner = String(env.INPUT_RUNNER || 'souls-timed');
   if (!RUNNERS.includes(runner)) bad('runner', runner, RUNNERS.join(' or '));
   if (runner === 'hosted' && command !== 'counted') bad('runner', runner, `${command} is a timing run and runs on souls-timed only`);
-  const args = checkArgs(command, env.INPUT_ARGS), inp = { ref, command, repeats: Number(repeats), args };
+  if (runner === 'souls-wide' && !WIDE.includes(command)) bad('runner', runner, `souls-wide runs ${WIDE.join(', ')} only`);
+  const args = command === 'v2-bench' ? checkBenchArgs(env.INPUT_ARGS) : checkArgs(command, env.INPUT_ARGS), inp = { ref, command, repeats: Number(repeats), args };
   const cores = String(env.INPUT_CORES ?? '').trim();   // #2507: a core plan, for the split commands only
   if (cores && !SPLIT.includes(command)) bad('cores', cores, `a core plan is for ${SPLIT.join(', ')} only`);
   if (cores) inp.cores = parseCorePlan(cores) ?? bad('cores', cores, 'world=N or world=N,launcher=M (physical cores, 1 to 64); the load drivers get the rest');
+  if (runner === 'souls-wide' && SPLIT.includes(command) && !cores) bad('cores', cores, 'souls-wide needs a core plan, such as world=6,launcher=1');
+  const arms = command === 'viewers' && args.includes('--viewers') ? args[args.indexOf('--viewers') + 1].split(',').map(Number) : [];
+  if (runner !== 'souls-wide' && arms.some((n) => n > NARROW_VIEWERS_MAX)) bad('runner', runner, `viewer arms above ${NARROW_VIEWERS_MAX} run on souls-wide only`);
   if (command === 'clip' && !args.includes('--kit')) bad('args', env.INPUT_ARGS, 'clip needs --kit <name> (a folder of tools/proof/clips)');
   if (command !== 'counted') return { ...inp, runner };
   // counted: a base ref, a scenario, and the one cell this job runs (base-k or cand-k, k up to repeats)
@@ -153,7 +202,7 @@ export function countedSteps(inp, { kit, out, port }) {
   ];
 }
 /** The log of repeat k: walk writes one per repeat, the others one in all. */
-export const logName = (command, k) => (command === 'walk' ? `walk-r${k}.log` : command === 'eval-scripted' ? 'eval.log' : command === 'counted' ? `counted/${k}.log` : `${command}.log`);
+export const logName = (command, k) => (command === 'walk' || command === 'v2-bench' ? `${command}-r${k}.log` : command === 'eval-scripted' ? 'eval.log' : command === 'counted' ? `counted/${k}.log` : `${command}.log`);
 /** A clip's frame timing from its frames' presentation times (seconds) → count, span, mean fps, largest gap. */
 export function frameTiming(pts) {
   const t = pts.filter(Number.isFinite).sort((a, b) => a - b), gaps = t.slice(1).map((x, i) => x - t[i]), r3 = (x) => +x.toFixed(3);
@@ -214,12 +263,14 @@ export function parseProcStat(text) {
   return o;
 }
 /** Busy fraction per core between two /proc/stat samples; the runner's own cores and the whole machine. */
-export function loadFacts(a, b, own, gate = LOAD_GATE) {
+export function loadFacts(a, b, own, gate = LOAD_GATE, maxGate = null) {
   const busy = (c) => { const d = b[c][1] - a[c][1]; return d > 0 ? (b[c][0] - a[c][0]) / d : 0; };
   const all = Object.keys(b).filter((c) => a[c]).map(Number), r3 = (x) => +x.toFixed(3), mean = (cs) => (cs.length ? r3(cs.reduce((s, c) => s + busy(c), 0) / cs.length) : null);
   const mine = own.filter((c) => all.includes(c));
   const ownMean = mean(mine);
-  return { ownCores: mine.length, ownBusy: ownMean, ownBusyMax: mine.length ? r3(Math.max(...mine.map(busy))) : null, machineCores: all.length, machineBusy: mean(all), gate, overGate: ownMean == null || ownMean > gate };
+  const ownMax = mine.length ? r3(Math.max(...mine.map(busy))) : null;
+  return { ownCores: mine.length, ownBusy: ownMean, ownBusyMax: ownMax, machineCores: all.length, machineBusy: mean(all), gate, ...(maxGate != null ? { maxGate } : {}),
+    overGate: ownMean == null || ownMean > gate || (maxGate != null && ownMax > maxGate) };
 }
 
 /** Soul tokens anywhere under out (each `.eden-agent.json`, and every `token` in a Soul home's `credentials.json`); none
@@ -256,6 +307,7 @@ export const PUBLISH = {
   // the clip, its sidecar (scrubbed) and a still of a page that never arrived; the world's data and the Soul folders stay
   clip: ['clip/*.mp4', 'clip/*.webm', 'clip/*.json', 'clip/*.open-failed.png', 'clip.log'],
   page: ['page/results.json', 'page/REPORT.md', 'page/*.png', 'page/world.log', 'page.log'],
+  'v2-bench': ['v2-bench-build.log', ...[1, 2, 3].map((k) => `v2-bench-r${k}.log`)],
 };
 /** Media a timed run publishes byte for byte (never scrubbed as text). */
 export const BINARY = /\.(mp4|webm|png)$/;
@@ -440,6 +492,37 @@ async function runClip(inp, rec, out, env) {
   writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, runs: [{ repeat: 1, exitCode: code, wallMs: clip.wallMs, clip }] }, null, 1));
   if (code !== 0) throw new Error(`the recorder exited ${code}${code === 5 ? ' (no hardware GL renderer)' : code === 4 ? ' (privacy hit: the take is not published)' : ''}`);
 }
+/** One cargo call (cwd: the ref's v2/), its stdout and stderr to the log and the job log; resolves to its exit code and stdout. */
+async function cargo(args, { env, log }) {
+  const ws = createWriteStream(log), child = spawn('cargo', args, { cwd: 'v2', env, stdio: ['ignore', 'pipe', 'pipe'] }), so = [];
+  child.stdout.on('data', (b) => { so.push(b); ws.write(b); process.stdout.write(b); });
+  child.stderr.on('data', (b) => { ws.write(b); process.stdout.write(b); });
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
+  const code = await new Promise((r) => { child.on('error', () => r(127)); child.on('close', (c) => r(c ?? 1)); }); ws.end();
+  return { code, stdout: Buffer.concat(so).toString('utf8') };
+}
+/** An Engine v2 bench of the ref (cwd: its checkout): the binary must be a [[bin]] of its v2/tools/bench/Cargo.toml; it is
+ *  built in release (untimed), then run `repeats` times on the runner's own cores. Each repeat's stdout (the bench's
+ *  table) goes to the job summary, scrubbed; HOME is inside the per-run directory. */
+async function runV2Bench(inp, rec, out, env) {
+  const bins = existsSync(V2_BENCH) ? benchBins(readFileSync(V2_BENCH, 'utf8')) : [], lines = benchLines(inp), bin = inp.args[1];
+  if (!bins.includes(bin)) throw new Error(`v2-bench: ${bin} is not a [[bin]] of ${V2_BENCH} in the ref (${bins.join(', ') || 'no manifest or no [[bin]]'})`);
+  env.HOME = join(env.PER_RUN, 'home'); mkdirSync(env.HOME, { recursive: true });
+  const sw = scrubWith(), summary = (t) => { if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, t); };
+  console.log(`v2-bench: cargo ${lines.build.join(' ')}`);
+  const t0 = Date.now(), b = await cargo(lines.build, { env, log: join(out, 'v2-bench-build.log') }), build = { exitCode: b.code, wallMs: Date.now() - t0 };
+  const runs = [];
+  if (b.code === 0) for (let k = 1; k <= inp.repeats; k++) {
+    console.log(`v2-bench ${k}/${inp.repeats}: cargo ${lines.run.join(' ')}`);
+    const load = la(), t = Date.now(), r = await cargo(lines.run, { env, log: join(out, logName('v2-bench', k)) });
+    runs.push({ repeat: k, exitCode: r.code, wallMs: Date.now() - t, load: { start: load, end: la() }, cpus: ownCpus().length });
+    summary(`### v2-bench ${bin}, repeat ${k} of ${inp.repeats} (exit ${r.code})\n\n\`cargo ${lines.run.join(' ')}\` from \`v2/\` at ${String(env.REF_COMMIT ?? '').slice(0, 12)}, 1- and 5-min load ${load.join(' ')}\n\n\`\`\`text\n${scrub(r.stdout, sw).slice(-60_000)}\n\`\`\`\n\n`);
+  }
+  writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, build, runs }, null, 1));
+  if (b.code !== 0) throw new Error(`v2-bench: the release build exited ${b.code}`);
+  const failed = runs.filter((r) => r.exitCode !== 0);
+  if (failed.length) throw new Error(`${failed.length} of ${runs.length} run(s) exited non-zero`);
+}
 const scrubWith = () => { const env = process.env, u = (() => { try { return userInfo().username; } catch { return env.USER; } })();
   return { paths: [[env.PER_RUN, '<per-run>'], [env.GITHUB_WORKSPACE, '.'], [env.RUNNER_WORKSPACE, '<runner-work>'], [env.RUNNER_TEMP, '<runner-temp>'], [env.HOME, '~']], names: [[hostname(), '<host>'], [u, '<user>']] }; };
 
@@ -466,14 +549,14 @@ async function main(cmd) {
     if (inp.cores) console.log(`cores: plan ${JSON.stringify(splitCores(own, siblingsOf, inp.cores))}`);   // #2507: throws if it does not fit
     let f;
     for (let t = 0; ; t += 15) {
-      const a = stat(); await sleep(SAMPLE_S * 1000); f = loadFacts(a, stat(), own);
+      const a = stat(); await sleep(SAMPLE_S * 1000); f = loadFacts(a, stat(), own, LOAD_GATE, inp.runner === 'souls-wide' ? WIDE_MAX_GATE : null);
       if (!gated || !f.overGate || t >= SETTLE_WAIT_S) break;
-      console.log(`own cores busy ${f.ownBusy} above the gate ${LOAD_GATE}; waiting`); await sleep(15_000);
+      console.log(`own cores busy ${f.ownBusy} (max ${f.ownBusyMax}) above the gate ${LOAD_GATE}${f.maxGate ? ` (any one CPU ${f.maxGate})` : ''}; waiting`); await sleep(15_000);
     }
     const startLoad = { ...f, gated, sampleS: SAMPLE_S, machineLoad1PerCore: +(loadavg()[0] / f.machineCores).toFixed(3) };
     writeFileSync(rf, JSON.stringify({ schema: 'timed-run/1', workflowRun: process.env.GITHUB_RUN_ID, ref: inp.ref, commit: process.env.REF_COMMIT ?? null, inputs: inp, startLoad }, null, 1));
     console.log(`start load: own ${f.ownCores} cores busy ${f.ownBusy} (max ${f.ownBusyMax}), machine ${f.machineCores} cores busy ${f.machineBusy}, 1-min load per core ${startLoad.machineLoad1PerCore}`);
-    if (gated && f.overGate) throw new Error(`the runner's own cores stayed above the gate (${f.ownBusy} > ${LOAD_GATE}) for ${SETTLE_WAIT_S} s; the run does not start`);
+    if (gated && f.overGate) throw new Error(`the runner's own cores stayed above the gate (mean ${f.ownBusy}, max ${f.ownBusyMax}; gate ${LOAD_GATE}${f.maxGate ? `, any one CPU ${f.maxGate}` : ''}) for ${SETTLE_WAIT_S} s; the run does not start`);
     return;
   }
   if (cmd === 'run') {   // fake minds, no GitHub token
@@ -482,6 +565,7 @@ async function main(cmd) {
     mkdirSync(out, { recursive: true });
     if (inp.command === 'counted') return runCounted(inp, rec, out, env);
     if (inp.command === 'clip') return runClip(inp, rec, out, env);
+    if (inp.command === 'v2-bench') return runV2Bench(inp, rec, out, env);
     // #1970: the world on two physical cores, the load generator (the driver and all it starts but the world) on the rest
     // (one or two). HOME goes inside the per-run directory: the capacity bench moves finished world data under ~/.Trash.
     const split = SPLIT.includes(inp.command) ? splitCores(ownCpus(), siblingsOf, inp.cores) : null;

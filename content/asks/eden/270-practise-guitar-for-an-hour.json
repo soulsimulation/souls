@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":270,"group":"over-time","words":"practise guitar for an hour","obvious":2,"when":"for an hour","things":{"stand":"eden:guitar_stand","guitar":"eden:guitar"},"chain":[{"this":"stand","form":"take"},{"this":"guitar","form":"play"}]}
