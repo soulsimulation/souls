@@ -12,8 +12,8 @@
 //! - **Rounding.** A point is put on the micrometre grid toward where the walk last stood, then checked: one that
 //!   rounding put outside its triangle falls back to the last point that was inside one. A slid point is moved
 //!   inwards by a micrometre at a time until it is on the piece's side of the edge.
-//! - **What is stored.** The pose (its frame is the body's parent, its support the surface with height 0, its height
-//!   the surface's at that point) and the velocity it moved at, relative to the frame. A step that changes neither
+//! - **What is stored.** The pose (its frame is the body's parent, its support the surface with height 0, or a
+//!   hovering body's height ([`lift`], B12), its height the surface's at that point plus that) and the velocity it moved at, relative to the frame. A step that changes neither
 //!   writes nothing; one that does gives T6's motion sample (`HandOff`, from mover to mover). A body standing on a
 //!   moving deck is carried by the deck's own motion and writes nothing.
 //! - **Crossing.** Into another node's frame (a doorway's other side, a deck to a dock): T4's hand-off keeps the
@@ -354,7 +354,7 @@ impl Surface {
         } else {
             self.walk(body.piece, body.tri, p, [p[0] + want[0], p[1] + want[1]])
         };
-        let y = i128::from(self.height(q, t, e));
+        let y = i128::from(self.height(q, t, e)) + i128::from(lift_of(body));
         let fit = |v: i128| i64::try_from(v).map_err(|_| ());
         let (Ok(x), Ok(z)) = (fit(e[0]), fit(e[1])) else {
             return refuse("out-of-range", "a position past 64 bits");
@@ -377,6 +377,23 @@ impl Surface {
             linear,
             angular: Vec3::ZERO,
         }))
+    }
+}
+
+/// How far above its surface the body is held, µm: its support's height (B12's hovering body; 0 stands).
+pub fn lift_of(body: &Body) -> i64 {
+    match body.pose.support {
+        Support::Surface { height, .. } => height,
+        _ => 0,
+    }
+}
+
+/// Holds a body standing on a surface `height` µm above it (B12's hovering body, as its build gives it), from where
+/// it is now held: its support's height and its position's height change together. Not on a surface: nothing.
+pub fn lift(body: &mut Body, height: i64) {
+    if let Support::Surface { surface, .. } = body.pose.support {
+        body.pose.position.y += height - lift_of(body);
+        body.pose.support = Support::Surface { surface, height };
     }
 }
 

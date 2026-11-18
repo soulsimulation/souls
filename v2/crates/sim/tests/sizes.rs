@@ -8,15 +8,23 @@
 #![allow(clippy::disallowed_methods)]
 
 use import_eden::Import;
-use replica::ids::Id;
+use replica::bodies::{Class, Family, Resource, SkillShape, Want};
+use replica::effects::{Header, Refusal, schema_hash};
+use replica::encode::{Name, Value, encode};
+use replica::ids::{Hash, Id, Purpose};
 use replica::kinds::Kinds;
 use replica::kinds::sizes::{Build, Size};
-use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::pose::{Frame, Mode, Pose, Quat, Support, Vec3};
+use replica::time::Micros;
 use replica::world_model::{plain, show};
+use sim::controller::{Controller, Driver, Part};
 use sim::ground::sizes::change_size;
 use sim::ground::{OpenGround, Patch, Scene, Turn, cut_floor};
-use sim::links::{Building, Kind};
+use sim::links::{Building, Doors, Kind};
+use sim::mover::Body;
 use sim::routes::{ALL, Hop, Map, Spot};
+use sim::walk::town::Town;
+use sim::walk::{AT_GOAL, Crowd, Leg, Mark, Pass, World};
 use std::collections::BTreeMap;
 
 fn eden() -> Import {
@@ -202,6 +210,63 @@ fn a3_a_change_to_a_larger_size_that_does_not_fit_or_has_no_exit_is_refused() {
     assert_eq!(body.size, Size::Large);
 }
 
+/// The test world with a solid block 8 m by 2 m standing 0.9 m outside each of the hall's 2.4 m doors (front and
+/// back): a standard body passes between wall and block, a large one does not.
+fn testworld_blocked_hall() -> Import {
+    let w = testworld::generate(1, 0).expect("the test world");
+    // The hall's walls' outer faces are 20.2 m either side of its centre, 62 m north of the square's.
+    let block = |id: &str, z: i64| {
+        format!(
+            r#"{{"id":"{id}","def":"testworld-ring@1","ref":"testworld-ring@1","parent":null,"pose":[0,0,{z},0],"scale_ppm":1000000,"name":"{id}","solids":[[0,0,4000,1000,0,0,3000,1,0]]}},"#
+        )
+    };
+    let blocks = block("block-front", 62_000 - 20_200 - 900 - 1_000)
+        + &block("block-back", 62_000 + 20_200 + 900 + 1_000);
+    let at = w.text.find(r#""things":["#).expect("the things") + r#""things":["#.len();
+    let text = format!("{}{blocks}{}", &w.text[..at], &w.text[at..]);
+    import_eden::load(&text).expect("the blocked test world loads")
+}
+
+/// A2 (the follow-up): a change to large in the hall, whose doors all open onto the open ground, is refused as
+/// `size-no-way-out` when the open ground outside each door is too tight for a large body, and made when it is not.
+#[test]
+fn a2_a_door_to_open_ground_too_tight_for_the_new_size_is_no_way_out() {
+    let who = replica::pose::fixture(1);
+    for (world, im, want) in [
+        ("the test world", testworld(), None),
+        (
+            "blocks outside the hall's doors",
+            testworld_blocked_hall(),
+            Some("size-no-way-out"),
+        ),
+    ] {
+        let (ground, hall) = (im.nodes["ground"], im.nodes["hall/floor-0"]);
+        let map = Map::build(&im.tree, ground, &|_| 0).unwrap();
+        let at = piece_near(&map, hall, [0, 0]).at;
+        let mut body = family("walker", "standard", 1_750, 0);
+        let before = body;
+        let got = change_size(&im.tree, ground, hall, who, um(at), &mut body, Size::Large);
+        match (&got, want) {
+            (Ok(()), None) => {
+                println!("A2 standard to large in the hall, {world}: made");
+                assert_eq!(body.size, Size::Large);
+            }
+            (Err(no), Some(name)) => {
+                println!(
+                    "A2 standard to large in the hall, {world}: {}: {}",
+                    no.name, no.detail
+                );
+                assert_eq!(no.name, name);
+                assert_eq!(body, before, "the old body is kept");
+            }
+            _ => panic!("{world}: {got:?}, wanted {want:?}"),
+        }
+        let mut small = before;
+        change_size(&im.tree, ground, hall, who, um(at), &mut small, Size::Small)
+            .expect("smaller fits");
+    }
+}
+
 /// A1: a small, a standard, a large and a hovering body each cross Eden by route, west to east between the same two
 /// points: each on a map cut for its class, the route carrying the class, and the floater's pose held above the
 /// surface below it at its hover height at every point it passes.
@@ -295,6 +360,232 @@ fn a1_four_bodies_cross_eden_by_route() {
             );
         }
     }
+}
+
+fn name(s: &str) -> Name {
+    Name::new(s).expect("a name")
+}
+
+/// The walk skill's world with every step made by the controller (B1): the skill's velocity is set through the
+/// walk's driver, the controller steps the body on the surfaces of its class, and the skill reads the body back.
+/// A link is not crossed here (the controller has no crossing yet), and the route crosses none.
+struct Driven {
+    town: Town,
+    ctl: Controller,
+    drivers: BTreeMap<Id, Driver>,
+}
+
+impl World for Driven {
+    fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
+        self.town.plan(body, node, goal)
+    }
+    fn corner(&mut self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
+        self.town.corner(body, to)
+    }
+    fn step(
+        &mut self,
+        body: &mut Body,
+        v: [i64; 2],
+        dt: Micros,
+        at: Micros,
+    ) -> Result<(), Refusal> {
+        let d = self.drivers[&body.id];
+        let velocity = Part::Velocity(Vec3::new(v[0], 0, v[1]), Mode::Surface);
+        self.ctl.set(body.id, d, velocity)?;
+        let stepped = self.ctl.step(self.town.surfaces_of(body.id), dt, at);
+        if let Some((_, r)) = stepped.refused.into_iter().next() {
+            return Err(r);
+        }
+        *body = *self.ctl.body(body.id).expect("the controller holds it");
+        Ok(())
+    }
+    fn cross(
+        &mut self,
+        _: &mut Body,
+        link: Id,
+        _: Id,
+        _: i64,
+        _: Micros,
+        _: Micros,
+    ) -> Result<bool, Refusal> {
+        Err(Refusal {
+            name: "link-not-driven",
+            detail: show(link),
+        })
+    }
+    fn turns(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
+        self.town.turns(marks, at)
+    }
+    fn pass(&self, link: Id, who: Id) -> Pass {
+        self.town.pass(link, who)
+    }
+}
+
+/// A1 (the follow-up): a small, a standard, a large and a hovering body each walk Eden west to east between the
+/// same two points as B12's A1, end to end, by N7's walk skill on ground and links cut for its own class, every step
+/// made by the controller. One town keeps one cut per class; the floater is held at its hover height at every tick.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn a1_four_bodies_walk_eden_through_the_controller() {
+    let Import {
+        tree, rules, nodes, ..
+    } = eden();
+    let ground = nodes["ground"];
+    let root = nodes["world"];
+    let v = Value::Map(BTreeMap::from([
+        (
+            1,
+            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/size-walk-test/1").to_bytes()),
+        ),
+        (2, Value::Bytes(schema_hash().to_bytes())),
+        (3, Value::Bytes(root.scope().0.to_vec())),
+        (4, root.to_value()),
+        (5, Value::Uint(0)),
+        (6, Value::Array(Vec::new())),
+        (7, Value::Array(Vec::new())),
+    ]));
+    let header = Header::read(&encode(&v).unwrap()).unwrap();
+    let next = tree.to_state().next;
+    // B12's A1 ends: the westmost and eastmost standing points of the open ground in the largest part of the large
+    // class's map.
+    let large = Map::build_for(&tree, ground, Size::Large, &|_| 0).unwrap();
+    let parts = large.parts(ALL);
+    let (n, ..) = large.counts();
+    let mut count: BTreeMap<u32, usize> = BTreeMap::new();
+    for &p in &parts {
+        *count.entry(p).or_default() += 1;
+    }
+    let main = *count
+        .iter()
+        .max_by_key(|(k, c)| (**c, std::cmp::Reverse(**k)))
+        .unwrap()
+        .0;
+    let pts: Vec<[i64; 3]> = (0..n as u32)
+        .filter(|&q| parts[q as usize] == main && large.patch_of(q).node == ground)
+        .flat_map(|q| large.standing(q).into_iter().map(move |p| (q, p)))
+        .map(|(q, p)| large.world(q, p))
+        .collect();
+    let west = *pts.iter().min_by_key(|p| p[0]).unwrap();
+    let east = *pts.iter().max_by_key(|p| p[0]).unwrap();
+    drop(large);
+    let mut town = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let legs = Family {
+        name: name("test:walker"),
+        resources: ["test:leg-left", "test:leg-right"]
+            .map(|r| Resource {
+                name: name(r),
+                class: Class::Locomotion,
+                slot: None,
+            })
+            .to_vec(),
+    };
+    let walk = SkillShape {
+        name: name("test:walk"),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: vec![],
+        cancelled_by: vec![],
+    };
+    const SPEED: i64 = 1_400_000;
+    const TICK: Micros = 100_000;
+    println!(
+        "A1 from ({}, {}) m to ({}, {}) m",
+        west[0] / 1000,
+        west[2] / 1000,
+        east[0] / 1000,
+        east[2] / 1000
+    );
+    println!(
+        "A1 | body | class | hover mm | cut ms | ground pieces | ticks | walked s | logged inputs | path sum mm | ends mm from the goal"
+    );
+    for (k, (label, build)) in [
+        ("small", family("small", "small", 1_000, 0)),
+        ("standard", family("walker", "standard", 1_750, 0)),
+        ("large", family("large", "large", 2_400, 0)),
+        ("hovering", family("floater", "standard", 1_200, 400)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let who = replica::pose::fixture(10 + k as u64);
+        let t = std::time::Instant::now();
+        town.size(who, build.size).expect("the class's cut");
+        let cut = t.elapsed().as_millis();
+        let at = Vec3::new(west[0] * 1000, west[1] * 1000, west[2] * 1000);
+        let mut body = town.surfaces_of(who)[&ground]
+            .place(who, frame, at, Quat::IDENTITY)
+            .unwrap_or_else(|e| panic!("{label}: {}: {}", e.name, e.detail));
+        sim::mover::lift(&mut body, build.hover_mm * 1000);
+        assert_eq!(body.pose.support, build.support(ground));
+        let mut ctl = Controller::new();
+        ctl.add(legs.clone(), body).expect("the body");
+        let d = ctl.claim(who, &walk).expect("the walk's driver");
+        let mut world = Driven {
+            town,
+            ctl,
+            drivers: BTreeMap::from([(who, d)]),
+        };
+        let goal = Vec3::new(east[0] * 1000, east[1] * 1000, east[2] * 1000);
+        let mut crowd = Crowd::new(TICK);
+        crowd
+            .add(
+                &mut world,
+                body,
+                SPEED,
+                replica::pose::fixture(100 + k as u64),
+                ground,
+                goal,
+            )
+            .unwrap_or_else(|e| panic!("{label}: {}: {}", e.name, e.detail));
+        let (mut ticks, mut path) = (0u64, 0i128);
+        while !crowd.done() {
+            crowd
+                .step(&mut world)
+                .unwrap_or_else(|e| panic!("{label} at tick {ticks}: {}: {}", e.name, e.detail));
+            ticks += 1;
+            assert!(ticks < 40_000, "{label}: not arrived");
+            let b = world.ctl.body(who).unwrap();
+            path += i128::from(b.pose.position.x) + i128::from(b.pose.position.z);
+            assert_eq!(
+                *b, crowd.walkers[0].body,
+                "{label}: the skill's body is the controller's"
+            );
+            assert_eq!(
+                b.pose.support,
+                build.support(ground),
+                "{label}: its support"
+            );
+            b.pose.check().expect("a legal pose");
+            if build.hover_mm > 0 {
+                let floor = world.town.surfaces[&ground]
+                    .place(who, frame, b.pose.position, Quat::IDENTITY)
+                    .unwrap();
+                assert_eq!(
+                    b.pose.position.y - floor.pose.position.y,
+                    build.hover_mm * 1000,
+                    "{label}: held at its hover height"
+                );
+            }
+        }
+        let end = world.ctl.body(who).unwrap().pose.position;
+        let off = ((end.x - goal.x).pow(2) + (end.z - goal.z).pow(2)).isqrt();
+        assert!(off <= AT_GOAL, "{label}: arrived");
+        let logged = world.ctl.log().len();
+        println!(
+            "A1 | {label} | {} | {} | {cut} | {} | {ticks} | {} | {logged} | {} | {}",
+            build.size.name(),
+            build.hover_mm,
+            world.town.surfaces_of(who)[&ground].pieces().len(),
+            ticks * TICK as u64 / 1_000_000,
+            path / 1_000,
+            off / 1000
+        );
+        town = world.town;
+    }
+    assert_eq!(town.cut_sizes(), Size::ALL.to_vec(), "one cut per class");
 }
 
 /// A4: every floor node of Eden and every square of its open ground cut for each size class, two repeats: time and

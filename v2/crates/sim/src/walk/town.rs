@@ -16,10 +16,13 @@
 //!   the marks of the last are read into each such link's facts (who waits at which end and how far from it, who is
 //!   inside and how far along, whether each end has room to step out into), and its owning node writes who may
 //!   enter. Without turns ([`Town::turns`] `None`) every link is free, as N7 walked them.
+//! - **Sizes** (B12). A body walks on ground, routes and links cut for its own size class ([`Town::size`]): each
+//!   class is cut once, when a body of it is first sized, and kept ([`Cut`]). A body never sized is standard, the
+//!   class of the town's own map, surfaces and buildings. Turns read the standard cut: a link's width is the same.
 
 use super::{Leg, Mark, Pass, World, node_of};
 use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, Scene};
+use crate::ground::{OpenGround, Scene};
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
 use crate::mover::{Body, Surface};
@@ -27,6 +30,7 @@ use crate::routes::{HANDS, Hop, Map};
 use replica::effects::{Actor, Cause, Refusal};
 use replica::encode::Value;
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::{ControllerInput, Frame, Mode, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
@@ -54,6 +58,13 @@ struct Crossing {
     start: Vec3,
 }
 
+/// The ground and links cut for one size class (B12): N5's map, each node's surface, and the links read for it.
+pub struct Cut {
+    pub map: Map,
+    pub surfaces: BTreeMap<Id, Surface>,
+    pub buildings: Vec<Building>,
+}
+
 /// The engine as the walk skill reads it.
 pub struct Town {
     pub tree: Tree,
@@ -66,14 +77,19 @@ pub struct Town {
     /// The turn states of the narrow links, written by their owners; `None` walks every link free.
     pub turns: Option<Turns>,
     crossings: BTreeMap<Id, Crossing>,
+    /// The cuts for the classes other than standard, each made once.
+    cuts: BTreeMap<Size, Cut>,
+    /// Each sized body's class.
+    sizes: BTreeMap<Id, Size>,
 }
 
-impl Town {
-    /// Everything on the open ground `ground`; openings are written by `doors`.
-    pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
-        let map = Map::build(&tree, ground, &|_| 0)?;
+impl Cut {
+    /// Everything on the open ground `ground`, cut for a body of the class `size`.
+    pub fn new(tree: &Tree, ground: Id, size: Size) -> Result<Cut, String> {
+        let r = size.radius_mm();
+        let map = Map::build_for(tree, ground, size, &|_| 0)?;
         let mut surfaces = BTreeMap::new();
-        let open = OpenGround::prepare(&Scene::of(&tree, ground)?, HUMAN_RADIUS)?;
+        let open = OpenGround::prepare(&Scene::of(tree, ground)?, r)?;
         let (mut pieces, mut meets) = (Vec::new(), Vec::new());
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
@@ -81,7 +97,7 @@ impl Town {
             meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
         }
         let gh = tree.handle(ground).ok_or("no such ground")?;
-        let gdoors = ground_doors(&tree, ground)?;
+        let gdoors = ground_doors(tree, ground)?;
         surfaces.insert(ground, Surface::new(ground, pieces));
         let mut buildings = Vec::new();
         let mut stack = vec![gh];
@@ -95,12 +111,12 @@ impl Town {
                 let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
                 let open = Open {
                     ground,
-                    place: crate::ground::scene::xform_to(&tree, h, gh)?,
+                    place: crate::ground::scene::xform_to(tree, h, gh)?,
                     meets: &meets,
                     on: &on,
                     doors: &gdoors,
                 };
-                if let Ok(b) = Building::read_on(&tree, id, Some(open)) {
+                if let Ok(b) = Building::read_sized(tree, id, Some(open), r) {
                     for (&floor, (_, patch)) in &b.floors {
                         surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
                     }
@@ -122,7 +138,23 @@ impl Town {
             on: &on,
             doors: &gdoors,
         };
-        buildings.push(Building::of_ground(&tree, open, &known)?);
+        buildings.push(Building::of_ground(tree, open, &known)?);
+        Ok(Cut {
+            map,
+            surfaces,
+            buildings,
+        })
+    }
+}
+
+impl Town {
+    /// Everything on the open ground `ground`; openings are written by `doors`.
+    pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
+        let Cut {
+            map,
+            surfaces,
+            buildings,
+        } = Cut::new(&tree, ground, Size::Standard)?;
         Ok(Town {
             tree,
             ground,
@@ -132,26 +164,85 @@ impl Town {
             doors,
             turns: Some(Turns::new()),
             crossings: BTreeMap::new(),
+            cuts: BTreeMap::new(),
+            sizes: BTreeMap::new(),
         })
     }
 
-    fn surface(&self, node: Id) -> Result<&Surface, Refusal> {
-        self.surfaces
+    /// From now on `body` walks as a body of the class `size`, on that class's cut, made here on its first use.
+    pub fn size(&mut self, body: Id, size: Size) -> Result<(), String> {
+        if size != Size::Standard && !self.cuts.contains_key(&size) {
+            let cut = Cut::new(&self.tree, self.ground, size)?;
+            self.cuts.insert(size, cut);
+        }
+        self.sizes.insert(body, size);
+        Ok(())
+    }
+
+    /// The class `body` walks as.
+    pub fn size_of(&self, body: Id) -> Size {
+        self.sizes.get(&body).copied().unwrap_or(Size::Standard)
+    }
+
+    /// The classes cut so far, standard always among them.
+    pub fn cut_sizes(&self) -> Vec<Size> {
+        let mut v: Vec<Size> = self.cuts.keys().copied().collect();
+        v.push(Size::Standard);
+        v.sort();
+        v
+    }
+
+    /// The surfaces a body of `body`'s class walks on.
+    pub fn surfaces_of(&self, body: Id) -> &BTreeMap<Id, Surface> {
+        match self.cuts.get(&self.size_of(body)) {
+            Some(c) => &c.surfaces,
+            None => &self.surfaces,
+        }
+    }
+
+    fn buildings_of(&self, body: Id) -> &[Building] {
+        match self.cuts.get(&self.size_of(body)) {
+            Some(c) => &c.buildings,
+            None => &self.buildings,
+        }
+    }
+
+    fn map_of(&self, body: Id) -> &Map {
+        match self.cuts.get(&self.size_of(body)) {
+            Some(c) => &c.map,
+            None => &self.map,
+        }
+    }
+
+    /// The tree and the map of `body`'s class, to route on.
+    fn routes(&mut self, body: Id) -> (&Tree, &mut Map) {
+        let size = self.size_of(body);
+        let map = match self.cuts.get_mut(&size) {
+            Some(c) => &mut c.map,
+            None => &mut self.map,
+        };
+        (&self.tree, map)
+    }
+
+    fn surface(&self, body: Id, node: Id) -> Result<&Surface, Refusal> {
+        self.surfaces_of(body)
             .get(&node)
             .ok_or_else(|| refusal("no-surface", show(node)))
     }
 
-    fn link(&self, id: Id) -> Option<&crate::links::Link> {
-        self.building(id).and_then(|b| b.link(id))
+    fn link(&self, body: Id, id: Id) -> Option<&crate::links::Link> {
+        self.building(body, id).and_then(|b| b.link(id))
     }
 
-    fn building(&self, link: Id) -> Option<&Building> {
-        self.buildings.iter().find(|b| b.link(link).is_some())
+    fn building(&self, body: Id, link: Id) -> Option<&Building> {
+        self.buildings_of(body)
+            .iter()
+            .find(|b| b.link(link).is_some())
     }
 
     /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm).
     fn clear(&self, body: &Body, to: [i64; 2]) -> Result<bool, Refusal> {
-        let s = self.surface(node_of(body))?;
+        let s = self.surface(body.id, node_of(body))?;
         let mut b = *body;
         let p = b.pose.position;
         // In one second, at the velocity that is the whole way.
@@ -231,7 +322,7 @@ impl World for Town {
     }
 
     fn pass(&self, link: Id, who: Id) -> Pass {
-        let (Some(turns), Some(l)) = (self.turns.as_ref(), self.link(link)) else {
+        let (Some(turns), Some(l)) = (self.turns.as_ref(), self.link(who, link)) else {
             return Pass::Free;
         };
         if !narrow(l) {
@@ -245,20 +336,19 @@ impl World for Town {
 
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
         let here = node_of(body);
-        let from = self
-            .map
+        let (tree, map) = self.routes(body.id);
+        let from = map
             .spot_near(here, body.pose.position, AT_EDGE)
             .ok_or_else(|| refusal("off-ground", show(here)))?;
-        let to = self
-            .map
+        let to = map
             .spot(node, goal)
             .ok_or_else(|| refusal("off-ground", show(node)))?;
-        let route = self.map.route(&self.tree, from, to, HANDS)?;
+        let route = map.route(tree, from, to, HANDS)?;
         let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
         for h in &route.hops {
             let Hop::Link { id, .. } = h else { continue };
             let l = self
-                .link(*id)
+                .link(body.id, *id)
                 .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
             let near = (0..2)
                 .filter(|&k| l.ends[k].is_some_and(|e| e.floor == on))
@@ -286,14 +376,15 @@ impl World for Town {
             return Ok([to.x, to.z]);
         }
         let node = node_of(body);
+        let (tree, map) = self.routes(body.id);
         let (Some(from), Some(goal)) = (
-            self.map.spot_near(node, body.pose.position, AT_EDGE),
+            map.spot_near(node, body.pose.position, AT_EDGE),
             // A link's near end lies on its piece's edge, within the grid's rounding.
-            self.map.spot_near(node, to, AT_EDGE),
+            map.spot_near(node, to, AT_EDGE),
         ) else {
             return Err(refusal("off-ground", show(node)));
         };
-        let r = self.map.route(&self.tree, from, goal, HANDS)?;
+        let r = map.route(tree, from, goal, HANDS)?;
         // The first point of the line that is not where the body stands (the funnel may repeat a point).
         let c = r
             .first_line
@@ -312,7 +403,7 @@ impl World for Town {
         dt: Micros,
         at: Micros,
     ) -> Result<(), Refusal> {
-        let s = self.surface(node_of(body))?;
+        let s = self.surface(body.id, node_of(body))?;
         s.step(body, walk(velocity), dt, at)?;
         Ok(())
     }
@@ -328,7 +419,7 @@ impl World for Town {
     ) -> Result<bool, Refusal> {
         if !self.crossings.contains_key(&body.id) {
             let l = self
-                .link(link)
+                .link(body.id, link)
                 .ok_or_else(|| refusal("link-missing", show(link)))?;
             if let Some(why) = l.blocked {
                 return Err(refusal(why, show(link)));
@@ -351,13 +442,13 @@ impl World for Town {
             let mut arrive = None;
             if here == self.ground || to == self.ground {
                 let place = self
-                    .building(link)
+                    .building(body.id, link)
                     .map(|b| b.place)
                     .ok_or_else(|| refusal("link-missing", show(link)))?;
                 let out = |e: String| refusal("out-of-range", e);
                 if let Some(e) = far {
                     let s = self
-                        .map
+                        .map_of(body.id)
                         .spot_near(to, e.middle(), AT_EDGE)
                         .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
                     let stand = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
@@ -442,9 +533,11 @@ impl World for Town {
             node: to,
             slot: None,
         };
+        let lift = crate::mover::lift_of(body);
         *body = self
-            .surface(to)?
+            .surface(body.id, to)?
             .place(body.id, frame, p, body.pose.orientation)?;
+        crate::mover::lift(body, lift);
         body.linear = linear;
         Ok(true)
     }

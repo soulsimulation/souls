@@ -7,8 +7,8 @@
 //! - **A way out** is N10's: a doorway that still passes the new class's centre, the end of a stair, ramp or ladder of
 //!   the floor that the class can use, or, on the open ground, the square's edge. A stair, ramp or doorway narrower
 //!   than the body with its clearance ([`too_narrow`]) is no way out, as it is no route (`crate::routes`), and nor is a
-//!   doorway between two rooms whose far side has no ground for the class. A doorway to the open ground is taken to
-//!   lead out: the open ground is not cut here.
+//!   doorway between two rooms whose far side has no ground for the class. A doorway to the open ground leads out
+//!   only where the open ground, cut for the class, meets its far side with room for the body.
 //!
 //! Integers only: µm and mm.
 
@@ -25,6 +25,31 @@ use replica::world_model::show;
 /// A link walked through, `width_um` wide (0: not known), is too narrow for a body of `radius` mm with its clearance.
 pub fn too_narrow(width_um: i64, radius: i64) -> bool {
     width_um > 0 && width_um < 2 * (radius + MARGIN) * 1000
+}
+
+/// Whether the open ground `open` (cut for a body of `radius` mm) meets the doorway or step `link` on the side away
+/// from `inside` (the side its floor meets it on) with room for the body: the squares within a metre of its centre
+/// are cut. A doorway too narrow for the body ([`too_narrow`]) never does.
+fn meets_outside(scene: &Scene, open: &OpenGround, link: Id, inside: i8, radius: i64) -> bool {
+    let Some(d) = scene.doorways.iter().find(|d| d.link == link) else {
+        return false;
+    };
+    if too_narrow(d.width, radius) {
+        return false;
+    }
+    let sq = |v: i64| (v / 1000).div_euclid(SQUARE) as i32;
+    let mut squares: Vec<(i32, i32)> = [-1_000_000, 1_000_000]
+        .iter()
+        .flat_map(|&dx| [-1_000_000, 1_000_000].map(|dz| (sq(d.at[0] + dx), sq(d.at[1] + dz))))
+        .collect();
+    squares.sort();
+    squares.dedup();
+    squares.into_iter().any(|(i, j)| {
+        open.cut_square(i, j)
+            .meets
+            .iter()
+            .any(|m| m.link == link && m.side == -inside && m.width_left > 0)
+    })
 }
 
 fn refusal(name: &'static str, detail: String) -> Refusal {
@@ -65,13 +90,38 @@ pub fn change_size(
         };
         // A doorway inside the building that this class cannot cross (its far side has no ground for it, or it is
         // too narrow) is no way out, though its own width still passes the centre.
-        let dead: Vec<Id> = b
+        let mut dead: Vec<Id> = b
             .links
             .iter()
             .filter(|l| l.kind == Kind::Doorway && !l.nodes.contains(&ground))
             .filter(|l| l.blocked.is_some() || too_narrow(l.width, r))
             .map(|l| l.id)
             .collect();
+        // Nor is a doorway or a step to the open ground whose far side the open ground, cut for this class, does not
+        // meet with room for the body.
+        let to_ground: Vec<Id> = b
+            .links
+            .iter()
+            .filter(|l| l.kind == Kind::Doorway && l.nodes.contains(&ground))
+            .map(|l| l.id)
+            .collect();
+        let mut out: Vec<(Id, i8)> = patch
+            .meets
+            .iter()
+            .filter(|m| m.step || to_ground.contains(&m.link))
+            .map(|m| (m.link, m.side))
+            .collect();
+        out.sort();
+        out.dedup_by_key(|o| o.0);
+        if !out.is_empty() {
+            let scene = Scene::of(tree, ground).map_err(fail)?;
+            let open = OpenGround::prepare(&scene, r).map_err(fail)?;
+            for (link, inside) in out {
+                if !meets_outside(&scene, &open, link, inside, r) {
+                    dead.push(link);
+                }
+            }
+        }
         for m in patch.meets.iter_mut().filter(|m| dead.contains(&m.link)) {
             m.width_left = 0;
         }
