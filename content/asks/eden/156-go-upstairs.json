@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":156,"group":"getting-around","words":"go upstairs","obvious":3,"things":{"stairs":"eden:stair_flight"},"chain":[{"this":"me","form":"go_to","args":{"place":"stairs"}},{"this":"stairs","form":"go_up"}]}

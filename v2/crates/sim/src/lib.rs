@@ -3,6 +3,7 @@
 
 pub mod checkpoint;
 pub mod clock;
+pub mod frozen;
 pub mod ground;
 pub mod links;
 pub mod log;

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":150,"group":"two-things","words":"clear the table and stack the bowls","obvious":2,"things":{"table":"eden:table","bowl1":"eden:bowl","bowl2":"eden:bowl"},"chain":[{"this":"me","form":"pick_up","carry":"bowl1","args":{"thing":"bowl1"}},{"this":"me","form":"put","place":{"at":"on","thing":"bowl1","anchor":"bowl2"},"args":{"thing":"bowl1"}}]}

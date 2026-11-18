@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":171,"group":"getting-around","words":"go to the top of the lighthouse","obvious":2,"things":{"lighthouse":"eden:lighthouse"},"chain":[{"this":"me","form":"go_to","args":{"place":"lighthouse"}},{"this":"lighthouse","form":"climb"}]}

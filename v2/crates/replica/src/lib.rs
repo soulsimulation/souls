@@ -4,18 +4,26 @@
 // No float in a verdict (K14, #2648; v2/tools/arch/README.md): a module of drawing helpers allows it by name.
 #![deny(clippy::float_arithmetic)]
 
+pub mod apply;
 pub mod audience;
 pub mod bodies;
 pub mod durability;
 pub mod effects;
 pub mod encode;
+pub mod hash;
 pub mod host;
 pub mod ids;
 pub mod intents;
+pub mod kinds;
 pub mod pose;
+pub mod query;
+pub mod read;
 pub mod time;
 pub mod tree;
 pub mod views;
+// Not built into the checker (`checker`), which has no imports (T10, `v2/docs/intents.md` rule 13).
+#[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
+mod wasm;
 pub mod world_model;
 pub mod zones;
 
