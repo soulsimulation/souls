@@ -930,6 +930,24 @@ fn fixture_id(v: &Value) -> R<Id> {
     }
 }
 
+/// How a reader takes an id: a fixture's counter, or T3's stored `[h'<scope>', counter]`.
+type IdOf = fn(&Value) -> R<Id>;
+
+/// An id as T3 stores it, `[h'<scope>', counter]` (ids.md rule 3).
+fn stored_id(v: &Value) -> R<Id> {
+    match v {
+        Value::Array(a) if a.len() == 2 => match (&a[0], &a[1]) {
+            (Value::Bytes(s), Value::Uint(c)) => {
+                let scope =
+                    <[u8; 16]>::try_from(s.as_slice()).map_err(|_| PoseRefusal::NotARecord)?;
+                Id::new(Scope(scope), *c).ok_or(PoseRefusal::OutOfRange)
+            }
+            _ => Err(PoseRefusal::NotARecord),
+        },
+        _ => Err(PoseRefusal::NotARecord),
+    }
+}
+
 fn uint(v: &Value) -> R<u64> {
     match v {
         Value::Uint(u) => Ok(*u),
@@ -944,10 +962,10 @@ impl Frame {
         Value::Array(a)
     }
 
-    fn from_fixture(v: &Value) -> R<Frame> {
+    fn read(v: &Value, id: IdOf) -> R<Frame> {
         match v {
             Value::Array(a) if a.len() == 1 || a.len() == 2 => Ok(Frame {
-                node: fixture_id(&a[0])?,
+                node: id(&a[0])?,
                 slot: a.get(1).map(uint).transpose()?,
             }),
             _ => Err(PoseRefusal::NotARecord),
@@ -971,17 +989,17 @@ impl Support {
         }
     }
 
-    fn from_fixture(v: &Value) -> R<Support> {
+    fn read(v: &Value, id: IdOf) -> R<Support> {
         let m = as_map(v)?;
         match uint(field(m, 1)?)? {
             0 => Ok(Support::None),
             1 => Ok(Support::Surface {
-                surface: fixture_id(field(m, 2)?)?,
+                surface: id(field(m, 2)?)?,
                 height: read_int(field(m, 3)?)?,
             }),
             2 => Ok(Support::Slot),
             3 => Ok(Support::Volume {
-                volume: fixture_id(field(m, 2)?)?,
+                volume: id(field(m, 2)?)?,
             }),
             4 => Ok(Support::Track),
             _ => Err(PoseRefusal::NotARecord),
@@ -1000,13 +1018,13 @@ impl Pose {
         ])
     }
 
-    fn from_fixture(v: &Value) -> R<Pose> {
+    fn read(v: &Value, id: IdOf) -> R<Pose> {
         let m = as_map(v)?;
         let pose = Pose {
-            frame: Frame::from_fixture(field(m, 1)?)?,
+            frame: Frame::read(field(m, 1)?, id)?,
             position: Vec3::from_value(field(m, 2)?)?,
             orientation: Quat::from_value(field(m, 3)?)?,
-            support: Support::from_fixture(field(m, 4)?)?,
+            support: Support::read(field(m, 4)?, id)?,
         };
         pose.check()?;
         Ok(pose)
@@ -1051,7 +1069,7 @@ impl Track {
         }
     }
 
-    fn from_fixture(m: &BTreeMap<u64, Value>) -> R<Track> {
+    fn read(m: &BTreeMap<u64, Value>, id: IdOf) -> R<Track> {
         let vec = |k| Vec3::from_value(field(m, k)?);
         match uint(field(m, 1)?)? {
             1 => Ok(Track::Rest),
@@ -1066,7 +1084,7 @@ impl Track {
                 spin: vec(6)?,
             }),
             4 => Ok(Track::Rail {
-                rail: fixture_id(field(m, 7)?)?,
+                rail: id(field(m, 7)?)?,
                 t0: read_int(field(m, 2)?)?,
                 s0: read_int(field(m, 3)?)?,
                 speed: read_int(field(m, 4)?)?,
@@ -1078,7 +1096,7 @@ impl Track {
 
 impl Owner {
     /// `{1: which, 2: track}`: 1 slot, 2 mover (its own: no driver is named), 3 track, 4 island.
-    fn to_value(self) -> Value {
+    pub fn to_value(self) -> Value {
         match self {
             Owner::Slot => map(vec![(1, Value::Uint(1))]),
             Owner::Mover => map(vec![(1, Value::Uint(2))]),
@@ -1087,12 +1105,12 @@ impl Owner {
         }
     }
 
-    fn from_fixture(v: &Value) -> R<Owner> {
+    fn read(v: &Value, id: IdOf) -> R<Owner> {
         let m = as_map(v)?;
         match uint(field(m, 1)?)? {
             1 => Ok(Owner::Slot),
             2 => Ok(Owner::Mover),
-            3 => Ok(Owner::Track(Track::from_fixture(as_map(field(m, 2)?)?)?)),
+            3 => Ok(Owner::Track(Track::read(as_map(field(m, 2)?)?, id)?)),
             4 => Err(PoseRefusal::IslandReserved),
             _ => Err(PoseRefusal::NotARecord),
         }
@@ -1111,6 +1129,38 @@ impl HandOff {
             (6, self.linear.to_value()),
             (7, self.angular.to_value()),
         ])
+    }
+}
+
+impl Pose {
+    /// A stored pose (T6 reads these): T3 ids, checked, and in its one byte form, else `not-a-record`.
+    pub fn from_value(v: &Value) -> R<Pose> {
+        let pose = Pose::read(v, stored_id)?;
+        if pose.to_value() != *v {
+            return Err(PoseRefusal::NotARecord);
+        }
+        Ok(pose)
+    }
+}
+
+impl HandOff {
+    /// A stored hand-off (T6's motion sample): T3 ids, owners as [`Owner`] reads them (an island is refused), and
+    /// in its one byte form, else `not-a-record`.
+    pub fn from_value(v: &Value) -> R<HandOff> {
+        let m = as_map(v)?;
+        let h = HandOff {
+            node: stored_id(field(m, 1)?)?,
+            at: read_int(field(m, 2)?)?,
+            from: Owner::read(field(m, 3)?, stored_id)?,
+            to: Owner::read(field(m, 4)?, stored_id)?,
+            pose: Pose::read(field(m, 5)?, stored_id)?,
+            linear: Vec3::from_value(field(m, 6)?)?,
+            angular: Vec3::from_value(field(m, 7)?)?,
+        };
+        if h.to_value() != *v {
+            return Err(PoseRefusal::NotARecord);
+        }
+        Ok(h)
     }
 }
 
@@ -1137,8 +1187,8 @@ pub fn scene_from_fixture(v: &Value) -> R<(Scene, Vec<Expectation>)> {
         }
         movables.push(Movable {
             id: fixture_id(field(r, 1)?)?,
-            pose: Pose::from_fixture(field(r, 2)?)?,
-            owner: Owner::from_fixture(field(r, 3)?)?,
+            pose: Pose::read(field(r, 2)?, fixture_id)?,
+            owner: Owner::read(field(r, 3)?, fixture_id)?,
             linear: Vec3::ZERO,
             angular: Vec3::ZERO,
             slots,
