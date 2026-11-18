@@ -947,11 +947,13 @@ impl Controller {
             out.refused.extend(g.refused);
             put.extend(g.put);
         }
-        for (s, put) in self.bodies.values().zip(put) {
-            if put {
-                self.near.put_moved(&s.moved);
-            }
-        }
+        self.near.put_moved_sorted(
+            self.bodies
+                .values()
+                .zip(put)
+                .filter(|(_, put)| *put)
+                .map(|(s, _)| &s.moved),
+        );
         out
     }
 }
