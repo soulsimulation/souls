@@ -1,0 +1,83 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:rain_collector's collect (from #1740), handed back by SA-X0 (#3024) and written here. With empty hands, the inlet uncovered and room for a litre, four seconds at the barrel gather 1000 g, only while it rains where the barrel stands: more than 100 permille of rain on the place it is linked to (`place`, from \"place\"), read through that link and never from the tree. Each refusal carries the original's words by key ('Put down what you hold before working on the rain inlet'; 'Uncover the rain inlet first'; 'The collector has less than one litre of room; draw some water first'; 'There is no collectable rain now; wait for authoritative rainy weather'). test:gauge reads a place field only the world's creator sees.",
+  "cases": [
+    {
+      "name": "collect_every_need_met",
+      "act": { "this": "r1", "form": "collect" },
+      "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air", "fields": { "rain": 400 } }, "r1": { "kind": "eden:rain_collector", "fields": { "covered": false }, "links": { "place": ["o1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", null], ["b1/hand/right", null], ["r1/field/2", false], ["r1/field/1", 0], ["r1/link/1", 1], ["o1/field/1", 400]] }
+    },
+    {
+      "name": "collect_one_hand_holds_something",
+      "act": { "this": "r1", "form": "collect" },
+      "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air", "fields": { "rain": 400 } }, "r1": { "kind": "eden:rain_collector", "fields": { "covered": false }, "links": { "place": ["o1"] } }, "p1": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "hand_not_empty", "need": 0, "detail": { "holding": 1 }, "fix": { "step": "put" }, "says": "put_down_first" }
+    },
+    {
+      "name": "collect_inlet_covered",
+      "act": { "this": "r1", "form": "collect" },
+      "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air", "fields": { "rain": 400 } }, "r1": { "kind": "eden:rain_collector", "links": { "place": ["o1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "detail": { "field": "covered", "found": true, "wanted": { "is": false } }, "fix": { "form": "uncover" }, "says": "uncover_first" }
+    },
+    {
+      "name": "collect_less_than_a_litre_of_room",
+      "act": { "this": "r1", "form": "collect" },
+      "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air", "fields": { "rain": 400 } }, "r1": { "kind": "eden:rain_collector", "fields": { "covered": false, "water": 3500 }, "links": { "place": ["o1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 2, "detail": { "field": "water", "found": 3500, "wanted": { "at_most": 3000 } }, "fix": { "form": "draw" }, "says": "no_room" }
+    },
+    {
+      "name": "collect_too_little_rain",
+      "act": { "this": "r1", "form": "collect" },
+      "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air", "fields": { "rain": 100 } }, "r1": { "kind": "eden:rain_collector", "fields": { "covered": false }, "links": { "place": ["o1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 3, "detail": { "node": "o1", "field": "rain", "found": 100, "wanted": { "at_least": 101 } }, "fix": null, "says": "no_rain" }
+    },
+    {
+      "name": "collect_dry_by_default",
+      "act": { "this": "r1", "form": "collect" },
+      "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air" }, "r1": { "kind": "eden:rain_collector", "fields": { "covered": false }, "links": { "place": ["o1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 3, "detail": { "node": "o1", "field": "rain", "found": 0, "wanted": { "at_least": 101 } }, "fix": null, "says": "no_rain" }
+    },
+    {
+      "name": "collect_standing_in_no_place",
+      "act": { "this": "r1", "form": "collect" },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector", "fields": { "covered": false } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_linked", "need": 3, "detail": { "link": "place", "count": 0 }, "fix": null, "says": "no_rain" }
+    },
+    {
+      "name": "collect_place_kind_without_the_field_is_bad_input_without_words",
+      "act": { "this": "r1", "form": "collect" },
+      "state": { "actor": "b1", "nodes": { "t1": { "kind": "test:tap" }, "r1": { "kind": "eden:rain_collector", "fields": { "covered": false }, "links": { "place": ["t1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "bad_input", "need": 3, "detail": { "what": "no_such_field", "node": "t1", "field": "rain" }, "fix": null }
+    },
+    {
+      "name": "gauge_place_field_outside_the_audience_is_unknown",
+      "act": { "this": "g1", "form": "read" },
+      "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air", "fields": { "survey": 2 } }, "g1": { "kind": "test:gauge", "links": { "place": ["o1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "unknown", "need": 0, "node": "o1", "field": "survey" }
+    },
+    {
+      "name": "gauge_place_field_seen_by_its_audience",
+      "act": { "this": "g1", "form": "read" },
+      "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air", "fields": { "survey": 2 } }, "g1": { "kind": "test:gauge", "links": { "place": ["o1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["creator"] },
+      "expect": { "verdict": "yes", "read": [["g1/link/1", 1], ["o1/field/2", 2]] }
+    },
+    {
+      "name": "gauge_place_field_seen_and_unmet",
+      "act": { "this": "g1", "form": "read" },
+      "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air" }, "g1": { "kind": "test:gauge", "links": { "place": ["o1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["creator"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "node": "o1", "field": "survey", "found": 0, "wanted": { "at_least": 1 } }, "fix": null }
+    }
+  ]
+}

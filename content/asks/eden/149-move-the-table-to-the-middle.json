@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":149,"group":"two-things","words":"move the table to the middle of the room","obvious":2,"things":{"table":"eden:table"},"chain":[{"this":"me","form":"push","push":"table","args":{"thing":"table"}},{"this":"me","form":"put","place":{"at":"middle","thing":"table"},"args":{"thing":"table"}}]}

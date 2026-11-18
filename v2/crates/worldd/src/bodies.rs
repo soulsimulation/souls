@@ -39,7 +39,7 @@ use sim::controller::Stance;
 use sim::host::Runner;
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
-use sim::slots::{Request, SeatAt, Slots};
+use sim::slots::{PlaceAt, Request, Slots};
 use sim::spots::Target;
 use sim::timers::DueList;
 use sim::walk::town::Town;
@@ -122,7 +122,7 @@ pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
 #[derive(Clone, Copy, Debug)]
 enum Live {
     Walk,
-    Seat(Instance),
+    Place(Instance),
 }
 
 /// Each body's point (its feet, or its seat's point while it is in one) and each seat's seat and stand point, µm.
@@ -138,9 +138,9 @@ impl Reach for Geo {
         point: &Name,
     ) -> Option<i64> {
         let a = self.0.get(&body)?;
-        let [seat, stand] = self.1.get(&target)?;
+        let [place, stand] = self.1.get(&target)?;
         let b = match point.as_str() {
-            "souls:seat" => seat,
+            "souls:slot" => place,
             "souls:stand" => stand,
             _ => return None,
         };
@@ -236,8 +236,8 @@ impl Bodies {
     }
 
     /// Adds a seat.
-    pub fn add_seat(&mut self, seat: SeatAt) -> R<()> {
-        self.slots.add(seat)
+    pub fn add_place(&mut self, place: PlaceAt) -> R<()> {
+        self.slots.add(place)
     }
 
     /// Where `body` is: the node of its frame (its floor, or the thing whose slot it sits in) and its position there.
@@ -342,27 +342,27 @@ impl Bodies {
         self.runner.now = now;
     }
 
-    fn geo(&self, bodies: &[Id], seats: &[Id]) -> Geo {
+    fn geo(&self, bodies: &[Id], places: &[Id]) -> Geo {
         let c = &self.runner.controller;
         let points = bodies
             .iter()
             .filter_map(|&b| {
                 let p = c.body(b)?.pose;
                 let at = match (p.support, self.slots.held_by(b)) {
-                    (Support::Slot, Some(t)) => self.slots.seat(t)?.point,
+                    (Support::Slot, Some(t)) => self.slots.place(t)?.point,
                     _ => p.position,
                 };
                 Some((b, at))
             })
             .collect();
-        let seats = seats
+        let places = places
             .iter()
             .filter_map(|&t| {
-                let s = self.slots.seat(t)?;
+                let s = self.slots.place(t)?;
                 Some((t, [s.point, s.stand().ok()?]))
             })
             .collect();
-        Geo(points, seats)
+        Geo(points, places)
     }
 
     /// A walk still going for an earlier intent gives way to a new move: it ends `claim-taken`.
@@ -388,7 +388,7 @@ impl Bodies {
                 Ask::Walk { node, point } => {
                     let goal = match point {
                         Some(p) => Ok(Target::new(node, p)),
-                        None => match self.slots.seat(node).map(|s| (s.floor, s.stand())) {
+                        None => match self.slots.place(node).map(|s| (s.floor, s.stand())) {
                             Some((floor, Ok(p))) => Ok(Target::new(floor, p)),
                             Some((_, Err(r))) => Err(r),
                             None => Err(refusal("move.no-point", node)),
@@ -458,7 +458,7 @@ impl Bodies {
 
     fn started(&mut self, id: Id, body: Id, r: R<Instance>) -> R<()> {
         let n = r?;
-        self.live.insert(body, (id, Live::Seat(n)));
+        self.live.insert(body, (id, Live::Place(n)));
         Ok(())
     }
 
@@ -484,7 +484,7 @@ impl Bodies {
                     &self.town.surfaces,
                     &t,
                 );
-                let Some(&(id, Live::Seat(n))) = self.live.get(&t.node) else {
+                let Some(&(id, Live::Place(n))) = self.live.get(&t.node) else {
                     continue;
                 };
                 if self.moves.record(n).is_some() {

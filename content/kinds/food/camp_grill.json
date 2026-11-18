@@ -1,0 +1,227 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:camp_grill",
+  "owner": "thing",
+  "state": {
+    "heat": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "lit": {
+      "n": 2,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 950]
+    }
+  },
+  "slots": {
+    "grate": {
+      "admits": "thing",
+      "kinds": [
+        "eden:camp_fish"
+      ],
+      "most": 1,
+      "at_mm": [0, 860, 0],
+      "fits_mm": [250, 140, 220]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [650, 900, 550]
+  },
+  "forms": {
+    "light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "heat",
+          "at_least": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lit",
+          "to": true,
+          "event": "lit"
+        }
+      ]
+    },
+    "put_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 1000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lit",
+          "to": false,
+          "event": "put_out"
+        }
+      ]
+    },
+    "cook": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "fish": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_fish",
+            "in": "this",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "heat",
+          "from": "this",
+          "into": {
+            "arg": "fish"
+          },
+          "amount": 1,
+          "event": "cooked"
+        },
+        {
+          "change": "set",
+          "field": "lit",
+          "to": false,
+          "event": "coals_out"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:camp_grill",
+    "table": [
+      {
+        "part": "light",
+        "field": "lit",
+        "do": "glow",
+        "at": {
+          "true": 1000,
+          "false": 0
+        }
+      },
+      {
+        "part": "light",
+        "field": "lit",
+        "do": "tint",
+        "at": {
+          "true": "#ed782d",
+          "false": "#3a3532"
+        }
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-280,400,-180],"size":[50,800,50],"tint":"iron"},{"kind":"box","at":[-280,400,180],"size":[50,800,50],"tint":"iron"},{"kind":"box","at":[280,400,-180],"size":[50,800,50],"tint":"iron"},{"kind":"box","at":[280,400,180],"size":[50,800,50],"tint":"iron"},{"kind":"box","at":[0,760,0],"size":[650,80,460],"tint":"iron"},{"kind":"box","at":[0,810,0],"size":[560,20,370],"tint":"coal","when":"@heat>=1"},{"kind":"box","at":[0,823,0],"size":[500,8,300],"tint":"ember","role":"light"},{"kind":"box","at":[-200,850,0],"size":[15,15,400],"tint":"iron"},{"kind":"box","at":[-100,850,0],"size":[15,15,400],"tint":"iron"},{"kind":"box","at":[0,850,0],"size":[15,15,400],"tint":"iron"},{"kind":"box","at":[100,850,0],"size":[15,15,400],"tint":"iron"},{"kind":"box","at":[200,850,0],"size":[15,15,400],"tint":"iron"}],"palette":{"iron":"#363b3f","coal":"#252321","ember":"#ed782d"},"tags":["camping","cooking","grill","object"]}
+  },
+  "text": {
+    "card": "A camp grill with one charcoal charge: light it and cook a raw fish on it.",
+    "camp": "camp",
+    "grill": "grill",
+    "barbecue": "barbecue",
+    "howto_fish": "Light the grill, put a raw fish on its grate, then cook it for ten seconds; the coals go out."
+  },
+  "card": {
+    "text": "card",
+    "category": "camp",
+    "synonyms": [
+      "grill",
+      "barbecue"
+    ]
+  },
+  "howtos": {
+    "fish": {
+      "text": "howto_fish",
+      "steps": [
+        {
+          "form": "light"
+        },
+        {
+          "form": "cook"
+        }
+      ]
+    }
+  }
+}

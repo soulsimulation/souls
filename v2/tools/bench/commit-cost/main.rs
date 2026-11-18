@@ -8,7 +8,8 @@
 //! the clock's time per committed act (confirm and apply), mean and 99th percentile; for the burst, the acts its
 //! biggest tick committed, that tick's work and how late the next tick started. Run from `v2/`:
 //! `cargo run -p bench --release --bin commit-cost`. Declared on #2686.
-// A bench times a run by the wall clock (the wall-clock rule, K7, is the engine's: v2/clippy.toml).
+
+// A bench times runs with the wall clock; the wall-clock rule (K7, v2/clippy.toml) is for the engine, not a bench.
 #![allow(clippy::disallowed_methods)]
 
 use sim::commit::{Outcome, checks_on_clock, commit, mark_clock_thread};
@@ -17,8 +18,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::thread;
 use std::time::{Duration, Instant};
-use worldd::checkers::lamps::{World, rules, toggle};
 use worldd::checkers::start;
+use worldd::checkers::toggles::{World, rules, toggle};
 
 const TICK: Duration = Duration::from_millis(50);
 const CHECKERS: usize = 4;

@@ -1,0 +1,41 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:carry_course",
+  "owner": "thing",
+  "state": {
+    "shuttles": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "start": { "role": "stand", "at_mm": [0, 0, 2000], "yaw_mdeg": 180000 },
+    "far": { "role": "stand", "at_mm": [0, 0, -2000], "yaw_mdeg": 0 }
+  },
+  "geometry": { "bounds_mm": [1400, 400, 4600] },
+  "forms": {
+    "carry_shuttle": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "holds": "eden:carry_weight" }],
+      "steps": [
+        { "step": "walk_to", "point": "start" },
+        { "step": "walk_to", "point": "far" },
+        { "step": "walk_to", "point": "start" }
+      ],
+      "effects": [{ "change": "set", "field": "shuttles", "by": 1, "event": "shuttle_completed" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:carry_course",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,4,2000],"size":[1200,8,200],"tint":"stripe","collide":false},{"kind":"box","at":[0,4,-2000],"size":[1200,8,200],"tint":"stripe","collide":false},{"kind":"cone","at":[-700,150,2000],"r":90,"h":300,"tint":"marker","collide":false},{"kind":"cone","at":[700,150,2000],"r":90,"h":300,"tint":"marker","collide":false},{"kind":"cone","at":[-700,150,-2000],"r":90,"h":300,"tint":"marker","collide":false},{"kind":"cone","at":[700,150,-2000],"r":90,"h":300,"tint":"marker","collide":false}],"palette":{"stripe":"#eee4c6","marker":"#dc803c"},"tags":["exercise","outdoors","stripes","cones"]}
+  },
+  "text": {
+    "card": "Two stripes four metres apart: carry a weight to the far one and back.",
+    "exercise": "exercise",
+    "loaded_carry": "loaded carry",
+    "shuttle": "shuttle",
+    "howto_carry": "Pick up a carry weight, then walk it from the near stripe to the far one and back; only a whole shuttle counts."
+  },
+  "card": { "text": "card", "category": "exercise", "synonyms": ["loaded_carry", "shuttle"] },
+  "howtos": { "carry": { "text": "howto_carry", "steps": [{ "form": "carry_shuttle" }] } }
+}

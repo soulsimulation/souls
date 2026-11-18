@@ -19,6 +19,10 @@ step() {
 step toolchain bash -c 'rustup component add rustfmt clippy && rustup target add wasm32-unknown-unknown'
 
 step format cargo fmt --all --check
+# Engine code names no kind (K3, #2667): the fixture kinds' names are in no Rust code under the crates' src/. Comment
+# lines and lines that embed a fixture file (data) are set aside; tests and fixtures name kinds on purpose.
+step no-kind-names bash -c '! grep -rniEw --include="*.rs" "lamps?|seats?|cups?" crates/*/src |
+  grep -vE "^[^:]+:[0-9]+:[[:space:]]*//" | grep -v "include_str!"'
 step lints cargo clippy --workspace --all-targets --locked -- -D warnings
 # replica's WASM-only code (the wasm-bindgen export) is linted on its own target too.
 step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked -- -D warnings
@@ -111,5 +115,15 @@ step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --l
 # The form rules (R2, #2685): every case `cargo test` ran (tests/rules.rs: 10,000 generated, and the case files) through
 # the same WASM build in Node, giving the native answers byte for byte.
 step rules-equal node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
   const got = r.rules_run(readFileSync("target/tmp/rules/run.json", "utf8")), want = readFileSync("target/tmp/rules/native.txt", "utf8");
   console.log(`rules-equal: ${want.split("\n").length - 1} cases, WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} native`);
+  if (got !== want) process.exit(1);'
+# The form rules' drift report (R2, #2685): the live packages/form-rules cases against this library, whose required
+# test reads a pinned snapshot. Only the daily full run on main (schedule) or V2_FULL=1, never per change; it prints
+# each disagreement and never fails the job.
+if [[ "${GITHUB_EVENT_NAME:-}" == schedule || "${V2_FULL:-}" == 1 ]]; then
+  step rules-drift bash -c 'cargo test -p replica --locked --test rules -- --ignored --nocapture drift || echo "::warning::rules-drift did not run"'
+fi

@@ -1,0 +1,72 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:rowing_boat",
+  "owner": "thing",
+  "state": {},
+  "points": {"landing":{"role":"stand","at_mm":[0,0,2400],"yaw_mdeg":180000}},
+  "slots": {
+    "oars": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,100],"stand":"landing"},
+    "bow": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,900],"stand":"landing"},
+    "stern": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,-600],"stand":"landing"}
+  },
+  "geometry": {"bounds_mm":[2339,1030,3200]},
+  "forms": {
+    "ride": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"slot_free","slot":"oars"}],
+      "steps": [{"step":"walk_to","point":"oars"},{"step":"sit","slot":"oars"}],
+      "effects": [{"change":"reparent","what":"actor","into":"oars","event":"took_the_oars"}]
+    },
+    "board": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+      "effects": [{"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"}]
+    },
+    "steer": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [],
+      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
+      "effects": []
+    }
+  },
+  "vehicle": {"drive":"oars","steer":"steer","speed_mm_s":1500,"ground":"deep_water"},
+  "motion": {"how":"two_souls"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:rowing_boat",
+    "shape": {
+      "shapes": [
+        {"kind":"lathe","at":[0,0,0],"profile":[[0,0],[320,20],[460,300],[500,500],[450,500],[410,300],[280,110],[0,100]],"segments":12,"tint":"hull","scale":[1300,1000,3200]},
+        {"kind":"ring","at":[0,500,0],"r":480,"r2":35,"segments":14,"tint":"rim","scale":[1300,1000,3200]},
+        {"kind":"extrude","at":[0,355,-600],"polygon":[[-530,-105],[530,-105],[530,105],[-530,105]],"h":10,"tint":"seat"},
+        {"kind":"extrude","at":[0,355,100],"polygon":[[-530,-105],[530,-105],[530,105],[-530,105]],"h":10,"tint":"seat"},
+        {"kind":"extrude","at":[0,355,900],"polygon":[[-530,-105],[530,-105],[530,105],[-530,105]],"h":10,"tint":"seat"},
+        {"kind":"cyl","at":[850,450,100],"r":25,"h":2000,"segments":5,"tint":"oar","pitch":90000,"yaw":17189},
+        {"kind":"cyl","at":[-850,450,100],"r":25,"h":2000,"segments":5,"tint":"oar","pitch":90000,"yaw":-17189}
+      ],
+      "round": 20,
+      "palette": {"hull":"#3f6f8a","rim":"#e9e2cf","seat":"#9a6b46","oar":"#c9a77a"},
+      "tags": ["transport","vehicle","boat","water","rowing"]
+    }
+  },
+  "text": {
+    "card": "A rowing boat: take the oars and row it across deep water; two more ride along.",
+    "getting_around": "transport",
+    "boat": "boat",
+    "dinghy": "dinghy",
+    "row_boat": "row boat",
+    "howto_row": "Sit at the oars, then row toward where you are going."
+  },
+  "card": {"text":"card","category":"getting_around","synonyms":["boat","dinghy","row_boat"]},
+  "howtos": {"row":{"text":"howto_row","steps":[{"form":"ride"},{"form":"steer"}]}}
+}

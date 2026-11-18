@@ -1,0 +1,182 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:apple: four bites from the hand, then eaten. Moved here from SA-X26 (#3043) with the entry.",
+  "cases": [
+    {
+      "name": "apple_four_bites_then_eaten",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:apple"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "bite"
+          },
+          "receipt": "rp1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "bites",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bitten",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "bite"
+          },
+          "receipt": "rp2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "bites",
+                "n": 1,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bitten",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "bite"
+          },
+          "receipt": "rp3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "bites",
+                "n": 1,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bitten",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "bite"
+          },
+          "receipt": "rp4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "bites",
+                "n": 1,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bitten",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "bite"
+          },
+          "receipt": "rp5",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "finish"
+          },
+          "receipt": "rp6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "x1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:eaten",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": null
+      }
+    }
+  ]
+}

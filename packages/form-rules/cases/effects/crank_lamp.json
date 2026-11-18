@@ -1,0 +1,86 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "The crank lamp (from #1873), every form in turn: three cranks fill it (0, 2, 4, 6); a 15 s shine spends 3 and lights it with a timer; it is put out early and the charge stays spent; a 5 s shine spends 1 and the world puts it out at its timer; a 10 s shine spends the last 2 and the world puts it out again. Each act carries its world time.",
+  "cases": [
+    {
+      "name": "crank_three_times_shine_put_out_shine_go_dark",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": { "loose": ["b1", "l1"] },
+          "l1": { "kind": "eden:crank_lamp" },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 250, 200] }
+        },
+        "moves": { "crank": { "reach_mm": 600 }, "press": { "reach_mm": 600 } }
+      },
+      "do": [
+        {
+          "act": { "this": "l1", "form": "crank" }, "now_us": 0, "receipt": "rl1",
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 2 }], "events": [{ "event": "eden:cranked", "node": "l1", "changes": [0] }], "timers": [] }
+        },
+        {
+          "act": { "this": "l1", "form": "crank" }, "now_us": 5000000, "receipt": "rl2",
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 4 }] }
+        },
+        {
+          "act": { "this": "l1", "form": "crank" }, "now_us": 10000000, "receipt": "rl3",
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 6 }] }
+        },
+        {
+          "act": { "this": "l1", "form": "shine_15s" }, "now_us": 15000000, "receipt": "rl4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 3 },
+              { "change": "set", "node": "l1", "field": "on", "n": 2, "to": 1 }
+            ],
+            "events": [
+              { "event": "eden:charge_spent", "node": "l1", "changes": [0] },
+              { "event": "eden:lit", "node": "l1", "changes": [1] },
+              { "event": "eden:will_go_dark", "node": "l1", "changes": [] }
+            ],
+            "timers": [{ "node": "l1", "form": "goes_dark", "after_us": 15000000, "event": 2 }]
+          }
+        },
+        {
+          "act": { "this": "l1", "form": "extinguish" }, "now_us": 18000000, "receipt": "rl5",
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "on", "n": 2, "to": 0 }], "events": [{ "event": "eden:put_out", "node": "l1", "changes": [0] }], "timers": [] }
+        },
+        {
+          "act": { "this": "l1", "form": "shine_5s" }, "now_us": 20000000, "receipt": "rl6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 2 },
+              { "change": "set", "node": "l1", "field": "on", "n": 2, "to": 1 }
+            ],
+            "timers": [{ "node": "l1", "form": "goes_dark", "after_us": 5000000, "event": 2 }]
+          }
+        },
+        {
+          "act": { "this": "l1", "form": "goes_dark" }, "now_us": 25000000, "receipt": "rl7",
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "on", "n": 2, "to": 0 }], "events": [{ "event": "eden:went_dark", "node": "l1", "changes": [0] }], "timers": [] }
+        },
+        {
+          "act": { "this": "l1", "form": "shine_10s" }, "now_us": 26000000, "receipt": "rl8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 0 },
+              { "change": "set", "node": "l1", "field": "on", "n": 2, "to": 1 }
+            ],
+            "timers": [{ "node": "l1", "form": "goes_dark", "after_us": 10000000, "event": 2 }]
+          }
+        },
+        {
+          "act": { "this": "l1", "form": "goes_dark" }, "now_us": 36000000, "receipt": "rl9",
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "on", "n": 2, "to": 0 }] }
+        }
+      ],
+      "after": {
+        "l1": { "kind": "eden:crank_lamp", "fields": { "charge": 0, "on": 0 } }
+      }
+    }
+  ]
+}

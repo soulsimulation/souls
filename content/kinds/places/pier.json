@@ -1,0 +1,221 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pier",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      20000,
+      2000,
+      4000
+    ]
+  },
+  "looks": {
+    "model": "look:pier",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            -8000,
+            350,
+            -1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -8000,
+            350,
+            1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -4000,
+            350,
+            -1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -4000,
+            350,
+            1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            350,
+            -1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            350,
+            1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            4000,
+            350,
+            -1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            4000,
+            350,
+            1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            8000,
+            350,
+            -1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            8000,
+            350,
+            1000
+          ],
+          "r": 120,
+          "h": 700,
+          "segments": 8,
+          "tint": "post"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            760,
+            0
+          ],
+          "size": [
+            20000,
+            120,
+            2400
+          ],
+          "tint": "deck"
+        },
+        {
+          "kind": "box",
+          "at": [
+            7500,
+            770,
+            0
+          ],
+          "size": [
+            5000,
+            120,
+            4000
+          ],
+          "tint": "deck"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2500,
+            1700,
+            -1150
+          ],
+          "size": [
+            15000,
+            60,
+            60
+          ],
+          "tint": "post"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2500,
+            1700,
+            1150
+          ],
+          "size": [
+            15000,
+            60,
+            60
+          ],
+          "tint": "post"
+        }
+      ],
+      "round": 10,
+      "palette": {
+        "deck": "#a07a4f",
+        "post": "#6b5038"
+      },
+      "tags": [
+        "pier",
+        "water",
+        "structure"
+      ]
+    }
+  },
+  "text": {
+    "card": "A pier on posts out over the water, with rails and a platform at the end.",
+    "water": "water",
+    "jetty": "jetty",
+    "dock": "dock",
+    "harbour": "harbour"
+  },
+  "card": {
+    "text": "card",
+    "category": "water",
+    "synonyms": [
+      "jetty",
+      "dock",
+      "harbour"
+    ]
+  }
+}
