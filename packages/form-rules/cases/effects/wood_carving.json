@@ -1,0 +1,351 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The wooden blank (from #1709): each of the three carvings is done once, credits its carver, and a second carving by another Soul is refused.",
+ "cases": [
+  {
+   "name": "carve_a_leaf_once_then_refused",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "w1",
+       "b2"
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_leaf",
+      "args": {
+       "bench": "w1"
+      }
+     },
+     "receipt": "rc_leaf",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "carving",
+        "n": 1,
+        "to": "leaf"
+       },
+       {
+        "change": "link",
+        "node": "t1",
+        "link": "carved_by",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:carved_leaf",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:maker_credited",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_bird",
+      "args": {
+       "bench": "w1"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rc_leaf_again",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:wooden_blank",
+     "fields": {
+      "carving": "leaf"
+     },
+     "links": {
+      "carved_by": [
+       "b1"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "carve_a_bird_once_then_refused",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "w1",
+       "b2"
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_bird",
+      "args": {
+       "bench": "w1"
+      }
+     },
+     "receipt": "rc_bird",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "carving",
+        "n": 1,
+        "to": "bird"
+       },
+       {
+        "change": "link",
+        "node": "t1",
+        "link": "carved_by",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:carved_bird",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:maker_credited",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_leaf",
+      "args": {
+       "bench": "w1"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rc_bird_again",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:wooden_blank",
+     "fields": {
+      "carving": "bird"
+     },
+     "links": {
+      "carved_by": [
+       "b1"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "carve_a_totem_once_then_refused",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "w1",
+       "b2"
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_totem",
+      "args": {
+       "bench": "w1"
+      }
+     },
+     "receipt": "rc_totem",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "carving",
+        "n": 1,
+        "to": "totem"
+       },
+       {
+        "change": "link",
+        "node": "t1",
+        "link": "carved_by",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:carved_totem",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:maker_credited",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_leaf",
+      "args": {
+       "bench": "w1"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rc_totem_again",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:wooden_blank",
+     "fields": {
+      "carving": "totem"
+     },
+     "links": {
+      "carved_by": [
+       "b1"
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

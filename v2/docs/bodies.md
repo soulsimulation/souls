@@ -39,11 +39,15 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
 
 7. **A skill touches the world through one trait, `Host`, in `replica`:** world time (T5; never a machine's clock),
    its body, reading nodes (its body as of this tick, every other node as of the previous tick, T1), a closed list of
-   geometry questions answered in integers (a distance, a point), timers on its body set and cleared (T6 rule 15),
+   geometry questions answered in integers (a distance, a point, and the bodies near it: their ids, positions and
+   velocities on the node it stands on, as of the previous tick), timers on its body set and cleared (T6 rule 15),
    draws from the world's random numbers, controller inputs (T4's own `ControllerInput`: a velocity in three
-   dimensions in the body's frame and a movement mode), and entries of its own node (T6 rule 6: generic changes, all
-   or none, with the named event that says what they meant), any other node refused as `write-outside-own`, and a
-   motion change on its own body refused as `motion-outside-controller` (it moves only by controller inputs). A skill
+   dimensions in the body's frame and a movement mode), a request to be carried across a link by the link's move
+   (T4; the controller carries it, its read shows field 40 meanwhile, and a shut door on the way is opened for it by
+   the world, the body as the acting Soul, while it stands that tick), and entries of its own node (T6 rule 6:
+   generic changes, all or none, with the named event that says what they meant), any other node refused as
+   `write-outside-own`, a motion change on its own body refused as `motion-outside-controller` and a reparent of its
+   own body as `reparent-outside-controller` (it moves only by controller inputs and crossings). A skill
    is a `Skill`: its shape and a step that returns going, done or failed with a name. The built-in skills use the
    same trait. A skill only asks: the claims it holds are made by the body, so nothing it returns needs sealing.
 8. **The wall is a crate boundary, and a scan for what the compiler allows.** Built-in skills live in
@@ -56,6 +60,17 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
    (`HashMap`, `HashSet`, `RandomState`), `skill-names-state` (the fixtures' harness) and `skill-allows-unsafe` (a
    crate root without the `forbid`); `use std as` counts as reaching out. A name reached through a re-export or a
    macro gets past a scan of text.
+   **The walk's fields (T9b A3).** A walker waiting for a link taken in turns sets field 41 on its own body,
+   `[link, distance µm]`, and clears it with `[]`; the world shows field 42 (1) on such a link and field 43, the body
+   its owning node lets in, both read with `read(link)`. The owner reads the marks as of the last tick and writes
+   its grants; a walker never writes the link. **N10 and N9 (T9c #3127).** The world sets on a walker's body field
+   44 (1: the shoulder turn, no body pushes it), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
+   ...]]`, walked from its first leg: N10's reroute, or the way to a standing spot N9 granted) and field 46 (1: the
+   world walks it out to legal ground, and the walk stands); it shows field 47 (1) on a body standing on its own
+   granted spot. Ending a walk by name is the world's: it ends the run. A new run on a body starts without the marks
+   of the run before it: fields 41, 44 and 45 go when it starts (#3168). A crossing is carried only from within 1 m
+   of the link's near end (else `link-not-here`), and lands on a point the far surface's mover holds, moved onto it
+   by less than a body's radius if need be (else `link-end-off-ground`); both are refused before the body moves.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
@@ -63,13 +78,36 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
 ## The controller (B1)
 
 The controller (`v2/crates/sim/src/controller`, B1 #2680) is the only way a body is moved or posed: it holds each
-body's mover state and is the one caller of the mover (N7's walk still calls it until T9b #3120). A driver is a claim
+body's mover state and is the one caller of the mover. It also carries a body across a link along the link's line
+(T9b #3120, `sim::host::carry`), and answers a dry run (what one step would do to a copy, moving nothing) for the
+world's geometry answers. By its own rule, with no driver, it carries a body found on illegal ground to the nearest
+legal point (N10's walk-out, T9c #3127). Skills run on its bodies through `sim::host::Runner`, a tick at a time; N7's
+`Crowd` is retired (T9c). A driver is a claim
 made by rule 4's rules, so a second driver asking for a held resource is refused by name and the first driver's input
 stands. A driver is a skill, its staged inputs handed on by `sim::host::hand_on` under its run's driver, or a script
 (`v2/tools/body-script`). One input type serves every family: velocity and mode (T4), facing and stance, set only by
 the driver holding all the body's locomotion, and one move per resource, set by that resource's driver; anything else
 is `resource-not-held` or `resource-missing`. An unheld resource gets the neutral input (still, hands down, facing
 kept), which never moves a body. An input is logged only when it changes.
+
+Gaze and voice (B11 #2742). Where a body looks is part of its input (a node, a point or ahead, record field 8), set
+by the driver holding its gaze and logged when it changes. Its voice carries one utterance at a time: a new one
+replaces the one under way or waits behind it, by the intent's `replace`, and lasts its length from its words, one
+timer. The world writes each as `souls:said {1: {21: words}, 2: reach mm, 3: [hearer, ...], 4: length µs}` in an
+entry whose audience says who may read it ([audience.md](audience.md) rule 4, `replica::speech`). Its hearers are
+resolved when it is written and recorded (`sim::speech`): for ordinary talk, the Souls whose interest set (R4) holds
+the speaker, found from the bodies within the set's leave distance, never a scan. So a body walks, carries and talks
+at once, each under its own driver.
+
+## Moves (B2)
+
+A move (`v2/crates/replica/src/moves.rs`, B2 #2681) is data: its claims, blocks and cancels in rule 2 to 4's terms,
+named phases in µs (a phase includes its start and excludes its end; contact is the instant the first phase ends), an
+effector (the body, the resource it holds, or a named point of the thing held), a reach in µm (at most 700 mm) and a
+contact point by name. Fixtures: `v2/crates/replica/fixtures/moves/`. `v2/crates/sim/src/moves` runs it: the reach is
+asked of the geometry first (`out-of-reach` with the distance), the claim is a controller driver with the move set on
+each resource it holds, and each phase end is one timer in K9's due list. Nothing polls; a later claim that takes the
+move's resources cancels it at its next phase end (`claim-taken`).
 
 ## The code hatch, shape only
 

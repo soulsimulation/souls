@@ -1,0 +1,156 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bathtub",
+  "owner": "thing",
+  "state": {
+    "water": {
+      "n": 1,
+      "type": "int",
+      "unit": "g",
+      "default": 0,
+      "min": 0,
+      "max": 200000,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "taps": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        820,
+        -700
+      ]
+    },
+    "side": {
+      "role": "stand",
+      "at_mm": [
+        600,
+        0,
+        0
+      ]
+    }
+  },
+  "slots": {
+    "soak": {
+      "admits": "body",
+      "posture": "lie",
+      "most": 1,
+      "at_mm": [
+        0,
+        350,
+        0
+      ],
+      "stand": "side"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      740,
+      840,
+      1640
+    ]
+  },
+  "forms": {
+    "fill": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "water",
+          "at_most": 0
+        },
+        {
+          "need": "within_reach",
+          "point": "taps"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "taps"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "water",
+          "to": 200000,
+          "event": "bath_run"
+        }
+      ]
+    },
+    "empty": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "water",
+          "at_least": 1
+        },
+        {
+          "need": "within_reach",
+          "point": "taps"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "taps"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "water",
+          "to": 0,
+          "event": "bath_emptied"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:bathtub",
+    "table": [
+      {
+        "part": "fill",
+        "field": "water",
+        "do": "show",
+        "range": [
+          0,
+          200000
+        ],
+        "to": [
+          0,
+          1
+        ]
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"extrude","at":[0,30,0],"polygon":[[-370,-820],[370,-820],[370,820],[-370,820]],"h":500,"tint":"porcelain"},{"kind":"box","at":[0,570,0],"size":[620,40,1500],"round":0,"tint":"inside"},{"kind":"box","at":[0,596,0],"size":[600,12,1460],"round":0,"tint":"water","role":"fill","pivot":[0,590,0]},{"kind":"cyl","at":[0,700,-780],"r":25,"h":250,"segments":5,"tint":"chrome"},{"kind":"cyl","at":[0,820,-700],"r":20,"h":140,"segments":5,"tint":"chrome","pitch":90000}],"palette":{"porcelain":"#eef0ee","inside":"#dfe4e4","water":"#8ec5d6","chrome":"#c9ccd0","brass":"#b8913f"},"tags":["bath","bathtub","object"]}
+  },
+  "text": {
+    "card": "A white bathtub with chrome taps: run a bath, lie in it, and let the water out.",
+    "bath": "bath",
+    "tub": "tub"
+  },
+  "card": {
+    "text": "card",
+    "category": "bath",
+    "synonyms": [
+      "bath",
+      "tub"
+    ]
+  }
+}

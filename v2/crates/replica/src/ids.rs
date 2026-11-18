@@ -179,6 +179,8 @@ pub enum Purpose {
     Redactions,
     /// An upload's stored bytes, after its check (G6, #2747, `v2/crates/assets`).
     Upload,
+    /// A stored model of a kind's picture: the binary glTF a page fetches (V17, #2717).
+    Model,
 }
 
 impl Purpose {
@@ -195,6 +197,7 @@ impl Purpose {
             Purpose::View => "souls/view/1",
             Purpose::Redactions => "souls/redactions/1",
             Purpose::Upload => "souls/upload/1",
+            Purpose::Model => "souls/model/1",
         }
     }
 }
@@ -361,6 +364,11 @@ impl KindSource {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The kind's numbered sections as written; K3 reads its state, points and forms from them.
+    pub fn sections(&self) -> &BTreeMap<u64, Value> {
+        &self.sections
     }
 
     fn references(&self) -> Vec<&str> {

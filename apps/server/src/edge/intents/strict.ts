@@ -27,12 +27,17 @@ export function knownIds(ledger: EdgeLedger, caps: EdgeCapability[]): Set<string
 
 export type StrictRefusal = {code: string; reason: string; did_you_mean: {id: string; label: string}[]};
 
-/** `verb:<id>` where <id> is id-shaped and names nothing here → a refusal (with the closest offered ids). */
-export function strictCheck(ledger: EdgeLedger, soul: EdgeSoul, input: string, caps: EdgeCapability[]): StrictRefusal | null {
+/** `verb:<id>` where <id> is id-shaped and names nothing here → a refusal (with the closest offered ids).
+ *  #2528: `menu` may be a function, called only when no id the world knows without it answers: an id-shaped target that is a
+ *  thing, spot, Soul or place builds no whole menu. Each early `null` is pure, so their order changes nothing. */
+export function strictCheck(ledger: EdgeLedger, soul: EdgeSoul, input: string, menu: EdgeCapability[] | (() => EdgeCapability[])): StrictRefusal | null {
   const i = input.indexOf(':'); if (i <= 0) return null;
   const verb = input.slice(0, i).trim().toLowerCase(), target = input.slice(i + 1).trim();
-  if (!ID_SHAPED.test(target) || caps.some(c => c.id === input)) return null;
+  if (!ID_SHAPED.test(target)) return null;
   if (verb === 'accept' || verb === 'decline') return null;          // invitation ids are checked by together/1
+  if (typeof menu === 'function' && knownIds(ledger, []).has(target)) return null;
+  const caps = typeof menu === 'function' ? menu() : menu;
+  if (caps.some(c => c.id === input)) return null;
   const known = knownIds(ledger, caps); if (known.has(target)) return null;
   // the closest real ids: same verb first, by shared words
   const words = target.split(/[-._]+/).filter(w => w.length > 2 && w !== 'eden');
