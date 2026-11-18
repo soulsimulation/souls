@@ -403,7 +403,7 @@ pub struct Runner {
     seed: u64,
     minter: Minter,
     /// The bodies not carried across a link, by node and cell of [`CELL`], as of the end of the last tick.
-    grid: BTreeMap<(Id, i64, i64), Vec<Near>>,
+    grid: Grid,
 }
 
 fn decode_int(v: &Value) -> Option<i64> {
@@ -423,9 +423,13 @@ pub fn waiting(fields: Option<&BTreeMap<u64, Value>>) -> Option<(Id, i64)> {
     Some((read_id(l).ok()?, decode_int(g)?))
 }
 
-fn key(node: Id, x: i64, z: i64) -> (Id, i64, i64) {
-    (node, x.div_euclid(CELL), z.div_euclid(CELL))
+fn key(x: i64, z: i64) -> (i64, i64) {
+    (x.div_euclid(CELL), z.div_euclid(CELL))
 }
+
+/// The bodies by node, then by cell of [`CELL`]: a node's cells are searched by two integers, not by the node's id
+/// each time (#3213).
+type Grid = BTreeMap<Id, BTreeMap<(i64, i64), Vec<Near>>>;
 
 fn body_kind() -> Name {
     Name::new("souls:body").unwrap_or_else(|| unreachable!("a fixed name"))
@@ -461,7 +465,7 @@ struct Here<'a> {
     town: View<'a>,
     controller: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
-    grid: &'a BTreeMap<(Id, i64, i64), Vec<Near>>,
+    grid: &'a Grid,
     settled: BTreeSet<Id>,
     /// A body's kind, named once a tick, not at each read (#3213).
     kind: Name,
@@ -511,21 +515,18 @@ impl Geometry for Here<'_> {
 }
 
 /// The bodies in `grid` other than `body` on `node` within `radius` of `at` (x and z), in id order.
-fn near(
-    grid: &BTreeMap<(Id, i64, i64), Vec<Near>>,
-    body: Id,
-    node: Id,
-    at: Vec3,
-    radius: i64,
-) -> Vec<Near> {
-    let (_, i, j) = key(node, at.x, at.z);
+fn near(grid: &Grid, body: Id, node: Id, at: Vec3, radius: i64) -> Vec<Near> {
+    let (i, j) = key(at.x, at.z);
     let k = (radius.max(0) + CELL - 1) / CELL;
     let r = i128::from(radius);
     let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
     let mut out = Vec::new();
-    // A row of cells is one range of the grid's keys (node, i, then j): one search a row, not one a cell (#3213).
+    let Some(cells) = grid.get(&node) else {
+        return out;
+    };
+    // A row of cells is one range of the node's keys (i, then j): one search a row, not one a cell (#3213).
     for di in -k..=k {
-        for (_, cell) in grid.range((node, i + di, j - k)..=(node, i + di, j + k)) {
+        for (_, cell) in cells.range((i + di, j - k)..=(i + di, j + k)) {
             for n in cell {
                 if n.id != body && d(at.x, n.position.x) + d(at.z, n.position.z) < r * r {
                     out.push(*n);
@@ -689,7 +690,7 @@ impl Runner {
     fn index(&mut self) {
         // The cells are emptied and kept, not dropped, and the ones left empty go after: no cell is allocated again
         // each tick (#3213).
-        for cell in self.grid.values_mut() {
+        for cell in self.grid.values_mut().flat_map(|c| c.values_mut()) {
             cell.clear();
         }
         for b in self.controller.bodies() {
@@ -698,7 +699,9 @@ impl Runner {
             }
             let p = b.pose.position;
             self.grid
-                .entry(key(node_of(b), p.x, p.z))
+                .entry(node_of(b))
+                .or_default()
+                .entry(key(p.x, p.z))
                 .or_default()
                 .push(Near {
                     id: b.id,
@@ -706,7 +709,10 @@ impl Runner {
                     velocity: b.linear,
                 });
         }
-        self.grid.retain(|_, cell| !cell.is_empty());
+        for cells in self.grid.values_mut() {
+            cells.retain(|_, cell| !cell.is_empty());
+        }
+        self.grid.retain(|_, cells| !cells.is_empty());
     }
 
     /// One tick over `town`: the marks read for the turns, every skill stepped against the bodies as they stood at
