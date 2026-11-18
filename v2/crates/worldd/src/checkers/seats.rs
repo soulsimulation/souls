@@ -6,14 +6,21 @@
 //! The copy is [`SeatsSeen`]: the seats as built (their thing, room, kind and point) and the set held at a version.
 //! The holds are B3's table (`sim::slots`), not yet in the tree, so the clock publishes that set as it publishes K8's
 //! frozen copy.
+//!
+//! **A described spot** (selector 2, E2 #2709) is resolved here too ([`spot`]): on the checker's frozen copy of the
+//! tree, by the shared library (`replica::select`), so the answer is the client's at the same version. The clock
+//! thread binds it once, at commit (`sim::commit::spot`, `crate::answers`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use replica::effects::Refusal;
 use replica::encode::Name;
 use replica::ids::Id;
 use replica::pose::Vec3;
+use replica::select::{Resolved, Spot, position};
 use replica::selector::{FEW, Selector, best};
+use replica::tree::Tree;
 use sim::commit::bind::Slot;
 use sim::commit::off_clock;
 
@@ -61,6 +68,27 @@ pub fn resolve(seen: &SeatsSeen, body: Vec3, wanted: &[Wanted]) -> Vec<Slot> {
             }
         })
         .collect()
+}
+
+/// Resolves described spot `spot` for `body` on `copy`, a checker's frozen copy, with the shared library: the answer a
+/// client gives at the same version. The body is "me" when it is a node of the copy. Refused by the library's own
+/// names (`spot.none`, `spot.no-front`, ...). `held(thing, slot)` is the slots taken, as the copy knows them.
+pub fn spot(
+    copy: &Tree,
+    spot: &Spot,
+    body: Id,
+    held: &dyn Fn(Id, u64) -> bool,
+) -> Result<Resolved, Refusal> {
+    off_clock();
+    replica::select::resolve(copy, spot, position(copy, body).ok(), held)
+}
+
+impl super::SpotAct {
+    /// Resolves this act's spot on a checker's copy ([`spot`]). B3's holds are not in the copy yet (as for
+    /// [`SeatsSeen`]), so a slot taken since is caught when it is bound, at commit.
+    pub fn resolve(&mut self, copy: &Tree, body: Id) {
+        self.resolved = Some(spot(copy, &self.spot, body, &|_, _| false));
+    }
 }
 
 #[cfg(test)]

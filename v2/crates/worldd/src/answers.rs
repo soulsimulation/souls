@@ -35,16 +35,20 @@
 // worldd's real clock: the tick loop and world time read the machine's clocks until K7's ticker drives them.
 #![allow(clippy::disallowed_methods)]
 
-use crate::bodies::{self, Asked, Bodies};
-use crate::checkers::{self, Act, Candidate, Rules};
+use crate::bodies::{self, Ask, Asked, Bodies};
+use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use replica::apply::Replica;
 use replica::effects::{Actor, Body, Cause, Effect, Envelope, Event as Named, Part, Refusal};
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Id, Scope, Version};
 use replica::intents::{Answer, INTENT_MOST, Intent, Target};
+use replica::select::Answer as Answered;
+use replica::select::Spot;
+use replica::select::wire::SPOT;
 use replica::time::Micros;
 use replica::world_model::Audience;
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
+use sim::commit::spot::{self, Spot as Bound};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
 use sim::frozen::Publisher;
 use sim::log::{Log, Storage};
@@ -235,7 +239,60 @@ fn act_of(intent: &Intent, id: u64, cause: Cause) -> Result<Act, &'static str> {
         body,
         candidates,
         recheck: None,
+        spot: None,
     })
+}
+
+/// A walk or a sit aimed at a described spot (selector 2 of I5's list, E2 #2709): `None` for any other intent, else
+/// the act a checker resolves the spot for on its copy, or the spot's refusal by name.
+fn spot_of(intent: &Intent, id: u64, cause: Cause) -> Option<Result<Act, &'static str>> {
+    let target @ Target::Selector(SPOT, _) = intent.target.as_ref()? else {
+        return None;
+    };
+    let sit = match intent.verb.as_str().split_once(':') {
+        Some((ns, "sit")) if ns != "souls" => true,
+        Some((ns, "walk")) if ns != "souls" => false,
+        _ => return None,
+    };
+    Some(Spot::read(target).map_err(|r| r.name).and_then(|spot| {
+        Ok(Act {
+            id,
+            cause,
+            actor: intent.actor,
+            body: body_of(intent)?,
+            candidates: Vec::new(),
+            recheck: None,
+            spot: Some(Box::new(SpotAct {
+                sit,
+                spot,
+                resolved: None,
+            })),
+        })
+    }))
+}
+
+/// Binds a resolved spot once, at commit (`sim::commit::spot`): a slot is sat in (or walked to), a thing or a point
+/// is walked to, as N9's target in the frame of the node it stands in. Refused by the checker's name.
+fn bind_spot(s: Box<SpotAct>, body: Id, actor: Actor) -> Result<Asked, String> {
+    let r = s
+        .resolved
+        .ok_or("spot.unresolved")?
+        .map_err(|r| r.name.to_owned())?;
+    let ask = match (spot::once(&r), s.sit, r.answer) {
+        (Bound::Slot { thing, .. }, true, _) | (_, true, Answered::Thing { thing, .. }) => {
+            Ask::Sit { thing }
+        }
+        (Bound::Slot { thing, .. }, false, _) => Ask::Walk {
+            node: thing,
+            point: None,
+        },
+        (Bound::Stand(t), false, _) => Ask::Walk {
+            node: t.node,
+            point: Some(t.point()),
+        },
+        (Bound::Stand(_), true, _) => return Err("spot.not-a-slot".into()),
+    };
+    Ok(Asked { body, actor, ask })
 }
 
 impl Clock {
@@ -355,9 +412,14 @@ impl Clock {
             Some(_) => body_of(&intent).ok().and_then(|b| bodies::read(&intent, b)),
             None => None,
         };
-        let taken = match moved {
-            Some(m) => m.map(Taken::Move),
-            None => act_of(&intent, self.next_intent, Cause::Intent(id)).map(Taken::Form),
+        let spotted = match self.bodies {
+            Some(_) => spot_of(&intent, self.next_intent, Cause::Intent(id)),
+            None => None,
+        };
+        let taken = match (spotted, moved) {
+            (Some(a), _) => a.map(Taken::Form),
+            (None, Some(m)) => m.map(Taken::Move),
+            (None, None) => act_of(&intent, self.next_intent, Cause::Intent(id)).map(Taken::Form),
         };
         let taken = match taken {
             Ok(t) => t,
@@ -519,6 +581,14 @@ impl Clock {
             let (actor, sequence) = (act.actor, o.sequence);
             if expired(o.expiry, now) {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+                continue;
+            }
+            // A described spot is bound here, once; the move then starts with this tick's moves.
+            if let Some(s) = act.spot.take() {
+                match bind_spot(s, act.body, actor) {
+                    Ok(asked) => self.moving.push((id, asked)),
+                    Err(reason) => self.end(id, |c| c.refusal(actor, sequence, &reason)),
+                }
                 continue;
             }
             match commit(&mut self.replica, &checks, now) {

@@ -29,6 +29,8 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    or a selector from a closed list that the engine binds at commit and records as its choice: the first, any free
    slot of a kind in a node with its binding rule as a field (`replica::selector`, I5); the second, a described spot
    (`replica::select`, E2): a pick among things or free slots, or a point on one node's shape, in ten relations.
+   A walk or a sit aimed at a described spot is resolved by a checker on its copy, the client's answer at that
+   version, and bound once when the act commits; a spot with no answer is refused by its name (`spot.no-front`).
    Resources are T9's claims (`{1: 1 all, 2 one or 3 named, 2: class or name}`). Parameters are the form's arguments;
    none may be a time or a condition, the one exception being a move's next beat (rule 9).
 4. **An intent's kind is its verb.** A form's verb (`namespace:form`) is a checked act. The engine's own verbs are
