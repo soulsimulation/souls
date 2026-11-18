@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":274,"group":"over-time","words":"keep the campfire going all night","obvious":2,"when":"all night","things":{"campfire":"eden:campfire","firewood":"eden:firewood"},"chain":[{"this":"me","form":"pick_up","carry":"firewood","args":{"thing":"firewood"}},{"this":"campfire","form":"add_fuel"}]}
