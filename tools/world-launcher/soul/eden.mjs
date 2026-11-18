@@ -6675,11 +6675,15 @@ async function act(...argv) {
 // SA-C8: `act <id> --else <id> --else any:sit`: the ranked list the act carries. The client sends the first; when the world
 // refuses it, or the act it began ends failed before it held, the next is sent at once: the mind is not woken between. An
 // entry is an offered id, `{"id":...,"params":...}`, or `any:sit`, which stands for the seats in this Soul's own room, nearest
-// first (this copy's guess: the world decides each). The answer says which entry held (`fallback.took`), or, when the list runs
+// first, a crowd spread over the nearest few (this copy's guess: the world decides each). The answer says which entry held (`fallback.took`), or, when the list runs
 // out, every entry with the world's word (`fallback.tried`) and what the world last offered (`did_you_mean`): that is the one
 // wake. A write the world did not confirm, an act limit and a stop are never tried past: the next entry could double the act.
 export const FALLBACK_MAX = 12, ANY_SEAT = "any:sit";
 const NO_FALLBACK = new Set(["rate-limited", "act.stopped", "act.replaced"]);
+/** any:sit spreads a crowd over the nearest FALLBACK_SPREAD free seats: a pick drawn from the Soul's id and the try, the same on
+ *  every run. Wider is worse: past the seats the world names free, the copy cannot tell a taken seat from a free one. */
+export const FALLBACK_SPREAD = 3;
+const spreadOf = (id, n) => { let h = 2166136261; for (const c of String(id ?? "")) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return n > 1 ? h % n : 0; };
 const entryOf = (e, shared) => typeof e === "string" ? { id: e, ...(shared ? { params: shared } : {}) } : e && typeof e.id === "string" ? { id: e.id, ...(e.params ? { params: e.params } : {}) } : null;
 async function actRanked(first, ranked, o) {
   const shared = first.params?.seconds !== undefined ? { seconds: first.params.seconds } : undefined;   // a duration is the same wherever
@@ -6693,8 +6697,11 @@ async function actRanked(first, ranked, o) {
       // the seats the world just named free (its own `did_you_mean`) first, then this room's seats nearest first
       const named = (last?.did_you_mean ?? []).map((d) => d?.id).filter((id) => /^sit:/.test(id ?? ""));
       const ids = [...new Set([...named, ...soulCatalog.seatsHere(ix, me?.place, me?.at, [...seen, ...queue.map((x) => x.id)])])].filter((id) => !seen.has(id));
-      // one seat at a time, read again after each refusal: what is free changes while the others are asking too
-      if (ids.length) queue.unshift({ id: ids[0], ...(shared ? { params: shared } : {}) }, e);
+      // one seat at a time, read again after each refusal: what is free changes while the others are asking too. A crowd refused
+      // together hears the same free seats, so each Soul takes its own one of the nearest few, drawn again on each try: all
+      // asking for the nearest, all but one would be refused again on every try, and the last would run out of tries.
+      const pick = spreadOf(`${load().soul}:${tried.length}`, Math.min(ids.length, FALLBACK_SPREAD));
+      if (ids.length) queue.unshift({ id: ids[pick], ...(shared ? { params: shared } : {}) }, e);
       continue;
     }
     if (seen.has(e.id)) continue; seen.add(e.id);
