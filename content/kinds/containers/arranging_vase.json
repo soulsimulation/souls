@@ -1,0 +1,319 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:arranging_vase",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        880
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "slots": {
+    "stem_1": {
+      "admits": "thing",
+      "kinds": [
+        "eden:cut_flower"
+      ],
+      "most": 1,
+      "at_mm": [
+        -130,
+        960,
+        -25
+      ],
+      "fits_mm": [
+        120,
+        540,
+        120
+      ],
+      "stand": "stand"
+    },
+    "stem_2": {
+      "admits": "thing",
+      "kinds": [
+        "eden:cut_flower"
+      ],
+      "most": 1,
+      "at_mm": [
+        0,
+        960,
+        45
+      ],
+      "fits_mm": [
+        120,
+        540,
+        120
+      ],
+      "stand": "stand"
+    },
+    "stem_3": {
+      "admits": "thing",
+      "kinds": [
+        "eden:cut_flower"
+      ],
+      "most": 1,
+      "at_mm": [
+        130,
+        960,
+        -25
+      ],
+      "fits_mm": [
+        120,
+        540,
+        120
+      ],
+      "stand": "stand"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      520,
+      1150,
+      520
+    ],
+    "front": "none"
+  },
+  "forms": {
+    "put_in": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        },
+        "place": {
+          "type": "slot",
+          "select": {
+            "of": "free_slots",
+            "in": "this",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "thing"
+          }
+        },
+        {
+          "need": "hand",
+          "holds": "eden:cut_flower"
+        },
+        {
+          "need": "slot_free",
+          "slot": {
+            "arg": "place"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "put",
+          "slot": {
+            "arg": "place"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": {
+            "arg": "place"
+          },
+          "event": "arranged"
+        }
+      ]
+    },
+    "take_out": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "this",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1,
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "taken_out"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:arranging_vase",
+    "shape": {
+      "round": 6,
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            35,
+            0
+          ],
+          "r": 260,
+          "h": 70,
+          "segments": 10,
+          "tint": "stand"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            460,
+            0
+          ],
+          "r": 45,
+          "h": 840,
+          "segments": 8,
+          "tint": "stand"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            890,
+            0
+          ],
+          "r": 240,
+          "h": 40,
+          "segments": 12,
+          "tint": "stand"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "profile": [
+            [
+              0,
+              910
+            ],
+            [
+              120,
+              910
+            ],
+            [
+              210,
+              950
+            ],
+            [
+              240,
+              1130
+            ],
+            [
+              230,
+              1150
+            ],
+            [
+              200,
+              1150
+            ],
+            [
+              180,
+              970
+            ],
+            [
+              0,
+              950
+            ]
+          ],
+          "segments": 14,
+          "tint": "glaze"
+        }
+      ],
+      "palette": {
+        "glaze": "#648a9a",
+        "stand": "#92704d"
+      },
+      "tags": [
+        "furniture",
+        "art",
+        "vase",
+        "flowers",
+        "container"
+      ]
+    }
+  },
+  "text": {
+    "card": "A vase with three places for single cut stems: put one in, take one out.",
+    "flowers": "flowers",
+    "stem_vase": "stem vase",
+    "flower_vase": "flower arranging vase",
+    "howto_arrange": "Hold a cut flower and put it in a free place in the vase; take one out with a hand free."
+  },
+  "card": {
+    "text": "card",
+    "category": "flowers",
+    "synonyms": [
+      "stem_vase",
+      "flower_vase"
+    ]
+  },
+  "howtos": {
+    "arrange": {
+      "text": "howto_arrange",
+      "steps": [
+        {
+          "form": "put_in"
+        },
+        {
+          "form": "take_out"
+        }
+      ]
+    }
+  }
+}

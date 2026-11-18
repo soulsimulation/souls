@@ -1,0 +1,18 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:piano",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [1500, 1000, 600] },
+  "areas": {
+    "lid": { "forbids": ["sit", "lie"] }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:piano" },
+  "text": {
+    "card": "A piano, to play, never to sit or lie on.",
+    "instrument": "instrument",
+    "keys": "keys"
+  },
+  "card": { "text": "card", "category": "instrument", "synonyms": ["keys"] }
+}

@@ -1,0 +1,544 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Tea, as entries, step after step through the rules: a Soul holding the kettle takes a cup off its saucer into the other hand (a change of parent), fills the kettle at the tap, switches it on at ten seconds, the world boils it at 160 s, the kettle is poured into the cup until the cup is full (250 g moved, out of the kettle and into the cup), and the cup is sipped five times, 50 g each, its sips counted, until it is empty. Each act carries its own world time.",
+  "cases": [
+    {
+      "name": "make_tea_take_fill_boil_pour_five_sips",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "s1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:tap"
+          },
+          "s1": {
+            "kind": "eden:saucer",
+            "slots": {
+              "cup": [
+                "c1"
+              ]
+            }
+          },
+          "c1": {
+            "kind": "eden:cup"
+          },
+          "k1": {
+            "kind": "eden:kettle"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "k1"
+            },
+            "effector_mm": [
+              -60,
+              40,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "take"
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "c1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "k1",
+            "form": "fill",
+            "args": {
+              "from": "t1"
+            }
+          },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "water",
+                "n": 1,
+                "to": 999998300,
+                "by": -1700
+              },
+              {
+                "change": "set",
+                "node": "k1",
+                "field": "water",
+                "n": 1,
+                "to": 1700,
+                "by": 1700
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:filled",
+                "node": "k1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "k1",
+            "form": "switch_on"
+          },
+          "now_us": 10000000,
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "k1",
+                "field": "heating",
+                "n": 2,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "k1",
+                "field": "heat",
+                "n": 3,
+                "to": {
+                  "value": 25000,
+                  "per_s": 500,
+                  "set_us": 10000000
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:switched_on",
+                "node": "k1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:warming",
+                "node": "k1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:will_boil",
+                "node": "k1",
+                "changes": []
+              }
+            ],
+            "timers": [
+              {
+                "node": "k1",
+                "form": "boiled",
+                "after_us": 150000000,
+                "event": 2
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "k1",
+            "form": "boiled"
+          },
+          "now_us": 160000000,
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "k1",
+                "field": "heating",
+                "n": 2,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "k1",
+                "field": "heat",
+                "n": 3,
+                "to": {
+                  "value": 100000,
+                  "per_s": -50,
+                  "set_us": 160000000
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:boiled",
+                "node": "k1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:cooling",
+                "node": "k1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "k1",
+            "form": "pour",
+            "args": {
+              "into": "c1"
+            }
+          },
+          "now_us": 165000000,
+          "receipt": "rc5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "k1",
+                "field": "water",
+                "n": 1,
+                "to": 1450,
+                "by": -250
+              },
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "water",
+                "n": 1,
+                "to": 250,
+                "by": 250
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:poured",
+                "node": "k1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "sip"
+          },
+          "now_us": 170000000,
+          "receipt": "rc6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "water",
+                "n": 1,
+                "to": 200
+              },
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "sips",
+                "n": 2,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sipped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sip_counted",
+                "node": "c1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "sip"
+          },
+          "now_us": 180000000,
+          "receipt": "rc7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "water",
+                "n": 1,
+                "to": 150
+              },
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "sips",
+                "n": 2,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sipped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sip_counted",
+                "node": "c1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "sip"
+          },
+          "now_us": 190000000,
+          "receipt": "rc8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "water",
+                "n": 1,
+                "to": 100
+              },
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "sips",
+                "n": 2,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sipped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sip_counted",
+                "node": "c1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "sip"
+          },
+          "now_us": 200000000,
+          "receipt": "rc9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "water",
+                "n": 1,
+                "to": 50
+              },
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "sips",
+                "n": 2,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sipped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sip_counted",
+                "node": "c1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "sip"
+          },
+          "now_us": 210000000,
+          "receipt": "rc10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "water",
+                "n": 1,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "sips",
+                "n": 2,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sipped",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sip_counted",
+                "node": "c1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:tap",
+          "fields": {
+            "water": 999998300
+          }
+        },
+        "k1": {
+          "kind": "eden:kettle",
+          "fields": {
+            "water": 1450,
+            "heating": 0,
+            "heat": {
+              "value": 100000,
+              "per_s": -50,
+              "set_us": 160000000
+            }
+          }
+        },
+        "c1": {
+          "kind": "eden:cup",
+          "fields": {
+            "water": 0,
+            "sips": 5
+          }
+        },
+        "s1": {
+          "kind": "eden:saucer",
+          "slots": {
+            "cup": []
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "c1",
+            "right": "k1"
+          },
+          "effector_mm": [
+            -60,
+            40,
+            400
+          ]
+        }
+      }
+    }
+  ]
+}

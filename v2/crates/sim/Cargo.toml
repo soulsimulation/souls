@@ -13,3 +13,5 @@ i_triangle.workspace = true
 [dev-dependencies]
 import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }
+# The built-in skills, stepped by the world host in its tests (K13a, #2676).
+skills = { path = "../skills" }
