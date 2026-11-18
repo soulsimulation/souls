@@ -31,11 +31,15 @@ const procs = [];
 const outputs = []; // every answer and message a command printed
 let relay, arrivals, rt;
 
-/** A TCP relay to the gateway: `cut()` closes every connection; `deaf` drops what the gateway sends meanwhile. */
+/**
+ * A TCP relay to the gateway: `cut()` closes every connection; `deaf` drops what the gateway sends meanwhile;
+ * `refuse` closes each new connection at once.
+ */
 function makeRelay(port) {
   const pairs = new Set();
-  const r = { deaf: false, port: 0, cut: () => { for (const [a, b] of pairs) { a.destroy(); b.destroy(); } pairs.clear(); } };
+  const r = { deaf: false, refuse: false, port: 0, cut: () => { for (const [a, b] of pairs) { a.destroy(); b.destroy(); } pairs.clear(); } };
   const server = createServer((down) => {
+    if (r.refuse) { down.destroy(); return; }
     const up = createConnection(port, '127.0.0.1');
     pairs.add([down, up]);
     down.on('data', (d) => up.write(d));
@@ -191,6 +195,61 @@ test('R5b A2, A3: told stream.cannot-resume, it compares and descends through th
   assert.equal(after.cannotResume, s.cannotResume, 'resumed, not synced again');
   assert.equal(after.syncs.length, s.syncs.length);
   if (process.env.R5B_REPORT) console.log(JSON.stringify({ snapshot, resync, currentMs: Math.round(currentMs) }));
+});
+
+test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says so within 10 s; then asleep, not stale', async () => {
+  const ask = async (req) => { const t = performance.now(); const a = await request(rt.socket, req, 10_000); outputs.push(JSON.stringify(a)); return { ...a, ms: Math.round(performance.now() - t) }; };
+  const seen = []; // the transcript of answers, for the PR
+  const keep = (op, t0, a) => seen.push({ s: Math.round((performance.now() - t0) / 100) / 10, op, age: a.age, ...(a.gap ? { gap: a.gap } : {}), ...(a.asleep ? { asleep: a.asleep } : {}) });
+  // A1: every answer, of every command, carries a numeric age.
+  const { answered } = await waitFor(async () => { const s = await status(); return s.connected && s; });
+  const act = await ask({ op: 'act', verb: 'eden:wave' });
+  await waitFor(async () => (await status()).answered > answered);
+  for (const req of [{ op: 'status' }, { op: 'look' }, { op: 'find', words: 'cup' }, { op: 'wait', seconds: 0 }, { op: 'read' }, { op: 'stats' }, { op: 'nonsense' }]) {
+    const a = await ask(req);
+    assert.equal(typeof a.age, 'number', `${req.op}: ${JSON.stringify(a).slice(0, 200)}`);
+  }
+  assert.equal(typeof act.age, 'number');
+  const fresh = await ask({ op: 'look' });
+  assert.equal(fresh.gap, undefined);
+  assert.ok(fresh.age < 2000, `age ${fresh.age}`);
+  // A2: cut off for 30 s. First a black hole (the socket stays open, nothing comes back), then the connection cut
+  // and every new one refused.
+  const t0 = performance.now();
+  relay.deaf = true;
+  let firstSaid = null;
+  while (performance.now() - t0 < 30_000) {
+    if (!relay.refuse && performance.now() - t0 > 15_000) { relay.refuse = true; relay.cut(); }
+    const a = await ask({ op: 'look' });
+    keep('look', t0, a);
+    if (a.gap && a.stale && firstSaid === null) firstSaid = performance.now() - t0;
+    // Once it has said so, every answer says so, and the gap only grows.
+    if (firstSaid !== null) {
+      assert.ok(a.stale && a.gap, JSON.stringify(a).slice(0, 300));
+      const before = seen.at(-2);
+      if (before?.gap) assert.ok(a.gap.ms >= before.gap.ms, `${a.gap.ms} after ${before.gap.ms}`);
+    }
+    await sleep(1000);
+  }
+  assert.ok(firstSaid !== null && firstSaid < 10_000, `said so ${Math.round(firstSaid)} ms after the cut`);
+  const last = seen.at(-1);
+  assert.ok(last.gap.ms > 25_000 && last.age > 25_000, JSON.stringify(last));
+  // Restored: current again, and since this world has written nothing for over 30 s, asleep since then, not stale.
+  relay.refuse = false; relay.deaf = false; relay.cut();
+  const back = await waitFor(async () => { const a = await ask({ op: 'look' }); return !a.gap && a; }, 15_000);
+  keep('look', t0, back);
+  assert.equal(back.stale, undefined);
+  assert.ok(back.age < 2000, `age ${back.age}`);
+  assert.ok(back.asleep?.sinceMs > 30_000, JSON.stringify(back.asleep));
+  // A3: stats over what this daemon did: every achieved intent's commands, bytes and first send.
+  const st = await ask({ op: 'stats' });
+  assert.ok(st.achieved >= 21, `achieved ${st.achieved}`);
+  // Each has its commands and bytes; the one after R5b's 300 sends whose answers the cut lost has an unanswered first send.
+  assert.ok(st.last.every((x) => x.commands >= 1 && x.bytes > 0 && x.tokens.estimate && x.turns === undefined), JSON.stringify(st.last));
+  assert.deepEqual(Object.keys(st.firstSend).filter((c) => st.firstSend[c] > 0).sort(), ['accepted-first', 'unanswered']);
+  assert.equal(st.firstSend.unanswered, 1);
+  assert.equal(st.harness.startsWith('not opted in'), true);
+  if (process.env.R10_REPORT) console.log(JSON.stringify({ firstSaidMs: Math.round(firstSaid), answers: seen, stats: { ...st, last: st.last.slice(-2) } }));
 });
 
 test('A4: the token is in no output, argument, environment variable or file but credentials.json', async () => {

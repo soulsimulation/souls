@@ -102,9 +102,9 @@ pub fn wire_sign_in(token: &str, cursor: &[u8]) -> Result<Vec<u8>, JsError> {
     encode(&Value::Map(m)).map_err(js)
 }
 
-/// One frame from the gateway as a line: `outcome <name>`, `answer <sequence> <version hex>`, with `-` for either
-/// when the frame has none (an answer the gateway gives itself has no version), or `sync <n> <refusal name or ->` for
-/// the answer to sync request `n` (R5b), which [`WasmCopy`] reads.
+/// One frame from the gateway as a line: `outcome <name>`, `answer <sequence> <version hex> <kind> <reason or
+/// outcome>`, with `-` for any the frame has none of (an answer the gateway gives itself has no version), or
+/// `sync <n> <refusal name or ->` for the answer to sync request `n` (R5b), which [`WasmCopy`] reads.
 #[wasm_bindgen(js_name = wireFrame)]
 pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     let Value::Map(m) = decode(frame).map_err(js)?.value else {
@@ -119,18 +119,21 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
             _ => format!("sync {n} -"),
         });
     }
-    let sequence = match m.get(&2) {
-        Some(Value::Map(a)) => match a.get(&2) {
-            Some(Value::Uint(s)) => s.to_string(),
-            _ => "-".to_owned(),
-        },
-        _ => return Err(JsError::new("frame-not-a-record")),
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return Err(JsError::new("frame-not-a-record"));
+    };
+    let field = |k: u64| match a.get(&k) {
+        Some(Value::Uint(s)) => s.to_string(),
+        Some(Value::Text(name)) => name.as_str().to_owned(),
+        _ => "-".to_owned(),
     };
     let version = match m.get(&1) {
         Some(v) => to_hex(&encode(v).map_err(js)?),
         None => "-".to_owned(),
     };
-    Ok(format!("answer {sequence} {version}"))
+    // R10 (#2702): the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason or outcome.
+    let (sequence, kind, name) = (field(2), field(3), field(4));
+    Ok(format!("answer {sequence} {version} {kind} {name}"))
 }
 
 /// A Soul's intent with no target or parameters, `verb` a ranked list of verbs split by spaces (the rest are its

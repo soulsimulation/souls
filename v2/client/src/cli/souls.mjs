@@ -8,6 +8,7 @@
 //   souls.mjs find <words...> [--limit n]     one search over the copy
 //   souls.mjs act <verb> [<verb>...]          a ranked list: the first is the act, the rest its fallbacks
 //   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened, or at the timeout
+//   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop                            ends the daemon
 //   any of them [--soul <id>]                 which Soul, when the home has more than one
 //
@@ -18,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
 
-export const OPS = ['status', 'look', 'find', 'act', 'wait', 'stop'];
+export const OPS = ['status', 'look', 'find', 'act', 'wait', 'stats', 'stop'];
 
 /** The daemon request the arguments make, or a refusal by name. */
 export function requestOf(argv) {

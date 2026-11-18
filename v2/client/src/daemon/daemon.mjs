@@ -17,6 +17,10 @@
 //     {"op":"find","words":"..."}         one search over the copy (`../find/find.mjs`)
 //     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks
 //     {"op":"wait","seconds":30}          returns when something addressed to this Soul happened, or at the timeout
+//   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
+//   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
+//   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
+//     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it). Every frame is built and read by replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
@@ -36,6 +40,9 @@ import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { brief, changedBlock } from '../brief/brief.mjs';
 import { changedBetween, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
+import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
+import { stats, transcriptOf } from '../stats/stats.mjs';
+import { ageOf } from './age.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 const EVENTS_KEPT = 1000;
@@ -110,16 +117,24 @@ const note = (e) => {
   if (events.length > EVENTS_KEPT) events.shift();
   if (e.kind !== 'synced') for (const w of wakers.splice(0)) w();
 };
-let copyVersion = null, copyAt = 0, shown = new Map(); // the copy's version and time, and the rows the last answer saw
+let copyVersion = null, shown = new Map(); // the copy's version, and the rows the last answer saw
+// R10: on the steady clock, when the copy was last confirmed current, when its version last changed, and since when
+// (and why) it has not been known current; null while it is.
+const startedAt = performance.now();
+let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
+const trace = openTrace(rt.dir);
+const rankedOf = new Map(); // sequence → how many verbs it ranked, until answered
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
 let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now();
 
-function send(bytes, sequence) {
+function send(bytes, sequence, ranked) {
   // Written down before it goes, so neither a drop nor a restart sends it again.
   state.unanswered.push(sequence);
   save();
   counts.sent++;
+  rankedOf.set(sequence, ranked);
+  trace.write({ k: 'send', seq: sequence, ranked });
   ws.send(bytes);
 }
 
@@ -127,12 +142,13 @@ function send(bytes, sequence) {
 function current() {
   signedIn = true;
   attempt = 0;
-  while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence); }
+  while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
 }
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
   syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: [] };
+  if (cutAt !== null) cutWhy = 'syncing';
   syncing.timer = setTimeout(() => { log('sync: no answer; reconnecting'); sock.close(); }, SYNC_WITHIN);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
 }
@@ -147,8 +163,11 @@ function syncAnswer(sock, n, refused, bytes) {
   if (next.length > 0) { syncing.step = 'records'; sock.send(next); return; }
   const done = { kind: syncing.kind, ms: Math.round(performance.now() - syncing.t0), ...JSON.parse(copy.finish()) };
   clearTimeout(syncing.timer);
+  const t = performance.now();
+  if (syncing.version !== copyVersion) changedAt = t;
   copyVersion = syncing.version;
-  copyAt = Date.now();
+  confirmedAt = t;
+  cutAt = null;
   const { waiters } = syncing;
   syncing = null;
   for (const w of waiters) w(true);
@@ -179,7 +198,7 @@ function connect() {
         step = 'outcome';
         return;
       }
-      const [kind, a, b] = wire.wireFrame(bytes).split(' ');
+      const [kind, a, b, c, d] = wire.wireFrame(bytes).split(' ');
       if (kind === 'outcome') {
         if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); attempt = 99; sock.close(); return; }
         if (a === 'stream.resumed') counts.resumed++;
@@ -196,6 +215,8 @@ function connect() {
         const s = Number(a);
         const k = state.unanswered.indexOf(s);
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
+        trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
+        if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
       }
       save();
       note({ kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b });
@@ -207,6 +228,8 @@ function connect() {
   sock.onclose = (ev) => {
     if (ws === sock) {
       ws = null; signedIn = false;
+      cutAt ??= performance.now();
+      cutWhy = 'not-connected';
       if (syncing) { clearTimeout(syncing.timer); for (const w of syncing.waiters) w(false); syncing = null; }
     }
     if (stopping) return;
@@ -234,15 +257,24 @@ function refresh() {
  * unless `now` (an act answers at once, from the copy as it is).
  */
 async function closing(out, f, { now = false } = {}) {
-  // A gateway that does not answer leaves the copy as it is, and the answer says it is stale.
+  // A gateway that does not answer leaves the copy as it is, and the answer says it is stale, since when and why.
+  const asking = performance.now();
   const current = now ? signedIn && !syncing : await Promise.race([refresh(), new Promise((ok) => setTimeout(ok, REFRESH_WITHIN, false))]);
+  if (!now && !current && cutAt === null) { cutAt = asking; cutWhy = signedIn ? 'no-answer' : 'not-connected'; }
+  let age = ageOf({ now: performance.now(), startedAt, confirmedAt, changedAt, cutAt, why: cutWhy, asked: !now });
+  if (!current && !age.gap) age = { ...age, stale: true, gap: { ms: 0, why: signedIn ? 'syncing' : 'not-connected' } };
   const rows = rowsOf(copy), changes = changedBetween(shown, rows);
   shown = rows;
-  return { ...out, ...(f ? f(rows, changes) : {}), at: sequenceOf(copyVersion), ...(current ? {} : { stale: true }), changed: changedBlock(changes) };
+  return { ...out, ...(f ? f(rows, changes) : {}), at: sequenceOf(copyVersion), ...age, changed: changedBlock(changes) };
 }
+
+/** The age fields of an answer that does not ask the gateway first (status, read, stats, stop, a refusal). */
+const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, changedAt, cutAt, why: cutWhy, asked: false });
 
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
+
+const OPS = new Set(['status', 'look', 'find', 'wait', 'act', 'read', 'stats', 'stop']);
 
 async function answer(req) {
   switch (req.op) {
@@ -256,7 +288,7 @@ async function answer(req) {
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
-      const b = brief(rows, { me: ME, changes, ageMs: Date.now() - copyAt });
+      const b = brief(rows, { me: ME, changes, ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       return b;
     });
@@ -279,10 +311,11 @@ async function answer(req) {
         state.cursor ? unhex(state.cursor) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER));
       save();
       const sequence = state.sequence, sent = signedIn;
-      if (signedIn) send(bytes, sequence); else queued.push({ bytes, sequence });
+      if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
       return closing({ ok: true, sequence, sent }, null, { now: true });
     }
     case 'read': return { ok: true, events: events.splice(0) };
+    case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
@@ -295,9 +328,15 @@ const server = createServer((c) => {
     for (let k; (k = buf.indexOf('\n')) >= 0;) {
       const line = buf.slice(0, k);
       buf = buf.slice(k + 1);
-      Promise.resolve().then(() => answer(JSON.parse(line)))
+      let op = 'unread';
+      Promise.resolve().then(() => { const req = JSON.parse(line); op = OPS.has(req.op) ? req.op : 'unknown'; return answer(req); })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
-        .then((out) => { if (!c.destroyed) c.write(JSON.stringify(out) + '\n'); });
+        .then((out) => {
+          // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
+          const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
+          if (op !== 'stats') trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
+          if (!c.destroyed) c.write(said);
+        });
     }
   });
   c.on('error', () => {});
