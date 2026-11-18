@@ -1,6 +1,6 @@
 {
  "format": "souls-effect-cases/1",
- "about": "A sign-up slot (from entry 25, #493): Ana signs; Ben cannot sign the same slot or cross Ana off; Ana crosses herself off.",
+ "about": "A sign-up slot (from entry 25, #493): Ana signs; Ben cannot sign the same slot or cross Ana off; Ana crosses herself off. Another Soul's attempt to take the name back is refused by its need (the actor is not at an end of the link), with the original's words by key.",
  "cases": [
   {
    "name": "signed_then_crossed_off_by_the_signer",
@@ -104,10 +104,12 @@
      "expect": {
       "verdict": "no",
       "reason": "not_linked",
-      "effect": 0,
+      "need": 0,
       "detail": {
-       "link": "signed"
-      }
+       "link": "signed",
+       "count": 1
+      },
+      "says": "not_your_name"
      }
     },
     {

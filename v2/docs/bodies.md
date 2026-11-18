@@ -91,6 +91,16 @@ resolved when it is written and recorded (`sim::speech`): for ordinary talk, the
 the speaker, found from the bodies within the set's leave distance, never a scan. So a body walks, carries and talks
 at once, each under its own driver.
 
+## Moves (B2)
+
+A move (`v2/crates/replica/src/moves.rs`, B2 #2681) is data: its claims, blocks and cancels in rule 2 to 4's terms,
+named phases in µs (a phase includes its start and excludes its end; contact is the instant the first phase ends), an
+effector (the body, the resource it holds, or a named point of the thing held), a reach in µm (at most 700 mm) and a
+contact point by name. Fixtures: `v2/crates/replica/fixtures/moves/`. `v2/crates/sim/src/moves` runs it: the reach is
+asked of the geometry first (`out-of-reach` with the distance), the claim is a controller driver with the move set on
+each resource it holds, and each phase end is one timer in K9's due list. Nothing polls; a later claim that takes the
+move's resources cancels it at its next phase end (`claim-taken`).
+
 ## The code hatch, shape only
 
 10. **The hatch is one pure function named by the hash of its module** (SA-F9, #3000): `{1: module (its SHA-256

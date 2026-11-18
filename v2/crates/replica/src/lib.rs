@@ -16,6 +16,7 @@ pub mod host;
 pub mod ids;
 pub mod intents;
 pub mod kinds;
+pub mod moves;
 pub mod pose;
 pub mod query;
 pub mod read;

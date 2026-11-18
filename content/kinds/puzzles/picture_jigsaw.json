@@ -1,0 +1,745 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:picture_jigsaw",
+  "owner": "thing",
+  "state": {
+    "tile1_cell": {
+      "n": 1,
+      "type": "enum",
+      "values": ["tray", "tl", "tr", "bl", "br"],
+      "default": "tray",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile2_cell": {
+      "n": 2,
+      "type": "enum",
+      "values": ["tray", "tl", "tr", "bl", "br"],
+      "default": "tray",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile3_cell": {
+      "n": 3,
+      "type": "enum",
+      "values": ["tray", "tl", "tr", "bl", "br"],
+      "default": "tray",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile4_cell": {
+      "n": 4,
+      "type": "enum",
+      "values": ["tray", "tl", "tr", "bl", "br"],
+      "default": "tray",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile1_turn": {
+      "n": 5,
+      "type": "enum",
+      "values": ["r0", "r90", "r180", "r270"],
+      "default": "r180",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile2_turn": {
+      "n": 6,
+      "type": "enum",
+      "values": ["r0", "r90", "r180", "r270"],
+      "default": "r90",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile3_turn": {
+      "n": 7,
+      "type": "enum",
+      "values": ["r0", "r90", "r180", "r270"],
+      "default": "r270",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile4_turn": {
+      "n": 8,
+      "type": "enum",
+      "values": ["r0", "r90", "r180", "r270"],
+      "default": "r180",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "moves": {
+      "n": 9,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1000000,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [300, 15, 0]
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [-135, 40, 0]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 600]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [600, 60, 400]
+  },
+  "forms": {
+    "place_1": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "cell": {
+          "type": "value",
+          "of": ["tl", "tr", "bl", "br"]
+        },
+        "turn": {
+          "type": "value",
+          "of": ["r0", "r90", "r180", "r270"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "tile1_cell",
+          "is": "tray",
+          "says": "lift_first"
+        },
+        {
+          "need": "state",
+          "field": "tile2_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        },
+        {
+          "need": "state",
+          "field": "tile3_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        },
+        {
+          "need": "state",
+          "field": "tile4_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tile1_cell",
+          "to": {
+            "arg": "cell"
+          },
+          "event": "tile_placed"
+        },
+        {
+          "change": "set",
+          "field": "tile1_turn",
+          "to": {
+            "arg": "turn"
+          },
+          "event": "tile_placed"
+        },
+        {
+          "change": "set",
+          "field": "moves",
+          "by": 1,
+          "event": "tile_placed"
+        }
+      ]
+    },
+    "place_2": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "cell": {
+          "type": "value",
+          "of": ["tl", "tr", "bl", "br"]
+        },
+        "turn": {
+          "type": "value",
+          "of": ["r0", "r90", "r180", "r270"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "tile2_cell",
+          "is": "tray",
+          "says": "lift_first"
+        },
+        {
+          "need": "state",
+          "field": "tile1_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        },
+        {
+          "need": "state",
+          "field": "tile3_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        },
+        {
+          "need": "state",
+          "field": "tile4_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tile2_cell",
+          "to": {
+            "arg": "cell"
+          },
+          "event": "tile_placed"
+        },
+        {
+          "change": "set",
+          "field": "tile2_turn",
+          "to": {
+            "arg": "turn"
+          },
+          "event": "tile_placed"
+        },
+        {
+          "change": "set",
+          "field": "moves",
+          "by": 1,
+          "event": "tile_placed"
+        }
+      ]
+    },
+    "place_3": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "cell": {
+          "type": "value",
+          "of": ["tl", "tr", "bl", "br"]
+        },
+        "turn": {
+          "type": "value",
+          "of": ["r0", "r90", "r180", "r270"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "tile3_cell",
+          "is": "tray",
+          "says": "lift_first"
+        },
+        {
+          "need": "state",
+          "field": "tile1_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        },
+        {
+          "need": "state",
+          "field": "tile2_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        },
+        {
+          "need": "state",
+          "field": "tile4_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tile3_cell",
+          "to": {
+            "arg": "cell"
+          },
+          "event": "tile_placed"
+        },
+        {
+          "change": "set",
+          "field": "tile3_turn",
+          "to": {
+            "arg": "turn"
+          },
+          "event": "tile_placed"
+        },
+        {
+          "change": "set",
+          "field": "moves",
+          "by": 1,
+          "event": "tile_placed"
+        }
+      ]
+    },
+    "place_4": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "cell": {
+          "type": "value",
+          "of": ["tl", "tr", "bl", "br"]
+        },
+        "turn": {
+          "type": "value",
+          "of": ["r0", "r90", "r180", "r270"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "tile4_cell",
+          "is": "tray",
+          "says": "lift_first"
+        },
+        {
+          "need": "state",
+          "field": "tile1_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        },
+        {
+          "need": "state",
+          "field": "tile2_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        },
+        {
+          "need": "state",
+          "field": "tile3_cell",
+          "not": {
+            "arg": "cell"
+          },
+          "says": "cell_taken"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tile4_cell",
+          "to": {
+            "arg": "cell"
+          },
+          "event": "tile_placed"
+        },
+        {
+          "change": "set",
+          "field": "tile4_turn",
+          "to": {
+            "arg": "turn"
+          },
+          "event": "tile_placed"
+        },
+        {
+          "change": "set",
+          "field": "moves",
+          "by": 1,
+          "event": "tile_placed"
+        }
+      ]
+    },
+    "lift": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": ["tile1_cell", "tile2_cell", "tile3_cell", "tile4_cell"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "not": "tray",
+          "says": "in_tray"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": "tray",
+          "event": "tile_lifted"
+        },
+        {
+          "change": "set",
+          "field": "moves",
+          "by": 1,
+          "event": "tile_lifted"
+        }
+      ]
+    },
+    "reset": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "any",
+          "fields": ["tile1_cell", "tile2_cell", "tile3_cell", "tile4_cell"],
+          "not": "tray",
+          "says": "already_reset"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tile1_cell",
+          "to": "tray",
+          "event": "reset"
+        },
+        {
+          "change": "set",
+          "field": "tile2_cell",
+          "to": "tray",
+          "event": "reset"
+        },
+        {
+          "change": "set",
+          "field": "tile3_cell",
+          "to": "tray",
+          "event": "reset"
+        },
+        {
+          "change": "set",
+          "field": "tile4_cell",
+          "to": "tray",
+          "event": "reset"
+        },
+        {
+          "change": "set",
+          "field": "tile1_turn",
+          "to": "r180",
+          "event": "reset"
+        },
+        {
+          "change": "set",
+          "field": "tile2_turn",
+          "to": "r90",
+          "event": "reset"
+        },
+        {
+          "change": "set",
+          "field": "tile3_turn",
+          "to": "r270",
+          "event": "reset"
+        },
+        {
+          "change": "set",
+          "field": "tile4_turn",
+          "to": "r180",
+          "event": "reset"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:picture_jigsaw",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"box","at":[0,15,0],"size":[600,30,400],"tint":"wood"},
+        {"kind":"box","at":[-200,32,-65],"size":[124,4,124],"tint":"grid"},
+        {"kind":"box","at":[-70,32,-65],"size":[124,4,124],"tint":"grid"},
+        {"kind":"box","at":[-200,32,65],"size":[124,4,124],"tint":"grid"},
+        {"kind":"box","at":[-70,32,65],"size":[124,4,124],"tint":"grid"},
+        {"kind":"wedge","at":[90,50,-65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile1_cell=tray&@tile1_turn=r0"},
+        {"kind":"wedge","at":[90,50,-65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile1_cell=tray&@tile1_turn=r90"},
+        {"kind":"wedge","at":[90,50,-65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile1_cell=tray&@tile1_turn=r180"},
+        {"kind":"wedge","at":[90,50,-65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile1_cell=tray&@tile1_turn=r270"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile1_cell=tl&@tile1_turn=r0"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile1_cell=tl&@tile1_turn=r90"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile1_cell=tl&@tile1_turn=r180"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile1_cell=tl&@tile1_turn=r270"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile1_cell=tr&@tile1_turn=r0"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile1_cell=tr&@tile1_turn=r90"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile1_cell=tr&@tile1_turn=r180"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile1_cell=tr&@tile1_turn=r270"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile1_cell=bl&@tile1_turn=r0"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile1_cell=bl&@tile1_turn=r90"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile1_cell=bl&@tile1_turn=r180"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile1_cell=bl&@tile1_turn=r270"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile1_cell=br&@tile1_turn=r0"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile1_cell=br&@tile1_turn=r90"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile1_cell=br&@tile1_turn=r180"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile1_cell=br&@tile1_turn=r270"},
+        {"kind":"wedge","at":[220,50,-65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile2_cell=tray&@tile2_turn=r0"},
+        {"kind":"wedge","at":[220,50,-65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile2_cell=tray&@tile2_turn=r90"},
+        {"kind":"wedge","at":[220,50,-65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile2_cell=tray&@tile2_turn=r180"},
+        {"kind":"wedge","at":[220,50,-65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile2_cell=tray&@tile2_turn=r270"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile2_cell=tl&@tile2_turn=r0"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile2_cell=tl&@tile2_turn=r90"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile2_cell=tl&@tile2_turn=r180"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile2_cell=tl&@tile2_turn=r270"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile2_cell=tr&@tile2_turn=r0"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile2_cell=tr&@tile2_turn=r90"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile2_cell=tr&@tile2_turn=r180"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile2_cell=tr&@tile2_turn=r270"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile2_cell=bl&@tile2_turn=r0"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile2_cell=bl&@tile2_turn=r90"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile2_cell=bl&@tile2_turn=r180"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile2_cell=bl&@tile2_turn=r270"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":180000,"tint":"leaf","when":"@tile2_cell=br&@tile2_turn=r0"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":270000,"tint":"leaf","when":"@tile2_cell=br&@tile2_turn=r90"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":0,"tint":"leaf","when":"@tile2_cell=br&@tile2_turn=r180"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":90000,"tint":"leaf","when":"@tile2_cell=br&@tile2_turn=r270"},
+        {"kind":"wedge","at":[90,50,65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile3_cell=tray&@tile3_turn=r0"},
+        {"kind":"wedge","at":[90,50,65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile3_cell=tray&@tile3_turn=r90"},
+        {"kind":"wedge","at":[90,50,65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile3_cell=tray&@tile3_turn=r180"},
+        {"kind":"wedge","at":[90,50,65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile3_cell=tray&@tile3_turn=r270"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile3_cell=tl&@tile3_turn=r0"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile3_cell=tl&@tile3_turn=r90"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile3_cell=tl&@tile3_turn=r180"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile3_cell=tl&@tile3_turn=r270"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile3_cell=tr&@tile3_turn=r0"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile3_cell=tr&@tile3_turn=r90"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile3_cell=tr&@tile3_turn=r180"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile3_cell=tr&@tile3_turn=r270"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile3_cell=bl&@tile3_turn=r0"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile3_cell=bl&@tile3_turn=r90"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile3_cell=bl&@tile3_turn=r180"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile3_cell=bl&@tile3_turn=r270"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile3_cell=br&@tile3_turn=r0"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile3_cell=br&@tile3_turn=r90"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile3_cell=br&@tile3_turn=r180"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile3_cell=br&@tile3_turn=r270"},
+        {"kind":"wedge","at":[220,50,65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile4_cell=tray&@tile4_turn=r0"},
+        {"kind":"wedge","at":[220,50,65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile4_cell=tray&@tile4_turn=r90"},
+        {"kind":"wedge","at":[220,50,65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile4_cell=tray&@tile4_turn=r180"},
+        {"kind":"wedge","at":[220,50,65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile4_cell=tray&@tile4_turn=r270"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile4_cell=tl&@tile4_turn=r0"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile4_cell=tl&@tile4_turn=r90"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile4_cell=tl&@tile4_turn=r180"},
+        {"kind":"wedge","at":[-200,50,-65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile4_cell=tl&@tile4_turn=r270"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile4_cell=tr&@tile4_turn=r0"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile4_cell=tr&@tile4_turn=r90"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile4_cell=tr&@tile4_turn=r180"},
+        {"kind":"wedge","at":[-70,50,-65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile4_cell=tr&@tile4_turn=r270"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile4_cell=bl&@tile4_turn=r0"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile4_cell=bl&@tile4_turn=r90"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile4_cell=bl&@tile4_turn=r180"},
+        {"kind":"wedge","at":[-200,50,65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile4_cell=bl&@tile4_turn=r270"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":90000,"tint":"trunk","when":"@tile4_cell=br&@tile4_turn=r0"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":180000,"tint":"trunk","when":"@tile4_cell=br&@tile4_turn=r90"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":270000,"tint":"trunk","when":"@tile4_cell=br&@tile4_turn=r180"},
+        {"kind":"wedge","at":[-70,50,65],"size":[116,36,116],"yaw":0,"tint":"trunk","when":"@tile4_cell=br&@tile4_turn=r270"}
+      ],
+      "palette": {
+        "wood": "#8a6a45",
+        "grid": "#e6d9b8",
+        "card": "#efe6cf",
+        "leaf": "#4f8a3c",
+        "trunk": "#6b4226"
+      },
+      "tags": ["game", "puzzle", "jigsaw", "object"]
+    }
+  },
+  "text": {
+    "card": "A four-tile picture of a tree: place each tile in its cell, the right way up.",
+    "puzzle": "puzzle",
+    "jigsaw": "jigsaw",
+    "put_down_first": "Put down what you are holding before working the jigsaw.",
+    "lift_first": "Lift that tile back to its tray before placing it again.",
+    "cell_taken": "That cell already holds a tile; lift its tile first.",
+    "in_tray": "That tile is already in its own tray.",
+    "already_reset": "Every tile is already in its tray.",
+    "howto_solve": "With empty hands, place each tile in a cell at a quarter turn; lift a tile to try it elsewhere."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": ["jigsaw"]
+  },
+  "howtos": {
+    "solve": {
+      "text": "howto_solve",
+      "steps": [
+        {
+          "form": "place_1"
+        },
+        {
+          "form": "place_2"
+        },
+        {
+          "form": "place_3"
+        },
+        {
+          "form": "place_4"
+        }
+      ]
+    }
+  }
+}

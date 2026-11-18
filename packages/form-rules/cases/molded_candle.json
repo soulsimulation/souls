@@ -1,0 +1,76 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:molded_candle: a candle made at a candle bench, its shape and colour set when it is made; it is taken with a free hand.",
+ "cases": [
+  {
+   "name": "take_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "take"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:molded_candle",
+      "fields": {
+       "shape": "taper",
+       "colour": "red"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "expect": {
+    "verdict": "yes"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "take_hands_full",
+   "act": {
+    "this": "c1",
+    "form": "take"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:molded_candle"
+     },
+     "x1": {},
+     "x2": {},
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 0,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  }
+ ]
+}

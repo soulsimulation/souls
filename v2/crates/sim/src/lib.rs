@@ -10,9 +10,11 @@ pub mod index;
 pub mod links;
 pub mod log;
 pub mod mover;
+pub mod moves;
 pub mod routes;
 pub mod speech;
 pub mod spots;
+pub mod timers;
 pub mod unstick;
 pub mod walk;
 

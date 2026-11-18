@@ -1,0 +1,104 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:rhythm_box (from #1851). Three lanes, kick, snare and hat, of eight steps each, every step a hit or a rest, a tempo of 60, 90 or 120 beats a minute, and whether the loop plays. With empty hands a Soul programs one step (the original took whole lanes as text, `kick=10001000`; here a step and its beat are choices from closed lists) or the tempo, only while stopped ('Stop the loop before editing its rhythm lanes.', 'Stop the loop before changing tempo.'); starts the loop ('The rhythm is already playing; stop it before restarting.'), never an empty one ('Program at least one selected step before starting an empty rhythm.'); and stops it ('The rhythm is already stopped.').",
+  "cases": [
+    {
+      "name": "rhythm_program_every_need_met",
+      "act": {"this":"r1","form":"program","args":{"step":"snare_4","beat":"hit"}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "rhythm_program_hands_full",
+      "act": {"this":"r1","form":"program","args":{"step":"snare_4","beat":"hit"}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "rhythm_program_while_playing",
+      "act": {"this":"r1","form":"program","args":{"step":"snare_4","beat":"hit"}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box","fields":{"playing":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"stop_to_edit"}
+    },
+    {
+      "name": "rhythm_program_not_a_step",
+      "act": {"this":"r1","form":"program","args":{"step":"tempo","beat":"hit"}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"bad_input"}
+    },
+    {
+      "name": "rhythm_set_tempo_every_need_met",
+      "act": {"this":"r1","form":"set_tempo","args":{"tempo":"bpm_60"}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "rhythm_set_tempo_hands_full",
+      "act": {"this":"r1","form":"set_tempo","args":{"tempo":"bpm_60"}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "rhythm_set_tempo_while_playing",
+      "act": {"this":"r1","form":"set_tempo","args":{"tempo":"bpm_60"}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box","fields":{"playing":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"stop_for_tempo"}
+    },
+    {
+      "name": "rhythm_start_every_need_met",
+      "act": {"this":"r1","form":"start"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "rhythm_start_hands_full",
+      "act": {"this":"r1","form":"start"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "rhythm_start_already_playing",
+      "act": {"this":"r1","form":"start"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box","fields":{"playing":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"already_playing"}
+    },
+    {
+      "name": "rhythm_start_empty_rhythm",
+      "act": {"this":"r1","form":"start"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box","fields":{"kick_1":"rest","kick_2":"rest","kick_3":"rest","kick_4":"rest","kick_5":"rest","kick_6":"rest","kick_7":"rest","kick_8":"rest","snare_1":"rest","snare_2":"rest","snare_3":"rest","snare_4":"rest","snare_5":"rest","snare_6":"rest","snare_7":"rest","snare_8":"rest","hat_1":"rest","hat_2":"rest","hat_3":"rest","hat_4":"rest","hat_5":"rest","hat_6":"rest","hat_7":"rest","hat_8":"rest"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"says":"empty_rhythm"}
+    },
+    {
+      "name": "rhythm_stop_every_need_met",
+      "act": {"this":"r1","form":"stop"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box","fields":{"playing":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "rhythm_stop_hands_full",
+      "act": {"this":"r1","form":"stop"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box","fields":{"playing":true}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "rhythm_stop_already_stopped",
+      "act": {"this":"r1","form":"stop"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rhythm_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"already_stopped"}
+    }
+  ]
+}
