@@ -52,8 +52,11 @@ path = "walkers/main.rs"
 name = "forms"
 path = "src/forms.rs"
 
+# I3, #2686: the clock's time per committed act, with checks on checker threads.
 [[bin]]
+name = "commit-cost"
 name = "resync"
+path = "commit-cost/main.rs"
 path = "resync/main.rs"
 
 [dependencies]

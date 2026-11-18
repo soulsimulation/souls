@@ -474,6 +474,62 @@ impl Tree {
         &self.moving
     }
 
+    /// The time effects applied, in order (T5).
+    pub fn time(&self) -> &[TimeEffect] {
+        &self.time
+    }
+
+    /// A fork's view (K6, #2670; T8 rule 10), made in place and recorded nowhere, since a fork is a view of a
+    /// checkpoint and not a change: drops every node whose audience `seen` refuses, with its subtree and every link
+    /// with an end in them, then every link `seen` refuses, and the timers of nodes gone. The sequence stays.
+    pub fn keep_seen(&mut self, seen: &dyn Fn(Audience) -> bool) {
+        let unseen: Vec<u32> = (0..self.nodes.len() as u32)
+            .filter(|s| *s != self.root && !seen(self.nodes[*s as usize].audience))
+            .collect();
+        for s in unseen {
+            if self.nodes[s as usize].life != Life::Live {
+                continue; // free, in flight, or gone with an ancestor
+            }
+            let gone = self.subtree(s);
+            self.detach(s);
+            for g in &gone {
+                let ends: Vec<Id> = self.nodes[*g as usize]
+                    .links
+                    .iter()
+                    .map(|e| e.link)
+                    .collect();
+                for l in ends {
+                    self.link_take(l);
+                }
+            }
+            for g in gone {
+                self.kill(g);
+            }
+        }
+        let unseen: Vec<Id> = self
+            .links
+            .iter()
+            .filter(|(_, l)| !seen(l.audience))
+            .map(|(i, _)| *i)
+            .collect();
+        for l in unseen {
+            self.link_take(l);
+        }
+        let orphan: Vec<Id> = self
+            .timers
+            .iter()
+            .filter(|(_, t)| self.handle(t.node).is_none())
+            .map(|(i, _)| *i)
+            .collect();
+        for t in orphan {
+            self.timers.remove(&t);
+        }
+        self.undo.clear();
+        for slot in std::mem::take(&mut self.dead) {
+            self.release(slot);
+        }
+    }
+
     fn place_of(&self, rec: &NodeRec) -> Option<Place> {
         match rec.at {
             Where::Root => None,
