@@ -16,7 +16,7 @@ export function countEndpoint(setting: string | undefined): string | null {
   try { const u = new URL(v); return u.protocol === 'https:' || u.protocol === 'http:' ? u.origin + u.pathname : null; } catch { return null; }
 }
 
-/** A host nobody outside reaches: never counted (localhost, *.localhost/.test/.local/.internal/.ts.net, loopback, private,
+/** A host nobody outside reaches: never counted (localhost, the .localhost/.test/.local/.internal suffixes, tailnet names, loopback, private,
  *  link-local and tailnet addresses). */
 export function localHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
