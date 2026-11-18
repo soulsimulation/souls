@@ -1,0 +1,160 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:camp_table",
+  "owner": "thing",
+  "state": {},
+  "geometry": {
+    "bounds_mm": [
+      1170,
+      735,
+      770
+    ]
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:camp_table",
+    "shape": {
+      "round": 15,
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            715,
+            0
+          ],
+          "polygon": [
+            [
+              -585,
+              -385
+            ],
+            [
+              585,
+              -385
+            ],
+            [
+              585,
+              385
+            ],
+            [
+              -585,
+              385
+            ]
+          ],
+          "h": 20,
+          "tint": "top"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -520,
+            350,
+            -320
+          ],
+          "r": 30,
+          "h": 700,
+          "segments": 6,
+          "r2": 24,
+          "tint": "legs"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            520,
+            350,
+            -320
+          ],
+          "r": 30,
+          "h": 700,
+          "segments": 6,
+          "r2": 24,
+          "tint": "legs"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -520,
+            350,
+            320
+          ],
+          "r": 30,
+          "h": 700,
+          "segments": 6,
+          "r2": 24,
+          "tint": "legs"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            520,
+            350,
+            320
+          ],
+          "r": 30,
+          "h": 700,
+          "segments": 6,
+          "r2": 24,
+          "tint": "legs"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            660,
+            330
+          ],
+          "size": [
+            1000,
+            70,
+            30
+          ],
+          "round": 0,
+          "tint": "legs"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            660,
+            -330
+          ],
+          "size": [
+            1000,
+            70,
+            30
+          ],
+          "round": 0,
+          "tint": "legs"
+        }
+      ],
+      "palette": {
+        "top": "#9a6b43",
+        "legs": "#5e3d27"
+      },
+      "tags": [
+        "furniture",
+        "table",
+        "surface",
+        "camping"
+      ]
+    }
+  },
+  "text": {
+    "card": "A camp table carried in both hands; set bowls and lanterns on its top.",
+    "furniture": "furniture",
+    "camping": "camping",
+    "howto_set_up": "Carry the table in both hands to clear ground, set it down, then put things on it."
+  },
+  "card": {
+    "text": "card",
+    "category": "furniture",
+    "synonyms": [
+      "camping"
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "A need on the state of the thing an argument names: test:probe's read needs the named place's `survey` at least 1. The field is read through the named thing's own kind, by its number (field 2 of test:open_air) and only by its audience: `survey` is seen by the creator alone, so any other asker gets unknown naming the node and the field. A missing argument, an argument naming no node, and a named thing whose kind has no such field are bad input.",
+  "cases": [
+    {
+      "name": "probe_read_met_for_the_creator",
+      "act": {"this": "p1", "form": "read", "args": {"at": "a1"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "test:probe"}, "a1": {"kind": "test:open_air", "fields": {"survey": 3}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["creator"]},
+      "expect": {"verdict": "yes", "read": [["a1/field/2", 3]]}
+    },
+    {
+      "name": "probe_read_unknown_outside_the_audience",
+      "act": {"this": "p1", "form": "read", "args": {"at": "a1"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "test:probe"}, "a1": {"kind": "test:open_air", "fields": {"survey": 3}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "unknown", "need": 0, "node": "a1", "field": "survey", "read": []}
+    },
+    {
+      "name": "probe_read_too_low",
+      "act": {"this": "p1", "form": "read", "args": {"at": "a1"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "test:probe"}, "a1": {"kind": "test:open_air"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["creator"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"node": "a1", "field": "survey", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
+    },
+    {
+      "name": "probe_read_no_argument",
+      "act": {"this": "p1", "form": "read"},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "test:probe"}, "a1": {"kind": "test:open_air"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["creator"]},
+      "expect": {"verdict": "no", "reason": "bad_input", "need": 0, "detail": {"what": "argument_missing", "arg": "at"}, "fix": null}
+    },
+    {
+      "name": "probe_read_argument_names_no_node",
+      "act": {"this": "p1", "form": "read", "args": {"at": "zz"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "test:probe"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["creator"]},
+      "expect": {"verdict": "no", "reason": "bad_input", "need": 0, "detail": {"what": "no_such_node", "node": "zz"}}
+    },
+    {
+      "name": "probe_read_kind_without_the_field",
+      "act": {"this": "p1", "form": "read", "args": {"at": "g1"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "test:probe"}, "g1": {"kind": "test:gauge"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["creator"]},
+      "expect": {"verdict": "no", "reason": "bad_input", "need": 0, "detail": {"what": "no_such_field", "node": "g1", "field": "survey"}}
+    }
+  ]
+}

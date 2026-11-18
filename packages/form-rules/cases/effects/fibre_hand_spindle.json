@@ -1,0 +1,19 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Hand spindle (from #1836): two portions spun firm (fibre 6 to 4, yarn 0 to 2), one hard, three soft (all six spun); one more is refused (no fibre left); three are unspun back to fibre; the spindle is taken. Fibre and yarn always sum to six.",
+  "cases": [
+    {
+      "name": "spin_all_six_unspin_three_take",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","s1"]},"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"s1","form":"spin_firm","args":{"amount":2}},"receipt":"rs1","expect":{"verdict":"yes","changes":[{"change":"set","node":"s1","field":"fibre","n":1,"to":4,"by":-2},{"change":"set","node":"s1","field":"yarn","n":2,"to":2,"by":2},{"change":"set","node":"s1","field":"twist","n":3,"to":"firm"}],"events":[{"event":"eden:spun","node":"s1","changes":[0,1]},{"event":"eden:twist_set","node":"s1","changes":[2]}],"timers":[]}},
+        {"act":{"this":"s1","form":"spin_hard","args":{"amount":1}},"receipt":"rs2","expect":{"verdict":"yes","changes":[{"change":"set","node":"s1","field":"fibre","n":1,"to":3,"by":-1},{"change":"set","node":"s1","field":"yarn","n":2,"to":3,"by":1},{"change":"set","node":"s1","field":"twist","n":3,"to":"hard"}],"events":[{"event":"eden:spun","node":"s1","changes":[0,1]},{"event":"eden:twist_set","node":"s1","changes":[2]}],"timers":[]}},
+        {"act":{"this":"s1","form":"spin_soft","args":{"amount":3}},"receipt":"rs3","expect":{"verdict":"yes","changes":[{"change":"set","node":"s1","field":"fibre","n":1,"to":0,"by":-3},{"change":"set","node":"s1","field":"yarn","n":2,"to":6,"by":3},{"change":"set","node":"s1","field":"twist","n":3,"to":"soft"}],"events":[{"event":"eden:spun","node":"s1","changes":[0,1]},{"event":"eden:twist_set","node":"s1","changes":[2]}],"timers":[]}},
+        {"act":{"this":"s1","form":"spin_soft","args":{"amount":1}},"receipt":"rs4","expect":{"verdict":"no","reason":"not_enough","need":1}},
+        {"act":{"this":"s1","form":"unspin","args":{"amount":3}},"receipt":"rs5","expect":{"verdict":"yes","changes":[{"change":"set","node":"s1","field":"yarn","n":2,"to":3,"by":-3},{"change":"set","node":"s1","field":"fibre","n":1,"to":3,"by":3}],"events":[{"event":"eden:unspun","node":"s1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"s1","form":"take"},"receipt":"rs6","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"s1","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"s1","changes":[0]}],"timers":[]}}
+      ],
+      "after": {"s1":{"kind":"eden:hand_spindle","fields":{"fibre":3,"yarn":3,"twist":"soft"}},"b1":{"hands":{"left":"s1","right":null}}}
+    }
+  ]
+}

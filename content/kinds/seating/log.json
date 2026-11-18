@@ -1,0 +1,48 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:log",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "seat_1_front": { "role": "stand", "at_mm": [-400, 0, 520], "yaw_mdeg": 180000 },
+    "seat_2_front": { "role": "stand", "at_mm": [400, 0, 520], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "seat_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-400, 440, 50], "stand": "seat_1_front" },
+    "seat_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [400, 440, 50], "stand": "seat_2_front" }
+  },
+  "geometry": { "bounds_mm": [2220, 480, 440] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:log",
+    "shape": {
+      "shapes": [
+        { "kind": "cyl", "at": [0, 220, 0], "r": 220, "h": 2200, "segments": 8, "tint": "bark", "roll": 90000 },
+        { "kind": "cyl", "at": [1100, 220, 0], "r": 200, "h": 20, "segments": 8, "tint": "ring", "roll": 90000 },
+        { "kind": "cyl", "at": [-1100, 220, 0], "r": 200, "h": 20, "segments": 8, "tint": "ring", "roll": 90000 },
+        { "kind": "sphere", "at": [200, 420, 0], "r": 500, "segments": 6, "tint": "moss", "scale": [1400, 120, 350] }
+      ],
+      "round": 20,
+      "palette": { "bark": "#5a3d22", "ring": "#c9a77a", "moss": "#5d7a3a" },
+      "tags": ["log", "wood", "forest", "seat", "prop"]
+    }
+  },
+  "text": { "card": "A fallen log with a mossy top where two can sit; two Souls move it.", "seat": "seat", "log": "log" },
+  "card": { "text": "card", "category": "seat", "synonyms": ["log"] }
+}

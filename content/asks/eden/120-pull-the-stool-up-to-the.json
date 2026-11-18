@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":120,"group":"two-things","words":"pull the stool up to the workbench","obvious":3,"things":{"stool":"eden:stool","workbench":"eden:workbench"},"chain":[{"this":"me","form":"pick_up","carry":"stool","args":{"thing":"stool"}},{"this":"me","form":"put","place":{"at":"in_front_of","thing":"stool","anchor":"workbench"},"args":{"thing":"stool"}}]}

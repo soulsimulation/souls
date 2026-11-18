@@ -1,0 +1,120 @@
+{
+  "format": "souls-activity-cases/1",
+  "about": "test:lecture_activity in three rooms. A speaker takes the lectern, the lecture's own slot; each listener is given the first free seat within 12000 mm of the lecture, nearest first, then by node id, then in the kind's slot order. Each Soul enters by its own act; the world moves no body.",
+  "cases": [
+    {
+      "name": "hall_benches_six_listeners_and_a_seventh_refused",
+      "activity": "l1",
+      "state": {
+        "nodes": {
+          "r1": { "loose": ["l1", "k1", "k2", "k3", "k4", "t1", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8"] },
+          "l1": { "kind": "test:lecture_activity", "at_mm": [0, 0, 0] },
+          "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000] },
+          "k2": { "kind": "eden:bench", "at_mm": [1000, 0, 3000] },
+          "k3": { "kind": "eden:bench", "at_mm": [0, 0, 6000] },
+          "k4": { "kind": "eden:bench", "at_mm": [0, 0, 13000] },
+          "t1": { "kind": "test:shelf", "at_mm": [500, 0, 1000] },
+          "b1": { "hands": {} },
+          "b2": { "hands": {} },
+          "b3": { "hands": {} },
+          "b4": { "hands": {} },
+          "b5": { "hands": {} },
+          "b6": { "hands": {} },
+          "b7": { "hands": {} },
+          "b8": { "hands": {} }
+        }
+      },
+      "enter": [
+        { "actor": "b1", "form": "take_the_lectern", "receipt": "e1", "expect": { "verdict": "yes", "role": "speaker", "place": { "node": "l1", "slot": "lectern" } } },
+        { "actor": "b2", "form": "attend", "receipt": "e2", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k1", "slot": "left" } } },
+        { "actor": "b3", "form": "attend", "receipt": "e3", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k1", "slot": "right" } } },
+        { "actor": "b4", "form": "attend", "receipt": "e4", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k2", "slot": "left" } } },
+        { "actor": "b5", "form": "attend", "receipt": "e5", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k2", "slot": "right" } } },
+        { "actor": "b6", "form": "attend", "receipt": "e6", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k3", "slot": "left" } } },
+        { "actor": "b7", "form": "attend", "receipt": "e7", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k3", "slot": "right" } } },
+        { "actor": "b8", "form": "attend", "receipt": "e8", "expect": { "verdict": "no", "reason": "no_free_place", "role": "listener", "detail": { "places": 6 } } }
+      ],
+      "after": {
+        "r1": { "loose": ["l1", "k1", "k2", "k3", "k4", "t1", "b8"] },
+        "l1": {
+          "kind": "test:lecture_activity",
+          "at_mm": [0, 0, 0],
+          "links": { "speaker": ["b1"], "listener": ["b2", "b3", "b4", "b5", "b6", "b7"] },
+          "slots": { "lectern": ["b1"] }
+        },
+        "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000], "slots": { "left": ["b2"], "right": ["b3"] } },
+        "k4": { "kind": "eden:bench", "at_mm": [0, 0, 13000] }
+      }
+    },
+    {
+      "name": "classroom_chairs_a_bed_is_no_seat",
+      "activity": "l2",
+      "state": {
+        "nodes": {
+          "r2": { "loose": ["l2", "d1", "c1", "c2", "c3", "c4", "c5", "c6", "b1", "b2", "b3", "b4", "b5", "b6", "b7"] },
+          "l2": { "kind": "test:lecture_activity", "at_mm": [0, 0, 0] },
+          "d1": { "kind": "test:bed", "at_mm": [0, 0, 1000] },
+          "c1": { "kind": "test:chair", "at_mm": [-1000, 0, 2000] },
+          "c2": { "kind": "test:chair", "at_mm": [0, 0, 2000] },
+          "c3": { "kind": "test:chair", "at_mm": [1000, 0, 2000] },
+          "c4": { "kind": "test:chair", "at_mm": [-1000, 0, 3000] },
+          "c5": { "kind": "test:chair", "at_mm": [0, 0, 3000] },
+          "c6": { "kind": "test:chair", "at_mm": [1000, 0, 3000] },
+          "b1": { "hands": {} },
+          "b2": { "hands": {} },
+          "b3": { "hands": {} },
+          "b4": { "hands": {} },
+          "b5": { "hands": {} },
+          "b6": { "hands": {} },
+          "b7": { "hands": {} }
+        }
+      },
+      "enter": [
+        { "actor": "b1", "form": "take_the_lectern", "receipt": "e1", "expect": { "verdict": "yes", "role": "speaker", "place": { "node": "l2", "slot": "lectern" } } },
+        { "actor": "b2", "form": "attend", "receipt": "e2", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "c2", "slot": "seat" } } },
+        { "actor": "b3", "form": "attend", "receipt": "e3", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "c1", "slot": "seat" } } },
+        { "actor": "b4", "form": "attend", "receipt": "e4", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "c3", "slot": "seat" } } },
+        { "actor": "b5", "form": "attend", "receipt": "e5", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "c5", "slot": "seat" } } },
+        { "actor": "b6", "form": "attend", "receipt": "e6", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "c4", "slot": "seat" } } },
+        { "actor": "b7", "form": "attend", "receipt": "e7", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "c6", "slot": "seat" } } }
+      ],
+      "after": {
+        "d1": { "kind": "test:bed", "at_mm": [0, 0, 1000] }
+      }
+    },
+    {
+      "name": "garden_benches_around_an_off_centre_lecture_one_seat_already_taken",
+      "activity": "l3",
+      "state": {
+        "nodes": {
+          "r3": { "loose": ["l3", "g1", "g2", "g3", "g4", "b1", "b2", "b3", "b4", "b5", "b6", "b7"] },
+          "l3": { "kind": "test:lecture_activity", "at_mm": [5000, 0, 5000] },
+          "g1": { "kind": "eden:bench", "at_mm": [5000, 0, 8000], "slots": { "left": ["b9"] } },
+          "g2": { "kind": "eden:bench", "at_mm": [2000, 0, 5000] },
+          "g3": { "kind": "eden:bench", "at_mm": [8000, 0, 9000] },
+          "g4": { "kind": "eden:bench", "at_mm": [5000, 0, 15000] },
+          "b1": { "hands": {} },
+          "b2": { "hands": {} },
+          "b3": { "hands": {} },
+          "b4": { "hands": {} },
+          "b5": { "hands": {} },
+          "b6": { "hands": {} },
+          "b7": { "hands": {} },
+          "b9": { "hands": {} }
+        }
+      },
+      "enter": [
+        { "actor": "b1", "form": "take_the_lectern", "receipt": "e1", "expect": { "verdict": "yes", "role": "speaker", "place": { "node": "l3", "slot": "lectern" } } },
+        { "actor": "b2", "form": "attend", "receipt": "e2", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "g1", "slot": "right" } } },
+        { "actor": "b3", "form": "attend", "receipt": "e3", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "g2", "slot": "left" } } },
+        { "actor": "b4", "form": "attend", "receipt": "e4", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "g2", "slot": "right" } } },
+        { "actor": "b5", "form": "attend", "receipt": "e5", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "g3", "slot": "left" } } },
+        { "actor": "b6", "form": "attend", "receipt": "e6", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "g3", "slot": "right" } } },
+        { "actor": "b7", "form": "attend", "receipt": "e7", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "g4", "slot": "left" } } }
+      ],
+      "after": {
+        "g1": { "kind": "eden:bench", "at_mm": [5000, 0, 8000], "slots": { "left": ["b9"], "right": ["b2"] } }
+      }
+    }
+  ]
+}
