@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":207,"group":"with-others","words":"join the class","obvious":3,"things":{"class":"eden:lecture","desk":"eden:school_desk"},"fields":{"class":{"running":true}},"chain":[{"this":"class","form":"attend","args":{"seat":{"node":"desk","slot":"seat"}}}]}

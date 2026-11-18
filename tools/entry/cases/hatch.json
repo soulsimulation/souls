@@ -1,0 +1,572 @@
+{
+ "about": "Hatch cases (SA-F9, #2850): the two known uses of the code hatch, as data a future function must meet. No function is written. A hatch is named by the hash of its WASM module and declares the fields and arguments it reads; `declares` gives each use's shape (its fields, its reads, its answer), and each case gives every read and the answer expected. Whole numbers and booleans only. The module hash is not here: it exists only when a function does. Chess: squares are 0-63, a1 = 0, rank-major (e1 = 4, h8 = 63); pieces 1 pawn, 2 knight, 3 bishop, 4 rook, 5 queen, 6 king, black is the piece plus 8; castling is a bitmask (1 white king side); en_passant is the square a pawn may be taken onto, 64 if none. Lamp: `phase` counts whole steps since the lamp was lit.",
+ "declares": {
+  "chess_move": {
+   "fields": {
+    "pieces": {
+     "type": "list",
+     "most": 32,
+     "of": {
+      "square": {
+       "type": "int",
+       "unit": "count"
+      },
+      "piece": {
+       "type": "int",
+       "unit": "count"
+      }
+     }
+    },
+    "turn": {
+     "type": "enum",
+     "values": [
+      "white",
+      "black"
+     ]
+    },
+    "en_passant": {
+     "type": "int",
+     "unit": "count"
+    },
+    "castling": {
+     "type": "int",
+     "unit": "count"
+    }
+   },
+   "args": {
+    "from": "count",
+    "to": "count"
+   },
+   "reads": [
+    {
+     "field": "pieces"
+    },
+    {
+     "field": "turn"
+    },
+    {
+     "field": "en_passant"
+    },
+    {
+     "field": "castling"
+    },
+    {
+     "arg": "from"
+    },
+    {
+     "arg": "to"
+    }
+   ],
+   "answers": "verdict",
+   "steps_most": 20000
+  },
+  "signal_lamp": {
+   "fields": {
+    "code": {
+     "type": "int",
+     "unit": "count"
+    },
+    "phase": {
+     "type": "int",
+     "unit": "count"
+    },
+    "lit": {
+     "type": "bool"
+    }
+   },
+   "args": {},
+   "reads": [
+    {
+     "field": "code"
+    },
+    {
+     "field": "phase"
+    }
+   ],
+   "answers": {
+    "field": "lit"
+   },
+   "steps_most": 200
+  }
+ },
+ "cases": [
+  {
+   "hatch": "chess_move",
+   "name": "pawn_double_step",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 12,
+      "piece": 1
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 0,
+    "from": 12,
+    "to": 28
+   },
+   "answer": true,
+   "why": "a pawn on its start rank may go two forward over empty squares"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "pawn_three_steps",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 12,
+      "piece": 1
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 0,
+    "from": 12,
+    "to": 36
+   },
+   "answer": false,
+   "why": "a pawn never goes three"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "rook_clear_file",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 0,
+      "piece": 4
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 0,
+    "from": 0,
+    "to": 24
+   },
+   "answer": true,
+   "why": "a rook slides along an empty file"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "rook_blocked_by_own_pawn",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 0,
+      "piece": 4
+     },
+     {
+      "square": 16,
+      "piece": 1
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 0,
+    "from": 0,
+    "to": 32
+   },
+   "answer": false,
+   "why": "a rook cannot pass a piece"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "knight_jumps",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 1,
+      "piece": 2
+     },
+     {
+      "square": 9,
+      "piece": 1
+     },
+     {
+      "square": 10,
+      "piece": 1
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 0,
+    "from": 1,
+    "to": 18
+   },
+   "answer": true,
+   "why": "a knight jumps over pieces"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "bishop_blocked",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 2,
+      "piece": 3
+     },
+     {
+      "square": 11,
+      "piece": 1
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 0,
+    "from": 2,
+    "to": 20
+   },
+   "answer": false,
+   "why": "a bishop cannot pass a piece on its diagonal"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "wrong_side_to_move",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 56,
+      "piece": 12
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 0,
+    "from": 56,
+    "to": 48
+   },
+   "answer": false,
+   "why": "it is white's turn; a black piece does not move"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "capture_own_piece",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 0,
+      "piece": 4
+     },
+     {
+      "square": 8,
+      "piece": 1
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 0,
+    "from": 0,
+    "to": 8
+   },
+   "answer": false,
+   "why": "a piece cannot take its own side's piece"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "king_steps_into_check",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 60,
+      "piece": 12
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 0,
+    "from": 4,
+    "to": 12
+   },
+   "answer": false,
+   "why": "a king may not move onto a square a black rook attacks"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "en_passant",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 36,
+      "piece": 1
+     },
+     {
+      "square": 35,
+      "piece": 9
+     }
+    ],
+    "turn": "white",
+    "en_passant": 43,
+    "castling": 0,
+    "from": 36,
+    "to": 43
+   },
+   "answer": true,
+   "why": "a pawn may take a pawn that has just gone two squares, by passing"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "castle_kingside",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 7,
+      "piece": 4
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 1,
+    "from": 4,
+    "to": 6
+   },
+   "answer": true,
+   "why": "the king and rook have not moved and nothing between them is attacked"
+  },
+  {
+   "hatch": "chess_move",
+   "name": "castle_through_check",
+   "inputs": {
+    "pieces": [
+     {
+      "square": 4,
+      "piece": 6
+     },
+     {
+      "square": 63,
+      "piece": 14
+     },
+     {
+      "square": 7,
+      "piece": 4
+     },
+     {
+      "square": 61,
+      "piece": 12
+     }
+    ],
+    "turn": "white",
+    "en_passant": 64,
+    "castling": 1,
+    "from": 4,
+    "to": 6
+   },
+   "answer": false,
+   "why": "the king may not cross a square a black rook attacks (f1)"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 1,
+    "phase": 0
+   },
+   "answer": true,
+   "why": "code 1 is steady"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 1,
+    "phase": 1
+   },
+   "answer": true,
+   "why": "code 1 is steady"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 1,
+    "phase": 5
+   },
+   "answer": true,
+   "why": "code 1 is steady"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 2,
+    "phase": 0
+   },
+   "answer": true,
+   "why": "code 2 flashes: lit one step, dark one step"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 2,
+    "phase": 1
+   },
+   "answer": false,
+   "why": "code 2 flashes: lit one step, dark one step"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 2,
+    "phase": 2
+   },
+   "answer": true,
+   "why": "code 2 flashes: lit one step, dark one step"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 2,
+    "phase": 3
+   },
+   "answer": false,
+   "why": "code 2 flashes: lit one step, dark one step"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 3,
+    "phase": 0
+   },
+   "answer": true,
+   "why": "code 3 is two short flashes then a pause, a pattern six steps long that repeats"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 3,
+    "phase": 1
+   },
+   "answer": false,
+   "why": "code 3 is two short flashes then a pause, a pattern six steps long that repeats"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 3,
+    "phase": 2
+   },
+   "answer": true,
+   "why": "code 3 is two short flashes then a pause, a pattern six steps long that repeats"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 3,
+    "phase": 3
+   },
+   "answer": false,
+   "why": "code 3 is two short flashes then a pause, a pattern six steps long that repeats"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 3,
+    "phase": 4
+   },
+   "answer": false,
+   "why": "code 3 is two short flashes then a pause, a pattern six steps long that repeats"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 3,
+    "phase": 5
+   },
+   "answer": false,
+   "why": "code 3 is two short flashes then a pause, a pattern six steps long that repeats"
+  },
+  {
+   "hatch": "signal_lamp",
+   "inputs": {
+    "code": 3,
+    "phase": 6
+   },
+   "answer": true,
+   "why": "code 3 is two short flashes then a pause, a pattern six steps long that repeats"
+  }
+ ]
+}

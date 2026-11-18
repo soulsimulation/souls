@@ -1,0 +1,13 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "The six things any thing allows (SA-F10, #2882): the body's own forms (eden:humanoid, SA-G3) taken on a copy of a kind that has no forms at all. A lamp post says nothing of going to, looking at, pointing at, touching, leaning on or waiting by it, and every one answers yes.",
+  "cases": [
+    { "name": "go_to_a_lamp_post", "act": { "this": "b1", "form": "go_to", "args": { "place": "lamp1" } }, "state": { "actor": "b1", "nodes": { "b1": { "kind": "eden:humanoid", "hands": {} }, "lamp1": { "kind": "eden:lamp_post" } } }, "asker": { "sees": ["public"] }, "expect": { "verdict": "yes" } },
+    { "name": "look_at_a_lamp_post", "act": { "this": "b1", "form": "look_at", "args": { "target": "lamp1" } }, "state": { "actor": "b1", "nodes": { "b1": { "kind": "eden:humanoid", "hands": {} }, "lamp1": { "kind": "eden:lamp_post" } } }, "asker": { "sees": ["public"] }, "expect": { "verdict": "yes" } },
+    { "name": "point_at_a_lamp_post", "act": { "this": "b1", "form": "point", "args": { "toward": "lamp1" } }, "state": { "actor": "b1", "nodes": { "b1": { "kind": "eden:humanoid", "hands": {} }, "lamp1": { "kind": "eden:lamp_post" } } }, "asker": { "sees": ["public"] }, "expect": { "verdict": "yes" } },
+    { "name": "touch_a_lamp_post", "act": { "this": "b1", "form": "touch", "args": { "target": "lamp1" } }, "state": { "actor": "b1", "nodes": { "b1": { "kind": "eden:humanoid", "hands": {} }, "lamp1": { "kind": "eden:lamp_post" } } }, "asker": { "sees": ["public"] }, "expect": { "verdict": "yes" } },
+    { "name": "lean_on_a_lamp_post", "act": { "this": "b1", "form": "lean_on", "args": { "support": "lamp1" } }, "state": { "actor": "b1", "nodes": { "b1": { "kind": "eden:humanoid", "hands": {} }, "lamp1": { "kind": "eden:lamp_post" } } }, "asker": { "sees": ["public"] }, "expect": { "verdict": "yes" } },
+    { "name": "wait_by_a_lamp_post", "act": { "this": "b1", "form": "wait_by", "args": { "place": "lamp1" } }, "state": { "actor": "b1", "nodes": { "b1": { "kind": "eden:humanoid", "hands": {} }, "lamp1": { "kind": "eden:lamp_post" } } }, "asker": { "sees": ["public"] }, "expect": { "verdict": "yes" } },
+    { "name": "lean_on_while_already_leaning", "act": { "this": "b1", "form": "lean_on", "args": { "support": "lamp1" } }, "state": { "actor": "b1", "nodes": { "b1": { "kind": "eden:humanoid", "hands": {}, "fields": { "posture": "lean" } }, "lamp1": { "kind": "eden:lamp_post" } } }, "asker": { "sees": ["public"] }, "expect": { "verdict": "no", "reason": "field_differs", "need": 0 } }
+  ]
+}

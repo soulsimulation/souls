@@ -1,0 +1,16 @@
+[package]
+name = "replica"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "The shared library, native and WASM (Engine v2, #2635). Empty but for the load probe (K1, #2638)."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Exports the test-only `encode_diagnostic` from the WASM build, for v2/tools/encoding-vectors (T0, #2639).
+vectors = []
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
