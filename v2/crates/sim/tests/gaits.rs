@@ -34,6 +34,11 @@ fn b64(bytes: &[u8]) -> String {
 
 /// A world of one 16 m terrain tile at (0, 0), its 17 × 17 heights (mm) from `h(i, j)`, i along x and j along z.
 fn world(h: impl Fn(i32, i32) -> i32) -> Import {
+    world_with(h, "", "")
+}
+
+/// [`world`], with N1's facts rows `kinds` and `things` on it.
+fn world_with(h: impl Fn(i32, i32) -> i32, kinds: &str, things: &str) -> Import {
     let n = (SQUARE / 1000) as i32;
     let mut heights = Vec::new();
     for j in 0..=n {
@@ -43,7 +48,7 @@ fn world(h: impl Fn(i32, i32) -> i32) -> Import {
     }
     let classes = vec![0u8; (n * n) as usize];
     let text = format!(
-        r#"{{"format": "souls/import-eden/1", "kinds": [], "things": [], "doors": [], "places": [],
+        r#"{{"format": "souls/import-eden/1", "kinds": [{kinds}], "things": [{things}], "doors": [], "places": [],
           "bake": {{}}, "byRef": {{}}, "ground": {{"tileM": {n}, "tiles": [{{"tx": 0, "tz": 0,
           "heights": "{}", "classes": "{}"}}]}}}}"#,
         b64(&heights),
@@ -476,4 +481,38 @@ fn a1_eden_hills() {
         spots, 5,
         "five spots on Eden's hills where every gait keeps its speed"
     );
+}
+
+/// #3241's A1: a fence on a hill blocks at its foot as on flat ground. A 6 m fence across x = 10 m, 1.2 m high,
+/// stands on the ground, flat or rising 0.3 m a metre along x (3 m up at the fence); a walker walking toward it from
+/// x = 6 m stops at it, the body's radius from its face, on both.
+#[test]
+fn a_fence_on_a_hill_stops_a_walker_at_its_foot() {
+    for rise in [0, 300] {
+        let y = 10 * rise;
+        let fence = format!(
+            r#"{{"id": "e_fence", "def": "core-fence@1", "ref": "core-fence@1", "parent": null,
+              "pose": [10000, {y}, 8000, 0], "world": [10000, {y}, 8000, 0], "scale_ppm": 1000000,
+              "solids": [[0, 0, 50, 3000, 0, 0, 1200, 1, 0]]}}"#
+        );
+        let im = world_with(
+            |i, _| i * rise,
+            r#"{"ref": "core-fence@1", "hash": "ff", "name": "core:fence", "form": "point"}"#,
+            &fence,
+        );
+        let s = surface(&im);
+        let mut b = place(&s, [6_000_000, 8_000_000]).expect("a body below the fence");
+        let w = walk(&s, &mut b, WALK, [1, 0], 100);
+        let face = 10_000_000 - 50_000 - HUMAN_RADIUS * 1000;
+        println!(
+            "rise {rise} mm/m: ends at x {:.3} m (the fence's face less the body's radius: {:.3} m)",
+            w.end.x as f64 / 1e6,
+            face as f64 / 1e6
+        );
+        assert!(
+            w.end.x <= face && w.end.x > face - 100_000,
+            "rise {rise} mm/m: stops at the fence, not through it or short of it: x {} µm",
+            w.end.x
+        );
+    }
 }

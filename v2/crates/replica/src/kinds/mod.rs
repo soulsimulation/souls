@@ -14,12 +14,14 @@
 //! - **6, slots** and **11, children:** what it admits, as T2 reads them (`v2/docs/world-model.md` rule 5).
 //! - **8, forms:** what can be done with it, `{1: name, 2: steps}`, each step a move by name and then its arguments.
 //!
-//! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12).
+//! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12). An
+//! authored body's resources, declared actions and models are section 13, read by [`body::Decl`] (B13).
 //!
 //! Every section below 20 is in the hash, whether read here or not, so a section a later task adds (reactions,
 //! lifetime, a place's line) is read by that task and already renames the kind. A thing whose kind is missing or bad
 //! still loads, as "unknown kind", keeping its generic state; the store keeps why each refused kind was refused.
 
+pub mod body;
 pub mod sizes;
 
 use crate::encode::{Name, Value, encode};
@@ -90,6 +92,8 @@ pub struct KindDef {
     pub points: BTreeMap<u64, Point>,
     pub forms: BTreeMap<u64, Form>,
     pub admits: Admits,
+    /// Section 13, an authored body's declaration (B13), for a family kind that has one.
+    pub body: Option<body::Decl>,
 }
 
 impl KindDef {
@@ -171,6 +175,7 @@ impl Kinds {
                             points,
                             forms,
                             admits,
+                            body,
                         } = d;
                         let def = KindDef {
                             name,
@@ -179,6 +184,7 @@ impl Kinds {
                             points,
                             forms,
                             admits,
+                            body,
                         };
                         self.by_hash.insert(k.hash, def);
                     }
@@ -260,6 +266,7 @@ struct Sections {
     points: BTreeMap<u64, Point>,
     forms: BTreeMap<u64, Form>,
     admits: Admits,
+    body: Option<body::Decl>,
 }
 
 /// Reads and checks the sections this module knows.
@@ -460,7 +467,22 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         Some(_) => return Err(bad("kind-motion", 18, None, "{1: how}".into())),
     };
 
+    let body = match s.get(&body::SECTION_BODY) {
+        None => None,
+        Some(v) => {
+            let why = |reason: String| bad("kind-body", body::SECTION_BODY, None, reason);
+            if owner != "family" {
+                return Err(why("only a family kind declares a body".into()));
+            }
+            let Value::Map(m) = v else {
+                return Err(why("a map of numbered entries".into()));
+            };
+            Some(body::Decl::read(kind, m).map_err(why)?)
+        }
+    };
+
     Ok(Sections {
+        body,
         state,
         points,
         forms,
