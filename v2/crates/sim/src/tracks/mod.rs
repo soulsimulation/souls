@@ -14,6 +14,8 @@
 //!   and an integer square root, then is checked on that polynomial so it is the first microsecond at or after the
 //!   crossing (T5's rule); the point must be on the face then. The earliest of these ends the track: the catching
 //!   slot's reach, a solid's face, the floor, the node's edge.
+//! - **Never inside forbidden geometry.** An end at a solid's face or the floor rounds toward the start instead: the
+//!   last microsecond whose position is outside every solid (faces included) and not below the floor.
 //! - **How it ends.** Caught: into the catching slot, keeping its position (as an offset in the slot) with velocity
 //!   zero (T4 rule 10: a catch ends the motion on purpose). On a solid's top or the floor: at rest where it lands
 //!   ([`rest`], the at-rest track a thing set down also uses), on that surface. On any other face of a solid (a wall):
@@ -106,7 +108,8 @@ pub enum Ends {
     Edge,
 }
 
-/// A track's end: when (the first microsecond at or after it), where (the formula's position then) and why.
+/// A track's end: when (the first microsecond at or after it; at a solid or the floor, the last one still outside),
+/// where (the formula's position then) and why.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct End {
     pub at: Micros,
@@ -481,9 +484,24 @@ fn first_end(pose: &Pose, track: &Track, geometry: &Geometry, catch: Option<&Cat
             }
         }
     }
-    let Some((n, ends)) = best else {
+    let Some((mut n, ends)) = best else {
         return refuse("track-never-ends", "nothing ends this track");
     };
+    // At a solid's face or the floor, the end rounds toward the start: the last microsecond whose position is
+    // outside every solid (faces included) and not below the floor, so a thing never rests inside forbidden geometry.
+    if matches!(ends, Ends::Wall { .. } | Ends::Landed { .. }) {
+        let forbidden = |p: Vec3| {
+            p.y < geometry.floor_y
+                || geometry.solids.iter().any(|b| {
+                    let (p, lo, hi) = (wide(p), wide(b.min), wide(b.max));
+                    (0..3).all(|j| lo[j] <= p[j] && p[j] <= hi[j])
+                })
+        };
+        n -= 1;
+        while n > 0 && forbidden(at(n)?.1) {
+            n -= 1;
+        }
+    }
     let (at, position) = at(n)?;
     Ok(End { at, position, ends })
 }

@@ -383,8 +383,8 @@ fn a3_a_missed_catch_lands_at_rest_and_a_throw_at_a_wall_ends_there() {
         }
     );
     assert!(
-        pose.position.y <= 0 && pose.position.y > -20,
-        "on the floor"
+        pose.position.y >= 0 && pose.position.y < 20,
+        "on the floor, never below it"
     );
     assert_eq!(pose.position, f.at(f.end.at).unwrap(), "where it lands");
 
@@ -402,20 +402,60 @@ fn a3_a_missed_catch_lands_at_rest_and_a_throw_at_a_wall_ends_there() {
     assert_eq!(f.end.ends, Ends::Wall { solid: ee(WALL) });
     let per_us = VELOCITY.x / 1_000_000;
     assert!(
-        (4_000_000..=4_000_000 + per_us).contains(&f.end.position.x),
-        "ends at the wall's face, within one microsecond's travel"
+        (4_000_000 - per_us..4_000_000).contains(&f.end.position.x),
+        "ends at the wall's face, outside it, within one microsecond's travel"
     );
     assert!(f.end.position.y < 4_000_000);
     // Then a drop from rest by the wall, its own track, to the floor.
     assert_eq!(owner, Owner::Track(Track::Rest));
     assert_eq!(pose.position.x, f.end.position.x);
-    assert!(pose.position.y <= 0);
+    assert!(pose.position.y >= 0 && pose.position.y < 20);
     assert_eq!(log.iter().filter(|(k, _)| *k == "effect").count(), 3);
 
     // The same wall 3 m high: the path clears it and the catch is made.
     let f = throw(header().zone, AT_ONE_SECOND, Some(3_000_000));
     println!("A3: a 3 m wall is cleared: ends {:?}", f.end.ends);
     assert_eq!(f.end.ends, Ends::Caught { slot: 2 });
+}
+
+#[test]
+fn a3_an_end_at_a_wall_is_outside_every_solid_at_any_speed() {
+    let geo = geometry(Some(4_000_000));
+    let inside = |p: Vec3| {
+        geo.solids.iter().any(|b| {
+            (b.min.x..=b.max.x).contains(&p.x)
+                && (b.min.y..=b.max.y).contains(&p.y)
+                && (b.min.z..=b.max.z).contains(&p.z)
+        }) || p.y < geo.floor_y
+    };
+    for vx in [3_000_000, 8_000_000, 20_000_000, 47_300_001] {
+        let velocity = Vec3::new(vx, 6_000_000, 0);
+        let f = Flight::throw(
+            ee(THING),
+            held(header().zone),
+            FROM,
+            T0,
+            velocity,
+            GRAVITY,
+            Vec3::ZERO,
+            &geo,
+            None,
+        )
+        .unwrap();
+        let (_, drop) = f.finish(&geo).unwrap();
+        let drop = drop.unwrap();
+        println!(
+            "A3: at {vx} µm/s: wall at {} µs at {}; the drop ends {:?} at {}",
+            f.end.at, f.end.position, drop.end.ends, drop.end.position
+        );
+        assert_eq!(f.end.ends, Ends::Wall { solid: ee(WALL) });
+        assert!(!inside(f.end.position), "the end is outside every solid");
+        assert!(
+            !inside(drop.end.position),
+            "the drop's end is outside every solid"
+        );
+        assert!(f.end.position.x < 4_000_000 && 4_000_000 - f.end.position.x <= vx / 1_000_000 + 1);
+    }
 }
 
 #[test]
