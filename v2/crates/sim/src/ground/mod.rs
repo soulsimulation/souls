@@ -40,6 +40,7 @@
 
 pub mod exits;
 pub mod scene;
+pub mod sizes;
 
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay::{Overlay, ShapeType};
@@ -48,6 +49,7 @@ use i_overlay::i_float::int::point::IntPoint;
 use i_overlay::i_shape::int::shape::{IntShape, IntShapes};
 use i_triangle::int::triangulatable::IntTriangulatable;
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::{Quat, Vec3};
 use replica::tree::Tree;
 pub use scene::{Doorway, Scene, Solid, Surface, Water};
@@ -64,8 +66,9 @@ pub const BODY_HIGH: i64 = 1_800;
 pub const STEP: i64 = BODY_LOW;
 /// The open ground's square, mm.
 pub const SQUARE: i64 = 16_000;
-/// Today's walking body, mm (`HUMAN_PROFILE`).
-pub const HUMAN_RADIUS: i64 = 280;
+/// Today's walking body, mm (`HUMAN_PROFILE`): the standard size class. Other bodies are cut for their own class
+/// (B12, `replica::kinds::sizes::Size`): one cut per class, kept by [`Cache`] per radius.
+pub const HUMAN_RADIUS: i64 = Size::Standard.radius_mm();
 /// A doorway's depth either side of its middle when no wall flanks it, mm.
 const DOOR_HALF_DEPTH: i64 = 100;
 /// How far the passage through a doorway runs past the grown wall, so that it overlaps the patch on each side, mm.

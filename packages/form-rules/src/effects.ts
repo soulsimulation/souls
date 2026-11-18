@@ -6,7 +6,9 @@
 // made. `apply` applies such a result to plain state: all of it or none, and once per receipt.
 //
 // - An amount moved between two things is two `set` changes on one field, each carrying its signed `by`
-//   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not.
+//   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not. An amount
+//   moved between two fields of one thing (`into_field`: a stock into a well) is two sets on that thing, and balances
+//   the same way.
 // - Holding is a parent: take and put are `reparent` into or out of a hand, a slot or the actor's place (`here`).
 //   What is moved is the actor, this thing, a thing argument of the form, or the one thing at the end of a link.
 // - A made thing appears where its form names: a slot, the actor's hand, or `here`, loose in the actor's
@@ -217,9 +219,9 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     } else if (e.change === 'transfer') {
       const m = measure(kinds, work, self, args, e);
       if ('bad' in m) return refuse(i, 'bad_input', { what: m.bad, ...m.detail });
-      if (m.room !== null && m.moved > m.room) return refuse(i, 'no_room', { node: m.into, field: m.field, room: m.room, amount: m.moved });
-      out.push({ change: 'set', node: m.from, field: m.field, n: m.fromDef.n, to: m.there - m.moved, by: -m.moved });
-      out.push({ change: 'set', node: m.into, field: m.field, n: m.intoDef.n, to: m.has + m.moved, by: m.moved });
+      if (m.room !== null && m.moved > m.room) return refuse(i, 'no_room', { node: m.into, field: m.intoField, room: m.room, amount: m.moved });
+      out.push({ change: 'set', node: m.from, field: m.field, n: m.fromDef.n, to: m.there - m.moved, by: 0 - m.moved });
+      out.push({ change: 'set', node: m.into, field: m.intoField, n: m.intoDef.n, to: m.has + m.moved, by: m.moved });
     } else if (e.change === 'link' || e.change === 'unlink') {
       const def = has(entry.links, e.link ?? '') ? entry.links![e.link!] : undefined;
       if (!def) return refuse(i, 'bad_input', { what: 'no_such_link', link: e.link ?? null });
