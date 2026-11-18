@@ -1,0 +1,5 @@
+# Clippy settings for the v2 workspace (K1, #2638). Lint levels live in each crate (`#![forbid(unsafe_code)]` in
+# replica and sim); v2/tools/ci.sh runs Clippy with every warning as an error.
+
+# Nothing under v2/ is published yet, so Clippy may suggest changes to public signatures too.
+avoid-breaking-exported-api = false

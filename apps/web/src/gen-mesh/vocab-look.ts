@@ -141,8 +141,10 @@ export function stationIndex(def: MeshCtx['def'], station: unknown): number {
 function stateRoles(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
   const s = look.state;
   const tuned = typeof s.station === 'string' ? stationIndex(ctx.def, s.station) - 1 : null;
+  // a role the looks table names is posed by the table alone (tableRoles), never here as well
+  const tabled = new Set(tableOf(ctx).flatMap((r) => [r.part, ...Object.values(r.at ?? {})]));
   root.traverse((o) => {
-    const role = o.userData.role as string | undefined; if (!role) return;
+    const role = o.userData.role as string | undefined; if (!role || tabled.has(role)) return;
     if (role === 'door' && s.open !== undefined) o.rotation.y = s.open === true ? -Math.PI * 0.48 : 0;
     if (role === 'lid' && s.open !== undefined) o.rotation.x = s.open === true ? -Math.PI * 0.6 : 0;
     // Soul Actions entry 23: curtains draw back to their outer ends (pleats bunch), a roller blind rolls up to its top
