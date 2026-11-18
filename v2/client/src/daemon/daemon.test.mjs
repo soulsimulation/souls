@@ -54,15 +54,26 @@ function makeRelay(port) {
   return new Promise((ok) => server.listen(0, '127.0.0.1', () => { r.port = server.address().port; ok(r); }));
 }
 
+const printed = {}; // each process's output, by binary name, for a timeout's message
 function run(bin, args, ready) {
   const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   procs.push(p);
+  const name = bin.split('/').pop();
+  printed[name] = '';
   return new Promise((ok, fail) => {
     let out = '';
-    p.stdout.on('data', (d) => { out += d; const m = ready.exec(out); if (m) ok(m); });
-    p.stderr.on('data', (d) => { out += d; });
+    p.stdout.on('data', (d) => { out += d; printed[name] += d; const m = ready.exec(out); if (m) ok(m); });
+    p.stderr.on('data', (d) => { out += d; printed[name] += d; });
     p.on('exit', (c) => fail(new Error(`${bin} ended (${c}): ${out}`)));
   });
+}
+
+/** The last lines of the daemon's log and of each process's output: what a timeout says, so CI shows why. */
+function tails(n = 40) {
+  const last = (text) => text.split('\n').slice(-n).join('\n');
+  let daemon = '';
+  try { daemon = readFileSync(rt.log, 'utf8'); } catch { /* not started yet */ }
+  return [`daemon.log:\n${last(daemon)}`, ...Object.entries(printed).map(([k, v]) => `${k}:\n${last(v)}`)].join('\n');
 }
 
 async function waitFor(f, ms = 5000) {
@@ -70,7 +81,7 @@ async function waitFor(f, ms = 5000) {
   for (;;) {
     const v = await f();
     if (v) return v;
-    if (Date.now() > until) throw new Error('timed out');
+    if (Date.now() > until) throw new Error(`timed out\n${tails()}`);
     await sleep(10);
   }
 }

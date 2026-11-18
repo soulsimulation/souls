@@ -29,7 +29,7 @@
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
 //       intent's basis is the version the model was last shown, not the send-time version.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
-//   gateway replays what it kept after it). Every frame is built and read by replica's WASM build (`wire*`).
+//   gateway replays what it kept after it). A socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
 //   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
@@ -54,6 +54,9 @@ import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check
 import { kindsIn, stateOf } from '../check/state.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
+// A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
+// stay connecting for good, firing neither open nor close (seen with Node 22's WebSocket).
+const SIGN_IN_WITHIN = 5000;
 const EVENTS_KEPT = 1000;
 
 const arg = (name) => { const k = process.argv.indexOf(name); return k > 0 ? process.argv[k + 1] : undefined; };
@@ -195,12 +198,18 @@ function syncAnswer(sock, n, refused, bytes) {
 
 function connect() {
   counts.connects++;
-  let step = 'hello';
+  let step = 'hello', ended = false;
   const sock = new WebSocket(seat.gateway);
   sock.binaryType = 'arraybuffer';
   ws = sock;
-  sock.onopen = () => sock.send(wire.wireHello());
+  const deadline = setTimeout(() => {
+    log(`not signed in within ${SIGN_IN_WITHIN} ms (at ${step}, state ${sock.readyState}); giving it up`);
+    closed(1006);
+    try { sock.close(); } catch { /* a socket still connecting may refuse to close; it is ignored from here */ }
+  }, SIGN_IN_WITHIN);
+  sock.onopen = () => { if (ended) sock.close(); else sock.send(wire.wireHello()); };
   sock.onmessage = (m) => {
+    if (ended) { sock.close(); return; } // given up: it must not sign in and take the grant from its successor
     const bytes = new Uint8Array(m.data);
     try {
       if (step === 'hello') {
@@ -216,6 +225,7 @@ function connect() {
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
         step = 'stream';
+        clearTimeout(deadline);
         if (a === 'stream.resumed' && !copy.empty()) current();
         else startSync(sock, a === 'stream.cannot-resume' ? 'resync' : 'snapshot');
         return;
@@ -236,7 +246,12 @@ function connect() {
       if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.close(); }
     }
   };
-  sock.onclose = (ev) => {
+  sock.onclose = (ev) => closed(ev.code);
+  /** This socket is done with, once: by its close, or given up first. */
+  function closed(code) {
+    if (ended) return;
+    ended = true;
+    clearTimeout(deadline);
     if (ws === sock) {
       ws = null; signedIn = false;
       cutAt ??= performance.now();
@@ -248,9 +263,9 @@ function connect() {
     const most = Math.min(WAIT_MOST, WAIT_FIRST * 2 ** Math.min(attempt, 10));
     const wait = Math.round(most / 2 + Math.random() * most / 2);
     attempt++;
-    log(`socket closed (${ev.code}${step === 'stream' ? '' : `, at ${step}`}); again in ${wait} ms`);
+    log(`socket closed (${code}${step === 'stream' ? '' : `, at ${step}`}); again in ${wait} ms`);
     setTimeout(connect, wait);
-  };
+  }
   sock.onerror = () => { /* onclose follows */ };
 }
 
