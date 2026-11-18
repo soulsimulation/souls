@@ -3,9 +3,9 @@
 //
 //   node .github/scripts/ci-scope.mjs --base <ref|sha> [--head <ref|sha>] [--event <name>]   (or --files a,b,c for tests)
 //
-// A push to main (ci.yml only takes pushes to main) and a manual run check everything, whatever changed: each merge then
-// leaves a full-scope run on main, which the merge train reads as proof that main is green (mainCiState in
-// merge-train.mjs). Pull request and merge_group runs stay scoped to their paths (a merge group's diff is every PR in it).
+// The daily scheduled run on main and a manual run check everything, whatever changed: those are the full-scope runs the
+// merge train reads as proof that main is green (mainCiState in merge-train.mjs). Pull request, merge_group and push
+// runs (ci.yml only takes pushes to main) stay scoped to their paths (a merge group's diff is every PR in it).
 // A diff confined to the low-risk paths (LOW_RISK: entry, content, form-rules, docs, changelog fragments) runs only
 // their own tests; any other diff goes through the path map, where paths no rule names (root files, the lockfile, mars/,
 // worlds/, vendor/, .github/, changes/ ...) run every job; docs and tools-only changes run none (ci-ok still reports).
@@ -17,8 +17,10 @@
 // requested for it by hand (--event request: `gh workflow run ci.yml --ref <branch> -f pr=<n>`, scoped by the PR's paths
 // against main). Outside the window a run that selected heavy jobs is deferred: none run and ci-ok fails,
 // so a skipped job never reads as a pass. A run any label started (#2018), or a requested one, whose head already has a green
-// ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>]` prints whether the
-// head's newest ci run passed.
+// ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>] [--events a,b]` prints
+// whether the head's newest ci run (of those events, when given) passed.
+// Pull request, merge_group and push runs never run the legs JOBS marks `heavy: true` (lightOnly): they run once a day
+// in the scheduled full run on main, on a manual run, and before a release in the remote gate, not per change.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -65,6 +67,17 @@ export function runnerFor(job, heavyRunner = '', lightRunner = '') {
   return pool.startsWith('[') ? JSON.parse(pool) : pool;
 }
 
+/** Events whose runs leave the `heavy: true` legs to the daily full run (Gene, 18 Nov: startup mode, merge no slower than
+ * lanes implement). The scheduled run on main (06:23 UTC) and manual runs check every job (FULL_EVENTS), and the remote
+ * gate runs everything before a release (docs/testing.md#ci-window). Scheduled, manual and requested runs keep them. */
+export const LIGHT_EVENTS = ['pull_request', 'merge_group', 'push'];
+
+/** The jobs a run of `event` does itself (`include`), and the names of the heavy legs it leaves to the daily run. */
+export function lightOnly(include, event) {
+  if (!LIGHT_EVENTS.includes(event)) return { include, daily: [] };
+  return { include: include.filter(j => !j.heavy), daily: include.filter(j => j.heavy).map(j => j.name) };
+}
+
 /** The god-skill unit tests (every *.test.mjs under tools/god-skill), run by the job with `godSkill` (ci.yml). */
 export const GOD_SKILL_TESTS = 'tools/god-skill/*.test.mjs tools/god-skill/lib/*.test.mjs tools/god-skill/scripts/*.test.mjs tools/god-skill/e2e/*.test.mjs';
 
@@ -104,7 +117,7 @@ export const SMOKE_PATHS = /^(apps\/web|apps\/server|e2e)\//;
 export const smokeFor = files => !files?.length || files.some(f => SMOKE_PATHS.test(f));
 
 /** Events whose runs check everything regardless of the changed paths. */
-export const FULL_EVENTS = ['push', 'workflow_dispatch'];
+export const FULL_EVENTS = ['schedule', 'workflow_dispatch'];
 
 /** Labels that open the CI window for a ready PR. */
 export const WINDOW_LABELS = ['merge:ready', 'ci:run'];
@@ -125,9 +138,12 @@ export function windowed({ include, smoke }, win, { greenAtHead = false } = {}) 
   return { include: [], smoke: false, deferred: true, why: win.why };
 }
 
-/** The head's newest ci run (other than `self`) concluded success, and no newer one is still running. */
-export function greenAtHead(runs = [], self = null) {
-  const others = runs.filter(r => String(r.id) !== String(self ?? '') && !['cancelled', 'skipped'].includes(r.conclusion)).sort((a, b) => b.id - a.id);
+/** The head's newest ci run (other than `self`, and of `events` when given) concluded success, and no newer one is
+ * still running. A requested run reads only other requested runs: a pull_request run at the head left its heavy legs
+ * to the daily run (lightOnly), so its pass says nothing about them. */
+export function greenAtHead(runs = [], self = null, events = []) {
+  const others = runs.filter(r => String(r.id) !== String(self ?? '') && !['cancelled', 'skipped'].includes(r.conclusion)
+    && (!events.length || events.includes(r.event))).sort((a, b) => b.id - a.id);
   return others[0]?.status === 'completed' && others[0].conclusion === 'success';
 }
 
@@ -142,7 +158,7 @@ function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
   if (argv[0] === 'green') {
     const runs = JSON.parse(execFileSync('gh', ['api', `repos/${opt('--repo')}/actions/workflows/ci.yml/runs?head_sha=${opt('--sha')}&per_page=100`], { encoding: 'utf8' })).workflow_runs ?? [];
-    console.log(String(greenAtHead(runs, opt('--self'))));
+    console.log(String(greenAtHead(runs, opt('--self'), (opt('--events') ?? '').split(',').filter(Boolean))));
     return;
   }
   const event = opt('--event');
@@ -152,13 +168,15 @@ function main(argv) {
   let labels = [];
   try { const l = JSON.parse(opt('--labels') || '[]'); if (Array.isArray(l)) labels = l; } catch { /* unreadable labels: none */ }
   const win = windowFor({ event, draft: opt('--draft') === 'true', labels });
-  const plan = { ...full, ...windowed({ include: full.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
+  const own = lightOnly(full.include, event);
+  const plan = { ...full, ...windowed({ include: own.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
   const out = { matrix: JSON.stringify({ include: plan.include }), any: String(plan.include.length > 0), scope: plan.scope, smoke: String(plan.smoke), deferred: String(plan.deferred), window: plan.why };
-  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: full.include.map(j => j.name), diff: plan.diff }, null, 2));
+  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: own.include.map(j => j.name), daily: own.daily, diff: plan.diff }, null, 2));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(out).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     `### CI scope: ${plan.scope}\n\nJobs: ${plan.include.map(j => '`' + j.name + '`').join(', ') || 'none (docs/tools only)'}; local smoke: ${out.smoke}\n` +
-    (plan.deferred ? `\n**Full CI deferred** (${plan.why}): ${full.include.length} job(s) selected, none run. Add \`ci:run\` or \`merge:ready\` to a ready PR to run them (docs/testing.md#ci-window).\n` : ''));
+    (own.daily.length ? `\nLeft to the daily full run on main (06:23 UTC) and the release gate: ${own.daily.map(n => '`' + n + '`').join(', ')}\n` : '') +
+    (plan.deferred ? `\n**Full CI deferred** (${plan.why}): ${own.include.length} job(s) selected, none run. Add \`ci:run\` or \`merge:ready\` to a ready PR to run them (docs/testing.md#ci-window).\n` : ''));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2));
