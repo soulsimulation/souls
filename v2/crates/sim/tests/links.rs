@@ -164,6 +164,11 @@ fn a1_a2_a3_a5_three_shut_doors_the_stair_and_the_ladder_from_link_data_alone() 
             show(link)
         );
         assert_eq!(ev.name.as_str(), DOOR_OPENED);
+        assert_eq!(
+            ev.name.as_str(),
+            "eden:door_opened",
+            "the door kind's event"
+        );
         assert_eq!((*field, to), (F_OPEN, &Value::Uint(1)));
         opened.push(link);
     }
