@@ -79,7 +79,9 @@ and rolling builds (O1, O7) are not here.
     changed the same way when a Soul travels (T1).
 12. **The directory's truth is a few small objects in the object store,** each written conditionally; machines keep
     a cached copy; there is no other database.
-13. **Checkpoints are taken by amount of log,** so restart time does not grow with the world (K5 builds it).
+13. **Checkpoints are taken by amount of log,** so restart time does not grow with the world. K5 builds them in
+    `v2/crates/sim/src/checkpoint/`: one file per checkpoint, the last two kept, the log never cut; the hashes in
+    `v2/crates/replica/src/tree/seal.rs`. Trimming the takeovers (rule 8) waits for the real directory (W8).
 
 **Step 0, the paused writer as a timeline** (`a2_...`): a holds epoch 1, writes 0 to 2 and ships them (mark 2); a
 pauses past its lease; b claims epoch 2 from sequence 3, writes 3 and ships it (mark 3); a resumes and writes 3 to its
