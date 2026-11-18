@@ -7,7 +7,8 @@
 //! - **A step.** The wanted move for one tick (velocity times the tick, rounded once per number) is walked across the
 //!   piece's triangles by orientation tests on whole micrometres: a straight walk from triangle to triangle through
 //!   the edges the line crosses. An edge with no triangle across it is the piece's edge: where it lies on a 16 m square's line and another
-//!   piece of the same node holds the point just past it (the open ground's next square), the walk goes on there;
+//!   piece of the same node holds the point just past it with the line going into it (the open ground's next square;
+//!   at a corner of four squares, the one ahead, not one beside), the walk goes on there;
 //!   otherwise the rest of the move slides along the edge. At most [`PASSES`] slides a step, so a tight corner cannot loop.
 //! - **Rounding.** A point is put on the micrometre grid toward where the walk last stood, then checked: one that
 //!   rounding put outside its triangle falls back to the last point that was inside one. A slid point is moved
@@ -175,6 +176,24 @@ impl Surface {
         })
     }
 
+    /// The piece and triangle, other than piece `not`, that a walk from `p` toward `to` enters: it holds `p`, and on
+    /// every edge `p` lies on, `to` is on its side. At a corner several squares hold `p`; only this one is ahead.
+    fn enter(&self, p: [i128; 2], to: [i128; 2], not: u32) -> Option<(u32, u32)> {
+        let qs = self.cells.get(&(cell(p[0]), cell(p[1])))?;
+        qs.iter().filter(|&&q| q != not).find_map(|&q| {
+            self.tris[q as usize]
+                .iter()
+                .position(|(v, ..)| {
+                    (0..3).all(|k| {
+                        let (a, b) = (v[k], v[(k + 1) % 3]);
+                        let o = orient(a, b, p);
+                        o > 0 || (o == 0 && orient(a, b, to) >= 0)
+                    })
+                })
+                .map(|t| (q, t as u32))
+        })
+    }
+
     /// The surface's height at `p` in triangle `t` of piece `q`, µm.
     fn height(&self, q: u32, t: u32, p: [i128; 2]) -> i64 {
         let (v, idx, _) = &self.tris[q as usize][t as usize];
@@ -288,7 +307,10 @@ impl Surface {
             }
             legal = (q, t, c);
             let past = at(true);
-            if let Some((nq, nt)) = (adj[k] == SEAM).then(|| self.locate(past, q)).flatten() {
+            if let Some((nq, nt)) = (adj[k] == SEAM)
+                .then(|| self.enter(past, target, q))
+                .flatten()
+            {
                 (q, t, p) = (nq, nt, past);
                 legal = (q, t, p);
                 entry = None;

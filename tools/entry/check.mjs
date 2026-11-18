@@ -278,6 +278,8 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 if (isMain && process.argv[2] === 'prove') import('./prove.mjs').then(m => { process.exitCode = m.main(process.argv.slice(3)); });
 // `entry run <family> --world <address>` drives a world from outside through the family's cases (run.mjs, SA-P3a).
 else if (isMain && process.argv[2] === 'run') import('./run.mjs').then(async m => { process.exitCode = await m.main(process.argv.slice(3)); });
+// `entry find <family> --goal "..."` gives a real model only a goal and reports what it found and did (find.mjs, SA-P7).
+else if (isMain && process.argv[2] === 'find') import('./find.mjs').then(async m => { process.exitCode = await m.main(process.argv.slice(3)); });
 else if (isMain) {
   const args = process.argv.slice(2).filter((a, i) => !(i === 0 && a === 'check'));
   const all = F.loadDir(KINDS_DIR);
