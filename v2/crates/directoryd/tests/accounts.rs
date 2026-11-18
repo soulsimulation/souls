@@ -1,0 +1,478 @@
+//! Accounts (Engine v2 W1, #2704). Each `aN_` test is one acceptance box. Tokens are signed
+//! here with RSA keys generated for the run (`openssl genpkey`); nothing calls a provider.
+
+use directoryd::accounts::session::{KeySource, PublicKey, Refused, Verifier, parse_jwks};
+use directoryd::accounts::store::Store;
+use directoryd::accounts::{b64url, start};
+use ring::rand::SystemRandom;
+use ring::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+const ISSUER: &str = "https://clerk.example.test";
+const PAGE: &str = "https://world.example.test";
+const T0: u64 = 1_800_000_000;
+
+/// A signing key made for this run, and its key id.
+struct Key {
+    kid: String,
+    pair: RsaKeyPair,
+}
+
+impl Key {
+    fn new(kid: &str) -> Key {
+        // OpenSSL writes an RSA key in DER as an RSAPrivateKey (PKCS#1), which ring reads.
+        let out = Command::new("openssl")
+            .args([
+                "genpkey",
+                "-algorithm",
+                "RSA",
+                "-pkeyopt",
+                "rsa_keygen_bits:2048",
+                "-outform",
+                "DER",
+            ])
+            .stderr(Stdio::null())
+            .output()
+            .expect("openssl makes a test key");
+        assert!(out.status.success(), "openssl genpkey");
+        Key {
+            kid: kid.to_string(),
+            pair: RsaKeyPair::from_der(&out.stdout).expect("an RSA key"),
+        }
+    }
+
+    fn public(&self) -> PublicKey {
+        let c: ring::rsa::PublicKeyComponents<Vec<u8>> = self.pair.public().into();
+        PublicKey { n: c.n, e: c.e }
+    }
+
+    fn sign(&self, header: &Value, claims: &Value) -> String {
+        let input = format!(
+            "{}.{}",
+            b64url(header.to_string().as_bytes()),
+            b64url(claims.to_string().as_bytes())
+        );
+        let mut sig = vec![0; self.pair.public().modulus_len()];
+        self.pair
+            .sign(
+                &RSA_PKCS1_SHA256,
+                &SystemRandom::new(),
+                input.as_bytes(),
+                &mut sig,
+            )
+            .expect("a signature");
+        format!("{input}.{}", b64url(&sig))
+    }
+
+    fn token(&self, claims: &Value) -> String {
+        self.sign(
+            &json!({"alg": "RS256", "typ": "JWT", "kid": self.kid}),
+            claims,
+        )
+    }
+}
+
+fn claims(now: u64, sub: &str) -> Value {
+    json!({"iss": ISSUER, "sub": sub, "sid": "sess_1", "azp": PAGE, "iat": now, "nbf": now - 10, "exp": now + 60})
+}
+
+/// The provider's published keys, as a test sets them, counting the fetches.
+#[derive(Clone, Default)]
+struct Published {
+    keys: Arc<Mutex<BTreeMap<String, PublicKey>>>,
+    fetches: Arc<AtomicU64>,
+}
+
+impl Published {
+    fn publish(&self, key: &Key) {
+        self.keys
+            .lock()
+            .unwrap()
+            .insert(key.kid.clone(), key.public());
+    }
+}
+
+impl KeySource for Published {
+    fn fetch(&self) -> Result<BTreeMap<String, PublicKey>, String> {
+        self.fetches.fetch_add(1, Ordering::SeqCst);
+        Ok(self.keys.lock().unwrap().clone())
+    }
+}
+
+fn verifier(p: &Published) -> Verifier {
+    Verifier::new(ISSUER, &[PAGE.to_string()], Box::new(p.clone()))
+}
+
+#[test]
+fn a1_ten_thousand_requests_fetch_the_keys_once_per_key_change() {
+    let keys = [Key::new("k1"), Key::new("k2"), Key::new("k3")];
+    let p = Published::default();
+    let v = verifier(&p);
+    // Requests every 100 ms; the provider rotates its key twice, publishing the new one first, as Clerk does.
+    let (mut ok, mut changes, mut current) = (0, 0, usize::MAX);
+    for i in 0..10_000u64 {
+        let now = T0 + i / 10;
+        let k = (i * 3 / 10_000) as usize;
+        if k != current {
+            p.publish(&keys[k]);
+            current = k;
+            changes += 1;
+        }
+        let s = v
+            .verify(&keys[k].token(&claims(now, "user_a1")), now)
+            .expect("verified");
+        assert_eq!(s.subject, "user_a1");
+        ok += 1;
+    }
+    let fetches = p.fetches.load(Ordering::SeqCst);
+    println!("a1: {ok} requests verified, {changes} keys in use, {fetches} key fetches");
+    assert_eq!(ok, 10_000);
+    assert_eq!(fetches, changes);
+    assert_eq!(v.fetches(), fetches);
+}
+
+#[test]
+fn a1_an_unknown_key_id_refetches_at_most_once_a_minute() {
+    let (known, stranger) = (Key::new("k1"), Key::new("forged"));
+    let p = Published::default();
+    p.publish(&known);
+    let v = verifier(&p);
+    v.verify(&known.token(&claims(T0, "user_a")), T0)
+        .expect("verified");
+    for s in 0..120 {
+        let now = T0 + s;
+        assert_eq!(
+            v.verify(&stranger.token(&claims(now, "user_a")), now),
+            Err(Refused::UnknownKey)
+        );
+    }
+    // The first fetch at T0, then one at T0 + 60 for the unknown id: two in two minutes of a request a second.
+    assert_eq!(p.fetches.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a3_each_bad_token_is_refused_by_name() {
+    let key = Key::new("k1");
+    let p = Published::default();
+    p.publish(&key);
+    let v = verifier(&p);
+    let good = claims(T0, "user_a3");
+    assert!(v.verify(&key.token(&good), T0).is_ok());
+    let with = |f: &str, val: Value| {
+        let mut c = good.clone();
+        c[f] = val;
+        c
+    };
+    let without = |f: &str| {
+        let mut c = good.clone();
+        c.as_object_mut().unwrap().remove(f);
+        c
+    };
+
+    // The wrong algorithm: HS256 (its "signature" made with the public key as a secret, the classic confusion), none,
+    // and RS512, each refused before any key is used.
+    for alg in ["HS256", "none", "RS512", "PS256"] {
+        let t = key.sign(&json!({"alg": alg, "kid": "k1"}), &good);
+        assert_eq!(v.verify(&t, T0), Err(Refused::Algorithm), "{alg}");
+    }
+    // The wrong issuer: another origin, one with a path, and none.
+    for iss in [
+        json!("https://evil.example.test"),
+        json!(format!("{ISSUER}/")),
+        json!(null),
+    ] {
+        assert_eq!(
+            v.verify(&key.token(&with("iss", iss.clone())), T0),
+            Err(Refused::Issuer),
+            "{iss}"
+        );
+    }
+    // Each claim missing, and each of the wrong type.
+    for c in ["exp", "nbf", "iat", "sub", "sid", "azp"] {
+        assert_eq!(
+            v.verify(&key.token(&without(c)), T0),
+            Err(Refused::MissingClaim(c)),
+            "{c}"
+        );
+        let wrong = if ["exp", "nbf", "iat"].contains(&c) {
+            json!("soon")
+        } else {
+            json!(7)
+        };
+        assert_eq!(
+            v.verify(&key.token(&with(c, wrong)), T0),
+            Err(Refused::MissingClaim(c)),
+            "{c} typed"
+        );
+    }
+    // An azp off the list.
+    for azp in ["https://evil.example.test", "http://world.example.test", ""] {
+        let r = v.verify(&key.token(&with("azp", json!(azp))), T0);
+        assert!(
+            matches!(r, Err(Refused::Party | Refused::MissingClaim("azp"))),
+            "{azp}: {r:?}"
+        );
+    }
+    // And the rest: expired, not yet valid, a changed payload, another key's signature, not a token at all.
+    assert_eq!(
+        v.verify(&key.token(&with("exp", json!(T0 - 6))), T0),
+        Err(Refused::Expired)
+    );
+    assert_eq!(
+        v.verify(&key.token(&with("nbf", json!(T0 + 6))), T0),
+        Err(Refused::NotYet)
+    );
+    let t = key.token(&good);
+    let mut parts: Vec<&str> = t.split('.').collect();
+    let other = b64url(with("sub", json!("user_b")).to_string().as_bytes());
+    parts[1] = &other;
+    assert_eq!(v.verify(&parts.join("."), T0), Err(Refused::Signature));
+    let imposter = Key::new("k1");
+    assert_eq!(
+        v.verify(&imposter.token(&good), T0),
+        Err(Refused::Signature)
+    );
+    for junk in ["", "a.b", "a.b.c.d", "!!.!!.!!"] {
+        assert_eq!(v.verify(junk, T0), Err(Refused::Shape), "{junk}");
+    }
+}
+
+#[test]
+fn a3_jwks_keeps_rsa_signing_keys_only() {
+    let doc = r#"{"keys":[
+      {"kty":"RSA","kid":"a","n":"AQAB","e":"AQAB","alg":"RS256","use":"sig"},
+      {"kty":"RSA","kid":"b","n":"AQAB","e":"AQAB","alg":"RS512"},
+      {"kty":"RSA","kid":"c","n":"AQAB","e":"AQAB","use":"enc"},
+      {"kty":"EC","kid":"d","crv":"P-256","x":"AQAB","y":"AQAB"},
+      {"kty":"RSA","kid":"e","n":"AQAB","e":"AQAB"}]}"#;
+    let keys = parse_jwks(doc).expect("a JWKS");
+    assert_eq!(keys.keys().collect::<Vec<_>>(), ["a", "e"]);
+}
+
+fn scratch(name: &str) -> PathBuf {
+    let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("accounts-{name}"));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).expect("a scratch dir");
+    d
+}
+
+fn directoryd(args: &[&str]) -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_directoryd"));
+    c.args(args);
+    c
+}
+
+/// Sends one request and returns the status and the JSON body.
+fn post(addr: &str, path: &str, body: &str) -> (u16, Value) {
+    let mut s = TcpStream::connect(addr).expect("connects");
+    write!(
+        s,
+        "POST {path} HTTP/1.1\r\nhost: {addr}\r\ncontent-length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    let status = out[9..12].parse().unwrap();
+    let body = out.split("\r\n\r\n").nth(1).unwrap();
+    (status, serde_json::from_str(body).unwrap())
+}
+
+#[test]
+fn a4_the_test_sign_in_works_on_loopback_and_refuses_a_public_address() {
+    let dir = scratch("a4");
+    let store = dir.join("accounts.sqlite");
+    let store = store.to_str().unwrap();
+    let refusals = [
+        // A public https address, a host that is not loopback, a listener that is not loopback, the real provider.
+        vec![
+            "--listen",
+            "127.0.0.1:0",
+            "--public-url",
+            "https://world.example.test",
+            "--store",
+            store,
+            "--test-sign-in",
+        ],
+        vec![
+            "--listen",
+            "127.0.0.1:0",
+            "--public-url",
+            "http://world.example.test",
+            "--store",
+            store,
+            "--test-sign-in",
+        ],
+        vec![
+            "--listen",
+            "127.0.0.1:0",
+            "--public-url",
+            "http://203.0.113.9:8080",
+            "--store",
+            store,
+            "--test-sign-in",
+        ],
+        vec![
+            "--listen",
+            "0.0.0.0:0",
+            "--public-url",
+            "http://127.0.0.1:8080",
+            "--store",
+            store,
+            "--test-sign-in",
+        ],
+        vec![
+            "--listen",
+            "127.0.0.1:0",
+            "--public-url",
+            "http://127.0.0.1:8080",
+            "--store",
+            store,
+            "--test-sign-in",
+            "--issuer",
+            ISSUER,
+            "--parties",
+            "http://127.0.0.1:8080",
+        ],
+    ];
+    for args in &refusals {
+        let out = directoryd(args).output().expect("runs");
+        let err = String::from_utf8_lossy(&out.stderr);
+        println!("a4: {}", err.trim());
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(err.contains("refusing to start"), "{err}");
+        assert!(out.stdout.is_empty(), "never listened: {args:?}");
+    }
+    assert!(
+        !dir.join("accounts.sqlite").exists(),
+        "a refused start opens no store"
+    );
+
+    // On loopback it starts, and signs a test person in with no provider: the same person gets the same principal.
+    let mut child = directoryd(&[
+        "--listen",
+        "127.0.0.1:0",
+        "--public-url",
+        "http://127.0.0.1:8080",
+        "--store",
+        store,
+        "--test-sign-in",
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
+    .expect("starts");
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let addr = line
+        .trim()
+        .strip_prefix("listening on ")
+        .expect("listening")
+        .to_string();
+    let (s1, a) = post(&addr, "/v1/account/test-sign-in", r#"{"name":"Ada"}"#);
+    let (s2, b) = post(&addr, "/v1/account/test-sign-in", r#"{"name":"Ada"}"#);
+    let (s3, c) = post(&addr, "/v1/account/test-sign-in", r#"{"name":"Bo"}"#);
+    let (s4, d) = post(&addr, "/v1/account/session", "");
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let mut log = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut log)
+        .unwrap();
+    println!("a4: Ada {a}\na4: Bo {c}\na4: no provider: {s4} {d}\na4: log:\n{log}");
+    assert_eq!((s1, s2, s3, s4), (200, 200, 200, 404));
+    assert_eq!(a, b);
+    assert_ne!(a["principal"], c["principal"]);
+    assert!(a["account"].as_str().unwrap().starts_with("acct_"));
+    assert!(!log.contains("Ada") && !log.contains(a["account"].as_str().unwrap()));
+}
+
+#[test]
+fn a5_one_owner_and_a_consistent_copy_while_in_use() {
+    let dir = scratch("a5");
+    let path = dir.join("accounts.sqlite");
+    let store = Arc::new(Store::open(&path).expect("opens"));
+    // One owning program: a second open of the same file, as another program would, is refused.
+    match Store::open(&path) {
+        Err(e) => assert!(e.to_string().starts_with("store-owned"), "{e}"),
+        Ok(_) => panic!("a second owner opened the store"),
+    }
+    // Four writers sign new people in until the copies are taken, so every copy is taken while they write.
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writers: Vec<_> = (0..4)
+        .map(|w| {
+            let (store, stop) = (store.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let mut i = 0;
+                while !stop.load(Ordering::SeqCst) {
+                    store
+                        .sign_in(start::TEST_ISSUER, &format!("p{w}-{i}"), T0)
+                        .expect("signed in");
+                    i += 1;
+                }
+            })
+        })
+        .collect();
+    let mut copies = Vec::new();
+    let mut last = 0;
+    for n in 0..5 {
+        while store.accounts().unwrap() < last + 100 {
+            std::thread::yield_now();
+        }
+        let to = dir.join(format!("copy-{n}.sqlite"));
+        store.backup(&to).expect("a copy");
+        last = store.accounts().unwrap();
+        copies.push(to);
+    }
+    stop.store(true, Ordering::SeqCst);
+    for w in writers {
+        w.join().unwrap();
+    }
+    let total = store.accounts().unwrap();
+    let mut counts = Vec::new();
+    for to in &copies {
+        let db = rusqlite::Connection::open(to).unwrap();
+        let check: String = db
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .unwrap();
+        let accounts: i64 = db
+            .query_row("SELECT COUNT(*) FROM provider_accounts_v1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let paired: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM provider_accounts_v1 a JOIN account_principals_v1 p USING (account_id)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        println!(
+            "a5: {}: integrity {check}, {accounts} accounts, {paired} with their principal",
+            to.file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(check, "ok");
+        assert_eq!(
+            accounts, paired,
+            "every account in a copy has its principal"
+        );
+        counts.push(accounts as u64);
+    }
+    println!("a5: the store holds {total} accounts when the writers stop");
+    assert!(
+        counts.windows(2).all(|w| w[0] < w[1]) && counts[4] < total,
+        "{counts:?} then {total}"
+    );
+}
