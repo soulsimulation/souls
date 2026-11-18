@@ -52,6 +52,11 @@ path = "walkers/main.rs"
 name = "forms"
 path = "src/forms.rs"
 
+# I3, #2686: the clock's time per committed act, with checks on checker threads.
+[[bin]]
+name = "commit-cost"
+path = "commit-cost/main.rs"
+
 [[bin]]
 name = "resync"
 path = "resync/main.rs"
@@ -60,6 +65,7 @@ path = "resync/main.rs"
 replica = { path = "../../crates/replica" }
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
 sim = { path = "../../crates/sim" }
+skills = { path = "../../crates/skills" }
 testworld = { path = "../testworld" }
 worldd = { path = "../../crates/worldd" }
 gatewayd = { path = "../../crates/gatewayd" }
@@ -70,4 +76,3 @@ import-eden = { path = "../import-eden" }
 # The `moves` bench places its bodies with the script driver's helpers (B2, #2681).
 body-script = { path = "../body-script" }
 # The `forms` bench binds the runner's kinds into steps (F1, #2766).
-skills = { path = "../../crates/skills" }
