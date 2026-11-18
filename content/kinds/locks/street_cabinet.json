@@ -1,0 +1,404 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:street_cabinet",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "locked": {
+      "n": 2,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "handle": {
+      "role": "grip",
+      "at_mm": [
+        80,
+        700,
+        215
+      ]
+    },
+    "keyhole": {
+      "role": "contact",
+      "at_mm": [
+        80,
+        640,
+        215
+      ]
+    },
+    "hinge_side": {
+      "role": "contact",
+      "at_mm": [
+        560,
+        700,
+        215
+      ]
+    },
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        300,
+        0,
+        900
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1300,
+      1330,
+      550
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "locked",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "handle"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "swing",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "cabinet_opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "hinge_side"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "swing",
+          "at": "hinge_side"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "cabinet_closed"
+        }
+      ]
+    },
+    "lock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "locked",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "keyhole"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "lock",
+          "at": "keyhole"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "locked",
+          "to": true,
+          "event": "cabinet_locked"
+        }
+      ]
+    },
+    "unlock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "locked",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "keyhole"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "lock",
+          "at": "keyhole"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "locked",
+          "to": false,
+          "event": "cabinet_unlocked"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:street_cabinet",
+    "table": [
+      {
+        "part": "door",
+        "field": "open",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": 86400,
+          "false": 0
+        },
+        "over_us": 700000
+      }
+    ],
+    "shape": {
+      "round": 6,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            50,
+            0
+          ],
+          "size": [
+            1300,
+            100,
+            550
+          ],
+          "round": 0,
+          "tint": "pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            680,
+            -30
+          ],
+          "size": [
+            1200,
+            1160,
+            400
+          ],
+          "round": 0,
+          "tint": "paint"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1300,
+            -20
+          ],
+          "size": [
+            1260,
+            60,
+            480
+          ],
+          "round": 0,
+          "tint": "paint"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            680,
+            175
+          ],
+          "size": [
+            1000,
+            900,
+            10
+          ],
+          "round": 0,
+          "tint": "inside"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            680,
+            190
+          ],
+          "size": [
+            590,
+            1100,
+            30
+          ],
+          "round": 0,
+          "tint": "paint"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            1050,
+            210
+          ],
+          "size": [
+            200,
+            80,
+            10
+          ],
+          "round": 0,
+          "tint": "plate"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            680,
+            190
+          ],
+          "size": [
+            590,
+            1100,
+            30
+          ],
+          "round": 0,
+          "tint": "paint",
+          "role": "door",
+          "pivot": [
+            600,
+            680,
+            180
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            700,
+            210
+          ],
+          "size": [
+            30,
+            100,
+            20
+          ],
+          "round": 0,
+          "tint": "iron",
+          "role": "door",
+          "pivot": [
+            600,
+            680,
+            180
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            640,
+            208
+          ],
+          "size": [
+            20,
+            30,
+            6
+          ],
+          "round": 0,
+          "tint": "keyhole",
+          "role": "door",
+          "pivot": [
+            600,
+            680,
+            180
+          ]
+        }
+      ],
+      "palette": {
+        "pad": "#9a9a96",
+        "paint": "#3f5a45",
+        "inside": "#2a2c2e",
+        "iron": "#4a4d50",
+        "plate": "#efe6cf",
+        "keyhole": "#17140f"
+      },
+      "tags": [
+        "utility",
+        "comms",
+        "cabinet"
+      ]
+    }
+  },
+  "text": {
+    "card": "A street cabinet kept locked: unlock it, open its door, lock it again after.",
+    "howto_lock_up": "Close the cabinet door, then lock it with the key."
+  },
+  "card": {
+    "text": "card"
+  },
+  "howtos": {
+    "lock_up": {
+      "text": "howto_lock_up",
+      "steps": [
+        {
+          "form": "close"
+        },
+        {
+          "form": "lock"
+        }
+      ]
+    }
+  }
+}
