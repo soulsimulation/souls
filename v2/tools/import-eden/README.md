@@ -23,7 +23,7 @@ win 1 and the named places of win 3. Two steps, both run by hand:
    key, with tint, variation and stretch left on the instance), and writes each picture as binary glTF named by its T3
    hash (`souls/model/1`, then the bytes; `1220` and 64 hex digits) under `.local/import-eden/models/worlds/models/`, with
    `models.json`: every kind with its model, or the reason it has none, and its state table (state field → the named
-   parts it changes). A part shown only in some state is drawn into the one model as a group named `when:<condition>`,
+   parts it changes), and `things`: each thing's model by today's id, the table v2/web's thing layer draws from (V8). A part shown only in some state is drawn into the one model as a group named `when:<condition>`,
    so no change of state needs another model. Runtime effects (fire, falling water, shadow proxies) and the page's
    runtime data are left out, so two runs give the same bytes. `--write-records` adds the models to the licence records
    (`tools/cdn/approved-derivatives.json`, `generated`), and the dry run

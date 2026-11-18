@@ -319,6 +319,7 @@ fn a5_a_removed_text_is_in_no_frame_or_snapshot() {
                 snapshots += 1;
                 bytes
             }
+            Delivery::Index { .. } => unreachable!("no index subscriber here"),
         };
         assert!(!bytes.windows(BOARD.len()).any(|x| x == BOARD.as_bytes()));
         let v = decode(&bytes).expect("decodes").value;

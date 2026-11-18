@@ -19,7 +19,8 @@
 //! 4. **Words never travel in parts.** A part is T6 bytes, whose text items are names only (T6 rule 10); free text is
 //!    a reference (T8, `{21: id}`). Words reach an entitled audience by another path (W4), not here.
 //! 5. **The reader** ([`Player`]) applies parts in number order to R1's replica, refuses a part out of order by name,
-//!    and checks each carried hash.
+//!    and checks each carried hash. It keeps the part's motion samples, every one in entry order ([`Player::samples`]),
+//!    so a page draws a body through each of them, not only through its state after the part (V6, #2715).
 //! 6. **A view's gaps are declared, never guessed.** A view skips the entries it does not hold (another audience's, or
 //!    outside its node; T7 rule 4), so its sequences jump. A part lists each jump before its entries as `[first,
 //!    count]`, and the reader's replica accepts exactly those (`Replica::apply_gaps`); a jump a part does not declare
@@ -32,9 +33,10 @@ mod wasm;
 use std::collections::BTreeMap;
 
 use crate::apply::Replica;
-use crate::effects::{Header, Part, Refusal};
+use crate::effects::{Body, Change, Header, Part, Refusal};
 use crate::encode::{Value, decode, encode, to_hex};
 use crate::ids::Id;
+use crate::pose::HandOff;
 use crate::time::Micros;
 use crate::views::Key;
 use crate::world_model::Audience;
@@ -301,6 +303,7 @@ impl Played {
 pub struct Player {
     replica: Replica,
     next: u64,
+    samples: Vec<HandOff>,
 }
 
 impl Player {
@@ -309,6 +312,7 @@ impl Player {
         Ok(Player {
             replica: Replica::start(header)?,
             next: 0,
+            samples: Vec::new(),
         })
     }
 
@@ -318,6 +322,11 @@ impl Player {
 
     pub fn replica(&self) -> &Replica {
         &self.replica
+    }
+
+    /// The motion samples of the part played last, every one, in entry order (V6, #2715).
+    pub fn samples(&self) -> &[HandOff] {
+        &self.samples
     }
 
     /// Plays one part's file bytes: the next number only, whole or not at all.
@@ -335,6 +344,19 @@ impl Player {
         }
         self.replica.apply_gaps(&part, &sp.gaps)?;
         self.next += 1;
+        self.samples = part
+            .effects
+            .iter()
+            .filter_map(|e| match &e.body {
+                Body::Changes(cs) => Some(cs),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|c| match &c.change {
+                Change::Motion(h) => Some(*h),
+                _ => None,
+            })
+            .collect();
         let hash = match &sp.hash {
             Some(h) => Some(*h == crate::hash::state_hash(self.replica.tree())?.to_bytes()),
             None => None,
