@@ -1,0 +1,52 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:mural_panel",
+  "owner": "thing",
+  "state": {
+    "picture": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "title": { "n": 2, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "painter": { "n": 1, "from": "soul", "most": 100, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 },
+    "face": { "role": "contact", "at_mm": [0, 1300, 60] }
+  },
+  "geometry": { "bounds_mm": [2000, 2400, 120] },
+  "forms": {
+    "paint": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "picture": { "type": "text" }, "title": { "type": "text" } },
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "slide", "at": "face" },
+        { "step": "wait", "us": 20000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "picture", "to": { "arg": "picture" }, "event": "painted" },
+        { "change": "set", "field": "title", "to": { "arg": "title" }, "event": "titled" },
+        { "change": "link", "link": "painter", "from": "actor", "event": "credited" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:mural_panel",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,1300,0],"size":[2000,1400,80],"tint":"frame"},{"kind":"box","at":[0,1300,45],"size":[1880,1280,10],"tint":"canvas"},{"kind":"box","at":[-900,300,0],"size":[100,600,100],"tint":"frame"},{"kind":"box","at":[900,300,0],"size":[100,600,100],"tint":"frame"}],"palette":{"frame":"#6e5a44","canvas":"#efe8d8"},"tags":["art","mural","wall"]}
+  },
+  "text": {
+    "card": "A mural panel: paint a picture on it, titled and credited to its painter.",
+    "art": "art",
+    "mural": "mural",
+    "painting": "painting",
+    "howto_paint": "With a hand free, paint the panel with a picture and a title; painting again replaces the picture."
+  },
+  "card": { "text": "card", "category": "art", "synonyms": ["mural", "painting"] },
+  "howtos": {
+    "paint": { "text": "howto_paint", "steps": [{ "form": "paint" }] }
+  }
+}

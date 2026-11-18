@@ -1,0 +1,154 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:knot_board",
+  "owner": "thing",
+  "state": {
+    "overhand": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {"rule": "everyone"}
+    },
+    "eight": {
+      "n": 2,
+      "type": "bool",
+      "default": false,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 50, 0]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 1000]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [840, 105, 600]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "free": true}
+      ],
+      "steps": [
+        {"step": "take"}
+      ],
+      "effects": [
+        {"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}
+      ]
+    },
+    "tie_overhand": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "overhand", "is": false, "says": "already_tied"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 6000000}
+      ],
+      "effects": [
+        {"change": "set", "field": "overhand", "to": true, "event": "overhand_tied"}
+      ]
+    },
+    "untie_overhand": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "overhand", "is": true, "says": "already_loose"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 6000000}
+      ],
+      "effects": [
+        {"change": "set", "field": "overhand", "to": false, "event": "overhand_untied"}
+      ]
+    },
+    "tie_eight": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "eight", "is": false, "says": "already_tied"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 6000000}
+      ],
+      "effects": [
+        {"change": "set", "field": "eight", "to": true, "event": "eight_tied"}
+      ]
+    },
+    "untie_eight": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "eight", "is": true, "says": "already_loose"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 6000000}
+      ],
+      "effects": [
+        {"change": "set", "field": "eight", "to": false, "event": "eight_untied"}
+      ]
+    }
+  },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:knot_board",
+    "table": [
+      {
+        "part": "arm.l",
+        "field": "overhand",
+        "do": "show",
+        "at": {"true": 0, "false": 1}
+      },
+      {
+        "part": "leg.l",
+        "field": "overhand",
+        "do": "show",
+        "at": {"true": 1, "false": 0}
+      },
+      {
+        "part": "arm.r",
+        "field": "eight",
+        "do": "show",
+        "at": {"true": 0, "false": 1}
+      },
+      {
+        "part": "leg.r",
+        "field": "eight",
+        "do": "show",
+        "at": {"true": 1, "false": 0}
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,25,0],"size":[820,50,580],"tint":"wood"},{"kind":"box","at":[-200,63,0],"size":[12,12,500],"tint":"left","role":"arm.l"},{"kind":"box","at":[-107,66,-22],"size":[12,12,113],"tint":"left","yaw":44583,"pitch":3184,"role":"leg.l"},{"kind":"box","at":[-68,72,63],"size":[12,12,101],"tint":"left","yaw":2497,"pitch":-10508,"role":"leg.l"},{"kind":"box","at":[-97,89,129],"size":[12,12,81],"tint":"left","yaw":-58046,"pitch":-12883,"role":"leg.l"},{"kind":"box","at":[-170,94,121],"size":[12,12,107],"tint":"left","yaw":-123076,"pitch":3871,"role":"leg.l"},{"kind":"box","at":[-239,80,30],"size":[12,12,145],"tint":"left","yaw":-157611,"pitch":8709,"role":"leg.l"},{"kind":"box","at":[-260,66,-98],"size":[12,12,135],"tint":"left","yaw":176008,"pitch":2840,"role":"leg.l"},{"kind":"box","at":[-228,71,-189],"size":[12,12,85],"tint":"left","yaw":133695,"pitch":-12446,"role":"leg.l"},{"kind":"box","at":[-172,89,-189],"size":[12,12,85],"tint":"left","yaw":46305,"pitch":-12446,"role":"leg.l"},{"kind":"box","at":[-140,94,-98],"size":[12,12,135],"tint":"left","yaw":3992,"pitch":2840,"role":"leg.l"},{"kind":"box","at":[-161,80,30],"size":[12,12,145],"tint":"left","yaw":-22389,"pitch":8709,"role":"leg.l"},{"kind":"box","at":[-230,66,121],"size":[12,12,107],"tint":"left","yaw":-56924,"pitch":3871,"role":"leg.l"},{"kind":"box","at":[-303,71,129],"size":[12,12,81],"tint":"left","yaw":-121954,"pitch":-12883,"role":"leg.l"},{"kind":"box","at":[-332,88,63],"size":[12,12,101],"tint":"left","yaw":177503,"pitch":-10508,"role":"leg.l"},{"kind":"box","at":[-293,94,-22],"size":[12,12,113],"tint":"left","yaw":135417,"pitch":3184,"role":"leg.l"},{"kind":"box","at":[200,63,0],"size":[12,12,500],"tint":"right","role":"arm.r"},{"kind":"box","at":[239,93,125],"size":[12,12,142],"tint":"right","yaw":-77239,"pitch":989,"role":"leg.r"},{"kind":"box","at":[150,79,77],"size":[12,12,143],"tint":"right","yaw":-160537,"pitch":11231,"role":"leg.r"},{"kind":"box","at":[151,67,-21],"size":[12,12,91],"tint":"right","yaw":146510,"pitch":-1139,"role":"leg.r"},{"kind":"box","at":[202,81,-56],"size":[12,12,67],"tint":"right","yaw":88118,"pitch":-26037,"role":"leg.r"},{"kind":"box","at":[251,94,-16],"size":[12,12,95],"tint":"right","yaw":29930,"pitch":654,"role":"leg.r"},{"kind":"box","at":[247,80,84],"size":[12,12,143],"tint":"right","yaw":-23317,"pitch":11205,"role":"leg.r"},{"kind":"box","at":[154,66,123],"size":[12,12,146],"tint":"right","yaw":-109104,"pitch":-138,"role":"leg.r"},{"kind":"box","at":[88,80,0],"size":[12,12,208],"tint":"right","yaw":-180000,"pitch":-7601,"role":"leg.r"},{"kind":"box","at":[154,94,-123],"size":[12,12,146],"tint":"right","yaw":109104,"pitch":-138,"role":"leg.r"},{"kind":"box","at":[247,80,-84],"size":[12,12,143],"tint":"right","yaw":23317,"pitch":11205,"role":"leg.r"},{"kind":"box","at":[251,66,16],"size":[12,12,95],"tint":"right","yaw":-29930,"pitch":654,"role":"leg.r"},{"kind":"box","at":[202,79,56],"size":[12,12,67],"tint":"right","yaw":-88118,"pitch":-26037,"role":"leg.r"},{"kind":"box","at":[151,93,21],"size":[12,12,91],"tint":"right","yaw":-146510,"pitch":-1139,"role":"leg.r"},{"kind":"box","at":[150,81,-77],"size":[12,12,143],"tint":"right","yaw":160537,"pitch":11231,"role":"leg.r"},{"kind":"box","at":[239,67,-125],"size":[12,12,142],"tint":"right","yaw":77239,"pitch":989,"role":"leg.r"}],"palette":{"wood":"#bd9968","left":"#d55239","right":"#397eb9"},"tags":["tool","knot","practice","item"]}
+  },
+  "text": {
+    "card": "A knot board: tie or untie an overhand (red cord) or a figure-eight (blue).",
+    "already_tied": "That cord is already tied; untie it first.",
+    "already_loose": "That cord is already loose; tie it first.",
+    "put_down_first": "Put down what you are holding before knot work.",
+    "knot": "knot",
+    "rope": "rope",
+    "practice": "practice",
+    "craft": "craft"
+  },
+  "card": {
+    "text": "card",
+    "category": "craft",
+    "synonyms": ["knot", "rope", "practice"]
+  }
+}
