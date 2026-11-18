@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":102,"group":"object","words":"wash your hands","obvious":3,"things":{"sink":"eden:sink"},"chain":[{"this":"sink","form":"turn_on"},{"this":"sink","form":"wash_hands"}]}

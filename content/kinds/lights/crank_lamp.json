@@ -1,0 +1,119 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:crank_lamp",
+  "owner": "thing",
+  "state": {
+    "charge": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
+    "on": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 320, 0] },
+    "crank": { "role": "contact", "at_mm": [210, 160, 0] },
+    "switch": { "role": "contact", "at_mm": [0, 300, 40] }
+  },
+  "geometry": { "bounds_mm": [460, 340, 230] },
+  "forms": {
+    "crank": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": false },
+        { "need": "state", "field": "charge", "at_most": 4 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "crank" }
+      ],
+      "steps": [
+        { "step": "move", "move": "crank", "at": "crank" },
+        { "step": "wait", "us": 4000000 }
+      ],
+      "effects": [{ "change": "set", "field": "charge", "by": 2, "event": "cranked" }]
+    },
+    "shine_5s": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": false },
+        { "need": "state", "field": "charge", "at_least": 1 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [
+        { "change": "set", "field": "charge", "by": -1, "event": "charge_spent" },
+        { "change": "set", "field": "on", "to": true, "event": "lit" },
+        { "change": "timer", "form": "goes_dark", "after_us": 5000000, "event": "will_go_dark" }
+      ]
+    },
+    "shine_10s": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": false },
+        { "need": "state", "field": "charge", "at_least": 2 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [
+        { "change": "set", "field": "charge", "by": -2, "event": "charge_spent" },
+        { "change": "set", "field": "on", "to": true, "event": "lit" },
+        { "change": "timer", "form": "goes_dark", "after_us": 10000000, "event": "will_go_dark" }
+      ]
+    },
+    "shine_15s": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": false },
+        { "need": "state", "field": "charge", "at_least": 3 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [
+        { "change": "set", "field": "charge", "by": -3, "event": "charge_spent" },
+        { "change": "set", "field": "on", "to": true, "event": "lit" },
+        { "change": "timer", "form": "goes_dark", "after_us": 15000000, "event": "will_go_dark" }
+      ]
+    },
+    "goes_dark": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{ "need": "state", "field": "on", "is": true }],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "on", "to": false, "event": "went_dark" }]
+    },
+    "extinguish": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": true },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [{ "change": "set", "field": "on", "to": false, "event": "put_out" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:crank_lamp",
+    "table": [
+      { "part": "light", "field": "on", "do": "tint", "at": { "true": "#fff1ba", "false": "#242b2c" } },
+      { "part": "light", "field": "on", "do": "glow", "at": { "true": 1000, "false": 0 } },
+      { "part": "fill", "field": "charge", "do": "scale", "axis": "x", "range": [0, 6], "to": [0, 1000] }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,110,0],"size":[300,220,200],"tint":"body"},{"kind":"box","at":[0,260,0],"size":[220,80,160],"tint":"body"},{"kind":"box","at":[0,320,0],"size":[120,40,80],"tint":"grip"},{"kind":"box","at":[0,260,83],"size":[180,55,12],"tint":"lens","role":"light"},{"kind":"box","at":[180,130,0],"size":[80,25,25],"tint":"grip"},{"kind":"box","at":[210,160,0],"size":[25,80,25],"tint":"grip","role":"knob"},{"kind":"box","at":[0,130,104],"size":[230,45,6],"tint":"grip"},{"kind":"box","at":[0,130,108],"size":[230,45,6],"tint":"charge","role":"fill","pivot":[-115,130,108]}],"palette":{"body":"#315d5b","grip":"#242b2c","lens":"#fff1ba","charge":"#d4c778"},"tags":["tool","lighting","item","lamp","object"]}
+  },
+  "text": {
+    "card": "A hand-crank lamp: crank it to store charge, spend charge to light it.",
+    "light": "light",
+    "lamp": "lamp",
+    "torch": "torch",
+    "howto_light": "Crank it (two charges, up to six), then light it: five seconds for each charge spent."
+  },
+  "card": { "text": "card", "category": "light", "synonyms": ["lamp", "torch"] },
+  "howtos": {
+    "light": { "text": "howto_light", "steps": [{ "form": "crank" }, { "form": "shine_10s" }] }
+  }
+}

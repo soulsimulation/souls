@@ -13,6 +13,8 @@
 //!   no fields, so each doorway's and stair's geometry is a field of the node at its owning end.
 //! - each named place that is not a room is a node under the open ground with its name, kind and outline. Nobody is
 //!   its child: a place is found by its outline.
+//! - the terrain (N1b, #3197) is two fields of the open ground: its tile side and every tile's heights and classes,
+//!   byte for byte as exported (`F_TILE_SIZE`, `F_TILES`). `ground::scene::Terrain` reads them.
 //!
 //! Positions are micrometres (the facts are whole millimetres, times 1,000); yaws become orientations only through
 //! `Quat::from_yaw_mdeg`. Human words (names) are stored by reference: the field holds the text's SHA-256, and
@@ -54,6 +56,11 @@ pub const F_PLACE_OF: u64 = 20; // what a place is derived from: area, water, sh
 pub const F_STAIRS: u64 = 21; // a floor: [[link, kind, to, width, y0, y1, [[x, z] …]] …] for each stair from it
 pub const F_DOORWAYS: u64 = 22; // a doorway's owning end: [[link, kind, x, z, yaw mdeg, width, height] …]
 pub const F_SCALE: u64 = 23; // a thing's scale in parts per million, when it is not 1
+pub const F_TILE_SIZE: u64 = 24; // the open ground: a terrain tile's side, mm (Eden: 64 m)
+// The open ground's terrain, as the exporter wrote it: [[tx, tz, heights, classes] …], tile (tx, tz) covering x from
+// tx × side to (tx + 1) × side, z likewise. Heights are (n + 1)² little-endian i32 mm, a row of x for each z, at
+// side / n spacing; classes are n² bytes, one per cell, in the same order (today's media codes, `packages/ground`).
+pub const F_TILES: u64 = 25;
 
 pub const WORLD: &str = "eden:world";
 pub const GROUND: &str = "eden:ground";
@@ -312,7 +319,7 @@ pub fn load(text: &str) -> R<Import> {
         notes: Vec::new(),
     };
     let root = b.node("world")?;
-    let ground = b.add("ground", root, None, &full[GROUND], [0; 4], BTreeMap::new())?;
+    let ground = b.add("ground", root, None, &full[GROUND], [0; 4], terrain(&f)?)?;
 
     // Doorway links, minted first so a door can name its doorway when it is created.
     let mut doorway_ids: BTreeMap<(String, String), Id> = BTreeMap::new();
@@ -761,6 +768,61 @@ pub fn load(text: &str) -> R<Import> {
         notes: b.notes,
         forms,
     })
+}
+
+/// The open ground's fields: its terrain tiles (`F_TILE_SIZE`, `F_TILES`), byte for byte as exported, when the facts
+/// have a ground.
+fn terrain(f: &Json) -> R<BTreeMap<u64, Value>> {
+    let mut out = BTreeMap::new();
+    let Some(g) = f.get("ground") else {
+        return Ok(out);
+    };
+    let mut tiles = Vec::new();
+    for t in need(g, "tiles")?.arr() {
+        let heights = base64(s(t, "heights")?)?;
+        let classes = base64(s(t, "classes")?)?;
+        let n = classes.len().isqrt();
+        if n == 0 || n * n != classes.len() || heights.len() != (n + 1) * (n + 1) * 4 {
+            return Err(format!(
+                "a terrain tile has {} height bytes and {} class bytes",
+                heights.len(),
+                classes.len()
+            ));
+        }
+        tiles.push(Value::Array(vec![
+            i(int(t, "tx")?),
+            i(int(t, "tz")?),
+            Value::Bytes(heights),
+            Value::Bytes(classes),
+        ]));
+    }
+    out.insert(F_TILE_SIZE, i(int(g, "tileM")? * 1000));
+    out.insert(F_TILES, Value::Array(tiles));
+    Ok(out)
+}
+
+/// Standard base64 (RFC 4648), as Node's `Buffer.toString('base64')` writes it.
+pub fn base64(t: &str) -> R<Vec<u8>> {
+    let digit = |c: u8| match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    };
+    let b = t.trim_end_matches('=').as_bytes();
+    let mut out = Vec::with_capacity(b.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0);
+    for &c in b {
+        acc = (acc << 6 | u32::from(digit(c).ok_or("not base64")?)) & 0xff_ffff;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Ok(out)
 }
 
 fn entry(sequence: u64, node: Id, changes: Vec<Change>) -> Effect {
