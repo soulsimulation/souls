@@ -43,7 +43,7 @@ use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;
 use crate::ground::{MARGIN, OpenGround, Piece, SQUARE};
-use crate::links::{Building, End, F_OPEN, Kind, Link, Open, ground_doors};
+use crate::links::{Building, End, F_OPEN, Kind, Link, Open, floor_joins, ground_doors};
 use replica::effects::Refusal;
 use replica::encode::Value;
 use replica::ids::Id;
@@ -409,6 +409,7 @@ impl Map {
                 meets: &ground_meets,
                 on: &on,
                 doors: &gdoors,
+                terrain: open.terrain(),
             };
             let b = match Building::read_sized(tree, id, Some(open), radius) {
                 Ok(b) => b,
@@ -429,12 +430,21 @@ impl Map {
             meets: &ground_meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
         let gates = Building::of_ground(tree, open, &known)?;
         let gates_at = gates.thing;
         buildings.push((gates, HashMap::new()));
-        for (b, base) in &buildings {
-            m.add_links(b, base);
+        // Steps from one thing's floor onto another's (#3227), and every floor's first piece and piece count.
+        for (i, l) in floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>()) {
+            buildings[i].0.links.push(l);
+        }
+        let all: HashMap<Id, (u32, u32)> = buildings
+            .iter()
+            .flat_map(|(_, base)| base.clone())
+            .collect();
+        for (b, _) in &buildings {
+            m.add_links(b, &all);
         }
         // The open ground's gates are the ground's, replaced only with it.
         m.owned.remove(&gates_at);
@@ -494,18 +504,18 @@ impl Map {
         }
     }
 
-    /// Puts building `b`'s floors on the map in its frame `place`: each floor's first piece.
+    /// Puts building `b`'s floors on the map in its frame `place`: each floor's first piece and piece count.
     fn add_floors(
         &mut self,
         b: &Building,
         place: Xform,
         version: &dyn Fn(Id) -> u64,
-    ) -> HashMap<Id, u32> {
+    ) -> HashMap<Id, (u32, u32)> {
         self.frames.push(place);
         let frame = (self.frames.len() - 1) as u32;
-        let mut base: HashMap<Id, u32> = HashMap::new();
+        let mut base: HashMap<Id, (u32, u32)> = HashMap::new();
         for (&floor, (_, patch)) in &b.floors {
-            base.insert(floor, self.pieces.len() as u32);
+            base.insert(floor, (self.pieces.len() as u32, patch.pieces.len() as u32));
             let at = PatchAt {
                 node: floor,
                 square: None,
@@ -518,8 +528,9 @@ impl Map {
         base
     }
 
-    /// Puts building `b`'s links on the map, their ends as portals (`base`: each floor's first piece).
-    fn add_links(&mut self, b: &Building, base: &HashMap<Id, u32>) {
+    /// Puts building `b`'s links on the map, their ends as portals (`base`: each floor's first piece and piece count,
+    /// of every building a link of `b` may reach).
+    fn add_links(&mut self, b: &Building, base: &HashMap<Id, (u32, u32)>) {
         let (first, elsewhere) = (self.links.len() as u32, self.meets_elsewhere);
         let radius = self.size.radius_mm();
         for l in &b.links {
@@ -527,7 +538,7 @@ impl Map {
             // A blocked link's ends are portals too, so a search that comes to it can name it.
             for (k, e) in l.ends.iter().enumerate() {
                 if let Some(e) = e {
-                    ends[k] = self.end_portals(l, e, k as u8, base, b);
+                    ends[k] = self.end_portals(l, e, k as u8, base);
                 }
             }
             let run: i64 = l
@@ -585,8 +596,7 @@ impl Map {
         l: &Link,
         e: &End,
         k: u8,
-        base: &HashMap<Id, u32>,
-        b: &Building,
+        base: &HashMap<Id, (u32, u32)>,
     ) -> Vec<u32> {
         let li = self.links.len() as u32;
         let (a, b2, mid) = ([mm(e.a.x), mm(e.a.z)], [mm(e.b.x), mm(e.b.z)], e.middle());
@@ -599,16 +609,16 @@ impl Map {
                 .is_some_and(|v| i64::from(v[1]) == y)
         };
         // The piece among `qs` the segment's middle lies on, within the grid's rounding.
+        // The open ground is one level, its plan at 0, and an end on it stands on its terrain (#3227): any height.
         let on = |m: &Map, qs: &mut dyn Iterator<Item = u32>, mid: [i64; 2]| {
-            qs.filter(|&q| at_y(m, q))
+            qs.filter(|&q| m.pieces[q as usize].at.square.is_some() || at_y(m, q))
                 .map(|q| (m.off_piece(q, mid), q))
                 .min()
                 .filter(|&(d, _)| d <= MEET_OFF)
                 .map(|(_, q)| q)
         };
         let mut out = Vec::new();
-        if let Some(&first) = base.get(&e.floor) {
-            let n = b.floors[&e.floor].1.pieces.len() as u32;
+        if let Some(&(first, n)) = base.get(&e.floor) {
             let q = if matches!(l.kind, Kind::Doorway | Kind::Step) {
                 on(self, &mut (first..first + n), [mm(mid.x), mm(mid.z)])
             } else {
