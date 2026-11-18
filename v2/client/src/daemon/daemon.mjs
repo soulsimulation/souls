@@ -13,6 +13,10 @@
 //     {"op":"stop"}              ends the process
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it). Every frame is built and read by replica's WASM build (`wire*`).
+// - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
+//   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
+//   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
+//   connected, and sends intents, only once its copy is current.
 // - **Each intent is sent at most once**: its sequence is written to disk before it goes out, and nothing resends
 //   it. An intent sent and not answered by the next sign-in stays `unanswered` in `status`.
 //
@@ -87,6 +91,10 @@ const save = () => { writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
+const copy = new wire.Copy(); // its scope, by hash (R5b)
+const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
+const syncs = []; // the last syncs: kind, time and R5's counts
+let syncing = null, asked = 0; // the sync under way: its request's number, step, kind and start
 const note = (e) => { events.push(e); if (events.length > EVENTS_KEPT) events.shift(); };
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
@@ -98,6 +106,40 @@ function send(bytes, sequence) {
   save();
   counts.sent++;
   ws.send(bytes);
+}
+
+/** Signed in and current: intents go now. */
+function current() {
+  signedIn = true;
+  attempt = 0;
+  while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence); }
+}
+
+/** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
+function startSync(sock, kind) {
+  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null };
+  syncing.timer = setTimeout(() => { log('sync: no answer; reconnecting'); sock.close(); }, SYNC_WITHIN);
+  sock.send(wire.wireSyncScope(BigInt(syncing.n)));
+}
+
+function syncAnswer(sock, n, refused, bytes) {
+  if (!syncing || n !== syncing.n) return; // an answer to a request since given up
+  if (refused !== '-') throw new Error(`sync refused: ${refused}`);
+  if (syncing.step === 'hashes') syncing.version = copy.onHashes(bytes);
+  else copy.onRecords(bytes);
+  syncing.n = ++asked;
+  const next = copy.next(BigInt(syncing.n));
+  if (next.length > 0) { syncing.step = 'records'; sock.send(next); return; }
+  const done = { kind: syncing.kind, ms: Math.round(performance.now() - syncing.t0), ...JSON.parse(copy.finish()) };
+  clearTimeout(syncing.timer);
+  state.cursor = syncing.version; // the stream carries on from the version the hashes are at
+  save();
+  syncing = null;
+  syncs.push(done);
+  if (syncs.length > SYNCS_KEPT) syncs.shift();
+  log(`synced (${done.kind}): ${done.fetched} of ${done.held} records in ${done.rounds} rounds, ${done.got} B, ${done.ms} ms`);
+  note({ kind: 'synced', ...done });
+  current();
 }
 
 function connect() {
@@ -123,11 +165,11 @@ function connect() {
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
         step = 'stream';
-        signedIn = true;
-        attempt = 0;
-        while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence); }
+        if (a === 'stream.resumed' && !copy.empty()) current();
+        else startSync(sock, a === 'stream.cannot-resume' ? 'resync' : 'snapshot');
         return;
       }
+      if (kind === 'sync') { syncAnswer(sock, Number(a), b, bytes); return; }
       if (b !== '-') state.cursor = b;
       if (a !== '-') {
         const s = Number(a);
@@ -138,10 +180,14 @@ function connect() {
       note({ kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b });
     } catch (e) {
       log(`frame refused: ${String(e.message ?? e).slice(0, 200)}`);
+      if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.close(); }
     }
   };
   sock.onclose = (ev) => {
-    if (ws === sock) { ws = null; signedIn = false; }
+    if (ws === sock) {
+      ws = null; signedIn = false;
+      if (syncing) { clearTimeout(syncing.timer); syncing = null; }
+    }
     if (stopping) return;
     counts.drops++;
     const most = Math.min(WAIT_MOST, WAIT_FIRST * 2 ** Math.min(attempt, 10));
@@ -161,6 +207,7 @@ function answer(req) {
       return {
         ok: true, soul, pid: process.pid, world: seat.world, connected: signedIn, cursor: state.cursor,
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
+        syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since,
       };
     }

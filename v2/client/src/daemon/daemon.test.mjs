@@ -76,7 +76,7 @@ before(async () => {
   const tokens = join(dir, 'tokens.txt');
   writeFileSync(tokens, `soul-${scope}-7 ${createHash('sha256').update(token).digest('hex')}\n`);
   const lineage = randomBytes(16).toString('hex');
-  const wl = spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--arrivals', arrivals], { stdio: 'ignore' });
+  const wl = spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--arrivals', arrivals, '--room', '1000'], { stdio: 'ignore' });
   procs.push(wl);
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
   const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
@@ -155,6 +155,42 @@ test('A2: after each of ten forced drops it is current within 2 s, and no intent
   assert.deepEqual(taken().map((l) => Number(l.split(' ')[1])), Array.from({ length: 20 }, (_, i) => i + 1));
   if (process.env.R6_REPORT) console.log(JSON.stringify({ dropsMs: times.map((t) => Math.round(t)), rssBytes: s.rssBytes, heapBytes: s.heapBytes, connects: s.connects, resumed: s.resumed }));
   for (const t of times) assert.ok(t < 2000, `current ${Math.round(t)} ms after a drop`);
+});
+
+test('R5b A2, A3: told stream.cannot-resume, it compares and descends through the gateway, ends current and resumes', async () => {
+  const before = await status();
+  const snapshot = before.syncs.find((x) => x.kind === 'snapshot');
+  assert.ok(snapshot, 'its first sign-in took its scope whole');
+  // A cut long enough that resume fails: the relay drops all the gateway sends while the world answers more intents
+  // than the gateway keeps for a grant (256), then the connection is cut.
+  relay.deaf = true;
+  const n = 300, already = taken().length;
+  for (let k = 0; k < n; k++) outputs.push(JSON.stringify(await request(rt.socket, { op: 'act', verb: 'eden:wave' })));
+  await waitFor(() => taken().length === already + n, 20_000);
+  await sleep(50);
+  const cut = performance.now();
+  relay.cut();
+  relay.deaf = false;
+  const s = await waitFor(async () => { const s = await status(); return s.connected && s.cannotResume > before.cannotResume && s; }, 10_000);
+  const currentMs = performance.now() - cut;
+  const resync = s.syncs.at(-1);
+  assert.equal(resync.kind, 'resync');
+  assert.equal(s.cannotResume, before.cannotResume + 1);
+  // Current: its copy's hash of the place is the world's after the last intent the world took.
+  assert.deepEqual(Object.values(s.roots), [taken().at(-1).split(' ')[2]]);
+  // A3: fewer records and bytes than a snapshot of the same scope.
+  assert.ok(resync.fetched < resync.held, `fetched ${resync.fetched} of ${resync.held}`);
+  assert.ok(resync.got < resync.heldBytes, `got ${resync.got} B, a snapshot ${resync.heldBytes} B`);
+  // The stream carries on from the hashes' version: an intent is answered, and the next drop resumes.
+  const answered = s.answered;
+  const a = await request(rt.socket, { op: 'act', verb: 'eden:wave' });
+  outputs.push(JSON.stringify(a));
+  await waitFor(async () => (await status()).answered === answered + 1);
+  relay.cut();
+  const after = await waitFor(async () => { const x = await status(); return x.connected && x.resumed > s.resumed && x; });
+  assert.equal(after.cannotResume, s.cannotResume, 'resumed, not synced again');
+  assert.equal(after.syncs.length, s.syncs.length);
+  if (process.env.R5B_REPORT) console.log(JSON.stringify({ snapshot, resync, currentMs: Math.round(currentMs) }));
 });
 
 test('A4: the token is in no output, argument, environment variable or file but credentials.json', async () => {
