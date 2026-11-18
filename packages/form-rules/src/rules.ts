@@ -16,7 +16,7 @@
 // What a form does once it may be done is effects.ts (SA-F2b, #2844); the amount a transfer
 // moves is measured here, so the `room` need and the effect agree on one number.
 
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room']);
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'enough', 'moves']);
 export const REASONS = Object.freeze([
   'field_differs',
   'slot_taken',
@@ -27,10 +27,18 @@ export const REASONS = Object.freeze([
   'not_linked',
   'already_linked',
   'no_room',
+  'not_enough',
   'link_full',
+  'moves_by',
+  'motion_unsaid',
+  'needs_souls',
   'bad_input',
 ]);
 export const MAX_HANDS = 8;
+/** How a thing moves (entry section 18, `motion.how`), one list with tools/entry/format.mjs and Engine v2 E5 (#2778):
+ *  carried in one or two hands, pushed by one Soul or by two, or fixed. A body acts alone, so two Souls' push is refused. */
+export const CARRIED: Readonly<Record<string, number>> = Object.freeze({ one_hand: 1, two_hands: 2 });
+export const PUSHED: Readonly<Record<string, number>> = Object.freeze({ pushed_by_one: 1, wheeled: 1, two_souls: 2 });
 
 export type Ref = string | { arg: string };
 export type SlotRef = string | { node: string; slot: string };
@@ -48,12 +56,16 @@ export type Need = {
   link?: string;
   free?: boolean;
   holds?: string;
+  /** `held_by_actor` and `moves`: the thing argument the need is about (default, for held: this thing). */
+  thing?: Ref;
+  /** `moves`: how the form moves the thing, `carry` or `push`. */
+  by?: string;
 };
 export type Form = {
   who?: unknown;
   starts?: string;
   needs?: Need[];
-  steps?: { step: string; move?: string; at?: Ref; toward?: Ref }[];
+  steps?: { step: string; move?: string; at?: Ref; toward?: Ref; point?: Ref }[];
   effects?: Effect[];
 };
 /** An effect as an entry writes it. `transfer` moves an amount of one field from one node to another (SA-F2b). */
@@ -63,7 +75,7 @@ export type Effect = {
   field?: string;
   to?: unknown;
   link?: string;
-  what?: string;
+  what?: string | { arg: string };
   into?: unknown;
   kind?: string;
   from?: unknown;
@@ -88,6 +100,7 @@ export type Entry = {
   forms?: Record<string, Form>;
   /** A closed kind: the fields it names take the container's audience and declare none of their own (SA-F8, #2849). */
   closed?: { audience: Audience; fields?: string[] };
+  motion?: { how?: string };
 };
 export type Node = {
   kind?: string;
@@ -213,9 +226,12 @@ export function decide(input: Input): Verdict {
       const wanted: Record<string, unknown> = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
       // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does;
-      // the fix's own needs on this field must hold now, or it would be refused in turn
-      const fix = formFix((e) => (e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
+      // a set with `by` meets it if the value it adds up to does, within the field's bounds (a crank that adds charge)
+      const after = (by: unknown) => (whole(by) && whole(value) ? value + by : null);
+      const fix = formFix((e) => (e.change === 'set' && e.field === field && !has(e, 'by') && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
+        (e.change === 'set' && e.field === field && after(e.by) !== null && after(e.by)! >= (def.min ?? 0) && (!whole(def.max) || after(e.by)! <= def.max) && meets(after(e.by))) ||
         (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))),
+        // the fix's own needs on this field must hold now, or it would be refused in turn
         (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
@@ -257,7 +273,21 @@ export function decide(input: Input): Verdict {
     within_reach(n, i) {
       const name = resolve(n.point, args);
       if (name === null) return { ok: false, no: bad(i, 'argument_missing', { arg: (n.point as { arg: string })?.arg ?? null }) };
-      // `of` names another thing by a form argument: its point is in its own frame, placed by its `at_mm` in the input.
+      // Reach to another thing, in this order (decided 17 Nov): (1) walk-first: a form that walks to the thing first
+      // reaches it by that walk, so the need is met when the thing is in the actor's place (the engine walks); (2) else
+      // the measured pose: `of` names the thing by a form argument, its point is in its own frame, placed by its
+      // `at_mm` in the input; (3) else unknown.
+      const thingRef = n.of !== undefined ? n.of : n.point;
+      const thingId = n.of !== undefined ? (n.of && typeof n.of === 'object' ? resolve(n.of, args) : null) : name;
+      const walks = (form.steps ?? []).some((s) => s.step === 'walk_to' && sameRef(s.point, thingRef));
+      const isThing = thingId !== null && has(nodes, thingId) && (n.of !== undefined || (!has(entry.points, name) && !has(entry.slots, name)));
+      if (walks && isThing) {
+        const there = placeOf(nodes, thingId!), mine = placeOf(nodes, state.actor);
+        read.push([`${thingId}/place`, there]);
+        if (there !== null && there === mine) return { ok: true };
+        return { ok: false, no: { verdict: 'no', reason: 'out_of_reach', need: i, detail: { thing: thingId }, fix: { step: 'walk_to', thing: thingId }, read } };
+      }
+      if (n.of === undefined && isThing) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: thingId!, field: 'at_mm', read } };
       let owner = entry;
       let ownerId: string | null = null;
       let origin: number[] | null = null;
@@ -311,36 +341,68 @@ export function decide(input: Input): Verdict {
       return { ok: false, no: bad(i, 'malformed_need') };
     },
 
-    held_by_actor(_n, i) {
+    held_by_actor(n, i) {
+      const thing = n.thing === undefined ? act.this : resolve(n.thing, args);
+      if (thing === null) return { ok: false, no: bad(i, 'argument_missing', { arg: (n.thing as { arg: string })?.arg ?? null }) };
       const h = hands();
       if (typeof h === 'string') return { ok: false, no: bad(i, h) };
-      if (sorted(h).some((k) => h[k] === act.this)) return { ok: true };
-      return { ok: false, no: { verdict: 'no', reason: 'not_held', need: i, detail: {}, fix: { step: 'take', thing: act.this }, read } };
+      if (sorted(h).some((k) => h[k] === thing)) return { ok: true };
+      return { ok: false, no: { verdict: 'no', reason: 'not_held', need: i, detail: n.thing === undefined ? {} : { thing }, fix: { step: 'take', thing }, read } };
+    },
+
+    // How the thing moves, from its kind's section 18: carried needs that many free hands, pushed needs one Soul.
+    moves(n, i) {
+      const thing = resolve(n.thing, args);
+      if (thing === null) return { ok: false, no: bad(i, 'argument_missing', { arg: (n.thing as { arg: string })?.arg ?? null }) };
+      const node = has(nodes, thing) ? nodes[thing] : undefined;
+      const kind = node?.kind && has(kinds, node.kind) ? kinds[node.kind] : undefined;
+      if (!kind) return { ok: false, no: bad(i, 'no_such_kind', { node: thing }) };
+      if (n.by !== 'carry' && n.by !== 'push') return { ok: false, no: bad(i, 'malformed_need') };
+      const how = kind.motion?.how;
+      read.push([`${node!.kind}/motion`, how ?? null]);
+      const no = (reason: string, detail: Record<string, unknown>): Outcome => ({ ok: false, no: { verdict: 'no', reason, need: i, detail: { thing, by: n.by, ...detail }, fix: null, read } });
+      if (typeof how !== 'string' || !(has(CARRIED, how) || has(PUSHED, how) || how === 'fixed')) return no('motion_unsaid', {});
+      const table = n.by === 'carry' ? CARRIED : PUSHED;
+      if (!has(table, how)) return no('moves_by', { how });
+      if (n.by === 'push') return PUSHED[how] > 1 ? no('needs_souls', { how, souls: PUSHED[how] }) : { ok: true };
+      const h = hands();
+      if (typeof h === 'string') return { ok: false, no: bad(i, h) };
+      const free = sorted(h).filter((k) => h[k] === null || h[k] === undefined).length;
+      if (free >= CARRIED[how]) return { ok: true };
+      return { ok: false, no: { verdict: 'no', reason: 'no_free_hand', need: i, detail: { thing, how, hands: CARRIED[how] }, fix: { step: 'put' }, read } };
     },
 
     linked: (n, i) => link(n, i, true),
     unlinked: (n, i) => link(n, i, false),
 
-    // Every amount the form moves has room where it lands (SA-F2b): a pour never overflows.
-    room(_n, i) {
-      const transfers = (form.effects ?? []).filter((e) => e && e.change === 'transfer');
-      if (!transfers.length) return { ok: false, no: bad(i, 'no_transfer') };
-      for (const e of transfers) {
-        const m = measure(kinds, nodes, act.this, args, e);
-        if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
-        for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]] as const) {
-          if (!sees(audienceOf(kinds[nodes[node]?.kind ?? ''], m.field, def))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
-        }
-        read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
-        read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
-        if (m.room !== null && m.moved > m.room) {
-          const detail = { node: m.into, field: m.field, room: m.room, amount: m.moved };
-          return { ok: false, no: { verdict: 'no', reason: 'no_room', need: i, detail, fix: null, read } };
-        }
-      }
-      return { ok: true };
-    },
+    // Every amount the form moves has room where it lands (SA-F2b): a pour never overflows. `enough`: every amount the
+    // form asks is there to give, so a pour of three units from a pitcher holding two is refused rather than made smaller.
+    room: (_n, i) => moves(i, 'room'),
+    enough: (_n, i) => moves(i, 'enough'),
   };
+
+  function moves(i: number, which: 'room' | 'enough'): Outcome {
+    const transfers = (form!.effects ?? []).filter((e) => e && e.change === 'transfer');
+    if (!transfers.length) return { ok: false, no: bad(i, 'no_transfer') };
+    for (const e of transfers) {
+      const m = measure(kinds, nodes, act.this, args, e);
+      if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
+      for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]] as const) {
+        if (!sees(audienceOf(kinds[nodes[node]?.kind ?? ''], m.field, def))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
+      }
+      read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
+      read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
+      if (which === 'room' && m.room !== null && m.moved > m.room) {
+        const detail = { node: m.into, field: m.field, room: m.room, amount: m.moved };
+        return { ok: false, no: { verdict: 'no', reason: 'no_room', need: i, detail, fix: null, read } };
+      }
+      if (which === 'enough' && m.moved < m.asked) {
+        const detail = { node: m.from, field: m.field, has: m.moved, amount: m.asked };
+        return { ok: false, no: { verdict: 'no', reason: 'not_enough', need: i, detail, fix: null, read } };
+      }
+    }
+    return { ok: true };
+  }
 
   function link(n: Need, i: number, wantLinked: boolean): Outcome {
     const type = n.link ?? '';
@@ -512,6 +574,28 @@ export function whoMay(input: Input): WhoVerdict {
   return ends.some((e) => e === state.actor || (soul !== null && e === soul)) ? yes : refuse({ link: type, ends });
 }
 // who:end
+const sameRef = (a: unknown, b: unknown): boolean =>
+  typeof a === 'string' ? a === b : !!a && typeof a === 'object' && !!b && typeof b === 'object' && has(a, 'arg') && (a as { arg: unknown }).arg === (b as { arg: unknown }).arg;
+
+/** The node a node stands loose in, through any slot or hand it is in; null if nowhere. Bounded by the number of nodes. */
+function placeOf(nodes: Record<string, Node>, id: string): string | null {
+  const ids = sorted(nodes);
+  const parent = (x: string): { node: string; loose: boolean } | null => {
+    for (const holder of ids) {
+      const n = nodes[holder];
+      if (n.loose?.includes(x)) return { node: holder, loose: true };
+      for (const slot of sorted(n.slots)) if (n.slots![slot]?.includes(x)) return { node: holder, loose: false };
+      for (const hand of sorted(n.hands)) if (n.hands![hand] === x) return { node: holder, loose: false };
+    }
+    return null;
+  };
+  let at = parent(id);
+  for (let hops = 0; at && hops < ids.length; hops++) {
+    if (at.loose) return at.node;
+    at = parent(at.node);
+  }
+  return null;
+}
 
 function resolve(ref: unknown, args: Record<string, unknown>): string | null {
   if (typeof ref === 'string') return ref;
@@ -534,6 +618,8 @@ export type Measure = {
   has: number;
   room: number | null;
   moved: number;
+  /** The amount asked, before the source's limit. */
+  asked: number;
 };
 
 /**
@@ -574,5 +660,5 @@ export function measure(kinds: Record<string, Entry>, nodes: Record<string, Node
     want = room;
   } else if (e.amount && typeof e.amount === 'object' && has(e.amount, 'arg')) want = args[(e.amount as { arg: string }).arg];
   if (!whole(want) || want < 0) return { bad: 'not_whole_number', detail: { amount: e.amount ?? null } };
-  return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)) };
+  return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)), asked: want };
 }
