@@ -9,9 +9,9 @@ description = "The world: tree, clock, controllers, movers, log; native only (En
 replica = { path = "../replica" }
 i_overlay.workspace = true
 i_triangle.workspace = true
+# The built-in skills: the world wakes the form runner (F1, #2766) and steps the walk it starts.
+skills = { path = "../skills" }
 
 [dev-dependencies]
 import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }
-# The built-in skills, stepped by the world host in its tests (K13a, #2676).
-skills = { path = "../skills" }

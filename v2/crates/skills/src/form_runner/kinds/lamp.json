@@ -1,0 +1,26 @@
+{
+  "format": "souls-entry/1",
+  "kind": "f1:lamp",
+  "owner": "thing",
+  "state": {
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "geometry": { "bounds_mm": [300, 1100, 300] },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 400], "yaw_mdeg": 180000 },
+    "button": { "role": "contact", "at_mm": [0, 1000, 150] }
+  },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "lit", "is": false }],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "button" },
+        { "step": "wait", "us": 2000000 }
+      ],
+      "effects": [{ "change": "set", "field": "lit", "to": true, "event": "lit" }]
+    }
+  }
+}
