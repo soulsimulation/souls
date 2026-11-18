@@ -4,6 +4,9 @@
 //! N1's exported facts file (`node v2/tools/import-eden/export/export.ts` from the repository root) and run with
 //! `cargo test -p sim --release --test ground -- --ignored --nocapture`.
 
+// Times its own runs: the wall-clock rule (K7) binds the engine, not this test.
+#![allow(clippy::disallowed_methods)]
+
 use import_eden::Import;
 use replica::encode::Value;
 use replica::ids::Id;
