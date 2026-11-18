@@ -1,0 +1,18 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:humanoid carries a saucer to the table and pushes the table back: pick_up and push hold a thing argument in a free hand, put sets it down loose where the body stands. The placement word and anchor are the engine's to resolve (E4); the rules move the node.",
+  "cases": [
+    {
+      "name": "body_pick_up_put_push_put",
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "s1", "t1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "s1": {"kind": "eden:saucer"}, "t1": {"kind": "eden:table"}}},
+      "do": [
+        {"act": {"this": "b1", "form": "put", "args": {"thing": "s1", "at": "on", "anchor": "t1"}}, "receipt": "rb0", "expect": {"verdict": "no", "reason": "not_held", "need": 0}},
+        {"act": {"this": "b1", "form": "pick_up", "args": {"thing": "s1"}}, "receipt": "rb1", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "s1", "to": {"node": "b1", "hand": "left"}}], "events": [{"event": "eden:picked_up", "node": "b1", "changes": [0]}], "timers": []}},
+        {"act": {"this": "b1", "form": "put", "args": {"thing": "s1", "at": "on", "anchor": "t1"}}, "receipt": "rb2", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "s1", "to": {"node": "room"}}], "events": [{"event": "eden:put_down", "node": "b1", "changes": [0]}], "timers": []}},
+        {"act": {"this": "b1", "form": "push", "args": {"thing": "t1"}}, "receipt": "rb3", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "t1", "to": {"node": "b1", "hand": "left"}}], "events": [{"event": "eden:took_hold_to_push", "node": "b1", "changes": [0]}], "timers": []}},
+        {"act": {"this": "b1", "form": "put", "args": {"thing": "t1", "at": "next_to", "anchor": "s1"}}, "receipt": "rb4", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "t1", "to": {"node": "room"}}], "events": [{"event": "eden:put_down", "node": "b1", "changes": [0]}], "timers": []}}
+      ],
+      "after": {"room": {"loose": ["b1", "s1", "t1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}}
+    }
+  ]
+}

@@ -1,0 +1,333 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:record_player",
+  "owner": "thing",
+  "state": {
+    "playing": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "off",
+        "waltz",
+        "harbour_lights",
+        "low_tide",
+        "night_train",
+        "paper_lanterns",
+        "open_window"
+      ],
+      "default": "off",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        650
+      ]
+    },
+    "tonearm": {
+      "role": "contact",
+      "at_mm": [
+        140,
+        1015,
+        -30
+      ]
+    },
+    "knob": {
+      "role": "contact",
+      "at_mm": [
+        200,
+        860,
+        220
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      620,
+      1030,
+      420
+    ]
+  },
+  "forms": {
+    "put_on_waltz": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tonearm"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": "waltz",
+          "event": "record_put_on"
+        }
+      ]
+    },
+    "put_on_harbour_lights": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tonearm"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": "harbour_lights",
+          "event": "record_put_on"
+        }
+      ]
+    },
+    "put_on_low_tide": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tonearm"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": "low_tide",
+          "event": "record_put_on"
+        }
+      ]
+    },
+    "put_on_night_train": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tonearm"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": "night_train",
+          "event": "record_put_on"
+        }
+      ]
+    },
+    "put_on_paper_lanterns": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tonearm"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": "paper_lanterns",
+          "event": "record_put_on"
+        }
+      ]
+    },
+    "put_on_open_window": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tonearm"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": "open_window",
+          "event": "record_put_on"
+        }
+      ]
+    },
+    "stop": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "playing",
+          "not": "off"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "knob"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": "off",
+          "event": "stopped"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:record_player",
+    "shape": {"round":0,"shapes":[
+        {"kind":"box","at":[0,30,0],"size":[620,60,420],"tint":"trim"},
+        {"kind":"box","at":[0,500,0],"size":[600,880,400],"tint":"wood"},
+        {"kind":"box","at":[0,955,0],"size":[580,30,380],"tint":"deck"},
+        {"kind":"cyl","at":[-70,985,0],"r":150,"h":30,"segments":16,"tint":"platter"},
+        {"kind":"cyl","at":[-70,1003,0],"r":140,"h":6,"segments":16,"tint":"vinyl","when":"@playing!=off"},
+        {"kind":"cyl","at":[-70,1007,0],"r":45,"h":4,"segments":8,"tint":"s1","when":"@playing=waltz"},
+        {"kind":"cyl","at":[-70,1007,0],"r":45,"h":4,"segments":8,"tint":"s2","when":"@playing=harbour_lights"},
+        {"kind":"cyl","at":[-70,1007,0],"r":45,"h":4,"segments":8,"tint":"s3","when":"@playing=low_tide"},
+        {"kind":"cyl","at":[-70,1007,0],"r":45,"h":4,"segments":8,"tint":"s4","when":"@playing=night_train"},
+        {"kind":"cyl","at":[-70,1007,0],"r":45,"h":4,"segments":8,"tint":"s5","when":"@playing=paper_lanterns"},
+        {"kind":"cyl","at":[-70,1007,0],"r":45,"h":4,"segments":8,"tint":"s6","when":"@playing=open_window"},
+        {"kind":"cyl","at":[170,990,-120],"r":25,"h":40,"segments":8,"tint":"dark"},
+        {"kind":"box","at":[140,1015,-30],"size":[22,16,200],"tint":"tuner"},
+        {"kind":"cyl","at":[200,860,205],"r":26,"h":30,"segments":8,"tint":"valve","pitch":90000,"role":"knob"},
+        {"kind":"cyl","at":[120,860,203],"r":10,"h":10,"segments":6,"tint":"dark","pitch":90000,"when":"@playing=off"},
+        {"kind":"cyl","at":[120,860,203],"r":10,"h":10,"segments":6,"tint":"jewel","pitch":90000,"role":"light","when":"@playing!=off"},
+        {"kind":"box","at":[-175,220,207],"size":[240,240,6],"tint":"s1"},
+        {"kind":"box","at":[-105,232,213],"size":[240,240,6],"tint":"s2"},
+        {"kind":"box","at":[-35,244,219],"size":[240,240,6],"tint":"s3"},
+        {"kind":"box","at":[35,256,225],"size":[240,240,6],"tint":"s4"},
+        {"kind":"box","at":[105,268,231],"size":[240,240,6],"tint":"s5"},
+        {"kind":"box","at":[175,280,237],"size":[240,240,6],"tint":"s6"}
+      ],
+      "palette":{"wood":"#6e4528","trim":"#3a2618","deck":"#2c2622","platter":"#9a9ea3","vinyl":"#141414","dark":"#1e1a17","valve":"#d9c08a","tuner":"#c9ccd1","jewel":"#d8452f","s1":"#e8b04a","s2":"#3f7cac","s3":"#5c9e6e","s4":"#8a3f62","s5":"#d8452f","s6":"#9fc4d8"},"tags":["music", "record-player", "object"]},
+    "table": [
+      {
+        "part": "light",
+        "field": "playing",
+        "do": "glow",
+        "at": {
+          "off": 0,
+          "waltz": 1000,
+          "harbour_lights": 1000,
+          "low_tide": 1000,
+          "night_train": 1000,
+          "paper_lanterns": 1000,
+          "open_window": 1000
+        }
+      },
+      {
+        "do": "sound",
+        "sound": "music",
+        "mode": "loop",
+        "field": "playing",
+        "at": {
+          "off": 0,
+          "waltz": 500,
+          "harbour_lights": 500,
+          "low_tide": 500,
+          "night_train": 500,
+          "paper_lanterns": 500,
+          "open_window": 500
+        },
+        "reach_mm": 18000
+      }
+    ]
+  },
+  "text": {
+    "card": "A record player with six records: put one on at the tonearm, stop at the knob.",
+    "music": "music",
+    "turntable": "turntable",
+    "gramophone": "gramophone",
+    "howto_listen": "Put on a record (put_on_ and its name); everyone near hears it until someone stops it.",
+    "waltz": "Morning Waltz",
+    "harbour_lights": "Harbour Lights",
+    "low_tide": "Low Tide",
+    "night_train": "Night Train",
+    "paper_lanterns": "Paper Lanterns",
+    "open_window": "Open Window"
+  },
+  "card": {
+    "text": "card",
+    "category": "music",
+    "synonyms": [
+      "turntable",
+      "gramophone"
+    ]
+  },
+  "howtos": {
+    "listen": {
+      "text": "howto_listen",
+      "steps": [
+        {
+          "form": "put_on_paper_lanterns"
+        },
+        {
+          "form": "stop"
+        }
+      ]
+    }
+  }
+}

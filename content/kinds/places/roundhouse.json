@@ -1,0 +1,173 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:roundhouse",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      7000,
+      5200,
+      7000
+    ]
+  },
+  "areas": {
+    "living": {
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "radius_mm": 3164
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:roundhouse",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1400,
+            0
+          ],
+          "r": 3500,
+          "h": 2800,
+          "segments": 16,
+          "tint": "wall"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            2800,
+            0
+          ],
+          "profile": [
+            [
+              3700,
+              0
+            ],
+            [
+              3400,
+              900
+            ],
+            [
+              2600,
+              1700
+            ],
+            [
+              1400,
+              2250
+            ],
+            [
+              0,
+              2400
+            ]
+          ],
+          "segments": 16,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1150,
+            3500
+          ],
+          "size": [
+            1000,
+            2100,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            2470,
+            1550,
+            2470
+          ],
+          "size": [
+            900,
+            1000,
+            50
+          ],
+          "yaw": 45000,
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2470,
+            1550,
+            2470
+          ],
+          "size": [
+            900,
+            1000,
+            50
+          ],
+          "yaw": -45000,
+          "tint": "glass"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#f1e7d2",
+        "trim": "#6b4a2b",
+        "roof": "#8a3b2a",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "roundhouse"
+      ]
+    }
+  },
+  "text": {
+    "card": "A round cottage: one round living room under a dome.",
+    "building": "building",
+    "round_house": "round house",
+    "hut": "hut",
+    "home": "home"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "round_house",
+      "hut",
+      "home"
+    ]
+  }
+}

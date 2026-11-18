@@ -1,0 +1,271 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hollow_stump",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        920
+      ],
+      "yaw_mdeg": 180000
+    },
+    "lip": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1060,
+        0
+      ]
+    }
+  },
+  "slots": {
+    "inside": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        0,
+        930,
+        40
+      ],
+      "fits_mm": [
+        280,
+        120,
+        280
+      ],
+      "stand": "stand"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      640,
+      1060,
+      640
+    ]
+  },
+  "forms": {
+    "hide": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "thing"
+          }
+        },
+        {
+          "need": "slot_free",
+          "slot": "inside"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "put",
+          "slot": "inside"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "inside",
+          "event": "hidden"
+        }
+      ]
+    },
+    "search": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "this",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "lip"
+        },
+        {
+          "step": "take",
+          "slot": "inside"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "found"
+        }
+      ]
+    }
+  },
+  "closed": {
+    "audience": {
+      "rule": "creator"
+    },
+    "fields": []
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:hollow_stump",
+    "shape": {
+      "round": 10,
+      "shapes": [
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "profile": [
+            [
+              320,
+              0
+            ],
+            [
+              300,
+              120
+            ],
+            [
+              280,
+              500
+            ],
+            [
+              260,
+              1030
+            ],
+            [
+              260,
+              1060
+            ],
+            [
+              240,
+              1060
+            ],
+            [
+              240,
+              940
+            ],
+            [
+              0,
+              930
+            ]
+          ],
+          "segments": 14,
+          "tint": "bark"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "profile": [
+            [
+              239,
+              935
+            ],
+            [
+              0,
+              932
+            ]
+          ],
+          "segments": 14,
+          "tint": "hollow"
+        }
+      ],
+      "palette": {
+        "bark": "#5b4632",
+        "hollow": "#1f1711"
+      },
+      "tags": [
+        "furniture",
+        "storage",
+        "hiding-place",
+        "hiding"
+      ]
+    }
+  },
+  "text": {
+    "card": "A hollow tree stump: hide a small thing down inside it, or search it.",
+    "syn_stump": "stump",
+    "syn_tree_stump": "tree stump",
+    "syn_hiding": "hiding place",
+    "howto_hide": "Hold a small thing and hide it down inside the stump.",
+    "howto_find": "With a hand free, search the stump: whatever is in it comes out in your hand.",
+    "hands_full": "Put down what you are holding before searching the stump.",
+    "empty": "You searched the stump and came away with nothing.",
+    "hiding": "hiding"
+  },
+  "card": {
+    "text": "card",
+    "category": "hiding",
+    "synonyms": [
+      "syn_stump",
+      "syn_tree_stump",
+      "syn_hiding"
+    ]
+  },
+  "howtos": {
+    "hide": {
+      "text": "howto_hide",
+      "steps": [
+        {
+          "form": "hide"
+        }
+      ]
+    },
+    "find": {
+      "text": "howto_find",
+      "steps": [
+        {
+          "form": "search"
+        }
+      ]
+    }
+  }
+}

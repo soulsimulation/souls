@@ -1,0 +1,838 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sand_garden",
+  "owner": "thing",
+  "state": {
+    "back_left": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "smooth",
+        "along",
+        "across"
+      ],
+      "default": "smooth",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "back_right": {
+      "n": 2,
+      "type": "enum",
+      "values": [
+        "smooth",
+        "along",
+        "across"
+      ],
+      "default": "smooth",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "front_left": {
+      "n": 3,
+      "type": "enum",
+      "values": [
+        "smooth",
+        "along",
+        "across"
+      ],
+      "default": "smooth",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "front_right": {
+      "n": 4,
+      "type": "enum",
+      "values": [
+        "smooth",
+        "along",
+        "across"
+      ],
+      "default": "smooth",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        800
+      ]
+    },
+    "bed": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1012,
+        0
+      ]
+    },
+    "back_left": {
+      "role": "contact",
+      "at_mm": [
+        -140,
+        1012,
+        -105
+      ]
+    },
+    "back_right": {
+      "role": "contact",
+      "at_mm": [
+        140,
+        1012,
+        -105
+      ]
+    },
+    "front_left": {
+      "role": "contact",
+      "at_mm": [
+        -140,
+        1012,
+        105
+      ]
+    },
+    "front_right": {
+      "role": "contact",
+      "at_mm": [
+        140,
+        1012,
+        105
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      850,
+      1060,
+      650
+    ]
+  },
+  "forms": {
+    "brush": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "cell": {
+          "type": "field",
+          "of": [
+            "back_left",
+            "back_right",
+            "front_left",
+            "front_right"
+          ]
+        },
+        "pattern": {
+          "type": "value",
+          "of": [
+            "along",
+            "across"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "cell"
+          },
+          "not": {
+            "arg": "pattern"
+          }
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": {
+            "arg": "cell"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "cell"
+          },
+          "to": {
+            "arg": "pattern"
+          },
+          "event": "brushed"
+        }
+      ]
+    },
+    "smooth": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "any",
+          "fields": [
+            "back_left",
+            "back_right",
+            "front_left",
+            "front_right"
+          ],
+          "not": "smooth",
+          "says": "already_smooth"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "bed"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "back_left",
+          "to": "smooth",
+          "event": "smoothed"
+        },
+        {
+          "change": "set",
+          "field": "back_right",
+          "to": "smooth",
+          "event": "smoothed"
+        },
+        {
+          "change": "set",
+          "field": "front_left",
+          "to": "smooth",
+          "event": "smoothed"
+        },
+        {
+          "change": "set",
+          "field": "front_right",
+          "to": "smooth",
+          "event": "smoothed"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:sand_garden",
+    "table": [
+      {
+        "part": "furrow.1",
+        "field": "back_left",
+        "do": "show",
+        "at": {
+          "smooth": 0,
+          "along": 1,
+          "across": 1
+        }
+      },
+      {
+        "part": "furrow.1",
+        "field": "back_left",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "smooth": 0,
+          "along": 0,
+          "across": 90000
+        }
+      },
+      {
+        "part": "furrow.2",
+        "field": "back_right",
+        "do": "show",
+        "at": {
+          "smooth": 0,
+          "along": 1,
+          "across": 1
+        }
+      },
+      {
+        "part": "furrow.2",
+        "field": "back_right",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "smooth": 0,
+          "along": 0,
+          "across": 90000
+        }
+      },
+      {
+        "part": "furrow.3",
+        "field": "front_left",
+        "do": "show",
+        "at": {
+          "smooth": 0,
+          "along": 1,
+          "across": 1
+        }
+      },
+      {
+        "part": "furrow.3",
+        "field": "front_left",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "smooth": 0,
+          "along": 0,
+          "across": 90000
+        }
+      },
+      {
+        "part": "furrow.4",
+        "field": "front_right",
+        "do": "show",
+        "at": {
+          "smooth": 0,
+          "along": 1,
+          "across": 1
+        }
+      },
+      {
+        "part": "furrow.4",
+        "field": "front_right",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "smooth": 0,
+          "along": 0,
+          "across": 90000
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            965,
+            0
+          ],
+          "size": [
+            850,
+            30,
+            650
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -340,
+            475,
+            -240
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -340,
+            475,
+            240
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            340,
+            475,
+            -240
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            340,
+            475,
+            240
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1000,
+            0
+          ],
+          "size": [
+            620,
+            20,
+            460
+          ],
+          "tint": "sand"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -325,
+            1012,
+            0
+          ],
+          "size": [
+            25,
+            65,
+            510
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            325,
+            1012,
+            0
+          ],
+          "size": [
+            25,
+            65,
+            510
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1012,
+            -245
+          ],
+          "size": [
+            670,
+            65,
+            25
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1012,
+            245
+          ],
+          "size": [
+            670,
+            65,
+            25
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1020,
+            -105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.1",
+          "pivot": [
+            -140,
+            1020,
+            -105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1020,
+            -105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.1",
+          "pivot": [
+            -140,
+            1020,
+            -105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -120,
+            1020,
+            -105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.1",
+          "pivot": [
+            -140,
+            1020,
+            -105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -80,
+            1020,
+            -105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.1",
+          "pivot": [
+            -140,
+            1020,
+            -105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            1020,
+            -105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.2",
+          "pivot": [
+            140,
+            1020,
+            -105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            120,
+            1020,
+            -105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.2",
+          "pivot": [
+            140,
+            1020,
+            -105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1020,
+            -105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.2",
+          "pivot": [
+            140,
+            1020,
+            -105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            1020,
+            -105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.2",
+          "pivot": [
+            140,
+            1020,
+            -105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1020,
+            105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.3",
+          "pivot": [
+            -140,
+            1020,
+            105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1020,
+            105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.3",
+          "pivot": [
+            -140,
+            1020,
+            105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -120,
+            1020,
+            105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.3",
+          "pivot": [
+            -140,
+            1020,
+            105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -80,
+            1020,
+            105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.3",
+          "pivot": [
+            -140,
+            1020,
+            105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            1020,
+            105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.4",
+          "pivot": [
+            140,
+            1020,
+            105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            120,
+            1020,
+            105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.4",
+          "pivot": [
+            140,
+            1020,
+            105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1020,
+            105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.4",
+          "pivot": [
+            140,
+            1020,
+            105
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            1020,
+            105
+          ],
+          "size": [
+            22,
+            22,
+            150
+          ],
+          "tint": "ridge",
+          "role": "furrow.4",
+          "pivot": [
+            140,
+            1020,
+            105
+          ]
+        }
+      ],
+      "palette": {
+        "wood": "#856342",
+        "sand": "#d9cba0",
+        "ridge": "#7d6a43"
+      },
+      "tags": [
+        "art",
+        "sand-garden",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A tabletop sand garden of four cells: brush each along or across, or smooth all.",
+    "art": "art",
+    "rake": "rake",
+    "furrow": "furrow",
+    "howto_pattern": "With a hand free, brush the cells you choose along or across; the pattern stays until someone smooths the sand.",
+    "already_smooth": "The sand is already smooth."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "rake",
+      "furrow"
+    ]
+  },
+  "howtos": {
+    "pattern": {
+      "text": "howto_pattern",
+      "steps": [
+        {
+          "form": "brush"
+        }
+      ]
+    }
+  }
+}

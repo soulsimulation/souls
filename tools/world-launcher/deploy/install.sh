@@ -90,6 +90,8 @@ install -d -o root -g simworlds -m 750 /etc/sim-worlds
 # eden2 (cpx42): 16 GB RAM, ~10 GB available with eden3 + the existing Sim release running; a new world's
 # server idles at ~250-350 MB RSS. Production: 24 running worlds in a 6 GB cgroup (~250 MB each), 60
 # registered (sleeping worlds cost only disk), and no world boots while the host has under 2.5 GB free.
+# --disk-min-free-mb 4096 (#2538): no new world while the data disk has under 4 GB free (above each world's own 1 GB
+# headroom, under host-health's 20 GB alert, so the alert comes first). Production only: a floor would refuse on dev boxes.
 # Staging: small, for the rehearsal party; stop it when production is live.
 # Heap: --world-heap-mb is only the default (1536 MB); a world's registry entry `worldHeapMb` wins (op.mjs set-heap) and
 # Eden-2026-class worlds get 2048 MB (registry.mjs worldHeapMb; LOAD-CONTRACT §4). The old launcher-wide cap was too small for Eden 2026 (10-31).
@@ -105,7 +107,7 @@ if [ ! -f /etc/sim-worlds/production.conf ]; then
 # /etc/sim-worlds/production-auth.env is a PLACEHOLDER path: Codex or Gene provisions it (CLERK_PUBLISHABLE_KEY,
 # CLERK_ISSUER_URL=https://clerk.eden.art, CLERK_AUTHORIZED_PARTIES=https://sim.eden.art; no secret key). Each world's node
 # loads it by path (--env-file); the launcher only reads the publishable key and issuer. Never copied from /opt/eden3.
-SIM_WORLDS_ARGS=--base /worlds --port 4620 --range 4621-4659 --data /srv/sim-worlds-data/production --public-origin https://sim.eden.art --auth-env /etc/sim-worlds/production-auth.env --max-worlds 60 --max-running 24 --min-free-mb 2500 --world-heap-mb 1536 --create-limit 6 --mars-web /srv/sim-worlds/production/mars-web --eager 4
+SIM_WORLDS_ARGS=--base /worlds --port 4620 --range 4621-4659 --data /srv/sim-worlds-data/production --public-origin https://sim.eden.art --auth-env /etc/sim-worlds/production-auth.env --max-worlds 60 --max-running 24 --min-free-mb 2500 --disk-min-free-mb 4096 --world-heap-mb 1536 --create-limit 6 --mars-web /srv/sim-worlds/production/mars-web --eager 4
 CONF
 fi
 chown root:simworlds /etc/sim-worlds/*.conf && chmod 640 /etc/sim-worlds/*.conf
@@ -122,10 +124,13 @@ mem() { local d=/etc/systemd/system/sim-worlds@$1.service.d; install -d "$d"; [ 
 mem staging 2500M 3G; mem production 8G 9G
 install -m 644 "$HERE/sim-worlds-backup@.service" /etc/systemd/system/sim-worlds-backup@.service
 install -m 644 "$HERE/sim-worlds-backup@.timer" /etc/systemd/system/sim-worlds-backup@.timer
+# the hourly backup (#2542): installed, never enabled here (enabling it is the maintainer's step; docs/operations.md#backups)
+install -m 644 "$HERE/sim-worlds-backup-hourly@.service" /etc/systemd/system/sim-worlds-backup-hourly@.service
+install -m 644 "$HERE/sim-worlds-backup-hourly@.timer" /etc/systemd/system/sim-worlds-backup-hourly@.timer
 install -m 644 "$HERE/sim-worlds-health@.service" /etc/systemd/system/sim-worlds-health@.service
 install -m 644 "$HERE/sim-worlds-health@.timer" /etc/systemd/system/sim-worlds-health@.timer
 # #2541: the telemetry collector and its alerts. Installed, never enabled here (this runs on every release): enabling is
 # the maintainer's step, docs/operations/telemetry.md.
 install -m 644 "$HERE/sim-worlds-telemetry@.service" /etc/systemd/system/sim-worlds-telemetry@.service
 systemctl daemon-reload
-echo "installed: user simworlds, /srv/sim-worlds{,-data}, /etc/sim-worlds/{staging,production}.conf, sim-worlds@.service, sim-worlds-{backup,health}@.{service,timer}, sim-worlds-telemetry@.service (nothing started)"
+echo "installed: user simworlds, /srv/sim-worlds{,-data}, /etc/sim-worlds/{staging,production}.conf, sim-worlds@.service, sim-worlds-{backup,backup-hourly,health}@.{service,timer}, sim-worlds-telemetry@.service (nothing started)"
