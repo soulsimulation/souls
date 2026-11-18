@@ -1,0 +1,538 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:sand_timer (from #1822). Its sand is all at the top or all at the bottom (the original's six whole units at one end). With empty hands, a Soul times five, ten or fifteen seconds; when the time is done the sand is at the bottom ('The sand is at the lower end; flip the same timer before starting another interval.'), and a flip brings it back to the top. The original's one form with a seconds argument is three forms, as the crank lamp's is. Taken with a hand free.",
+ "cases": [
+  {
+   "name": "take_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "take"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "take_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "take"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 0,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "time_5s_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "time_5s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "time_5s_sand_at_bottom_names_flip",
+   "act": {
+    "this": "t1",
+    "form": "time_5s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer",
+      "fields": {
+       "sand": "bottom"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "sand",
+     "found": "bottom",
+     "wanted": {
+      "is": "top"
+     }
+    },
+    "fix": {
+     "form": "flip"
+    },
+    "says": "flip_first"
+   }
+  },
+  {
+   "name": "time_5s_holding_something",
+   "act": {
+    "this": "t1",
+    "form": "time_5s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "time_10s_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "time_10s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "time_10s_sand_at_bottom_names_flip",
+   "act": {
+    "this": "t1",
+    "form": "time_10s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer",
+      "fields": {
+       "sand": "bottom"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "sand",
+     "found": "bottom",
+     "wanted": {
+      "is": "top"
+     }
+    },
+    "fix": {
+     "form": "flip"
+    },
+    "says": "flip_first"
+   }
+  },
+  {
+   "name": "time_10s_holding_something",
+   "act": {
+    "this": "t1",
+    "form": "time_10s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "time_15s_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "time_15s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "time_15s_sand_at_bottom_names_flip",
+   "act": {
+    "this": "t1",
+    "form": "time_15s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer",
+      "fields": {
+       "sand": "bottom"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "sand",
+     "found": "bottom",
+     "wanted": {
+      "is": "top"
+     }
+    },
+    "fix": {
+     "form": "flip"
+    },
+    "says": "flip_first"
+   }
+  },
+  {
+   "name": "time_15s_holding_something",
+   "act": {
+    "this": "t1",
+    "form": "time_15s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "flip_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "flip"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer",
+      "fields": {
+       "sand": "bottom"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "flip_sand_at_top_names_timing",
+   "act": {
+    "this": "t1",
+    "form": "flip"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "sand",
+     "found": "top",
+     "wanted": {
+      "is": "bottom"
+     }
+    },
+    "fix": {
+     "form": "time_10s"
+    }
+   }
+  },
+  {
+   "name": "flip_holding_something",
+   "act": {
+    "this": "t1",
+    "form": "flip"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sand_timer",
+      "fields": {
+       "sand": "bottom"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  }
+ ]
+}

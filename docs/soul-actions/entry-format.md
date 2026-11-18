@@ -48,7 +48,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
-| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing` or a kind), `most`, `most_per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
+| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
@@ -147,9 +147,12 @@ stairs or ladders; `deep_water`: water deep enough to swim in). Its size is `geo
 Getting on and off is only while it stands still, and only where the rider could stand (`level`, `shallow`) or swim
 (`deep_water`): `dismount(entry, {moving, spot})` answers with the code `moving` or `no_footing` and a reason naming the
 spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/vehicle.json`.
-`ride` is for a boat that is not rowed, a sail: `seats` (body slots), `stops` (two or more `stand` points in the order
-of the trip), `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
-`speed_mm_s` and `ground`. A kind is a vehicle or a ride, not both. Sections 13 and 14 are meaning, so covered by the hash.
+`ride` is for a boat that is not rowed, a sail, and for a ride on a track (a big wheel, a carousel, a balloon, a cable car):
+`seats` (body slots), `stops` (two or more `stand` points in the order of the trip; a round trip names its one stop twice),
+`returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
+`speed_mm_s` and `ground`, which for a ride may also be `air` (a cable or a flight: a rider gets on and off only at its
+stops). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
+(SA-X33, [#2923](https://github.com/soulsimulation/souls/issues/2923)). Sections 13 and 14 are meaning, so covered by the hash.
 
 **Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a
 wardrobe, a fridge or a stall is known to hold, made real when someone reaches for it. A stock is
@@ -160,9 +163,11 @@ supplies (a book's title and first page); optional `refill`, `{every_us}`, one m
 (a timed value, SA-F5a). The take form is checked: it is a Soul's act that needs the count `at_least` 1 (an empty
 stock refuses) and a free hand, and its one `create` makes the kind into `actor_hand`; it never sets the count. The engine
 lowers the count by one in the same batch as the make (`takeStock` shows the batch: a `create` and a `set` with `by` -1), so
-nothing is made from nothing. Stock is free to take; buying, lending and debts are not here. A kind whose contents are
+nothing is made from nothing, and the check gate's `makes` rule counts the stock as what pays for it. Stock is free to
+take; buying, lending and debts are not here. A kind whose contents are
 closed lists `count` in `closed.fields` and shows its stock only once opened (`stockOf` answers `null` until then; a shelf
-or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Section 15 is meaning, so covered by the hash.
+or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Eden's own storage
+(`content/kinds/storage/`, SA-X26 [#2916](https://github.com/soulsimulation/souls/issues/2916)) names each stock's take form `take`. Section 15 is meaning, so covered by the hash.
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
@@ -180,9 +185,12 @@ body's family declares it.
 
 **Bounds and timed values.** `min` / `max`: whole bounds of an `int` field (or a timed value); an amount moved never
 takes it past them. A `transfer` fills to `max` and draws down to `min`. A `timed` field is a value that changes with
-time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit), and a default
+time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit: `count`, `mm`,
+`g`, `mg`, `mC` or `permille`), and a default
 of three whole numbers, `{"value", "per_s", "set_us"}`: the value in that unit, its rate in that unit per second, and the
-world time it was set, in microseconds. A range need reads it at the state's time; the arithmetic is
+world time it was set, in microseconds. A slow process takes a small unit so its rate stays a whole number a second:
+the planter's water (SA-V4a) is in mg and dries at 5 mg a second (18 g an hour), and its stages come from timers a
+world day apart. A range need reads it at the state's time; the arithmetic is
 `packages/form-rules/README.md` ("A timed value").
 
 A `list` field holds a short bounded list of small records: `most` (required, 1 to 100, so it stays in tens: it is set
@@ -214,7 +222,8 @@ list (`AUDIENCE_RULES` in `tools/entry/format.mjs`): `{"rule": "everyone"}`, `{"
 the Soul whose turn it is) and `{"rule": "creator"}` (the world's creator). A rule names a link type, never a Soul.
 A kind may add a `closed` section (9), `{"audience": rule, "fields": ["stock"]}`: the fields it names, and its
 children, take the container's own audience until it is opened (Engine v2 E22,
-[#2792](https://github.com/soulsimulation/souls/issues/2792)); those fields declare no audience of their own.
+[#2792](https://github.com/soulsimulation/souls/issues/2792)); those fields declare no audience of their own, and the
+rules (`@souls/form-rules`) read a need on one with the container's audience.
 Delivering to viewers is the new engine's view tier. Point and slot names share one namespace, so a form's argument of type
 `part` or `slot` can name "the top drawer" or "the left seat" and one form serves every part.
 
@@ -286,11 +295,27 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   or `{"thing": {"arg": ...}}`), `moves` (`{"thing": {"arg": ...}, "by": "carry" | "push"}`: the thing's kind moves
   that way by its section 18 `motion.how`; carrying takes as many free hands as it says, a push by one body is refused
   for `two_souls`; refused as `moves_by`, `motion_unsaid`, `needs_souls` or `no_free_hand`), `hand`
-  (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
+  (`{"free": true}`, one hand free; `{"empty": true}`, every hand empty; or `{"holds": "<namespace:name>"}`, a kind
+  the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
-  `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
-  `timed` field.
+  `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less), `sum` (below). A range
+  need also takes a `timed` field.
+  A `state` need with a `link` reads the **place the thing stands in**: `{"need": "state", "link": "place", "field":
+  "rain", "at_least": 101}`, where the link type is declared `{"from": "place", "most": 1}`. The field is the place
+  kind's, read by its number and only by its audience; the place is never read from the tree, since a parent means
+  lifetime and frame only (Engine v2 T2, `v2/docs/world-model.md`), and never from a global weather call. Who links a
+  thing to its place is outside the kind (Engine v2 E4, E6); a rain collector collects only while it rains there.
+  A `state` need with `of` reads the **thing an argument names**: `{"need": "state", "of": {"arg": "mug"}, "field":
+  "dirt", "at_most": 0}`, where `mug` is a `thing` argument. The field is the named thing's kind's, read by its number
+  and only by its audience (an asker outside it gets `unknown` naming the thing and the field); a missing argument is
+  `bad_input`. A coffee grinder doses only a washed, empty mug; a fire toasts only the skewer side not yet golden.
+  A `sum` need adds two or more `int` fields of this kind, of one unit: `{"need": "sum", "fields": ["well_green",
+  "well_mint"], "at_most": 4}` (`at_least` and/or `at_most`, whole numbers). With `"after_moves": true` it adds them as
+  the form's transfers would leave them, so a capacity shared by several fields is never overfilled: a tea caddy's well
+  holds four portions across its green and mint.
+  Any need may name its refusal's words with `says`, a key of the `text` table (words by reference, SA-F6b), so a
+  conversion keeps the original's wording: `{"need": "hand", "empty": true, "says": "put_down_first"}`.
   SA-F2 evaluates them. **Reach to another thing** is read in this order: (1) the walk, taken as done: entries store
   no position for a loose thing (Engine v2 holds poses, and today's adapter walks first), so `within_reach` of a
   `thing` argument that the form `walk_to`s is met when the thing is in the actor's place, and refused `out_of_reach`
@@ -303,6 +328,10 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
   SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
+- **A timer is named by the form it starts.** Starting a timer replaces the thing's pending timer for the same form
+  (Engine v2 T6 rule 15: the engine clears it, a clear being "fired or cancelled"; T5: it is due at a world time in
+  microseconds). A crank lamp put out early and lit again goes dark at its new time, not by the earlier timer. The
+  timer's form still checks its own needs when it fires.
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor, this thing or a
   `thing` argument, into a slot, the actor's hand or `here`, loose in the actor's place: holding is a change of
   parent), `link`, `unlink`, `create` (a kind, `here`, in a slot or in the hand), `remove` (the actor, this thing or a
@@ -318,7 +347,11 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   "from", "into", "amount", "event"}`. `field` is an `int` field of this kind, and of the same name and unit at the other
   end; `from` and `into` are each `"this"` or a `thing` argument; `amount` is a whole number above zero, a `count`
   argument, or `"room"` (fill to the target's `max`, so a field filled to the brim here has a `max`). It moves the least of
-  what it asks and what the source has above its `min`: two `set`s whose amounts sum to zero.
+  what it asks and what the source has above its `min`: two `set`s whose amounts sum to zero. Between **two fields of
+  one thing**, `from` and `into` are both `"this"` and `into_field` names the `int` field it lands in, of the same unit:
+  `{"change": "transfer", "field": "green", "from": "this", "into": "this", "into_field": "well_green", "amount":
+  {"arg": "green"}}`. It is two `set`s on the one thing that still sum to zero; to move a field's whole value, ask for
+  its `max` (it moves what is there).
 - **draw** (SA-F13, [#2852](https://github.com/soulsimulation/souls/issues/2852)): an outcome nobody chose.
   `{"change": "draw", "outcomes": [{"name", "weight", "event", "set": [{"field", "to"}]}]}`. Each `weight` is a whole
   number from 0 or `{"field": <an int field of this kind>}` (a practice count); names differ. The world draws a whole
@@ -457,7 +490,9 @@ the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`),
 `scale` (permille, one axis or all), `show` (1 or 0), `glow` (permille), `tint` (a colour) or `pick` (no part: which
 of several parts a choice shows). Three more kinds draw a thing's own moving picture from a field (SA-D2): `steam` (permille
 of a plume leaving the part, so a kettle steams only above the level its range states), `flame` (permille of a flame
-burning on the part, 0 is out) and `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting). The part
+burning on the part, 0 is out), `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting; a value with no
+amount draws no plants) and `wilt` (permille of how far those plants hang, 0 fresh to 1000 wilted; the planter's falls as its
+water runs out, `content/kinds/garden/planter.json`). The part
 is a role of the model (the closed list of roles of the shape language), not the thing's name. The amount comes from `at` (field value to amount, for a bool or enum) or from
 `range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
 `over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
@@ -510,7 +545,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 |---|---|---|
 | `exact` | a float or a count in ticks | yes |
 | `targets` | an argument whose selector picks the wrong list, or that nothing uses | partly (closed selector lists) |
-| `makes` | a `create` that pays for nothing in its own form | where it appears (`into`) |
+| `makes` | a `create` that pays for nothing in its own form (a stock's take is paid by its count, lowered by the engine) | where it appears (`into`) |
 | `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
 | `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |

@@ -1,0 +1,28 @@
+{
+  "format": "souls-entry/1",
+  "kind": "looks:tablelamp",
+  "owner": "thing",
+  "state": {
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [300, 500, 300] },
+  "looks": {
+    "model": "look:looks_tablelamp",
+    "shape": {
+      "make": { "kind": "gen", "gen": "kit/2", "args": { "shapes": [
+        { "kind": "cyl", "at": [0, 0.02, 0], "r": 0.11, "h": 0.04, "segments": 10, "tint": "brass" },
+        { "kind": "cyl", "at": [0, 0.2, 0], "r": 0.015, "h": 0.36, "segments": 6, "tint": "brass" },
+        { "kind": "cyl", "at": [0, 0.4, 0], "r": 0.1, "h": 0.14, "segments": 10, "r2": 0.15, "tint": "shade", "material": "glass" },
+        { "kind": "sphere", "at": [0, 0.38, 0], "r": 0.05, "segments": 6, "tint": "bulb", "glow": 1, "role": "light", "pivot": [0, 0.38, 0] }
+      ] } },
+      "palette": { "brass": "#b8913f", "shade": "#e8d9b0", "bulb": "#fff2b0" },
+      "tags": ["lamp"]
+    },
+    "table": [
+      { "part": "light", "field": "lit", "do": "glow", "at": { "true": 1000, "false": 0 } },
+      { "part": "light", "field": "lit", "do": "tint", "at": { "true": "#fff2b0", "false": "#5d5a50" } }
+    ]
+  },
+  "text": { "card": "A lamp whose bulb and shade glow when it is lit." },
+  "card": { "text": "card" }
+}
