@@ -8,6 +8,8 @@
 //! Each effect is written by its own node (T6 rule 6): a place by its parent, a move, set or remove by the node itself.
 //! Operations in a row with the same writer and audience share one effect.
 
+pub mod safety;
+
 use crate::commit::write;
 use replica::apply::Replica;
 use replica::edit::{Checked, Op, Ref, Refused, confirm};
