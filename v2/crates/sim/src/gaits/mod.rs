@@ -51,3 +51,9 @@ impl Gait {
         self.on.contains(&ground)
     }
 }
+
+/// The speed a walk takes for a body's manner (E10, #2781): a gait of that name gives its speed; any other word, or
+/// none, walks. A manner never changes where the body may go.
+pub fn speed_of(manner: Option<&str>) -> i64 {
+    manner.and_then(Gait::named).unwrap_or(WALK).speed
+}

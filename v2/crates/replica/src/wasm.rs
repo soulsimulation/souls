@@ -8,12 +8,16 @@
 //! The resident daemon (Engine v2 R6, #2700; `v2/client/src/daemon/`) builds and reads every frame on the gateway's
 //! socket through the `wire*` functions, never in JavaScript (`v2/docs/encoding.md` rule 11). The frames are I1's
 //! (`gatewayd/src/lib.rs`).
+//!
+//! The daemon's copy of its scope is a [`WasmCopy`] (R5's `sync::Copy`): when the gateway cannot resume its stream it
+//! compares and descends through the gateway, one request at a time (R5b, #3164).
 
 use crate::apply::Replica;
 use crate::effects::Actor;
 use crate::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use crate::ids::{Id, Scope, Version};
-use crate::intents::{Hello, Intent, PROTOCOL, Target};
+use crate::intents::{Fallback, Hello, Intent, PROTOCOL, Target};
+use crate::sync::{Copy, Descent, read_hashes, read_records, wire};
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::{JsError, wasm_bindgen};
 
@@ -98,8 +102,9 @@ pub fn wire_sign_in(token: &str, cursor: &[u8]) -> Result<Vec<u8>, JsError> {
     encode(&Value::Map(m)).map_err(js)
 }
 
-/// One frame from the gateway as a line: `outcome <name>`, or `answer <sequence> <version hex>`, with `-` for either
-/// when the frame has none (an answer the gateway gives itself has no version).
+/// One frame from the gateway as a line: `outcome <name>`, `answer <sequence> <version hex> <kind> <reason or
+/// outcome>`, with `-` for any the frame has none of (an answer the gateway gives itself has no version), or
+/// `sync <n> <refusal name or ->` for the answer to sync request `n` (R5b), which [`WasmCopy`] reads.
 #[wasm_bindgen(js_name = wireFrame)]
 pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     let Value::Map(m) = decode(frame).map_err(js)?.value else {
@@ -108,23 +113,33 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     if let Some(Value::Text(name)) = m.get(&4) {
         return Ok(format!("outcome {}", name.as_str()));
     }
-    let sequence = match m.get(&2) {
-        Some(Value::Map(a)) => match a.get(&2) {
-            Some(Value::Uint(s)) => s.to_string(),
-            _ => "-".to_owned(),
-        },
-        _ => return Err(JsError::new("frame-not-a-record")),
+    if let Some(Value::Uint(n)) = m.get(&wire::ASK) {
+        return Ok(match m.get(&wire::REFUSED) {
+            Some(Value::Text(name)) => format!("sync {n} {}", name.as_str()),
+            _ => format!("sync {n} -"),
+        });
+    }
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return Err(JsError::new("frame-not-a-record"));
+    };
+    let field = |k: u64| match a.get(&k) {
+        Some(Value::Uint(s)) => s.to_string(),
+        Some(Value::Text(name)) => name.as_str().to_owned(),
+        _ => "-".to_owned(),
     };
     let version = match m.get(&1) {
         Some(v) => to_hex(&encode(v).map_err(js)?),
         None => "-".to_owned(),
     };
-    Ok(format!("answer {sequence} {version}"))
+    // R10 (#2702): the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason or outcome.
+    let (sequence, kind, name) = (field(2), field(3), field(4));
+    Ok(format!("answer {sequence} {version} {kind} {name}"))
 }
 
-/// A Soul's intent with no parameters, on `target` (a node's id as `<scope hex>-<counter>`, or empty for none),
-/// decided against `basis` (a version's bytes; empty for the zero version) and expiring at `expiry` world
-/// microseconds; read back as the world reads it.
+/// A Soul's intent with no parameters, `verb` a ranked list of verbs split by spaces (the rest are its fallbacks,
+/// R7), each on `target` (a node's id as `<scope hex>-<counter>`, or empty for none), decided against `basis` (a
+/// version's bytes; empty for the zero version) and expiring at `expiry` world microseconds; read back as the world
+/// reads it.
 #[wasm_bindgen(js_name = wireIntent)]
 pub fn wire_intent(
     scope: &[u8],
@@ -163,20 +178,157 @@ pub fn wire_intent(
         .to_value(),
         b => decode(b).map_err(js)?.value,
     };
+    let mut ranked = verb
+        .split(' ')
+        .map(|v| Name::new(v).ok_or_else(|| JsError::new("verb-not-a-name")));
+    let verb = ranked
+        .next()
+        .ok_or_else(|| JsError::new("verb-not-a-name"))??;
+    let fallbacks = ranked
+        .map(|v| {
+            v.map(|verb| Fallback {
+                verb,
+                target: target.clone(),
+                parameters: BTreeMap::new(),
+                resources: Vec::new(),
+            })
+        })
+        .collect::<Result<_, _>>()?;
     let intent = Intent {
         actor: Actor::Soul(id),
-        verb: Name::new(verb).ok_or_else(|| JsError::new("verb-not-a-name"))?,
+        verb,
         target,
         parameters: BTreeMap::new(),
         sequence,
         basis,
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
         resources: Vec::new(),
-        fallbacks: Vec::new(),
+        fallbacks,
         replaces: None,
         body: None,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
     Intent::read(&bytes).map_err(js)?;
     Ok(bytes)
+}
+
+fn sync_map(frame: &[u8]) -> Result<BTreeMap<u64, Value>, JsError> {
+    match decode(frame).map_err(js)?.value {
+        Value::Map(m) => match m.get(&wire::REFUSED) {
+            Some(Value::Text(name)) => Err(JsError::new(name.as_str())),
+            _ => Ok(m),
+        },
+        _ => Err(JsError::new("frame-not-a-record")),
+    }
+}
+
+/// The first request of a sync: `{20: n, 21: []}`, the hashes of the scope the world grants this Soul.
+#[wasm_bindgen(js_name = wireSyncScope)]
+pub fn wire_sync_scope(n: u64) -> Result<Vec<u8>, JsError> {
+    encode(&Value::Map(BTreeMap::from([
+        (wire::ASK, Value::Uint(n)),
+        (wire::IDS, Value::Array(Vec::new())),
+    ])))
+    .map_err(js)
+}
+
+/// The daemon's copy of its scope (R5's `sync::Copy`), synced one request at a time through the gateway (R5b).
+#[wasm_bindgen(js_name = Copy)]
+#[derive(Default)]
+pub struct WasmCopy {
+    copy: Copy,
+    descent: Option<Descent>,
+    asked: Vec<Vec<u8>>,
+}
+
+#[wasm_bindgen(js_class = Copy)]
+impl WasmCopy {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmCopy {
+        WasmCopy::default()
+    }
+
+    /// Whether it holds none of its scope.
+    pub fn empty(&self) -> bool {
+        self.copy.roots().is_empty()
+    }
+
+    /// The hashes answer: compares, and gives the world's version (hex) the hashes are at.
+    #[wasm_bindgen(js_name = onHashes)]
+    pub fn on_hashes(&mut self, frame: &[u8]) -> Result<String, JsError> {
+        let m = sync_map(frame)?;
+        let (ids, hashes) = read_hashes(&m).map_err(js)?;
+        let version = m.get(&1).ok_or_else(|| JsError::new("sync-answer"))?;
+        let version = to_hex(&encode(version).map_err(js)?);
+        self.descent = Some(self.copy.compare(&ids, hashes));
+        Ok(version)
+    }
+
+    /// The next records request `{20: n, 22: [hashes]}`, or nothing once the copy holds its scope.
+    pub fn next(&mut self, n: u64) -> Result<Vec<u8>, JsError> {
+        let d = self
+            .descent
+            .as_mut()
+            .ok_or_else(|| JsError::new("sync-not-started"))?;
+        self.asked = self.copy.ask(d, wire::RECORDS_MOST);
+        if self.asked.is_empty() {
+            return Ok(Vec::new());
+        }
+        encode(&Value::Map(BTreeMap::from([
+            (wire::ASK, Value::Uint(n)),
+            (
+                wire::RECORDS,
+                Value::Array(self.asked.iter().cloned().map(Value::Bytes).collect()),
+            ),
+        ])))
+        .map_err(js)
+    }
+
+    /// A records answer: each record checked against the hash that named it, and kept.
+    #[wasm_bindgen(js_name = onRecords)]
+    pub fn on_records(&mut self, frame: &[u8]) -> Result<(), JsError> {
+        let got = read_records(&sync_map(frame)?).map_err(js)?;
+        let d = self
+            .descent
+            .as_mut()
+            .ok_or_else(|| JsError::new("sync-not-started"))?;
+        self.copy.take(d, &self.asked, got).map_err(js)
+    }
+
+    /// Ends the sync: lets go what the scope no longer reaches, and gives R5's counts as JSON, with `heldBytes`, the
+    /// records a snapshot of the scope would fetch.
+    pub fn finish(&mut self) -> Result<String, JsError> {
+        let d = self
+            .descent
+            .take()
+            .ok_or_else(|| JsError::new("sync-not-started"))?;
+        let s = self.copy.finish(d).map_err(js)?;
+        Ok(format!(
+            r#"{{"rounds":{},"changed":{},"fetched":{},"sent":{},"got":{},"held":{},"heldBytes":{}}}"#,
+            s.rounds,
+            s.changed,
+            s.fetched,
+            s.sent,
+            s.got,
+            s.held,
+            self.copy.held_bytes()
+        ))
+    }
+
+    /// The record a hash names (hex), if held (R7 reads the copy through it).
+    pub fn record(&self, hash: &str) -> Option<Vec<u8>> {
+        self.copy
+            .record(&crate::encode::from_hex(hash).ok()?)
+            .map(<[u8]>::to_vec)
+    }
+
+    /// Each scope node's hash, as JSON `{"<id's bytes hex>": "<hash hex>"}`.
+    pub fn roots(&self) -> Result<String, JsError> {
+        let mut out = Vec::new();
+        for (id, h) in self.copy.roots() {
+            let id = to_hex(&encode(&id.to_value()).map_err(js)?);
+            out.push(format!(r#""{id}":"{}""#, to_hex(h)));
+        }
+        Ok(format!("{{{}}}", out.join(",")))
+    }
 }
