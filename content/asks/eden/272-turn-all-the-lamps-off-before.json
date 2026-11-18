@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":272,"group":"over-time","words":"turn all the lamps off before bed","obvious":3,"when":"before bed","things":{"lamp1":"eden:floor_lamp","lamp2":"eden:floor_lamp"},"chain":[{"this":"lamp1","form":"switch_off"},{"this":"lamp2","form":"switch_off"}]}

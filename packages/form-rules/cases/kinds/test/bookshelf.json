@@ -1,0 +1,57 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:bookshelf",
+  "owner": "thing",
+  "state": {
+    "books": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 40,
+      "min": 0,
+      "max": 60,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "links": {},
+  "stock": {
+    "books": {
+      "kind": "test:book",
+      "count": "books",
+      "take": "take_book",
+      "carries": [
+        "title",
+        "first_page"
+      ]
+    }
+  },
+  "forms": {
+    "take_book": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "books",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "test:book",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "text": {}
+}

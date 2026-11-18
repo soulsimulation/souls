@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":208,"group":"with-others","words":"go to the concert","obvious":2,"things":{"stage":"eden:stage","seats":"eden:theatre_seats"},"chain":[{"this":"seats","form":"sit","args":{"seat":"front_1"}},{"this":"me","form":"look_at","args":{"target":"stage"}}]}

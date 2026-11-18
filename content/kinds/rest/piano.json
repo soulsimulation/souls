@@ -6,6 +6,8 @@
   "areas": {
     "lid": { "forbids": ["sit", "lie"] }
   },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
   "looks": { "model": "look:piano" },
   "text": {
     "card": "A piano, to play, never to sit or lie on.",

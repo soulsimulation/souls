@@ -145,6 +145,14 @@ export function roomOf(ix, placeId) {
   for (let p = ix.place(placeId ?? ""), n = 0; p && n < 12; p = p.parent ? ix.places.get(p.parent) : null, n++) if (p.kind === "room" || p.doors?.length) return p.id;
   return "";
 }
+/** SA-C8: "any free seat here", as ids to try: the seats in the same room as `placeId` (the copy's best guess, as roomOf), nearest to
+ *  `at` first, never one in `exclude`. The copy cannot tell which are taken: the world decides, one try at a time. */
+export const FALLBACK_SEATS_MAX = 6;
+export function seatsHere(ix, placeId, at, exclude = [], limit = FALLBACK_SEATS_MAX) {
+  const room = roomOf(ix, placeId), skip = new Set(exclude);
+  return ix.cat.things.filter((t) => t.seat && roomOf(ix, t.place) === room && !skip.has(`sit:${t.id}`))
+    .map((t) => ({ id: `sit:${t.id}`, d: dist(at, t.at) ?? 1e9 })).sort((a, b) => a.d - b.d || (a.id < b.id ? -1 : 1)).slice(0, limit).map((x) => x.id);
+}
 /** #2477: an act that walks to where a Soul is: its place's walk when the catalog vouches for one, or else a walk to its point. */
 export function soulWalk(ix, x) {
   const p = ix.place(x?.place ?? ""), walk = p ? ix.walkId(p) : null;
