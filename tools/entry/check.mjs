@@ -101,7 +101,7 @@ function rules(entry) {
     (f.effects ?? []).forEach((e, i) => {
       if (e.change !== 'create') return;
       const spent = Object.values(isObj(entry.stock) ? entry.stock : {}).some(s => isObj(s) && s.take === fn && s.kind === e.kind)
-        || f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && n.field === x.field));
+        || f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && !n.link && !n.of && n.field === x.field));
       if (!spent) add('makes', `${p}.effects.${i}`, `creates ${e.kind} and pays for nothing`, 'add a remove effect for what it is made from, or a set of a field the form needs (spending it)');
     });
     // no-waiting: a timer that arms its own form again waits on a condition by polling; a name that counts a time of day.
@@ -156,8 +156,12 @@ function rules(entry) {
 function wayOut(entry, add) {
   const state = entry.state ?? {}, forms = entry.forms ?? {}, links = entry.links ?? {};
   const setters = {}, linkers = {};
+  // A field or value argument stands for each of its choices (the form's own closed list); any other argument for any value.
+  const choices = (f, v) => isArg(v) && Array.isArray(f.takes?.[v.arg]?.of) ? f.takes[v.arg].of : null;
+  const fieldsOf = (f, v) => choices(f, v) ?? [v];
+  const valuesOf = (f, v) => choices(f, v)?.map(x => JSON.stringify(x)) ?? [isArg(v) ? '*' : JSON.stringify(v)];
   for (const f of Object.values(forms)) for (const e of f.effects ?? []) {
-    if (e.change === 'set') (setters[e.field] ??= new Set()).add(isArg(e.to) ? '*' : JSON.stringify(e.to));
+    if (e.change === 'set') for (const x of fieldsOf(f, e.field)) for (const v of valuesOf(f, e.to)) (setters[x] ??= new Set()).add(v);
     if (e.change === 'link') linkers[e.link] = true;
   }
   const reach = {}, open = new Set();
@@ -168,24 +172,26 @@ function wayOut(entry, add) {
   }
   const linked = new Set(Object.keys(links).filter(l => !linkers[l]));
   const armed = new Set(), on = new Set();
-  const ok = n => {
-    if (n.need === 'state' && n.link) return true; // the place's field is set by its place, from outside
-    if (n.need === 'state') {
-      if (open.has(n.field) || !reach[n.field]) return true;
+  const ok = (n, f) => {
+    if (n.need === 'state' && (n.link || n.of)) return true; // another node's field (its place, a named thing) is set from outside
+    if (n.need === 'state') return fieldsOf(f, n.field).some(field => {
+      if (open.has(field) || !reach[field]) return true;
       const v = 'is' in n ? n.is : n.not;
       if (isArg(v)) return true;
       const j = JSON.stringify(v);
-      return 'is' in n ? reach[n.field].has(j) : [...reach[n.field]].some(x => x !== j);
-    }
+      return 'is' in n ? reach[field].has(j) : [...reach[field]].some(x => x !== j);
+    });
+    // any of several fields differs from a value: one of them can be made something else
+    if (n.need === 'any') return (n.fields ?? []).some(field => open.has(field) || !reach[field] || [...reach[field]].some(x => x !== JSON.stringify(n.not)));
     return n.need === 'linked' ? linked.has(n.link) : true;
   };
   for (let changed = true; changed;) {
     changed = false;
     for (const [fn, f] of Object.entries(forms)) {
-      if (on.has(fn) || (f.starts === 'timer' && !armed.has(fn)) || (isObj(f.who) && !linked.has(f.who.link)) || !(f.needs ?? []).every(ok)) continue;
+      if (on.has(fn) || (f.starts === 'timer' && !armed.has(fn)) || (isObj(f.who) && !linked.has(f.who.link)) || !(f.needs ?? []).every(n => ok(n, f))) continue;
       on.add(fn); changed = true;
       for (const e of f.effects ?? []) {
-        if (e.change === 'set' && reach[e.field]) reach[e.field].add(isArg(e.to) ? '*' : JSON.stringify(e.to));
+        if (e.change === 'set') for (const x of fieldsOf(f, e.field)) if (reach[x]) for (const v of valuesOf(f, e.to)) reach[x].add(v);
         if (e.change === 'link') linked.add(e.link);
         if (e.change === 'timer') armed.add(e.form);
       }
@@ -193,10 +199,10 @@ function wayOut(entry, add) {
   }
   for (const [fn, f] of Object.entries(forms)) {
     if (on.has(fn)) continue;
-    const i = (f.needs ?? []).findIndex(n => !ok(n));
+    const i = (f.needs ?? []).findIndex(n => !ok(n, f));
     if (f.starts === 'timer' && !armed.has(fn)) add('way-out', `forms.${fn}`, 'a timer form that no reachable form arms', `add a timer effect for "${fn}" to a form that can be done`);
     else if (isObj(f.who) && !linked.has(f.who.link)) add('way-out', `forms.${fn}.who`, `needs the link "${f.who.link}" and nothing reachable makes it`, 'link it in a form that needs nothing');
-    else if (i >= 0) { const n = f.needs[i]; add('way-out', `forms.${fn}.needs.${i}`, `needs ${n.need} ${n.field ?? n.link ?? ''} that only forms stuck behind this need can bring about`, 'let a form that needs nothing bring it about, or make the default what the need asks'); }
+    else if (i >= 0) { const n = f.needs[i]; add('way-out', `forms.${fn}.needs.${i}`, `needs ${n.need} ${isArg(n.field) ? `{arg: ${n.field.arg}}` : n.field ?? n.fields?.join('|') ?? n.link ?? ''} that only forms stuck behind this need can bring about`, 'let a form that needs nothing bring it about, or make the default what the need asks'); }
   }
 }
 
