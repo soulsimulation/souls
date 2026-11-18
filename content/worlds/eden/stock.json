@@ -1,0 +1,49 @@
+{
+  "format": "souls-world-stock/1",
+  "world": "eden",
+  "template": "worlds/templates/eden-2026.json",
+  "map": "content/worlds/eden/map.json",
+  "libraries": {"books": "content/library/books.json", "garments": "content/library/garments.json"},
+  "about": [
+    "What Eden's containers hold when the world starts (SA-E12, #2927), assigned by rule, never by hand per thing. A row names an entry and one of its stock sections (section 15), where it applies, how many each copy starts with, and for books and garments which library rows it draws.",
+    "A placed copy becomes its entry through map.json. Its room is the slot it, or the thing it stands in, holds in its outermost building (bedroom, bedroom-2, guest-1-east, stacks); a copy in the open has no room and is matched by its own name. 'where' matches by prefix: room, name or building. Rows are read in order and the first that matches a copy is its row; each entry ends with a row matching everything, so every copy has one.",
+    "count is the copy's starting count, written into the stock's count field in place of the entry's default; it never exceeds the field's max. 0 is an empty container, said on purpose with its reason.",
+    "draw picks library rows: the rows of that library whose tags meet the given tags (or all), in library order, are the pool. A row's copies are numbered 0, 1, 2 in template order; copy k holds pool[(k * count + j) mod pool size] for j below count, so neighbouring shelves differ and every book in a big pool is on some shelf. A take yields the held row at index count - 1 (the top of the pile), as the count falls by one.",
+    "A book yielded carries its title and first page by reference to its books row (the stock's carries). A garment yielded gets its style from its garments row, and is drawn by the row's look for the wearer's family (Engine v2 E15).",
+    "A closed container (a wardrobe, a dresser, a fridge) shows its stock only once opened (its closed section; Engine v2 E22). A shelf, a crate and a stall are open.",
+    "Stock is free to take. Buying, lending and debts are not here."
+  ],
+  "rows": [
+    {"entry": "eden:bookcase", "stock": "books", "where": {"room": ["stacks", "reading"]}, "count": 120, "draw": {"library": "books"}, "note": "the library and the campus library annex: the most books, from the whole library"},
+    {"entry": "eden:bookcase", "stock": "books", "where": {"room": ["classroom"]}, "count": 60, "draw": {"library": "books", "tags": ["science", "history", "craft", "poems", "walks"]}},
+    {"entry": "eden:bookcase", "stock": "books", "where": {"room": ["lobby"]}, "count": 30, "draw": {"library": "books", "tags": ["sea", "walks", "history", "story"]}, "note": "the seafront hotel's lobby"},
+    {"entry": "eden:bookcase", "stock": "books", "where": {"room": ["cafe"]}, "count": 40, "draw": {"library": "books", "tags": ["poems", "story", "kitchen", "mystery"]}},
+    {"entry": "eden:bookcase", "stock": "books", "where": {}, "count": 24, "draw": {"library": "books", "tags": ["story", "children", "poems", "kitchen", "garden", "mystery"]}, "note": "a home's living room"},
+
+    {"entry": "eden:bookshelf", "stock": "books", "where": {"room": ["shop"]}, "count": 40, "draw": {"library": "books", "tags": ["story", "mystery", "children", "sea", "poems"]}, "note": "a shop's shelf is a bookseller's: full"},
+    {"entry": "eden:bookshelf", "stock": "books", "where": {"room": ["storeroom"]}, "count": 6, "draw": {"library": "books", "tags": ["kitchen", "craft", "garden"]}, "note": "a few working manuals in the back"},
+    {"entry": "eden:bookshelf", "stock": "books", "where": {}, "count": 12, "draw": {"library": "books", "tags": ["story", "children", "poems", "kitchen", "garden", "mystery", "walks"]}, "note": "a home's living room: a dozen"},
+
+    {"entry": "eden:wardrobe", "stock": "garments", "where": {"room": ["guest"]}, "count": 3, "draw": {"library": "garments", "tags": ["warm", "outdoor"]}, "note": "a hotel guest room: a coat, a hat and a scarf to borrow"},
+    {"entry": "eden:wardrobe", "stock": "garments", "where": {}, "count": 6, "draw": {"library": "garments", "tags": ["everyday", "smart", "warm", "summer", "party"]}},
+
+    {"entry": "eden:dresser", "stock": "garments", "where": {"room": ["bedroom"]}, "count": 9, "draw": {"library": "garments", "tags": ["everyday", "summer", "warm", "work"]}},
+    {"entry": "eden:dresser", "stock": "garments", "where": {}, "count": 4, "draw": {"library": "garments", "tags": ["work", "warm"]}, "note": "a living room or an office: a few spare things"},
+
+    {"entry": "eden:fridge", "stock": "pies", "where": {}, "count": 3},
+
+    {"entry": "eden:market_stall", "stock": "apples", "where": {}, "count": 24, "note": "every stall, its refill as the entry says"},
+
+    {"entry": "eden:crate", "stock": "apples", "where": {"room": ["reception"]}, "count": 0, "note": "the office's parcel crates hold parcels, not apples; the crate's one stock is apples"},
+    {"entry": "eden:crate", "stock": "apples", "where": {}, "count": 6, "note": "street, market and barn crates: full"},
+
+    {"entry": "eden:shop_counter", "stock": "apples", "where": {"room": ["reading"]}, "count": 0, "note": "the annex's two reading desks: no apples at a library desk; the counter's one stock is apples"},
+    {"entry": "eden:shop_counter", "stock": "apples", "where": {}, "count": 12}
+  ],
+  "waiting": [
+    {"entry": "eden:workbench", "why": "the workbench entry has no stock section, and Eden has no tool kinds yet; 81 of its 112 copies are kitchen counters. Tools on workbenches wait on a stock section for the workbench (storage/tables corrections) and tool kinds."},
+    {"entry": "eden:toolbox", "why": "the toolbox entry has a slot and no stock section; its tools wait with the workbench's."},
+    {"entry": "eden:shop_shelving", "why": "no stock section (a cafe's back shelves, the office's pigeonholes, the barn's pottery shelf): what they hold waits on kinds for them."},
+    {"def": "core/book-stack@1", "why": "its entry is SA-X34's (signage/book_stack); a stack is books already out, not a stock."}
+  ]
+}

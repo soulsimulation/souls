@@ -1,0 +1,15 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:signup_slot",
+  "owner": "thing",
+  "state": {
+    "starts_in": { "n": 1, "type": "duration", "default": 0, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "signed": { "n": 1, "from": "soul", "most": 1, "most_per": 3, "audience": { "rule": "everyone" } }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "text": { "card": "One place on a sheet; who signed it is a link." },
+  "card": { "text": "card" }
+}

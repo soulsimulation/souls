@@ -1,0 +1,183 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:rubbing_wood",
+  "owner": "thing",
+  "state": {},
+  "slots": {
+    "relief": {
+      "admits": "thing",
+      "kinds": [
+        "eden:rubbing_paper"
+      ],
+      "most": 1,
+      "at_mm": [
+        0,
+        80,
+        0
+      ],
+      "fits_mm": [
+        600,
+        100,
+        500
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      800,
+      80,
+      800
+    ]
+  },
+  "forms": {},
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:rubbing_wood",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            35,
+            0
+          ],
+          "size": [
+            800,
+            70,
+            800
+          ],
+          "tint": "base"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -240,
+            73,
+            0
+          ],
+          "size": [
+            12,
+            6,
+            460
+          ],
+          "tint": "relief"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            73,
+            0
+          ],
+          "size": [
+            12,
+            6,
+            460
+          ],
+          "tint": "relief"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -80,
+            73,
+            0
+          ],
+          "size": [
+            12,
+            6,
+            460
+          ],
+          "tint": "relief"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            73,
+            0
+          ],
+          "size": [
+            12,
+            6,
+            460
+          ],
+          "tint": "relief"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            73,
+            0
+          ],
+          "size": [
+            12,
+            6,
+            460
+          ],
+          "tint": "relief"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            73,
+            0
+          ],
+          "size": [
+            12,
+            6,
+            460
+          ],
+          "tint": "relief"
+        },
+        {
+          "kind": "box",
+          "at": [
+            240,
+            73,
+            0
+          ],
+          "size": [
+            12,
+            6,
+            460
+          ],
+          "tint": "relief"
+        }
+      ],
+      "palette": {
+        "base": "#99704d",
+        "relief": "#654932"
+      },
+      "tags": [
+        "art",
+        "rubbing",
+        "wood",
+        "relief"
+      ]
+    }
+  },
+  "text": {
+    "card": "A fixed wood block with raised grain: lay paper on it and rub its grain.",
+    "art": "art",
+    "relief": "relief",
+    "rubbing_source": "rubbing block"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "relief",
+      "rubbing_source"
+    ]
+  }
+}

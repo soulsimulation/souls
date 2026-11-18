@@ -1,0 +1,21 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:saucer",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 400] }
+  },
+  "slots": {
+    "cup": { "admits": "thing", "kinds": ["eden:cup"], "most": 1, "at_mm": [0, 15, 0], "fits_mm": [90, 100, 90] }
+  },
+  "geometry": { "bounds_mm": [150, 15, 150] },
+  "forms": {},
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:saucer" },
+  "text": {
+    "card": "A saucer: a cup stands on it, and nothing else does."
+  },
+  "card": { "text": "card" }
+}

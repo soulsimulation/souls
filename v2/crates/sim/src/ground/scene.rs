@@ -5,13 +5,14 @@
 //! The field numbers and kind names are N1's import (#2649, `v2/tools/import-eden/src/lib.rs`), which N2's test world (#2650) shares;
 //! `tests/ground.rs` checks that they are equal to the importer's.
 
+use i_overlay::core::overlay_rule::OverlayRule;
 use replica::encode::Value;
-use replica::ids::Id;
+use replica::ids::{Id, Scope, sha256};
 use replica::pose::{Quat, Vec3};
 use replica::tree::{Handle, Tree};
 use replica::world_model::plain;
 
-use super::STEP;
+use super::{P, STEP, ccw, op};
 
 pub const F_OPEN_DOOR_LINK: u64 = 7; // a door thing: the doorway link it stands in (N1's F_DOORWAY)
 pub const F_OUTLINE: u64 = 11;
@@ -22,6 +23,8 @@ pub const F_LINE_WIDTH: u64 = 17;
 pub const F_WATER_LEVEL: u64 = 18;
 pub const F_PLACE_OF: u64 = 20;
 pub const F_DOORWAYS: u64 = 22;
+pub const F_TILE_SIZE: u64 = 24;
+pub const F_TILES: u64 = 25;
 
 pub const GROUND: &str = "eden:ground";
 pub const FLOOR: &str = "eden:floor";
@@ -50,7 +53,9 @@ pub struct Solid {
 }
 
 /// A doorway at this node: the link, its centre, a metre along its wall (`along`) and through it (`across`), its
-/// width and the height of the floor it opens from.
+/// width and the height of the floor it opens from. A step ([`steps_of`]) is a doorway of no depth on a low floor's
+/// open edge, `across` pointing off the floor, or between two of a floor's surfaces ([`inner_steps_of`]); its link is
+/// derived ([`step_id`]), never a link of the tree.
 #[derive(Clone, Debug)]
 pub struct Doorway {
     pub link: Id,
@@ -59,6 +64,7 @@ pub struct Doorway {
     pub across: Xz,
     pub width: i64,
     pub y: i64,
+    pub step: bool,
 }
 
 /// A water on the open ground: its own outline (a ring, or a line and a width) and its level, kept for N11 (#2735).
@@ -87,6 +93,153 @@ pub struct Scene {
     /// The outlines of the open ground's other named places (a square, a park): open ground, which they only widen
     /// the extent of, so an empty square is cut as well as one with things on it.
     pub areas: Vec<Vec<Xz>>,
+}
+
+/// The open ground's terrain (N1b, #3197), read from its node's `F_TILE_SIZE` and `F_TILES` (N1's import, byte for
+/// byte as exported): square tiles of `side` µm, each with (n + 1)² heights at side / n spacing, sampled bilinearly,
+/// and n² cells, each with a class byte (today's media codes, which the engine does not name). Read on demand, so a
+/// [`Scene`] that has no use for the heights does not copy them. A point off every tile has no terrain (`None`).
+#[derive(Clone, Default)]
+pub struct Terrain {
+    pub side: i64,
+    tiles: std::collections::HashMap<(i64, i64), Tile>,
+}
+
+#[derive(Clone)]
+struct Tile {
+    /// Samples a side, n + 1.
+    n: usize,
+    /// (n + 1)² heights, µm: a row of x for each z.
+    heights: Vec<i64>,
+    /// n² class bytes, the same order.
+    classes: Vec<u8>,
+}
+
+impl std::fmt::Debug for Terrain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Terrain({} tiles of {} µm)", self.tiles.len(), self.side)
+    }
+}
+
+/// The cell of a tile holding a point: the tile, the cell's column and row, and the point's offset into the cell (µm).
+struct At<'a> {
+    tile: &'a Tile,
+    i: usize,
+    j: usize,
+    u: i64,
+    v: i64,
+}
+
+impl Terrain {
+    /// The terrain of node `id` (the open ground), or `None` when it holds none.
+    pub fn of(tree: &Tree, id: Id) -> Result<Option<Terrain>, String> {
+        let n = tree
+            .node(tree.handle(id).ok_or("no such node")?)
+            .ok_or("no such node")?;
+        let (Some(side), Some(rows)) = (
+            n.fields().get(&F_TILE_SIZE).and_then(int),
+            n.fields().get(&F_TILES),
+        ) else {
+            return Ok(None);
+        };
+        let side = side * 1000;
+        if side <= 0 {
+            return Err("a terrain tile of no size".into());
+        }
+        let mut tiles = std::collections::HashMap::new();
+        for r in row(rows) {
+            let [tx, tz, Value::Bytes(h), Value::Bytes(c)] = row(r) else {
+                return Err("a terrain tile is [tx, tz, heights, classes]".into());
+            };
+            let k = (int(tx).ok_or("a tile's tx")?, int(tz).ok_or("a tile's tz")?);
+            let n = c.len().isqrt();
+            if n == 0 || n * n != c.len() || h.len() != (n + 1) * (n + 1) * 4 {
+                return Err("a terrain tile's heights and classes do not agree".into());
+            }
+            let heights = h
+                .chunks_exact(4)
+                .map(|b| i64::from(i32::from_le_bytes([b[0], b[1], b[2], b[3]])) * 1000)
+                .collect();
+            let tile = Tile {
+                n,
+                heights,
+                classes: c.clone(),
+            };
+            tiles.insert(k, tile);
+        }
+        Ok(Some(Terrain { side, tiles }))
+    }
+
+    /// The cell holding (x, z), µm. A point on a tile's far edge, with no tile beyond, is on the tile's last cell.
+    fn at(&self, x: i64, z: i64) -> Option<At<'_>> {
+        let key = |p: i64| p.div_euclid(self.side);
+        let (mut tx, mut tz) = (key(x), key(z));
+        if !self.tiles.contains_key(&(tx, tz)) && x.rem_euclid(self.side) == 0 {
+            tx -= 1;
+        }
+        if !self.tiles.contains_key(&(tx, tz)) && z.rem_euclid(self.side) == 0 {
+            tz -= 1;
+        }
+        let tile = self.tiles.get(&(tx, tz))?;
+        let cell = self.side / tile.n as i64;
+        let (fx, fz) = (x - tx * self.side, z - tz * self.side);
+        let last = tile.n as i64 - 1;
+        let (i, j) = ((fx / cell).min(last), (fz / cell).min(last));
+        Some(At {
+            tile,
+            i: i as usize,
+            j: j as usize,
+            u: fx - i * cell,
+            v: fz - j * cell,
+        })
+    }
+
+    /// The heights at a cell's four corners, µm: (i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1).
+    fn corners(a: &At) -> [i64; 4] {
+        let w = a.tile.n + 1;
+        let h = |i: usize, j: usize| a.tile.heights[j * w + i];
+        [
+            h(a.i, a.j),
+            h(a.i + 1, a.j),
+            h(a.i, a.j + 1),
+            h(a.i + 1, a.j + 1),
+        ]
+    }
+
+    /// The ground's height at (x, z), µm: bilinear between the four samples of the cell holding it, as today's
+    /// `Terrain.sample` reads a tile, rounded to the nearest micrometre.
+    pub fn height_at(&self, x: i64, z: i64) -> Option<i64> {
+        let a = self.at(x, z)?;
+        let s = i128::from(self.side / a.tile.n as i64);
+        let [h00, h10, h01, h11] = Self::corners(&a).map(i128::from);
+        let (u, v) = (i128::from(a.u), i128::from(a.v));
+        let sum = h00 * (s - u) * (s - v) + h10 * u * (s - v) + h01 * (s - u) * v + h11 * u * v;
+        let d = s * s;
+        i64::try_from((sum + d / 2).div_euclid(d)).ok()
+    }
+
+    /// The slope of the cell holding (x, z): its mean rise across x and across z, combined, in parts per million
+    /// (1,000,000 is a rise of a metre over a metre).
+    pub fn slope_at(&self, x: i64, z: i64) -> Option<i64> {
+        let a = self.at(x, z)?;
+        let s = self.side / a.tile.n as i64;
+        let [h00, h10, h01, h11] = Self::corners(&a);
+        // Twice the mean rise over the cell's width, scaled to parts per million.
+        let gx = i128::from(h10 - h00 + h11 - h01) * 500_000 / i128::from(s);
+        let gz = i128::from(h01 - h00 + h11 - h10) * 500_000 / i128::from(s);
+        i64::try_from((gx * gx + gz * gz).isqrt()).ok()
+    }
+
+    /// The class byte of the cell holding (x, z).
+    pub fn class_at(&self, x: i64, z: i64) -> Option<u8> {
+        let a = self.at(x, z)?;
+        a.tile.classes.get(a.j * a.tile.n + a.i).copied()
+    }
+
+    /// The tiles held.
+    pub fn tiles(&self) -> usize {
+        self.tiles.len()
+    }
 }
 
 /// A rigid move from one frame to another, micrometres (T4's integer arithmetic).
@@ -275,7 +428,9 @@ fn things_below(
                 Some(c) => s.covers.extend(c),
                 None => {
                     let thing = n.parent().and_then(|p| tree.handle(p)).ok_or("a floor")?;
-                    f.extend(surfaces_of(tree, h, &xform_to(tree, thing, frame)?)?);
+                    let x = xform_to(tree, thing, frame)?;
+                    f.extend(surfaces_of(tree, h, &x)?);
+                    s.doorways.extend(steps_of(tree, h, &x, &x)?);
                 }
             }
             continue;
@@ -364,10 +519,167 @@ fn doorways_at(tree: &Tree, ends: &[Handle], frame: Handle, s: &mut Scene) -> Re
                 across: [ac.x, ac.z],
                 width,
                 y: at.y,
+                step: false,
             });
         }
     }
     Ok(())
+}
+
+/// A step's link: derived, never minted, so that the floor's scene and the open ground's name the same step. Its
+/// scope is the first 16 bytes of the SHA-256 of a label and the floor's id; its counter is the edge's number.
+pub fn step_id(floor: Id, edge: u64) -> Id {
+    let mut input = b"souls:step\0".to_vec();
+    input.extend_from_slice(&floor.scope().0);
+    input.extend_from_slice(&floor.counter().to_be_bytes());
+    let h = sha256(&input);
+    let mut scope = [0u8; 16];
+    scope.copy_from_slice(&h[..16]);
+    Id::new(Scope(scope), edge).expect("an edge's number is below 2^53")
+}
+
+/// Whether `p` lies inside the ring `r` (µm, crossing count, exact on integers).
+fn inside(r: &[Xz], p: Xz) -> bool {
+    let mut c = false;
+    for k in 0..r.len() {
+        let (a, b) = (r[k], r[(k + 1) % r.len()]);
+        if (a[1] > p[1]) != (b[1] > p[1]) {
+            let lhs = i128::from(p[0] - a[0]) * i128::from(b[1] - a[1]);
+            let rhs = i128::from(b[0] - a[0]) * i128::from(p[1] - a[1]);
+            if (b[1] > a[1] && lhs < rhs) || (b[1] < a[1] && lhs > rhs) {
+                c = !c;
+            }
+        }
+    }
+    c
+}
+
+/// The steps off the floor `floor` of a thing standing on the open ground: each edge of the outline of its surfaces
+/// (their union, in the thing's frame) where the surface it bounds lies within [`STEP`] of the open ground's height
+/// (`to_ground` moves the thing's frame into the ground's; the ground is at 0 until N11, #2735, brings terrain): a
+/// porch's front, an arcade's open side. Each is a doorway of no depth on the edge, moved into the scene's frame by
+/// `x`; N3 cuts its passage as a doorway's, less the boxes, so a wall or a rail along an edge leaves nothing to cross.
+fn steps_of(
+    tree: &Tree,
+    floor: Handle,
+    x: &Xform,
+    to_ground: &Xform,
+) -> Result<Vec<Doorway>, String> {
+    let id = tree.node(floor).ok_or("a node that is gone")?.id();
+    let own = surfaces_of(tree, floor, &Xform::IDENTITY)?;
+    // The surfaces are whole millimetres (N1), so the grid holds them exactly.
+    let grid = |p: &Xz| P::new((p[0] / 1000) as i32, (p[1] / 1000) as i32);
+    let rings: Vec<Vec<P>> = own
+        .iter()
+        .map(|s| ccw(s.ring.iter().map(grid).collect()))
+        .collect();
+    let mut out = Vec::new();
+    let mut edge = 0u64;
+    for c in op(&rings, &[], OverlayRule::Union).iter().flatten() {
+        for k in 0..c.len() {
+            let (a, b) = (c[k], c[(k + 1) % c.len()]);
+            let n = edge;
+            edge += 1;
+            let (ex, ez) = (i64::from(b.x - a.x), i64::from(b.y - a.y));
+            let len = (ex * ex + ez * ez).isqrt();
+            if len == 0 {
+                continue;
+            }
+            let mid = [
+                (i64::from(a.x) + i64::from(b.x)) * 500,
+                (i64::from(a.y) + i64::from(b.y)) * 500,
+            ];
+            // The floor lies on the edge's left (outer rings counter-clockwise, holes clockwise): its surface is the
+            // highest holding the point 2 mm that way.
+            let into = [mid[0] - ez * 2000 / len, mid[1] + ex * 2000 / len];
+            let Some(y) = own
+                .iter()
+                .filter(|s| inside(&s.ring, into))
+                .map(|s| s.y)
+                .max()
+            else {
+                continue;
+            };
+            if on_plane(to_ground, mid, y)?.y.abs() > STEP * 1000 {
+                continue;
+            }
+            let at = on_plane(x, mid, y)?;
+            let turn = |v: [i64; 2]| {
+                x.rot
+                    .rotate(Vec3::new(v[0], 0, v[1]))
+                    .map(|r| [r.x, r.z])
+                    .map_err(|e| format!("{e:?}"))
+            };
+            out.push(Doorway {
+                link: step_id(id, n),
+                at: [at.x, at.z],
+                along: turn([ex * 1_000_000 / len, ez * 1_000_000 / len])?,
+                across: turn([ez * 1_000_000 / len, -ex * 1_000_000 / len])?,
+                width: len * 1000,
+                y: at.y,
+                step: true,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Where an inner step's link counters start ([`inner_steps_of`]), above any outline edge's number.
+const INNER: u64 = 1 << 40;
+
+/// The steps inside a floor: where two of its surfaces share a stretch of edge (within 2 mm of one line, at least
+/// 10 mm long) and lie apart in height by no more than [`STEP`], what a body steps over (a bridge's deck, its quads
+/// each 100 to 145 mm above the last). Each is a doorway of no depth on that stretch, at the height between the two,
+/// whose link joins the floor to itself (N4 reads both its ends on the floor's patch). Its link is derived as a step
+/// off the floor's outline is ([`step_id`]), counted from [`INNER`]. Surfaces of one height are one surface already;
+/// surfaces further apart are joined only by a stair.
+fn inner_steps_of(floor: Id, own: &[Surface]) -> Vec<Doorway> {
+    let mut out = Vec::new();
+    let mut k = INNER;
+    for (i, s) in own.iter().enumerate() {
+        for t in &own[i + 1..] {
+            let dy = (s.y - t.y).abs();
+            if dy == 0 || dy > STEP * 1000 {
+                continue;
+            }
+            for e in 0..s.ring.len() {
+                let (a, b) = (s.ring[e], s.ring[(e + 1) % s.ring.len()]);
+                let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+                let len = (ex * ex + ez * ez).isqrt();
+                if len == 0 {
+                    continue;
+                }
+                for f in 0..t.ring.len() {
+                    let (c, d) = (t.ring[f], t.ring[(f + 1) % t.ring.len()]);
+                    // Off the line through a and b, and along it from a, µm.
+                    let off =
+                        |p: Xz| (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])) / len;
+                    let on =
+                        |p: Xz| (ex * i128::from(p[0] - a[0]) + ez * i128::from(p[1] - a[1])) / len;
+                    if off(c).abs() > 2_000 || off(d).abs() > 2_000 {
+                        continue;
+                    }
+                    let (lo, hi) = (on(c).min(on(d)).max(0), on(c).max(on(d)).min(len));
+                    if hi - lo < 10_000 {
+                        continue;
+                    }
+                    let at = |u: i128| [a[0] + (ex * u / len) as i64, a[1] + (ez * u / len) as i64];
+                    let unit = |v: i128| (v * 1_000_000 / len) as i64;
+                    out.push(Doorway {
+                        link: step_id(floor, k),
+                        at: at((lo + hi) / 2),
+                        along: [unit(ex), unit(ez)],
+                        across: [unit(ez), -unit(ex)],
+                        width: (hi - lo) as i64,
+                        y: (s.y + t.y) / 2,
+                        step: true,
+                    });
+                    k += 1;
+                }
+            }
+        }
+    }
+    out
 }
 
 impl Scene {
@@ -386,13 +698,20 @@ impl Scene {
                     return Err("a floor not at its building's origin".into());
                 }
                 let thing = n.parent().and_then(|p| tree.handle(p)).ok_or("a floor")?;
+                // The open ground the thing stands on, when no floor lies between (as the ground takes footprints).
+                let mut on_ground = None;
                 let mut up = Some(thing);
                 while let Some(a) = up {
-                    if kind_of(tree, a) == GROUND {
-                        if cover_of(tree, h, a)?.is_some() {
-                            return Err("ground-cover: walked as the open ground".into());
+                    match kind_of(tree, a).as_str() {
+                        GROUND => {
+                            if cover_of(tree, h, a)?.is_some() {
+                                return Err("ground-cover: walked as the open ground".into());
+                            }
+                            on_ground = Some(a);
+                            break;
                         }
-                        break;
+                        FLOOR => break,
+                        _ => {}
                     }
                     up = tree
                         .node(a)
@@ -407,6 +726,12 @@ impl Scene {
                 let mut ends = vec![h];
                 ends.extend(tree.children(h).ok_or("a floor")?.iter().copied());
                 doorways_at(tree, &ends, thing, &mut s)?;
+                s.doorways.extend(inner_steps_of(id, &s.surfaces));
+                if let Some(g) = on_ground {
+                    let to_ground = xform_to(tree, thing, g)?;
+                    s.doorways
+                        .extend(steps_of(tree, h, &Xform::IDENTITY, &to_ground)?);
+                }
             }
             GROUND => {
                 s.open = true;

@@ -32,7 +32,8 @@ node tools/entry/asks.mjs --json     # the same as one JSON line
 - `chain`: the steps in order. A step is one of:
   - a form: `{"this", "form", "args"}`, where `this` is `me` or a thing, and an argument that names a thing uses its name;
     `carry` or `push` (with `souls`) names the thing moved, and `place` (`at`, `thing`, `anchor`, `facing`) where it is
-    put, so the format's rules for moving and placing are asked too;
+    put, so the format's rules for moving and placing are asked too; a slot argument the step does not name, described
+    by a selector of the thing's own free slots, is the first free one ("go on the swings" takes a free swing);
   - a line said: `{"say": "<what, in a few words>"}`;
   - a read of the copy: `{"read": "<thing>", "field": "<a state field, or stock>"}`, for a question;
   - a choice: `{"any": [[...], [...]]}`, for an open-ended request: expressible when any one chain is.
