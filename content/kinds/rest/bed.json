@@ -2,13 +2,168 @@
   "format": "souls-entry/1",
   "kind": "eden:bed",
   "owner": "thing",
-  "geometry": { "bounds_mm": [1400, 500, 2000] },
-  "areas": {
-    "mattress": { "allows": { "lie": "on", "sit": "edge" } }
+  "state": {
+    "covers": {
+      "n": 1,
+      "type": "enum",
+      "values": ["turned_down", "pulled_up"],
+      "default": "turned_down",
+      "audience": { "rule": "everyone" }
+    }
   },
-  "looks": { "model": "look:bed" },
+  "links": { "sleeper": { "n": 1, "from": "body", "most": 2, "audience": { "rule": "everyone" } } },
+  "points": {
+    "left_side": { "role": "stand", "at_mm": [-1035, 0, -100], "yaw_mdeg": 90000 },
+    "right_side": { "role": "stand", "at_mm": [1035, 0, -100], "yaw_mdeg": 270000 },
+    "foot": { "role": "grip", "at_mm": [0, 520, 900] }
+  },
+  "slots": {
+    "left": { "admits": "body", "posture": "lie", "most": 1, "at_mm": [-360, 500, -100], "stand": "left_side" },
+    "right": { "admits": "body", "posture": "lie", "most": 1, "at_mm": [360, 500, -100], "stand": "right_side" }
+  },
+  "geometry": { "bounds_mm": [1470, 960, 2060] },
+  "forms": {
+    "lie": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "side": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "side" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "side" } }, { "step": "sit", "slot": { "arg": "side" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "side" }, "event": "lay_down" },
+        { "change": "link", "link": "sleeper", "from": "actor", "event": "lying_in" }
+      ]
+    },
+    "sleep": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "side": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "side" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "side" } }, { "step": "sit", "slot": { "arg": "side" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "side" }, "event": "fell_asleep" },
+        { "change": "link", "link": "sleeper", "from": "actor", "event": "lying_in" },
+        { "change": "set", "field": "covers", "to": "pulled_up", "event": "covers_pulled_up" }
+      ]
+    },
+    "get_up": {
+      "who": { "link": "sleeper" },
+      "starts": "act",
+      "needs": [{ "need": "linked", "link": "sleeper" }],
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "sleeper", "from": "actor", "event": "got_up" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_by" }
+      ]
+    },
+    "get_under_covers": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "side": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "side" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "side" } }, { "step": "sit", "slot": { "arg": "side" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "side" }, "event": "got_into_bed" },
+        { "change": "link", "link": "sleeper", "from": "actor", "event": "lying_in" },
+        { "change": "set", "field": "covers", "to": "pulled_up", "event": "covers_pulled_up" }
+      ]
+    },
+    "make": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "unlinked", "link": "sleeper" }, { "need": "within_reach", "point": "foot" }],
+      "steps": [{ "step": "walk_to", "point": "foot" }, { "step": "move", "move": "press", "at": "foot" }],
+      "effects": [{ "change": "set", "field": "covers", "to": "turned_down", "event": "bed_made" }]
+    }
+  },
+  "areas": { "mattress": { "allows": { "lie": "on", "sit": "edge" } } },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:bed",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [0, 105, 0],
+          "polygon": [[-735, -1010], [735, -1010], [735, 1010], [-735, 1010]],
+          "h": 190,
+          "tint": "frame"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 315, 20],
+          "polygon": [[-695, -965], [695, -965], [695, 965], [-695, 965]],
+          "h": 170,
+          "tint": "linen"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 240, -1030],
+          "polygon": [[-735, -20], [735, -20], [735, 20], [-735, 20]],
+          "h": 720,
+          "tint": "frame"
+        },
+        {
+          "kind": "extrude",
+          "at": [-360, 505, -750],
+          "polygon": [[-285, -155], [285, -155], [285, 155], [-285, 155]],
+          "h": 90,
+          "tint": "linen"
+        },
+        {
+          "kind": "extrude",
+          "at": [360, 505, -750],
+          "polygon": [[-285, -155], [285, -155], [285, 155], [-285, 155]],
+          "h": 90,
+          "tint": "linen"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 500, 350],
+          "polygon": [[-715, -585], [715, -585], [715, 585], [-715, 585]],
+          "h": 40,
+          "tint": "quilt",
+          "role": "lid",
+          "pivot": [0, 500, 350]
+        },
+        { "kind": "cyl", "at": [-670, 50, -945], "r": 35, "h": 100, "segments": 6, "r2": 28, "tint": "frame" },
+        { "kind": "cyl", "at": [670, 50, -945], "r": 35, "h": 100, "segments": 6, "r2": 28, "tint": "frame" },
+        { "kind": "cyl", "at": [-670, 50, 945], "r": 35, "h": 100, "segments": 6, "r2": 28, "tint": "frame" },
+        { "kind": "cyl", "at": [670, 50, 945], "r": 35, "h": 100, "segments": 6, "r2": 28, "tint": "frame" }
+      ],
+      "round": 15,
+      "palette": { "frame": "#9a6b43", "linen": "#ece3cf", "quilt": "#3f7f86" },
+      "tags": ["furniture", "bed", "sleep"]
+    },
+    "table": [
+      {
+        "part": "lid",
+        "field": "covers",
+        "do": "scale",
+        "axis": "z",
+        "at": { "turned_down": 1000, "pulled_up": 1310 }
+      },
+      { "part": "lid", "field": "covers", "do": "slide", "axis": "z", "at": { "turned_down": 0, "pulled_up": -180 } }
+    ]
+  },
   "text": {
-    "card": "A bed to lie on, or to sit on the edge of.",
+    "card": "A double bed with two places to lie and sleep, a quilt and two pillows.",
     "furniture": "furniture",
     "sleep": "sleep"
   },

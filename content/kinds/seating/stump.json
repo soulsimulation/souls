@@ -1,0 +1,84 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:stump",
+  "owner": "thing",
+  "state": {},
+  "points": { "front": { "role": "stand", "at_mm": [0, 0, 839], "yaw_mdeg": 180000 } },
+  "slots": { "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 0], "stand": "front" } },
+  "geometry": { "bounds_mm": [1075, 521, 1079] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:stump",
+    "shape": {
+      "shapes": [
+        { "kind": "cyl", "at": [0, 220, 0], "r": 320, "h": 440, "segments": 8, "r2": 280, "tint": "bark" },
+        { "kind": "cyl", "at": [0, 445, 0], "r": 270, "h": 10, "segments": 8, "tint": "ring" },
+        {
+          "kind": "cone",
+          "at": [350, 75, 0],
+          "r": 80,
+          "h": 335,
+          "segments": 4,
+          "tint": "bark",
+          "pitch": 116540,
+          "yaw": 90012
+        },
+        {
+          "kind": "cone",
+          "at": [-10, 75, 350],
+          "r": 80,
+          "h": 335,
+          "segments": 4,
+          "tint": "bark",
+          "pitch": 116540,
+          "yaw": -1662
+        },
+        {
+          "kind": "cone",
+          "at": [-349, 75, -20],
+          "r": 80,
+          "h": 335,
+          "segments": 4,
+          "tint": "bark",
+          "pitch": 116540,
+          "yaw": -93335
+        },
+        {
+          "kind": "cone",
+          "at": [31, 75, -349],
+          "r": 80,
+          "h": 335,
+          "segments": 4,
+          "tint": "bark",
+          "pitch": 116540,
+          "yaw": 174981
+        }
+      ],
+      "round": 20,
+      "palette": { "bark": "#5a3d22", "ring": "#c9a77a" },
+      "tags": ["stump", "wood", "forest", "seat", "prop"]
+    }
+  },
+  "text": {
+    "card": "A tree stump with roots and rings, rooted where it stands; one can sit on it.",
+    "seat": "seat",
+    "stump": "stump"
+  },
+  "card": { "text": "card", "category": "seat", "synonyms": ["stump"] }
+}

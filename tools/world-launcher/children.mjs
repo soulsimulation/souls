@@ -541,8 +541,14 @@ export class ChildPool {
     let port;
     try { port = await this.pickPort(k.port ?? k.world.port, k.slug); }
     catch (e) {
-      if (!(await this.unloadForRoom(k.slug))) throw e;
-      for (let i = 0; ; i++) { try { port = await this.pickPort(k.port ?? k.world.port, k.slug); break; } catch (again) { if (i >= 50) throw again; await sleep(100); } }  // the sleeper's socket takes a moment to close
+      try {
+        if (!(await this.unloadForRoom(k.slug))) throw e;
+        for (let i = 0; ; i++) { try { port = await this.pickPort(k.port ?? k.world.port, k.slug); break; } catch (again) { if (i >= 50) throw again; await sleep(100); } }  // the sleeper's socket takes a moment to close
+      } catch (none) {
+        // no free port is no room, as above: the world stays unloaded (never 'starting' with no process, which nothing
+        // retries and which counts as loading) and loads when asked again, its alarm's next pass included
+        k.status = 'stopped'; none.code ??= 'capacity'; this.capacityRefusedAt = Date.now(); this.o.onChange?.(k.slug); throw none;
+      }
     }
     k.port = port; k.asleep = false; k.healthPort = await this.pickHealthPort(k, port); await this.pickReadPorts(k, port);
     if (k.abandoned) { k.status = 'failed'; this.o.onChange?.(k.slug); throw new Error(`world ${k.slug}: boot abandoned for a handover`); }

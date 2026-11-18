@@ -1,0 +1,25 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pin_board",
+  "owner": "thing",
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [1500, 2100, 240] },
+  "children": {
+    "note": { "kind": "eden:pinned_note", "most": 6 }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:pin_board",
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[-700,1000,0],"size":[60,2000,60],"tint":"post"},{"kind":"box","at":[700,1000,0],"size":[60,2000,60],"tint":"post"},{"kind":"box","at":[0,1350,30],"size":[1340,900,40],"tint":"frame"},{"kind":"box","at":[0,1350,52],"size":[1260,820,6],"tint":"cork"},{"kind":"box","at":[0,1880,0],"size":[1500,40,240],"tint":"roof","roll":0}],"palette":{"post":"#5b4a3a","frame":"#6b4a2e","cork":"#b88a5a","roof":"#4a3b30"},"tags":["board","signage","object"]}
+  },
+  "text": {
+    "card": "A roofed notice board where Souls pin short signed notes, up to six at once.",
+    "board": "board",
+    "notice_board": "notice board",
+    "pinboard": "pinboard"
+  },
+  "card": { "text": "card", "category": "board", "synonyms": ["notice_board", "pinboard"] }
+}

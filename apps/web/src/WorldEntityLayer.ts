@@ -454,7 +454,7 @@ export class WorldEntityLayer {
   private plantTweens = new Map<string, { from: PlantLook; to: PlantLook; t0: number; dur: number }>();
   private pours = new Map<string, THREE.Points>();
   /** Entry 43: steam over kettles and cups of tea (world space, placed each frame); the depicted tick their heat is read at. */
-  private steamers = new Map<string, { pts: THREE.Points; kind: 'kettle' | 'cup'; lamp?: THREE.Mesh }>();
+  private steamers = new Map<string, { pts: THREE.Points; kind: 'kettle' | 'cup' | 'part'; lamp?: THREE.Mesh; part?: THREE.Object3D }>();
   private depictedTick = Infinity;
   private figures = new Map<string, Figure>();
   private now = 0;
@@ -1133,7 +1133,10 @@ export class WorldEntityLayer {
       const d = this.drawn.get(id), e = this.model.entities.get(id);
       if (!d || !e || d.removing || !d.obj.visible) { setSteam(st.pts, 0); if (st.lamp) st.lamp.visible = false; continue; }
       const s = d.obj.scale.x, q = d.obj.quaternion;
-      if (st.kind === 'kettle') {
+      if (st.kind === 'part') {   // SA-D2: a looks-table steam row: the plume leaves the named part, as strong as the row says
+        const v = (st.part?.userData.lookSteam as number | undefined) ?? 0;
+        st.pts.position.copy(st.part?.getWorldPosition(_vs) ?? d.obj.position); setSteam(st.pts, v / 1000, _vs.set(0, 0.02, 0));
+      } else if (st.kind === 'kettle') {
         const k = kettleHeat(e.state, this.depictedTick), o = KETTLE_SPOUT;
         st.pts.position.set(o[0], o[1], o[2]).multiplyScalar(s).applyQuaternion(q).add(d.obj.position);
         const jet = _vs.set(Math.cos(KETTLE_SPOUT_ANGLE), Math.sin(KETTLE_SPOUT_ANGLE), 0).applyQuaternion(q).multiplyScalar(0.3 + 0.5 * k.steam);
@@ -1663,13 +1666,18 @@ export class WorldEntityLayer {
       if (jets?.userData.waterJet === 'stream') this.tapJets.set(e.id, jets as THREE.Points); else this.tapJets.delete(e.id); }
     // Entry 34: a growing planter's plants, eased from how they were last drawn to what the state now asks for; a can
     // carried by its handle (a `carry` slot) is posed from the hand every frame, so never instanced
-    if (isGrowingDef(def as never)) {
-      const look = plantLookOf(e.state, def as never), shown = this.plantShown.get(e.id) ?? look;
+    if (isGrowingDef(def as never) || built.userData.lookGrowth !== undefined) {   // SA-D2: or a looks-table grow row
+      // a table plant (SA-D2) wilts only by its wilt row and keeps its soil part whole
+      const look = plantLookOf(e.state, def as never); if (built.userData.lookGrowth !== undefined) { look.g = Math.min(4, (built.userData.lookGrowth as number) / 1000); look.w = Math.min(1, ((built.userData.lookWilt as number | undefined) ?? 0) / 1000); look.m = 1; } const shown = this.plantShown.get(e.id) ?? look;
       built.add(plantGroup(seedOf(e.id), shown)); delete built.userData.instanceKey; setPatch(built, shown.m); this.growing.add(e.id);
       if (!sameLook(shown, look)) this.plantTweens.set(e.id, { from: shown, to: look, t0: this.now, dur: lookSeconds(shown, look) * 1000 }); else this.plantTweens.delete(e.id);
       this.plantShown.set(e.id, shown);
     }
     { const grip = (def as unknown as { slots?: { kind: string; p: number[] }[] }).slots?.find((x) => x.kind === 'carry'); if (grip) { built.userData.handleGrip = [...grip.p]; delete built.userData.instanceKey; } }
+    // SA-D2: a thing whose looks table has a steam row steams from that part (by the table, not by what the thing is called)
+    { const sp = built.userData.lookSteamPart as THREE.Object3D | undefined, old = this.steamers.get(e.id);
+      if (sp) { delete built.userData.instanceKey; if (old) old.part = sp; else { const pts = steam('cup'); this.thingsGroup.add(pts); this.steamers.set(e.id, { pts, kind: 'part', part: sp }); } }
+      else if (old?.kind === 'part') { old.pts.removeFromParent(); (old.pts.material as THREE.Material).dispose(); this.steamers.delete(e.id); } }
     // Entry 43: a kettle is filled through its lid and pours from its spout (a can: its filler and its rose); kettles and
     // cups of tea steam (a plume placed each frame from their state and the depicted tick)
     if (isKettleDef(def as never)) built.userData.vessel = { opening: KETTLE_OPENING, outlet: KETTLE_SPOUT, angle: KETTLE_SPOUT_ANGLE, pour: 'spout' };

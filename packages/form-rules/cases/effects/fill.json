@@ -1,6 +1,6 @@
 {
   "format": "souls-effect-cases/1",
-  "about": "The published kettle is filled at a tap, then boiled: fill sets water to cold from the default state.",
+  "about": "The published kettle is filled at a tap: fill moves water out of the tap and into the empty kettle until it is full, 1700 g, in one batch whose amounts sum to zero. The tap holds its own water and gives it up.",
   "cases": [
     {
       "name": "kettle_fill_from_empty",
@@ -19,17 +19,23 @@
           "receipt": "rc1",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "k1", "field": "water", "n": 1, "to": "cold" }],
-            "events": [{ "event": "filled", "node": "k1", "changes": [0] }]
+            "changes": [
+              { "change": "set", "node": "t1", "field": "water", "n": 1, "to": 999998300, "by": -1700 },
+              { "change": "set", "node": "k1", "field": "water", "n": 1, "to": 1700, "by": 1700 }
+            ],
+            "events": [{ "event": "eden:filled", "node": "k1", "changes": [0, 1] }]
           }
         },
         {
           "act": { "this": "k1", "form": "fill", "args": { "from": "t1" } },
           "receipt": "rc2",
-          "expect": { "verdict": "no", "reason": "field_differs" }
+          "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "fix": { "form": "pour" } }
         }
       ],
-      "after": { "k1": { "kind": "eden:kettle", "fields": { "water": "cold" } } }
+      "after": {
+        "t1": { "kind": "eden:tap", "fields": { "water": 999998300 } },
+        "k1": { "kind": "eden:kettle", "fields": { "water": 1700 } }
+      }
     }
   ]
 }

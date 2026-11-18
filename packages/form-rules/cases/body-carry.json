@@ -1,0 +1,125 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:humanoid's pick_up, put and push: a body carries, pushes and sets down a thing argument. How the thing moves is its kind's section 18; a thing the form walks to is reached by the walk when it is in the actor's place. Another body has no motion, so it is never picked up or pushed.",
+  "cases": [
+    {
+      "name": "pick_up_saucer",
+      "act": {"this": "b1", "form": "pick_up", "args": {"thing": "s1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "s1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "s1": {"kind": "eden:saucer"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "pick_up_hands_full",
+      "act": {"this": "b1", "form": "pick_up", "args": {"thing": "s1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "s1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": "s2", "right": "s3"}}, "s1": {"kind": "eden:saucer"}, "s2": {"kind": "eden:saucer"}, "s3": {"kind": "eden:saucer"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
+    },
+    {
+      "name": "pick_up_chair_one_hand_free",
+      "act": {"this": "b1", "form": "pick_up", "args": {"thing": "c1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "c1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": "s2", "right": null}}, "s2": {"kind": "eden:saucer"}, "c1": {"kind": "eden:chair"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {"thing": "c1", "how": "two_hands", "hands": 2}, "fix": {"step": "put"}}
+    },
+    {
+      "name": "pick_up_chair_two_hands_free",
+      "act": {"this": "b1", "form": "pick_up", "args": {"thing": "c1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "c1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "c1": {"kind": "eden:chair"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "pick_up_table_is_pushed",
+      "act": {"this": "b1", "form": "pick_up", "args": {"thing": "t1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "t1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "t1": {"kind": "eden:table"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "moves_by", "need": 1, "detail": {"thing": "t1", "by": "carry", "how": "pushed_by_one"}, "fix": null}
+    },
+    {
+      "name": "pick_up_window_is_fixed",
+      "act": {"this": "b1", "form": "pick_up", "args": {"thing": "w1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "w1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "w1": {"kind": "eden:window"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "moves_by", "need": 1, "detail": {"thing": "w1", "by": "carry", "how": "fixed"}, "fix": null}
+    },
+    {
+      "name": "pick_up_another_body_is_refused",
+      "act": {"this": "b1", "form": "pick_up", "args": {"thing": "b2"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "b2"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "b2": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "motion_unsaid", "need": 1, "detail": {"thing": "b2", "by": "carry"}, "fix": null}
+    },
+    {
+      "name": "pick_up_saucer_in_another_place",
+      "act": {"this": "b1", "form": "pick_up", "args": {"thing": "s1x"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "room2": {"loose": ["s1x"]}, "s1x": {"kind": "eden:saucer"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "out_of_reach", "need": 2, "detail": {"thing": "s1x"}, "fix": {"step": "walk_to", "thing": "s1x"}}
+    },
+    {
+      "name": "put_held_saucer_on_table",
+      "act": {"this": "b1", "form": "put", "args": {"thing": "s1", "at": "on", "anchor": "t1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "t1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": "s1", "right": null}}, "s1": {"kind": "eden:saucer"}, "t1": {"kind": "eden:table"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "put_saucer_not_held",
+      "act": {"this": "b1", "form": "put", "args": {"thing": "s1", "at": "on", "anchor": "t1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "s1", "t1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "s1": {"kind": "eden:saucer"}, "t1": {"kind": "eden:table"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_held", "need": 0, "detail": {"thing": "s1"}, "fix": {"step": "take", "thing": "s1"}}
+    },
+    {
+      "name": "push_table",
+      "act": {"this": "b1", "form": "push", "args": {"thing": "t1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "t1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "t1": {"kind": "eden:table"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "push_bicycle_wheeled",
+      "act": {"this": "b1", "form": "push", "args": {"thing": "y1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "y1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "y1": {"kind": "eden:bicycle"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "push_hands_full",
+      "act": {"this": "b1", "form": "push", "args": {"thing": "t1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "t1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": "s2", "right": "s3"}}, "s2": {"kind": "eden:saucer"}, "t1": {"kind": "eden:table"}, "s3": {"kind": "eden:saucer"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
+    },
+    {
+      "name": "push_saucer_is_carried",
+      "act": {"this": "b1", "form": "push", "args": {"thing": "s1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "s1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "s1": {"kind": "eden:saucer"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "moves_by", "need": 1, "detail": {"thing": "s1", "by": "push", "how": "one_hand"}, "fix": null}
+    },
+    {
+      "name": "push_bench_takes_two_souls",
+      "act": {"this": "b1", "form": "push", "args": {"thing": "n1"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "n1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "n1": {"kind": "eden:bench"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "needs_souls", "need": 1, "detail": {"thing": "n1", "by": "push", "how": "two_souls", "souls": 2}, "fix": null}
+    },
+    {
+      "name": "push_another_body_is_refused",
+      "act": {"this": "b1", "form": "push", "args": {"thing": "b2"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "b2"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "b2": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "motion_unsaid", "need": 1, "detail": {"thing": "b2", "by": "push"}, "fix": null}
+    },
+    {
+      "name": "push_table_in_another_place",
+      "act": {"this": "b1", "form": "push", "args": {"thing": "t1x"}},
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1"]}, "b1": {"kind": "eden:humanoid", "hands": {"left": null, "right": null}}, "room2": {"loose": ["t1x"]}, "t1x": {"kind": "eden:table"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "out_of_reach", "need": 2, "detail": {"thing": "t1x"}, "fix": {"step": "walk_to", "thing": "t1x"}}
+    }
+  ]
+}

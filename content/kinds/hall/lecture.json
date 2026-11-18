@@ -81,6 +81,8 @@
       "effects": [{ "change": "remove", "what": "this", "event": "lapsed" }]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {
       "round": 6,

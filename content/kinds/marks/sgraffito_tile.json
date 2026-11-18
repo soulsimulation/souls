@@ -1,0 +1,512 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sgraffito_tile",
+  "owner": "thing",
+  "state": {
+    "coat": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "none",
+        "red",
+        "blue",
+        "gold"
+      ],
+      "default": "none",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "portions": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cuts": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        600
+      ],
+      "yaw_mdeg": 180000
+    },
+    "face": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        40,
+        0
+      ]
+    },
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        40,
+        200
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      600,
+      50,
+      400
+    ]
+  },
+  "forms": {
+    "coat_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "portions",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "face"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "coat",
+          "to": "red",
+          "event": "coated"
+        },
+        {
+          "change": "set",
+          "field": "portions",
+          "by": -1,
+          "event": "portion_used"
+        },
+        {
+          "change": "set",
+          "field": "cuts",
+          "to": 0,
+          "event": "cuts_covered"
+        }
+      ]
+    },
+    "coat_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "portions",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "face"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "coat",
+          "to": "blue",
+          "event": "coated"
+        },
+        {
+          "change": "set",
+          "field": "portions",
+          "by": -1,
+          "event": "portion_used"
+        },
+        {
+          "change": "set",
+          "field": "cuts",
+          "to": 0,
+          "event": "cuts_covered"
+        }
+      ]
+    },
+    "coat_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "portions",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "face"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "coat",
+          "to": "gold",
+          "event": "coated"
+        },
+        {
+          "change": "set",
+          "field": "portions",
+          "by": -1,
+          "event": "portion_used"
+        },
+        {
+          "change": "set",
+          "field": "cuts",
+          "to": 0,
+          "event": "cuts_covered"
+        }
+      ]
+    },
+    "scratch": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "coat",
+          "not": "none"
+        },
+        {
+          "need": "state",
+          "field": "cuts",
+          "at_most": 5
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "face"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cuts",
+          "by": 1,
+          "event": "scratched"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:sgraffito_tile",
+    "table": [
+      {
+        "part": "fill",
+        "field": "coat",
+        "do": "show",
+        "at": {
+          "none": 0,
+          "red": 1,
+          "blue": 1,
+          "gold": 1
+        }
+      },
+      {
+        "part": "fill",
+        "field": "coat",
+        "do": "tint",
+        "at": {
+          "none": "#eee3c9",
+          "red": "#c8423c",
+          "blue": "#2f62b0",
+          "gold": "#d9a72a"
+        }
+      },
+      {
+        "part": "lid",
+        "field": "cuts",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          0,
+          6
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            20,
+            0
+          ],
+          "size": [
+            600,
+            40,
+            400
+          ],
+          "tint": "base"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            42,
+            0
+          ],
+          "size": [
+            580,
+            4,
+            380
+          ],
+          "tint": "coat",
+          "role": "fill"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            46,
+            -80
+          ],
+          "size": [
+            120,
+            3,
+            90
+          ],
+          "tint": "cut",
+          "role": "lid",
+          "pivot": [
+            -270,
+            46,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            46,
+            -80
+          ],
+          "size": [
+            120,
+            3,
+            90
+          ],
+          "tint": "cut",
+          "role": "lid",
+          "pivot": [
+            -270,
+            46,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            46,
+            -80
+          ],
+          "size": [
+            120,
+            3,
+            90
+          ],
+          "tint": "cut",
+          "role": "lid",
+          "pivot": [
+            -270,
+            46,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            46,
+            80
+          ],
+          "size": [
+            120,
+            3,
+            90
+          ],
+          "tint": "cut",
+          "role": "lid",
+          "pivot": [
+            -270,
+            46,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            46,
+            80
+          ],
+          "size": [
+            120,
+            3,
+            90
+          ],
+          "tint": "cut",
+          "role": "lid",
+          "pivot": [
+            -270,
+            46,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            46,
+            80
+          ],
+          "size": [
+            120,
+            3,
+            90
+          ],
+          "tint": "cut",
+          "role": "lid",
+          "pivot": [
+            -270,
+            46,
+            0
+          ]
+        }
+      ],
+      "palette": {
+        "base": "#eee3c9",
+        "coat": "#ffffff",
+        "cut": "#cdb98f"
+      },
+      "tags": [
+        "art",
+        "ceramic",
+        "tile",
+        "item"
+      ]
+    }
+  },
+  "text": {
+    "card": "An ivory tile with three coats of glaze: coat it, then scratch the coat away.",
+    "art": "art",
+    "sgraffito": "sgraffito",
+    "scratch_tile": "scratch tile",
+    "howto_scratch": "Coat the tile in red, blue or gold (three coats in all), then scratch up to six windows through to the ivory. A new coat covers the old cuts."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "sgraffito",
+      "scratch_tile"
+    ]
+  },
+  "howtos": {
+    "scratch": {
+      "text": "howto_scratch",
+      "steps": [
+        {
+          "form": "coat_blue"
+        },
+        {
+          "form": "scratch"
+        }
+      ]
+    }
+  }
+}

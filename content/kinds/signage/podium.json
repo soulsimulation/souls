@@ -1,0 +1,230 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:podium",
+  "owner": "thing",
+  "links": {
+    "speaker": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "behind": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        160,
+        -500
+      ],
+      "yaw_mdeg": 0
+    },
+    "top": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1120,
+        40
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1140,
+      1206,
+      840
+    ]
+  },
+  "forms": {
+    "step_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "unlinked",
+          "link": "speaker"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "behind"
+        }
+      ],
+      "effects": [
+        {
+          "change": "link",
+          "link": "speaker",
+          "from": "actor",
+          "event": "took_the_podium"
+        }
+      ]
+    },
+    "step_down": {
+      "who": {
+        "link": "speaker"
+      },
+      "starts": "act",
+      "needs": [
+        {
+          "need": "linked",
+          "link": "speaker"
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "unlink",
+          "link": "speaker",
+          "from": "actor",
+          "event": "left_the_podium"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:podium",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            30,
+            0
+          ],
+          "polygon": [
+            [
+              -570,
+              -420
+            ],
+            [
+              570,
+              -420
+            ],
+            [
+              570,
+              420
+            ],
+            [
+              -570,
+              420
+            ]
+          ],
+          "h": 100,
+          "tint": "step"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            175,
+            0
+          ],
+          "polygon": [
+            [
+              -270,
+              -195
+            ],
+            [
+              270,
+              -195
+            ],
+            [
+              270,
+              195
+            ],
+            [
+              -270,
+              195
+            ]
+          ],
+          "h": 890,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1120,
+            40
+          ],
+          "size": [
+            680,
+            50,
+            500
+          ],
+          "round": 0,
+          "tint": "top",
+          "pitch": 14324
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            750,
+            232
+          ],
+          "size": [
+            400,
+            400,
+            10
+          ],
+          "round": 0,
+          "tint": "badge"
+        }
+      ],
+      "round": 30,
+      "palette": {
+        "step": "#b9b3a6",
+        "wood": "#6e4a30",
+        "top": "#9a6b46",
+        "badge": "#c79a3a"
+      },
+      "tags": [
+        "civic",
+        "podium",
+        "speech",
+        "venue",
+        "prop"
+      ]
+    }
+  },
+  "text": {
+    "card": "A speaker's podium on a low step: step up to speak, one at a time.",
+    "civic": "civic",
+    "rostrum": "rostrum",
+    "stand": "speaker stand",
+    "howto_speech": "Step up to the podium, speak, then step down."
+  },
+  "card": {
+    "text": "card",
+    "category": "civic",
+    "synonyms": [
+      "rostrum",
+      "stand"
+    ]
+  },
+  "howtos": {
+    "speech": {
+      "text": "howto_speech",
+      "steps": [
+        {
+          "form": "step_up"
+        },
+        {
+          "form": "step_down"
+        }
+      ]
+    }
+  }
+}

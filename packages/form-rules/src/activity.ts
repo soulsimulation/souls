@@ -38,7 +38,7 @@
 // member cannot part while present (refused `still_present`). The end date is its `ends` field: its own world form
 // removes it at that time, members or not; `lapse` then releases every member first. Nothing waits for a time.
 
-import { apply, effects, parentOf, type Change, type Done, type Event, type Refused, type State } from './effects.ts';
+import { apply, effects, parentOf, type Change, type Done, type Event, type Refused, type State, type Unknown } from './effects.ts';
 import { crossing, seesAudience, whoMay, type Audience, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
@@ -156,7 +156,7 @@ const namespace = (entry: Entry) => (entry.kind.includes(':') ? entry.kind.slice
 /** The stage field's value on a node, its default when never set. */
 const stageOf = (entry: Entry, node: { fields?: Record<string, unknown> }, field: string): unknown => (has(node.fields, field) ? node.fields![field] : entry.state![field].default);
 
-export type Joined = (Done & { role: string }) | Refused | Verdict | WhoVerdict | LeaveBad;
+export type Joined = (Done & { role: string }) | Refused | Verdict | WhoVerdict | LeaveBad | Unknown;
 /** Join a standing activity: the form that links the actor as a member, with no place (membership is not being there). */
 export function join(input: Input & { receipt: string }): Joined {
   const who = whoMay(input);
@@ -185,7 +185,8 @@ function sittingBegins(entry: Activity, standing: Standing, nodes: State['nodes'
   return setStage(entry, standing, id, standing.sitting, 'sitting_began', done);
 }
 
-export type Entered = (Done & { role: string; place: SlotPlace }) | Refused | Verdict | WhoVerdict | PlaceVerdict;
+/** `Unknown` is effects' answer for a draw the world has not made yet: passed through unchanged, as effects gives it. */
+export type Entered = (Done & { role: string; place: SlotPlace }) | Refused | Verdict | WhoVerdict | PlaceVerdict | Unknown;
 
 /** Enter the role a form enters: who may (SA-F7a), then the place, then the form's needs and effects (SA-F2b). */
 export function enter(input: Input & { receipt: string }): Entered {
@@ -214,7 +215,8 @@ export function leaving(entry: Activity, form: string): { role: string } | { bad
 
 export type LeaveBad = { verdict: 'no'; reason: 'bad_input' | 'still_present'; detail: Record<string, unknown> };
 /** `ended` is 1 when this leave ended the activity, which is then removed; else 0. */
-export type Left = (Done & { role: string; ended: 0 | 1 }) | Refused | Verdict | WhoVerdict | LeaveBad;
+/** `Unknown` is effects' answer for a draw the world has not made yet: passed through unchanged, as `enter` does. */
+export type Left = (Done & { role: string; ended: 0 | 1 }) | Refused | Verdict | WhoVerdict | LeaveBad | Unknown;
 
 /**
  * Leave the role a form leaves: who may (SA-F7a), the form's own needs and effects (SA-F2b), then the role's rule for
@@ -278,7 +280,7 @@ export function leave(input: Input & { receipt: string }): Left {
   return check.ok ? result : bad(check.reason, { change: check.change });
 }
 
-export type Lapsed = (Done & { released: number }) | Refused | Verdict | LeaveBad;
+export type Lapsed = (Done & { released: number }) | Refused | Verdict | LeaveBad | Unknown;
 /**
  * The end date of an activity, as the engine's timer runs its world form (`starts: "timer"`, whose need is the time and
  * nothing else, so members do not hold it): the form's own effects, with every member released first. Each is unlinked

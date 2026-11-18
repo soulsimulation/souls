@@ -26,9 +26,9 @@
               { "change": "set", "node": "h1", "field": "phase", "n": 1, "to": "speaking" }
             ],
             "events": [
-              { "event": "took_the_lectern", "node": "h1", "changes": [0] },
-              { "event": "stood_at_the_lectern", "node": "h1", "changes": [1] },
-              { "event": "lecture_began", "node": "h1", "changes": [2] }
+              { "event": "eden:took_the_lectern", "node": "h1", "changes": [0] },
+              { "event": "eden:stood_at_the_lectern", "node": "h1", "changes": [1] },
+              { "event": "eden:lecture_began", "node": "h1", "changes": [2] }
             ]
           }
         },
@@ -43,8 +43,8 @@
               { "change": "reparent", "node": "b2", "to": { "node": "k1", "slot": "left" } }
             ],
             "events": [
-              { "event": "joined_the_audience", "node": "h1", "changes": [0] },
-              { "event": "sat_down", "node": "h1", "changes": [1] }
+              { "event": "eden:joined_the_audience", "node": "h1", "changes": [0] },
+              { "event": "eden:sat_down", "node": "h1", "changes": [1] }
             ]
           }
         },
@@ -59,8 +59,8 @@
               { "change": "reparent", "node": "b2", "to": { "node": "room" } }
             ],
             "events": [
-              { "event": "left_the_audience", "node": "h1", "changes": [0] },
-              { "event": "stood_up", "node": "h1", "changes": [1] }
+              { "event": "eden:left_the_audience", "node": "h1", "changes": [0] },
+              { "event": "eden:stood_up", "node": "h1", "changes": [1] }
             ]
           }
         },
@@ -74,8 +74,8 @@
               { "change": "reparent", "node": "b1", "to": { "node": "room" } }
             ],
             "events": [
-              { "event": "stepped_down", "node": "h1", "changes": [0] },
-              { "event": "left_the_lectern", "node": "h1", "changes": [1] }
+              { "event": "eden:stepped_down", "node": "h1", "changes": [0] },
+              { "event": "eden:left_the_lectern", "node": "h1", "changes": [1] }
             ]
           }
         }
@@ -93,7 +93,7 @@
         }
       },
       "do": [
-        { "act": { "this": "h1", "form": "lapse" }, "receipt": "hl5", "expect": { "verdict": "yes", "events": [{ "event": "lapsed", "node": "h1", "changes": [0] }] } }
+        { "act": { "this": "h1", "form": "lapse" }, "receipt": "hl5", "expect": { "verdict": "yes", "events": [{ "event": "eden:lapsed", "node": "h1", "changes": [0] }] } }
       ],
       "after": { "h1": null, "room": { "loose": ["b1"] } }
     }

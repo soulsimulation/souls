@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chooseContext, createHome, findHome, openHome, selectSoul, slugOf, splitSecrets } from './soul/home.mjs';
-import { withBlocks } from './soul/inline.mjs';
+import { MODULES, withBlocks } from './soul/inline.mjs';
 import { guideHomeHead } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
@@ -59,8 +59,15 @@ const cliIn = (cwd, env = {}) => (...args) => new Promise((resolve) => {
 const exited = async (pid) => { for (let i = 0; i < 500; i++) { try { process.kill(pid, 0); } catch { return; } await new Promise((r) => setTimeout(r, 10)); } };
 const tree = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? tree(join(dir, e.name)) : e.isSocket() ? [] : [join(dir, e.name)]);
 
-test('inline: eden.mjs carries the current home.mjs', () => {
-  assert.equal(withBlocks(readFileSync(cli, 'utf8')), readFileSync(cli, 'utf8'), 'stale: run node tools/world-launcher/soul/inline.mjs');
+// A PR need not carry the rebuilt file (CI, the release stamp and eden-sync.yml build it), so this checks that inlining
+// succeeds, not that the committed copy is current: every module gets its block and the result is valid JavaScript.
+test('inline: inline.mjs builds eden.mjs from its modules', (t) => {
+  const built = withBlocks(readFileSync(cli, 'utf8'));
+  for (const [file] of MODULES) assert.ok(built.includes(`// <inline ${file.split('/').pop()}>`), `no block for ${file}`);
+  const out = join(tmp(t), 'eden.mjs');
+  writeFileSync(out, built);
+  const r = gitRun(process.execPath, ['--check', out], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
 });
 
 test('discovery: upward like git, stops at the home folder, nearest wins, SOULS_HOME overrides', (t) => {

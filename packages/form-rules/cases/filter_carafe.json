@@ -1,0 +1,192 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:filter_carafe (from #1828). One portion of filtered water (0 or 1) that goes with it. Taken with a hand free; drained with empty hands, losing the portion ('This same carafe is already empty; filter one portion first.'). It is filled by the filter, which the rules do not name as a fix from here.",
+ "cases": [
+  {
+   "name": "take_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "take"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "take_hands_full",
+   "act": {
+    "this": "c1",
+    "form": "take"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 0,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "drain_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "drain"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:filter_carafe",
+      "fields": {
+       "water": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "drain_already_empty",
+   "act": {
+    "this": "c1",
+    "form": "drain"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "already_empty"
+   }
+  },
+  {
+   "name": "drain_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "drain"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:filter_carafe",
+      "fields": {
+       "water": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "hands_and_table"
+   }
+  }
+ ]
+}

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":159,"group":"getting-around","words":"look out over the harbour","obvious":3,"things":{"pier":"eden:pier","boat":"eden:sailboat"},"chain":[{"this":"me","form":"go_to","args":{"place":"pier"}},{"this":"me","form":"look_at","args":{"target":"boat"}}]}

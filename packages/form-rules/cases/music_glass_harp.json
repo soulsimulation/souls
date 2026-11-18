@@ -1,0 +1,195 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:glass_harp (from #1814). Three glasses, each holding 0 to 300 g of water, and a reservoir, with 600 g between them (the original's six units of 100 g) that are never made or lost: tuning moves water between the reservoir and a glass. With empty hands ('Put down held objects before tuning or striking the glasses.') a Soul pours grams into a glass in three seconds, refused when the reservoir has fewer ('Not enough water remains in this reservoir; lower another glass to recover water first.') or the glass would pass 300 g; lowers water back; or strikes a glass, which sounds it. The original tuned a glass to a chosen level in one act; here the act names how many grams move, so the water stays one transfer.",
+  "cases": [
+    {
+      "name": "harp_fill_1_every_need_met",
+      "act": {"this":"g1","form":"fill_1","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "harp_fill_1_hands_full",
+      "act": {"this":"g1","form":"fill_1","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "harp_fill_1_reservoir_short",
+      "act": {"this":"g1","form":"fill_1","args":{"grams":200}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":100,"glass_1":200,"glass_2":100,"glass_3":200}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"says":"not_enough_water"}
+    },
+    {
+      "name": "harp_fill_1_glass_full",
+      "act": {"this":"g1","form":"fill_1","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":100,"glass_1":300,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_room","need":2,"says":"glass_full"}
+    },
+    {
+      "name": "harp_lower_1_every_need_met",
+      "act": {"this":"g1","form":"lower_1","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":300,"glass_1":100,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "harp_lower_1_hands_full",
+      "act": {"this":"g1","form":"lower_1","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":300,"glass_1":100,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "harp_lower_1_glass_low",
+      "act": {"this":"g1","form":"lower_1","args":{"grams":200}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":300,"glass_1":100,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"says":"glass_low"}
+    },
+    {
+      "name": "harp_strike_1_every_need_met",
+      "act": {"this":"g1","form":"strike_1"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "harp_strike_1_hands_full",
+      "act": {"this":"g1","form":"strike_1"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "harp_fill_2_every_need_met",
+      "act": {"this":"g1","form":"fill_2","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "harp_fill_2_hands_full",
+      "act": {"this":"g1","form":"fill_2","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "harp_fill_2_reservoir_short",
+      "act": {"this":"g1","form":"fill_2","args":{"grams":200}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":100,"glass_1":200,"glass_2":100,"glass_3":200}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"says":"not_enough_water"}
+    },
+    {
+      "name": "harp_fill_2_glass_full",
+      "act": {"this":"g1","form":"fill_2","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":100,"glass_2":300,"glass_1":100,"glass_3":100}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_room","need":2,"says":"glass_full"}
+    },
+    {
+      "name": "harp_lower_2_every_need_met",
+      "act": {"this":"g1","form":"lower_2","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":300,"glass_1":100,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "harp_lower_2_hands_full",
+      "act": {"this":"g1","form":"lower_2","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":300,"glass_1":100,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "harp_lower_2_glass_low",
+      "act": {"this":"g1","form":"lower_2","args":{"grams":200}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":300,"glass_1":100,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"says":"glass_low"}
+    },
+    {
+      "name": "harp_strike_2_every_need_met",
+      "act": {"this":"g1","form":"strike_2"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "harp_strike_2_hands_full",
+      "act": {"this":"g1","form":"strike_2"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "harp_fill_3_every_need_met",
+      "act": {"this":"g1","form":"fill_3","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "harp_fill_3_hands_full",
+      "act": {"this":"g1","form":"fill_3","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "harp_fill_3_reservoir_short",
+      "act": {"this":"g1","form":"fill_3","args":{"grams":200}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":100,"glass_1":200,"glass_2":100,"glass_3":200}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"says":"not_enough_water"}
+    },
+    {
+      "name": "harp_fill_3_glass_full",
+      "act": {"this":"g1","form":"fill_3","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":100,"glass_3":300,"glass_1":100,"glass_2":100}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_room","need":2,"says":"glass_full"}
+    },
+    {
+      "name": "harp_lower_3_every_need_met",
+      "act": {"this":"g1","form":"lower_3","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":300,"glass_1":100,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "harp_lower_3_hands_full",
+      "act": {"this":"g1","form":"lower_3","args":{"grams":100}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":300,"glass_1":100,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "harp_lower_3_glass_low",
+      "act": {"this":"g1","form":"lower_3","args":{"grams":200}},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp","fields":{"reservoir":300,"glass_1":100,"glass_2":100,"glass_3":100}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"says":"glass_low"}
+    },
+    {
+      "name": "harp_strike_3_every_need_met",
+      "act": {"this":"g1","form":"strike_3"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "harp_strike_3_hands_full",
+      "act": {"this":"g1","form":"strike_3"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:glass_harp"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    }
+  ]
+}
