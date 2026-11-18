@@ -175,8 +175,7 @@ fn route_of(me: &replica::host::Seen, taken: u64) -> Option<(u64, Vec<Leg>)> {
 
 /// A body's waiting mark, `[link, distance]`, or none.
 fn mark_of(host: &dyn Host, body: Id) -> Option<(Id, i64)> {
-    let s = host.read(body)?;
-    let Value::Array(a) = s.fields.get(&F_WAITING)? else {
+    let Value::Array(a) = host.field(body, F_WAITING)? else {
         return None;
     };
     let [l, g] = a.as_slice() else { return None };
@@ -397,10 +396,7 @@ impl Skill for Route {
         let mut pushers: Vec<(Near, i64)> = Vec::new();
         if !shoulder && !calm {
             for n in &near {
-                let settled = self.spot
-                    && host
-                        .read(n.id)
-                        .is_some_and(|s| s.fields.contains_key(&F_SETTLED));
+                let settled = self.spot && host.field(n.id, F_SETTLED).is_some();
                 if (wait || mark_of(host, n.id).is_none()) && !settled {
                     pushers.push((*n, dist(n)));
                 }

@@ -99,6 +99,10 @@ pub trait Host {
     fn body(&self) -> Id;
     /// A node: the body as of this tick, any other as of the previous tick.
     fn read(&self, node: Id) -> Option<Seen>;
+    /// One field of a node, as [`Host::read`] shows it: a world may answer without copying the rest of the node.
+    fn field(&self, node: Id, field: u64) -> Option<Value> {
+        self.read(node)?.fields.remove(&field)
+    }
     /// An answer about geometry, in integers, or none.
     fn ask(&self, q: &Ask) -> Option<Answer>;
     /// A timer on the body, due `after` microseconds of world time from now, named for what it is for (T6 rule 15).
