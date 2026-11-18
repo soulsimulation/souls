@@ -163,6 +163,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:camp_linen",
     "table": [

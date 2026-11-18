@@ -49,6 +49,8 @@
   "geometry": {
     "bounds_mm": [1100, 1020, 700]
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:cloth_dye_bench",
     "table": [

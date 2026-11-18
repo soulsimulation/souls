@@ -126,6 +126,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:reed_basket_frame",
     "table": [
