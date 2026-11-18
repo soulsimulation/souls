@@ -63,3 +63,12 @@ test('A2: a stock is a count that runs out and refills only by a stated rate', (
   e = copy(shelf); e.stock.books.price = 3; refused(e, 'stock.books.price', 'unknown key');
   e = copy(shelf); e.stock.books.carries = []; refused(e, 'stock.books.carries');
 });
+
+test('a stock\'s take form is paid by its count: the check gate finds no "makes" in it, and still finds one in any other free make', async () => {
+  const C = await import('./check.mjs');
+  const makes = e => C.checkText(JSON.stringify(e)).findings.filter(f => f.rule === 'makes').map(f => f.path);
+  for (const [name, e] of Object.entries(doc.kinds)) assert.deepEqual(makes(e), [], name);
+  const e = copy(doc.kinds['test:bookshelf']);
+  e.forms.conjure = {...copy(e.forms.take_book), needs: [], effects: [{...e.forms.take_book.effects[0]}]};
+  assert.deepEqual(makes(e), ['forms.conjure.effects.0'], 'a make outside the take form is still paid for or found');
+});
