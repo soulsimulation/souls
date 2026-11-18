@@ -165,7 +165,7 @@ export function mainCiState(runs = [], isFull = () => false) {
 }
 
 /** A run checked everything: started by hand (ci.yml then scopes to full), every qualify job ran and succeeded, or the
- * merge queue's run at the same sha did (ci-main.mjs: the push ran `merge-group-covered` instead). */
+ * merge queue's run at the same sha did (older runs only, ci-main.mjs: the push ran `merge-group-covered` instead). */
 export function fullScope(run, jobs) {
   if (run.event === 'workflow_dispatch' || coveredByQueue(jobs)) return true;
   const ok = new Set(jobs.filter(j => j.conclusion === 'success').map(j => j.name));

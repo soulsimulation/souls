@@ -144,13 +144,15 @@ therefore **windowed**:
   The heavy jobs are skipped and `ci-ok` fails with "Full CI deferred". A deferred `ci-ok` is a real failure, so
   skipped heavy jobs never count toward merging, and branch protection still requires a green `ci-ok`. Docs or
   tools-only PRs select no heavy jobs and are never deferred.
-- **The `heavy: true` legs run once, in the merge queue.** A `pull_request` run never runs the `qualify` legs that
-  `ci-scope.mjs` marks `heavy: true` (`packages`, `launcher`, the server shards, `soul-actions`), even inside the window.
-  Every change reaches main through a merge-group run, which selects them by the same path map and must pass them, so
-  running them on the PR as well only doubled the load. On the PR, `ci-ok` passes when every job that ran passed: the
-  light legs the paths pick (`types-web`, `web`, `client-cli`, `native`, `latency`, `docs-reference`, `soul-tools`), the
-  smoke, `scope` and `repo`. A PR whose paths pick only heavy legs has nothing of its own to run and is never deferred.
-  The step summary lists the legs left to the queue. The decision is `heavyInQueue` in `.github/scripts/ci-scope.mjs`.
+- **The `heavy: true` legs run after the merge and before a release, not per change** (Gene, 18 Nov). Neither a
+  `pull_request` run nor a merge-group run runs the `qualify` legs that `ci-scope.mjs` marks `heavy: true`
+  (`packages`, which includes the walk, `launcher`, the server shards and `soul-actions`), even inside the window. They
+  run in the push run on main after each merge (see CI on main below), and the remote gate runs everything before a
+  release. On a PR and in the queue, `ci-ok` passes when every job that ran passed: the light legs the paths pick
+  (`types-web`, which includes the bundle check, `web`, `client-cli`, `native`, `latency`, `docs-reference`,
+  `soul-tools`), the smoke, `scope` and `repo`. A change whose paths pick only heavy legs has nothing of its own to run
+  and is never deferred. The step summary lists the legs left to after the merge. The decision is `heavyAfterMerge` in
+  `.github/scripts/ci-scope.mjs`.
 - **To request full CI**, add `ci:run` (or `merge:ready`) to a ready PR. `ci.yml` takes the `labeled` event, so that starts
   a fresh `pull_request` run with the window open. The merge queue reads required checks from that event: a green dispatch
   doesn't clear a deferred `ci-ok`. The run queues behind a CI run already going for the same PR and cancels nothing, and it
@@ -163,7 +165,8 @@ therefore **windowed**:
   own `ci.yml`. It runs the heavy legs, and reads only earlier requested runs as green at the head. It tells you the
   result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
-  which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
+  which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group
+  since `main`, without the heavy legs, and
   `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
 
 **Low-risk paths.** When every file a PR or a merge group changes sits under `tools/entry/`, `content/kinds/`,
@@ -173,22 +176,23 @@ bundle). It runs `repo`, `soul-tools` (the entry tests, the form-rules tests and
 `content/kinds`) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
 keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
 and the usual path map decides; a changelog fragment beside any other file still selects every job. The list is
-`LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after a low-risk merge group runs in full, since the
-group did not run every `qualify` job.
+`LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after any merge group runs in full.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
 `merge:ready` once a head's `ci-ok` is green, and remove `ci:run` from PRs that leave the window. A PR labelled
 `merge:ready` straight from a deferred head still works: the labeled run replaces the deferred one, and the train reads
-the replaced failure as stale (#909). But the train's 15-minute head wait is shorter than a server run, so a PR that
+the replaced failure as stale (#909). But the train's 15-minute head wait can be shorter than a PR run, so a PR that
 is behind main can still leave with `needs:rebase`. The decision is `windowFor` and `windowed` in
 `.github/scripts/ci-scope.mjs`.
 
-**CI on main.** The merge queue fast-forwards `main` to the commit its merge-group run tested, so the push carries
-the same sha. When a successful merge-group `ci` run at that sha passed every `qualify` job, the push run does no heavy
-work: it runs `scope`, `repo` and the marker job `merge-group-covered`, and `ci-ok` passes on those. Any other push to
-main (a direct push, a revert, a merge group whose paths selected only some jobs) runs everything. The marker counts as
-full scope for the merge train's `fullScope`, and the release gate's CI evidence then reads the merge-group run's jobs.
-The decision is `queueCovered` in `.github/scripts/ci-main.mjs`.
+**CI on main.** Every push to main runs everything, heavy legs included: it is the check after the merge, and it
+blocks nothing, since the merge queue doesn't read main's CI. Push runs share one concurrency group, `ci-main`, and a
+newer push cancels an older one still running, so when merges land quickly only the newest main commit is tested. A
+cancelled run says nothing: the merge train's `mainCiState` (used only when the merge queue is off) and the release
+gate's CI evidence read the newest completed full push run. A release candidate whose push run was cancelled has no
+heavy-leg evidence, so the remote gate runs those steps itself. Until 18 Nov a push covered by a full merge-group run
+ran the marker job `merge-group-covered` instead; merge-group runs no longer run the heavy legs, so `ci.yml` no longer
+has it, and readers accept the marker only on those older runs (`.github/scripts/ci-main.mjs`).
 
 **Soul Action tests.** `tools/soul-actions/*.test.mjs` runs as the CI job `soul-actions`, about 76 s measured on a
 loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
