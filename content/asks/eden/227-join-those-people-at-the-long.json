@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":227,"group":"with-others","words":"join those people at the long table","obvious":3,"things":{"table":"eden:long_table","chair":"eden:chair"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"chair"}}]}

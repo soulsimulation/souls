@@ -1,9 +1,8 @@
-# Engine v2 (#2635): the Rust workspace (K1, #2638). Every folder under crates/ and tools/ with a Cargo.toml is a
-# member, so a crate added later edits no shared file. CI's `v2` job runs v2/tools/ci.sh on it.
+# Engine v2 (#2635): the Rust workspace (K1, #2638). Every folder under crates/ is a member (each needs a Cargo.toml),
+# so a crate added there edits no shared file. Folders under tools/ hold Node scripts, checks and data too, so only
+# the Rust tool crates are listed here, one by one. CI's `v2` job runs v2/tools/ci.sh on the workspace.
 [workspace]
-members = ["crates/*", "tools/*"]
-# Node packages, not crates (T0, #2639; K14, #2648).
-exclude = ["tools/encoding-vectors", "tools/arch"]
+members = ["crates/*", "tools/bench", "tools/birdseye", "tools/compare-reach", "tools/import-eden", "tools/stall-test", "tools/testworld", "tools/wasm-load"]
 resolver = "3"
 
 [workspace.package]
@@ -24,3 +23,5 @@ panic = "unwind"
 
 [profile.release]
 panic = "unwind"
+# Integer overflow panics in release builds too (the WASM build included), as it does in the tests.
+overflow-checks = true

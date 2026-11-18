@@ -1,0 +1,39 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bench",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "front_left": { "role": "stand", "at_mm": [-450, 0, 450] },
+    "front_right": { "role": "stand", "at_mm": [450, 0, 450] }
+  },
+  "slots": {
+    "left": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-450, 450, 0], "stand": "front_left" },
+    "right": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [450, 450, 0], "stand": "front_right" }
+  },
+  "geometry": { "bounds_mm": [1500, 800, 450] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": { "type": "slot", "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:bench" },
+  "text": {
+    "card": "A wooden bench with room for two to sit side by side.",
+    "seating": "seating",
+    "rest": "rest"
+  },
+  "card": { "text": "card", "category": "seating", "synonyms": ["rest"] }
+}
