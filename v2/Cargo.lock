@@ -7,6 +7,17 @@ name = "bench"
 version = "0.0.0"
 dependencies = [
  "replica",
+ "sim",
+]
+
+[[package]]
+name = "birdseye"
+version = "0.0.0"
+dependencies = [
+ "import-eden",
+ "replica",
+ "sim",
+ "testworld",
 ]
 
 [[package]]
