@@ -1,0 +1,39 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:poll_option",
+  "owner": "thing",
+  "state": {
+    "label": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "vote": { "n": 1, "from": "soul", "most": 500, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "tally": { "role": "contact", "at_mm": [220, 50, 6] }
+  },
+  "geometry": { "bounds_mm": [900, 100, 12] },
+  "forms": {
+    "vote": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "within_reach", "point": "tally" }
+      ],
+      "steps": [{ "step": "move", "move": "slide", "at": "tally" }],
+      "effects": [
+        { "change": "link", "link": "vote", "from": "actor", "event": "voted" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:poll_option",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-200,50,3],"size":[400,60,2],"tint":"label"},{"kind":"box","at":[220,50,3],"size":[300,60,2],"tint":"tally"}],"palette":{"label":"#d9d4c5","tally":"#f6f7f4"},"tags":["board","object"]}
+  },
+  "text": {
+    "card": "One choice on a poll board; a Soul votes for it with a tally mark.",
+    "option": "option"
+  },
+  "card": { "text": "card", "category": "option" }
+}
