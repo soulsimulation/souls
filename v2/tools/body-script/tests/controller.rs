@@ -283,3 +283,102 @@ fn a_skills_motion_change_on_its_own_body_is_refused() {
         staged.emits
     );
 }
+
+/// #3244 A2: the controller writes each input record straight out; its bytes are those of encoding
+/// [`sim::controller::Input::record`], and a body is logged exactly when its input differs from the one last logged.
+/// 400 ticks of seeded inputs on two bodies (negative and wide numbers, every stance, moves, every kind of gaze), each
+/// body touched every tick and often set to what it already had.
+#[test]
+fn a_logged_input_is_the_bytes_of_its_record_and_only_when_it_changed() {
+    use replica::encode::encode;
+    use sim::controller::{Gaze, Input, Stance};
+
+    let g = ground();
+    let surfaces = BTreeMap::from([(ground_id(), ground())]);
+    let mut c = Controller::new();
+    let bodies = [fixture(20), fixture(21)];
+    place(&mut c, &g, bodies[0], humanoid(), 0, 0).unwrap();
+    place(&mut c, &g, bodies[1], humanoid(), 3000, -3000).unwrap();
+    let all = SkillShape {
+        name: name("souls:all"),
+        claims: vec![
+            Want::All(Class::Locomotion),
+            Want::All(Class::Manipulator),
+            Want::All(Class::Gaze),
+        ],
+        blocks: vec![],
+        cancelled_by: vec![],
+    };
+    let drivers = bodies.map(|b| c.claim(b, &all).expect("claimed"));
+    // splitmix64, seeded: the test's own numbers.
+    let mut seed = 3244u64;
+    let mut draw = |n: u64| {
+        seed = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = seed;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        (z ^ (z >> 31)) % n
+    };
+    let far = Id::new(Scope([0x7f; 16]), (1 << 53) - 1).unwrap();
+    let mut last: BTreeMap<Id, Input> = BTreeMap::new();
+    let (mut logged, mut unchanged) = (0, 0);
+    for tick in 0..400i64 {
+        for (b, d) in bodies.iter().zip(drivers) {
+            let part = match draw(6) {
+                // Few values, so a body is often set to what it has.
+                0 => Part::Velocity(
+                    Vec3::new(
+                        (draw(3) as i64 - 1) * 400,
+                        0,
+                        -(draw(2) as i64) * 1_000_000_000_000,
+                    ),
+                    Mode::Surface,
+                ),
+                1 => Part::Facing(Quat::from_yaw_mdeg(draw(4) as i64 * -90_000).unwrap()),
+                2 => Part::Stance([Stance::Stand, Stance::Sit, Stance::Lie][draw(3) as usize]),
+                3 | 4 => {
+                    let hand = ["souls:hand-left", "souls:hand-right"][draw(2) as usize];
+                    let mv = ["souls:pour", "souls:press", "x"].get(draw(4) as usize);
+                    Part::Move(name(hand), mv.map(|m| name(m)))
+                }
+                _ => Part::Gaze(match draw(4) {
+                    0 => Gaze::Ahead,
+                    1 => Gaze::Node(far),
+                    2 => Gaze::Node(bodies[1]),
+                    _ => Gaze::Point(Vec3::new(
+                        -(draw(2) as i64) * 123_456_789,
+                        24,
+                        i64::MIN / 2,
+                    )),
+                }),
+            };
+            c.set(*b, d, part).expect("held");
+        }
+        let at = tick * TICK;
+        let before = c.log().len();
+        c.step(&surfaces, TICK, at);
+        let new = &c.log()[before..];
+        for b in bodies {
+            let input = c.input(b).unwrap();
+            let changed = last.get(&b) != Some(input);
+            let rec = new.iter().find(|l| l.body == b);
+            assert_eq!(rec.is_some(), changed, "tick {tick}: logged iff changed");
+            if let Some(l) = rec {
+                assert_eq!(l.at, at);
+                assert_eq!(
+                    l.bytes,
+                    encode(&input.record(at, b)).unwrap(),
+                    "tick {tick}: the bytes of the record"
+                );
+                last.insert(b, input.clone());
+                logged += 1;
+            } else {
+                unchanged += 1;
+            }
+        }
+    }
+    println!(
+        "A2: {logged} records logged, each the bytes of its record; {unchanged} unchanged inputs not logged"
+    );
+    assert!(logged > 200 && unchanged > 100, "both cases covered");
+}

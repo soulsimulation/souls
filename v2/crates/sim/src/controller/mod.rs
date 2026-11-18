@@ -43,7 +43,7 @@ use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
-use replica::encode::{Name, Value, encode};
+use replica::encode::{Name, Value, write_head};
 use replica::ids::Id;
 use replica::pose::{ControllerInput, Frame, HandOff, Mode, Quat, Support, Vec3};
 use replica::time::Micros;
@@ -171,6 +171,106 @@ impl Input {
         }
         Value::Map(m)
     }
+
+    /// The bytes of [`Input::record`] from key 2 on, written straight out (#3244): the same bytes as encoding the
+    /// record, without building it. They hold the whole input and the body, so two inputs of one body are equal
+    /// exactly when these bytes are.
+    fn write_rest(&self, body: Id, out: &mut Vec<u8>) {
+        let ints = |out: &mut Vec<u8>, v: &[i64]| {
+            write_head(out, 4, v.len() as u64);
+            for n in v {
+                put_int(out, *n);
+            }
+        };
+        write_head(out, 0, 2);
+        put_id(out, body);
+        let v = self.velocity;
+        write_head(out, 0, 3);
+        ints(out, &[v.x, v.y, v.z]);
+        write_head(out, 0, 4);
+        ints(out, &self.facing.parts());
+        write_head(out, 0, 5);
+        write_head(
+            out,
+            0,
+            match self.mode {
+                Mode::Surface => 1,
+            },
+        );
+        write_head(out, 0, 6);
+        write_head(
+            out,
+            0,
+            match self.stance {
+                Stance::Stand => 1,
+                Stance::Sit => 2,
+                Stance::Lie => 3,
+            },
+        );
+        if !self.moves.is_empty() {
+            write_head(out, 0, 7);
+            write_head(out, 4, self.moves.len() as u64);
+            for (r, mv) in &self.moves {
+                write_head(out, 4, 2);
+                put_text(out, r);
+                put_text(out, mv);
+            }
+        }
+        match self.gaze {
+            Gaze::Ahead => {}
+            Gaze::Node(id) => {
+                write_head(out, 0, 8);
+                write_head(out, 5, 2);
+                write_head(out, 0, 1);
+                write_head(out, 0, 2);
+                write_head(out, 0, 2);
+                put_id(out, id);
+            }
+            Gaze::Point(p) => {
+                write_head(out, 0, 8);
+                write_head(out, 5, 2);
+                write_head(out, 0, 1);
+                write_head(out, 0, 3);
+                write_head(out, 0, 2);
+                ints(out, &[p.x, p.y, p.z]);
+            }
+        }
+    }
+
+    /// The number of keys in [`Input::record`].
+    fn keys(&self) -> u64 {
+        6 + u64::from(!self.moves.is_empty()) + u64::from(self.gaze != Gaze::Ahead)
+    }
+
+    /// The bytes of `encode(&self.record(at, body))`, given `rest` from [`Input::write_rest`].
+    fn bytes(&self, at: Micros, rest: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(12 + rest.len());
+        write_head(&mut out, 5, self.keys());
+        write_head(&mut out, 0, 1);
+        put_int(&mut out, at);
+        out.extend_from_slice(rest);
+        out
+    }
+}
+
+fn put_int(out: &mut Vec<u8>, n: i64) {
+    match u64::try_from(n) {
+        Ok(u) => write_head(out, 0, u),
+        Err(_) => write_head(out, 1, n.unsigned_abs() - 1),
+    }
+}
+
+fn put_id(out: &mut Vec<u8>, id: Id) {
+    let scope = id.scope().0;
+    write_head(out, 4, 2);
+    write_head(out, 2, scope.len() as u64);
+    out.extend_from_slice(&scope);
+    write_head(out, 0, id.counter());
+}
+
+fn put_text(out: &mut Vec<u8>, t: &Name) {
+    write_head(out, 3, t.as_str().len() as u64);
+    out.extend_from_slice(t.as_str().as_bytes());
 }
 
 fn int(n: i64) -> Value {
@@ -290,7 +390,8 @@ struct Slot {
     claims: Claims,
     moved: Moved,
     input: Input,
-    logged: Option<Input>,
+    /// The last input logged, as its record's bytes from key 2 on ([`Input::write_rest`]); empty before the first.
+    logged: Vec<u8>,
     /// Whether the input may differ from the one logged: set by every change, so an unchanged body costs no compare.
     touched: bool,
     track: Option<Track>,
@@ -422,7 +523,7 @@ impl Controller {
                 claims: Claims::new(family),
                 moved,
                 input,
-                logged: None,
+                logged: Vec::new(),
                 touched: true,
                 track: None,
                 voice: Voice::default(),
@@ -609,6 +710,7 @@ impl Controller {
     /// the mover of the surface it stands on. A body refused here is listed and stays where it was; the others go on.
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {
         let mut out = Stepped::default();
+        let mut rest = Vec::new();
         for (&id, s) in self.bodies.iter_mut() {
             if s.voice.now.as_ref().is_some_and(|(_, ends)| *ends <= at) {
                 s.voice.now = None;
@@ -620,25 +722,18 @@ impl Controller {
                 out.said.push((id, line.clone(), ends));
                 s.voice.now = Some((line, ends));
             }
-            if s.touched && s.logged.as_ref() != Some(&s.input) {
-                match encode(&s.input.record(at, id)) {
-                    Ok(bytes) => self.log.push(Logged {
+            if s.touched {
+                rest.clear();
+                s.input.write_rest(id, &mut rest);
+                if rest != s.logged {
+                    self.log.push(Logged {
                         at,
                         body: id,
-                        bytes,
-                    }),
-                    Err(e) => {
-                        out.refused.push((
-                            id,
-                            Refusal {
-                                name: "encoding",
-                                detail: e.to_string(),
-                            },
-                        ));
-                        continue;
-                    }
+                        bytes: s.input.bytes(at, &rest),
+                    });
+                    // The logged bytes swap in; the old ones' room is the next body's.
+                    std::mem::swap(&mut s.logged, &mut rest);
                 }
-                s.logged = Some(s.input.clone());
             }
             s.touched = false;
             s.moved.pose.orientation = s.input.facing;

@@ -149,7 +149,10 @@ pub fn encode(value: &Value) -> Result<Vec<u8>, Refusal> {
     Ok(out)
 }
 
-fn write_head(out: &mut Vec<u8>, major: u8, arg: u64) {
+/// Writes one head: `major` (0 to 7) and its argument in its shortest form. For a writer that knows its
+/// value's shape and writes it without building a [`Value`] (the controller's input log, #3244); its bytes must equal
+/// [`encode`]'s.
+pub fn write_head(out: &mut Vec<u8>, major: u8, arg: u64) {
     let m = major << 5;
     if arg < 24 {
         out.push(m | arg as u8);
