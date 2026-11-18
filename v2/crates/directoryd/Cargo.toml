@@ -1,0 +1,16 @@
+[package]
+name = "directoryd"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "The directory process (Engine v2, #2635): so far its accounts (W1, #2704)."
+
+[dependencies]
+replica = { path = "../replica" }
+# RS256 signatures (the session check) and the random account and principal ids.
+ring = "0.17"
+# The account store: one SQLite file, with SQLite's online backup for a consistent copy.
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+serde_json = "1"
+# The provider's public keys, fetched over HTTPS when its key id changes.
+ureq = { version = "3", default-features = false, features = ["rustls"] }

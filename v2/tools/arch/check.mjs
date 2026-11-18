@@ -49,6 +49,8 @@ export const ALLOWED = {
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld'],
   worldd: ['replica', 'sim'],
   gatewayd: [],
+  // W1 (#2704): RS256 checks and random ids (ring), the one-file account store (rusqlite), JWKS (serde_json, ureq).
+  directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq'],
 };
 
 const rsFiles = dir => readdirSync(dir, { recursive: true }).filter(f => /\.rs$/.test(f)).map(f => join(dir, f));

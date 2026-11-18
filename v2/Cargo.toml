@@ -1,7 +1,7 @@
 # Engine v2 (#2635): the Rust workspace (K1, #2638). Every folder under crates/ and tools/ with a Cargo.toml is a
 # member, so a crate added later edits no shared file. CI's `v2` job runs v2/tools/ci.sh on it.
 [workspace]
-members = ["crates/*", "tools/*"]
+members = ["crates/*", "tools/*", "tools/scan-ids"]
 # Node packages, not crates (T0, #2639; K14, #2648).
 exclude = ["tools/encoding-vectors", "tools/arch"]
 resolver = "3"
