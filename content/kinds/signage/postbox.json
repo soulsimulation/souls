@@ -1,0 +1,428 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:postbox",
+  "owner": "thing",
+  "state": {
+    "locked": {
+      "n": 1,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "letters": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 200,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        600
+      ],
+      "yaw_mdeg": 180000
+    },
+    "mouth": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1080,
+        230
+      ]
+    },
+    "door": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        550,
+        230
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      560,
+      1490,
+      560
+    ]
+  },
+  "forms": {
+    "post": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "letter": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:letter",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "letter"
+          }
+        },
+        {
+          "need": "state",
+          "field": "letters",
+          "at_most": 199
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "mouth"
+        }
+      ],
+      "effects": [
+        {
+          "change": "remove",
+          "what": {
+            "arg": "letter"
+          },
+          "event": "posted"
+        },
+        {
+          "change": "set",
+          "field": "letters",
+          "by": 1,
+          "event": "letter_in"
+        }
+      ]
+    },
+    "unlock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "locked",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "door"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "locked",
+          "to": false,
+          "event": "unlocked"
+        }
+      ]
+    },
+    "lock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "locked",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "door"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "locked",
+          "to": true,
+          "event": "locked"
+        }
+      ]
+    },
+    "collect": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "letters",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "state",
+          "field": "locked",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "door"
+        }
+      ],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "eden:letter",
+          "into": "actor_hand",
+          "event": "collected"
+        }
+      ]
+    }
+  },
+  "stock": {
+    "post": {
+      "kind": "eden:letter",
+      "count": "letters",
+      "take": "collect",
+      "carries": [
+        "words"
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:postbox",
+    "table": [
+      {
+        "part": "door",
+        "field": "locked",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": 0,
+          "false": -80000
+        },
+        "over_us": 600000
+      }
+    ],
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            50,
+            0
+          ],
+          "r": 280,
+          "h": 100,
+          "segments": 10,
+          "tint": "base"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            100,
+            0
+          ],
+          "profile": [
+            [
+              240,
+              0
+            ],
+            [
+              220,
+              40
+            ],
+            [
+              220,
+              1120
+            ],
+            [
+              270,
+              1160
+            ],
+            [
+              270,
+              1220
+            ],
+            [
+              200,
+              1320
+            ],
+            [
+              80,
+              1380
+            ],
+            [
+              0,
+              1390
+            ]
+          ],
+          "segments": 10,
+          "tint": "paint"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1080,
+            210
+          ],
+          "size": [
+            240,
+            40,
+            40
+          ],
+          "round": 0,
+          "tint": "slot"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            215
+          ],
+          "size": [
+            160,
+            120,
+            20
+          ],
+          "round": 0,
+          "tint": "plate"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            550,
+            215
+          ],
+          "size": [
+            240,
+            500,
+            12
+          ],
+          "round": 0,
+          "tint": "trim",
+          "role": "door",
+          "pivot": [
+            -120,
+            550,
+            215
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            550,
+            225
+          ],
+          "size": [
+            30,
+            60,
+            20
+          ],
+          "round": 0,
+          "tint": "plate"
+        }
+      ],
+      "palette": {
+        "base": "#2b2623",
+        "paint": "#c23a2b",
+        "slot": "#2b2623",
+        "plate": "#f2ead8",
+        "trim": "#a83224"
+      },
+      "tags": [
+        "utility",
+        "comms"
+      ]
+    }
+  },
+  "text": {
+    "card": "A red pillar postbox: post a letter in its slot; unlock it to collect the post.",
+    "post": "post",
+    "pillar_box": "pillar box",
+    "mailbox": "mailbox",
+    "letter_box": "letter box",
+    "howto_post": "Hold a letter and post it through the slot.",
+    "howto_collect": "Unlock the door, collect each letter, then lock it again."
+  },
+  "card": {
+    "text": "card",
+    "category": "post",
+    "synonyms": [
+      "pillar_box",
+      "mailbox",
+      "letter_box"
+    ]
+  },
+  "howtos": {
+    "post": {
+      "text": "howto_post",
+      "steps": [
+        {
+          "form": "post"
+        }
+      ]
+    },
+    "collect": {
+      "text": "howto_collect",
+      "steps": [
+        {
+          "form": "unlock"
+        },
+        {
+          "form": "collect"
+        },
+        {
+          "form": "lock"
+        }
+      ]
+    }
+  }
+}

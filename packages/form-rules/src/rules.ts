@@ -675,12 +675,6 @@ export function crossing(def: Bounds, stored: unknown, level: { at_least?: Int; 
 }
 // timed:end
 
-const isRef = (v: unknown): v is { arg: string } => v !== null && typeof v === 'object' && has(v, 'arg') && typeof (v as { arg: unknown }).arg === 'string';
-/** A value as written, or the value an argument holds. */
-function valueOf(v: unknown, args: Record<string, unknown>): unknown {
-  return isRef(v) ? args[v.arg] : v;
-}
-
 // who:begin. Who may do a form (SA-F7a, #2848): one closed list, shared with Engine v2 F6 (#2771). A form's `who` is a
 // test on links, never on a field: `anyone` (the default: owning does not lock); `holder`, the thing is in one of the
 // actor's hands (holding is a parent); `world`, a form a timer starts, which no Soul's act may do; or
@@ -760,6 +754,11 @@ function placeOf(nodes: Record<string, Node>, id: string): string | null {
     at = parent(at.node);
   }
   return null;
+}
+const isRef = (v: unknown): v is { arg: string } => v !== null && typeof v === 'object' && has(v, 'arg') && typeof (v as { arg: unknown }).arg === 'string';
+/** A value as written, or the value an argument holds. */
+function valueOf(v: unknown, args: Record<string, unknown>): unknown {
+  return isRef(v) ? args[v.arg] : v;
 }
 
 function resolve(ref: unknown, args: Record<string, unknown>): string | null {
