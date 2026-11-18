@@ -9,17 +9,26 @@
 //! - **3, state:** fields by stable number, each `{1: name, 2: type, 3: default, 4: audience}`, and for an `enum`
 //!   `5: [values]`. Types are `bool` (0 or 1), `int`, `duration` (whole microseconds), `enum` and `text`. Numbers are
 //!   whole: the encoding has no floats, so a client and the world never disagree over rounding.
-//! - **5, points:** named places in the thing's frame, `{1: name, 2: [x, y, z] in mm, 3: role}`, the role one of
-//!   `stand`, `grip`, `contact`, `outlet`, or absent.
-//! - **6, slots** and **11, children:** what it admits, as T2 reads them (`v2/docs/world-model.md` rule 5).
+//! - **4, links:** the link types it takes part in, `{1: name, 2: from (a category or a kind), 3: most, 4: most_per}`
+//!   (B17, #3338). [`Kinds::check_link`] reads them: a link's type against the kinds at its ends.
+//! - **5, points:** named places in the thing's frame, `{1: name, 2: [x, y, z] in mm, 3: role, 4: yaw in mdeg}`, the
+//!   role one of `stand`, `grip`, `contact`, `outlet`, `joint`, or absent. A `joint` point is a connector (B17): where
+//!   the part joins another, with `5: its connector kind` and `6: the connector kind it mates with`.
+//! - **6, slots** and **11, children:** what it admits, as T2 reads them (`v2/docs/world-model.md` rule 5). A slot is
+//!   its admit list, or `{1: admit list, 2: [x, y, z] in mm, 3: name}` with its place in the thing's frame (B17).
+//!
+//! A `souls-entry/1` file (`content/kinds`) is turned into this numbered form by [`entry::entry_to_kind`].
 //! - **8, forms:** what can be done with it, `{1: name, 2: steps}`, each step a move by name and then its arguments.
 //!
-//! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12).
+//! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12). An
+//! authored body's resources, declared actions and models are section 13, read by [`body::Decl`] (B13).
 //!
 //! Every section below 20 is in the hash, whether read here or not, so a section a later task adds (reactions,
 //! lifetime, a place's line) is read by that task and already renames the kind. A thing whose kind is missing or bad
 //! still loads, as "unknown kind", keeping its generic state; the store keeps why each refused kind was refused.
 
+pub mod body;
+pub mod entry;
 pub mod sizes;
 
 use crate::encode::{Name, Value, encode};
@@ -30,6 +39,7 @@ use std::fmt;
 
 pub const SECTION_OWNER: u64 = 2;
 pub const SECTION_STATE: u64 = 3;
+pub const SECTION_LINKS: u64 = 4;
 pub const SECTION_POINTS: u64 = 5;
 pub const SECTION_SLOTS: u64 = 6;
 pub const SECTION_FORMS: u64 = 8;
@@ -64,6 +74,15 @@ pub enum Role {
     Grip,
     Contact,
     Outlet,
+    /// A connector: where a part joins another (B17).
+    Joint,
+}
+
+/// A connector's own kind and the connector kind it mates with (`beam_end` with `beam_seat`, say; B17).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Connector {
+    pub kind: Name,
+    pub mates: Name,
 }
 
 /// A named place in the thing's own frame, in whole millimetres.
@@ -72,6 +91,36 @@ pub struct Point {
     pub name: Name,
     pub at_mm: [i64; 3],
     pub role: Option<Role>,
+    /// Its heading in the thing's frame, in millidegrees (0 when not written).
+    pub yaw_mdeg: i64,
+    /// A `joint` point's connector; `None` for every other role.
+    pub connector: Option<Connector>,
+}
+
+/// A numbered slot: its name and place in the thing's frame when the kind gives them, and what it admits.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Slot {
+    pub name: Option<Name>,
+    pub at_mm: Option<[i64; 3]>,
+    pub admits: BTreeSet<String>,
+}
+
+/// A link type a kind takes part in (section 4): the kind declaring it is one end, `from` (a category or a plain
+/// `namespace:name`) the other.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkType {
+    pub name: Name,
+    pub from: Name,
+    pub most: Option<u64>,
+    pub most_per: Option<u64>,
+}
+
+/// One end of a link as [`Kinds::check_link`] reads it: the node's kind (full name) and, for a part that joins, the
+/// connector it joins at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkEnd<'a> {
+    pub kind: &'a str,
+    pub connector: Option<&'a str>,
 }
 
 /// Something that can be done with a thing of the kind. Its steps are F1's to run; each starts with a move's name.
@@ -90,9 +139,23 @@ pub struct KindDef {
     pub points: BTreeMap<u64, Point>,
     pub forms: BTreeMap<u64, Form>,
     pub admits: Admits,
+    /// Section 13, an authored body's declaration (B13), for a family kind that has one.
+    pub body: Option<body::Decl>,
+    pub slots: BTreeMap<u64, Slot>,
+    pub links: BTreeMap<u64, LinkType>,
 }
 
 impl KindDef {
+    /// The point of this name.
+    pub fn point(&self, name: &str) -> Option<&Point> {
+        self.points.values().find(|p| p.name.as_str() == name)
+    }
+
+    /// Whether any point is a connector.
+    pub fn joins(&self) -> bool {
+        self.points.values().any(|p| p.connector.is_some())
+    }
+
     /// The fields a new thing of this kind starts with: every state field at its default.
     pub fn defaults(&self) -> BTreeMap<u64, Value> {
         self.state
@@ -171,6 +234,9 @@ impl Kinds {
                             points,
                             forms,
                             admits,
+                            body,
+                            slots,
+                            links,
                         } = d;
                         let def = KindDef {
                             name,
@@ -179,6 +245,9 @@ impl Kinds {
                             points,
                             forms,
                             admits,
+                            body,
+                            slots,
+                            links,
                         };
                         self.by_hash.insert(k.hash, def);
                     }
@@ -232,6 +301,78 @@ impl Kinds {
             .collect()
     }
 
+    /// Whether a link of type `ty` may join these two ends (B17; `v2/docs/world-model.md` rule 11 leaves a link's type
+    /// against its ends' kinds to K3). One end's kind declares the type in section 4 with the other's kind (or its
+    /// category) as `from`. When either kind has connectors, each end names one of its kind's connectors, and the two
+    /// mate: each one's `mates` is the other's connector kind. Refused by name: `link-kind-unknown`,
+    /// `link-type-undeclared`, `connector-missing`, `connector-unknown`, `connectors-do-not-mate`.
+    pub fn check_link(&self, ty: &str, a: LinkEnd, b: LinkEnd) -> Result<(), KindError> {
+        let refuse = |name, kind: &str, reason: String| KindError {
+            name,
+            kind: kind.to_owned(),
+            section: None,
+            field: None,
+            reason,
+        };
+        let def = |e: LinkEnd| {
+            self.get(e.kind)
+                .ok_or_else(|| refuse("link-kind-unknown", e.kind, "the kind is not loaded".into()))
+        };
+        let (ka, kb) = (def(a)?, def(b)?);
+        let declares = |k: &KindDef, other: &KindDef| {
+            let plain = crate::world_model::plain(other.name.as_str());
+            let category = match other.admits.owner.as_str() {
+                "family" => "body",
+                o => o,
+            };
+            k.links.values().any(|l| {
+                l.name.as_str() == ty && (l.from.as_str() == plain || l.from.as_str() == category)
+            })
+        };
+        if !declares(ka, kb) && !declares(kb, ka) {
+            return Err(refuse(
+                "link-type-undeclared",
+                ka.name.as_str(),
+                format!(
+                    "neither end declares {ty} with the other's kind, {}",
+                    kb.name.as_str()
+                ),
+            ));
+        }
+        if !ka.joins() && !kb.joins() {
+            return Ok(());
+        }
+        let connector = |e: LinkEnd, k: &KindDef| -> Result<Connector, KindError> {
+            let n = e.connector.ok_or_else(|| {
+                refuse(
+                    "connector-missing",
+                    k.name.as_str(),
+                    format!("a {ty} names a connector at each end"),
+                )
+            })?;
+            k.point(n).and_then(|p| p.connector.clone()).ok_or_else(|| {
+                refuse(
+                    "connector-unknown",
+                    k.name.as_str(),
+                    format!("{n} is not a connector of this kind"),
+                )
+            })
+        };
+        let (ca, cb) = (connector(a, ka)?, connector(b, kb)?);
+        if ca.mates != cb.kind || cb.mates != ca.kind {
+            return Err(refuse(
+                "connectors-do-not-mate",
+                ka.name.as_str(),
+                format!(
+                    "{} does not mate with {}",
+                    ca.kind.as_str(),
+                    cb.kind.as_str()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn len(&self) -> usize {
         self.by_hash.len()
     }
@@ -260,6 +401,9 @@ struct Sections {
     points: BTreeMap<u64, Point>,
     forms: BTreeMap<u64, Form>,
     admits: Admits,
+    body: Option<body::Decl>,
+    slots: BTreeMap<u64, Slot>,
+    links: BTreeMap<u64, LinkType>,
 }
 
 /// Reads and checks the sections this module knows.
@@ -370,17 +514,10 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
     for (n, e) in entries(SECTION_POINTS, "kind-point")? {
         let why = |reason: &str| bad("kind-point", SECTION_POINTS, Some(n), reason.into());
         let name = text(e.get(&1)).ok_or_else(|| why("1, the name, is text"))?;
-        let at_mm = match e.get(&2) {
-            Some(Value::Array(xyz)) if xyz.len() == 3 => {
-                let mut at = [0i64; 3];
-                for (a, v) in at.iter_mut().zip(xyz) {
-                    *a =
-                        int(v).ok_or_else(|| why("2, the position, is three whole millimetres"))?;
-                }
-                at
-            }
-            _ => return Err(why("2, the position, is three whole millimetres")),
-        };
+        let at_mm = e
+            .get(&2)
+            .and_then(xyz)
+            .ok_or_else(|| why("2, the position, is three whole millimetres"))?;
         let role = match e.get(&3) {
             None => None,
             Some(r) => Some(match text(Some(r)).as_ref().map(Name::as_str) {
@@ -388,10 +525,38 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
                 Some("grip") => Role::Grip,
                 Some("contact") => Role::Contact,
                 Some("outlet") => Role::Outlet,
-                _ => return Err(why("3, the role, is stand, grip, contact or outlet")),
+                Some("joint") => Role::Joint,
+                _ => return Err(why("3, the role, is stand, grip, contact, outlet or joint")),
             }),
         };
-        points.insert(n, Point { name, at_mm, role });
+        let yaw_mdeg = match e.get(&4) {
+            None => 0,
+            Some(v) => int(v).ok_or_else(|| why("4, the yaw, is whole millidegrees"))?,
+        };
+        let connector = match (role, text(e.get(&5)), text(e.get(&6))) {
+            (Some(Role::Joint), Some(kind), Some(mates)) => Some(Connector { kind, mates }),
+            (Some(Role::Joint), _, _) => {
+                return Err(why(
+                    "a joint names its connector kind in 5 and what it mates with in 6",
+                ));
+            }
+            (_, None, None) => None,
+            _ => {
+                return Err(why(
+                    "only a joint names a connector kind (5) and what it mates with (6)",
+                ));
+            }
+        };
+        points.insert(
+            n,
+            Point {
+                name,
+                at_mm,
+                role,
+                yaw_mdeg,
+                connector,
+            },
+        );
     }
 
     let mut forms = BTreeMap::new();
@@ -411,7 +576,33 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         forms.insert(n, Form { name, steps });
     }
 
+    let mut links = BTreeMap::new();
+    for (n, e) in entries(SECTION_LINKS, "kind-link")? {
+        let why = |reason: &str| bad("kind-link", SECTION_LINKS, Some(n), reason.into());
+        let name = text(e.get(&1)).ok_or_else(|| why("1, the name, is text"))?;
+        let from =
+            text(e.get(&2)).ok_or_else(|| why("2, the other end, is a category or a kind"))?;
+        let count = |k| match e.get(&k) {
+            None => Ok(None),
+            Some(Value::Uint(u)) if *u > 0 => Ok(Some(*u)),
+            Some(_) => Err(why(
+                "3 and 4, most and most_per, are whole numbers above zero",
+            )),
+        };
+        let (most, most_per) = (count(3)?, count(4)?);
+        links.insert(
+            n,
+            LinkType {
+                name,
+                from,
+                most,
+                most_per,
+            },
+        );
+    }
+
     let mut slots = BTreeMap::new();
+    let mut named_slots = BTreeMap::new();
     if let Some(v) = s.get(&SECTION_SLOTS) {
         let Value::Map(m) = v else {
             return Err(bad(
@@ -421,16 +612,32 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
                 "a map of slots to what each admits".into(),
             ));
         };
-        for (n, admits) in m {
-            let list = texts(Some(admits)).ok_or_else(|| {
-                bad(
-                    "kind-slot",
-                    SECTION_SLOTS,
-                    Some(*n),
-                    "a list of kinds or categories".into(),
-                )
-            })?;
-            slots.insert(*n, list.iter().map(|t| t.as_str().to_owned()).collect());
+        for (n, entry) in m {
+            let why = |reason: &str| bad("kind-slot", SECTION_SLOTS, Some(*n), reason.into());
+            let (admits, at_mm, name) = match entry {
+                Value::Map(e) => {
+                    let at_mm = match e.get(&2) {
+                        None => None,
+                        Some(v) => Some(
+                            xyz(v)
+                                .ok_or_else(|| why("2, the place, is three whole millimetres"))?,
+                        ),
+                    };
+                    (e.get(&1), at_mm, text(e.get(&3)))
+                }
+                list => (Some(list), None, None),
+            };
+            let list = texts(admits).ok_or_else(|| why("a list of kinds or categories"))?;
+            let admits: BTreeSet<String> = list.iter().map(|t| t.as_str().to_owned()).collect();
+            slots.insert(*n, admits.clone());
+            named_slots.insert(
+                *n,
+                Slot {
+                    name,
+                    at_mm,
+                    admits,
+                },
+            );
         }
     }
     let children = match s.get(&SECTION_CHILDREN) {
@@ -449,7 +656,22 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             .collect(),
     };
 
+    let body = match s.get(&body::SECTION_BODY) {
+        None => None,
+        Some(v) => {
+            let why = |reason: String| bad("kind-body", body::SECTION_BODY, None, reason);
+            if owner != "family" {
+                return Err(why("only a family kind declares a body".into()));
+            }
+            let Value::Map(m) = v else {
+                return Err(why("a map of numbered entries".into()));
+            };
+            Some(body::Decl::read(kind, m).map_err(why)?)
+        }
+    };
+
     Ok(Sections {
+        body,
         state,
         points,
         forms,
@@ -458,6 +680,8 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             children,
             slots,
         },
+        slots: named_slots,
+        links,
     })
 }
 
@@ -471,6 +695,13 @@ fn text(v: Option<&Value>) -> Option<Name> {
 fn texts(v: Option<&Value>) -> Option<Vec<Name>> {
     match v {
         Some(Value::Array(a)) => a.iter().map(|x| text(Some(x))).collect(),
+        _ => None,
+    }
+}
+
+fn xyz(v: &Value) -> Option<[i64; 3]> {
+    match v {
+        Value::Array(a) if a.len() == 3 => Some([int(&a[0])?, int(&a[1])?, int(&a[2])?]),
         _ => None,
     }
 }

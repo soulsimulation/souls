@@ -46,4 +46,39 @@ impl WasmPlayer {
     pub fn next(&self) -> u64 {
         self.0.next()
     }
+
+    /// The motion samples of the part played last, every one in entry order (V6, #2715), as JSON:
+    /// `[[node, frame node, frame slot or null, at µs, x, y, z µm], ...]`, ids as the page keys them (`<scope hex>.<n>`).
+    pub fn samples(&self) -> String {
+        let key = |id: crate::ids::Id| {
+            format!("{}.{}", crate::encode::to_hex(&id.scope().0), id.counter())
+        };
+        let rows: Vec<String> = self
+            .0
+            .samples()
+            .iter()
+            .map(|h| {
+                let p = h.pose.position;
+                format!(
+                    r#"["{}","{}",{},{},{},{},{}]"#,
+                    key(h.node),
+                    key(h.pose.frame.node),
+                    h.pose
+                        .frame
+                        .slot
+                        .map_or("null".to_owned(), |s| s.to_string()),
+                    h.at,
+                    p.x,
+                    p.y,
+                    p.z
+                )
+            })
+            .collect();
+        format!("[{}]", rows.join(","))
+    }
+
+    /// Answers one query on the copy it has played (R1's `query.rs`, Engine v2 V5 #2714).
+    pub fn query(&self, query: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.0.replica().query(query).map_err(js)
+    }
 }

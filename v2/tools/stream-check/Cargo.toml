@@ -9,3 +9,4 @@ description = "A live world written as the viewer's stream, played in a headless
 replica = { path = "../../crates/replica" }
 sim = { path = "../../crates/sim" }
 worldd = { path = "../../crates/worldd" }
+import-eden = { path = "../import-eden" }

@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- The site owner's health page (Engine v2 O21, #3325): a shell with no data. It fetches ?json=1 every 30 s, which
+     answers a signed-in site owner only (v2/tools/ops/health/page.mjs). Phone width first. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>World health</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --dim: #666; --line: #ddd; --ok: #1b7f3b; --warn: #a15c00; --bad: #b3261e; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #121212; --fg: #eee; --dim: #9a9a9a; --line: #333; --ok: #5cc27a; --warn: #e0a040; --bad: #f2786d; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 12px 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  #status { color: var(--dim); font-size: 12px; margin-bottom: 12px; }
+  .world { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  .head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .name { font-family: ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere; }
+  .state { font-weight: 600; white-space: nowrap; }
+  .running { color: var(--ok); } .starting, .restarting { color: var(--warn); } .restart-loop, .unknown { color: var(--bad); } .stopped { color: var(--dim); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0 0; }
+  dt { color: var(--dim); } dd { margin: 0; overflow-wrap: anywhere; }
+  .nm { color: var(--dim); font-style: italic; }
+</style>
+</head>
+<body>
+<main>
+  <h1>World health</h1>
+  <div id="status">Loading…</div>
+  <div id="worlds"></div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const when = (ms) => (ms ? new Date(ms).toLocaleString() : '—');
+  const nm = (why) => `<span class="nm">not metered (${esc(why)})</span>`;
+  function row(w, notMetered) {
+    const r = w.restarts, t = w.tick;
+    const restarts = r ? `${r.in_5_min} starts in 5 min, ${r.failures} failures${r.last_exit ? `, last exit ${esc(r.last_exit)}` : ''}${r.next_try ? `, next try ${when(r.next_try)}` : ''}` : '—';
+    const tick = t ? `lag ${t.lag_ms} ms, p99 ${t.p99_ms} / ${t.budget_ms} ms, ${t.over_budget} over budget, written ${t.health_age_s} s ago` : '—';
+    return `<section class="world"><div class="head"><span class="name">${esc(w.world)}</span>` +
+      `<span class="state ${esc(w.state)}">${esc(w.awake)} · ${esc(w.state)}</span></div><dl>` +
+      `<dt>Where</dt><dd>${esc(w.where ?? '—')}${w.wake_at ? `, wakes ${when(w.wake_at)}` : ''}</dd>` +
+      `<dt>Ticks</dt><dd>${tick}</dd><dt>Restarts</dt><dd>${restarts}</dd>` +
+      `<dt>Watcher</dt><dd>${w.watcher == null ? nm(notMetered.watcher) : esc(when(w.watcher))}</dd>` +
+      `<dt>Cost</dt><dd>${w.cost == null ? nm(notMetered.cost) : esc(w.cost)}</dd></dl></section>`;
+  }
+  async function load() {
+    try {
+      const r = await fetch('?json=1', { credentials: 'same-origin', cache: 'no-store' });
+      if (r.status === 401) { $('status').textContent = 'Sign in as a site owner to see this page.'; $('worlds').innerHTML = ''; return; }
+      if (r.status === 403) { $('status').textContent = 'This page is for site owners.'; $('worlds').innerHTML = ''; return; }
+      const d = await r.json();
+      $('status').textContent = `${d.worlds.length} worlds · ${new Date(d.at).toLocaleTimeString()} · refreshes every 30 s`;
+      $('worlds').innerHTML = d.worlds.map((w) => row(w, d.not_metered)).join('');
+    } catch (e) { $('status').textContent = `Could not load: ${e.message}`; }
+  }
+  load();
+  setInterval(load, 30_000);
+</script>
+</body>
+</html>
