@@ -40,6 +40,8 @@ step cost node --test tools/ops/cost/cost.test.mjs
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
+# The driver's loads (I10, #2693): the shared shapes imported, the stretch merged, every kind given a verb.
+step driver-loads node --test tools/driver/loads.test.mjs
 
 # The WASM build: one artifact (wasm-bindgen --target web) that Node loads with initSync and a page with init().
 # The command's version is the wasm-bindgen crate's in Cargo.lock; it is installed under target/, which CI caches.
