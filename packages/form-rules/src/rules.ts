@@ -16,7 +16,7 @@
 // What a form does once it may be done is effects.ts (SA-F2b, #2844); the amount a transfer
 // moves is measured here, so the `room` need and the effect agree on one number.
 
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'enough', 'sum', 'any', 'moves']);
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'not_in_hand', 'linked', 'unlinked', 'most_per', 'room', 'enough', 'sum', 'any', 'moves']);
 export const REASONS = Object.freeze([
   'field_differs',
   'slot_taken',
@@ -25,6 +25,7 @@ export const REASONS = Object.freeze([
   'hand_not_empty',
   'not_holding_kind',
   'not_held',
+  'in_hand',
   'not_linked',
   'already_linked',
   'no_room',
@@ -36,6 +37,8 @@ export const REASONS = Object.freeze([
   'bad_input',
 ]);
 export const MAX_HANDS = 8;
+/** The most children of one parent a `most_per` need reads (a board's places; the format bounds `children` well below). */
+export const MAX_SIBLINGS = 1000;
 /** How a thing moves (entry section 18, `motion.how`), one list with tools/entry/format.mjs and Engine v2 E5 (#2778):
  *  carried in one or two hands, pushed by one Soul or by two, or fixed. A body acts alone, so two Souls' push is refused. */
 export const CARRIED: Readonly<Record<string, number>> = Object.freeze({ one_hand: 1, two_hands: 2 });
@@ -54,6 +57,8 @@ export type Need = {
   slot?: Ref;
   point?: Ref;
   link?: string;
+  /** A `linked` / `unlinked` need with `end: "actor"`: whether the actor is one of the link's ends on this thing. */
+  end?: string;
   /** The thing a need reads, given as a form argument; omitted means this thing. `within_reach`: the thing whose point
    *  it is. `state`: the field is read through that thing's kind. */
   of?: Ref;
@@ -105,13 +110,16 @@ export type Effect = {
   rate?: number;
   /** A set on an int field may add `by` (signed) to its value instead of naming `to`: a count, or an amount used up. */
   by?: number;
+  /** A `create`'s fields of the made thing, each a value or a value argument (a candle's shape and colour). */
+  set?: { field: string; to: unknown }[];
 };
 /** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
 export type DrawRow = { name: string; weight: number | { field: string }; event: string; set: { field: string; to: unknown }[] };
 export type Entry = {
   kind: string;
   state?: Record<string, { n: number; default: unknown; audience: Audience; type?: string; unit?: string; min?: number; max?: number }>;
-  links?: Record<string, { n: number; most: number; audience: Audience }>;
+  /** `most_per` with `per: "parent"`: how many things of this kind under one parent one end may be linked to. */
+  links?: Record<string, { n: number; most: number; most_per?: number; per?: string; audience: Audience }>;
   points?: Record<string, { at_mm: number[] }>;
   slots?: Record<string, { admits: string; most: number; at_mm?: number[] }>;
   forms?: Record<string, Form>;
@@ -126,6 +134,8 @@ export type Node = {
   slots?: Record<string, unknown[]>;
   hands?: Record<string, string | null>;
   effector_mm?: number[];
+  /** Its child nodes (the entry's section 11): a guestbook's lines, a poll board's options. */
+  children?: string[];
   /** Its origin in the frame of the place it is loose in, whole mm, supplied by the engine (an activity's places, SA-G1a). */
   at_mm?: number[];
   /** Things resting loose in this node (on its ground or a surface), not in a slot or a hand. */
@@ -247,9 +257,10 @@ export function decide(input: Input): Verdict {
       read.push([`${act.this}/field/${def.n}`, value]);
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
+      // another form's need on this field holds now (its own value, never an argument's choice)
       const holds = (m: Need, v: unknown) =>
-        (!has(m, 'is') || flag(def, v) === flag(def, m.is)) &&
-        (!has(m, 'not') || flag(def, v) !== flag(def, m.not)) &&
+        (!has(m, 'is') || isRef(m.is) || flag(def, v) === flag(def, m.is)) &&
+        (!has(m, 'not') || isRef(m.not) || flag(def, v) !== flag(def, m.not)) &&
         (!has(m, 'at_least') || (int(v) && v >= (m.at_least as number))) &&
         (!has(m, 'at_most') || (int(v) && v <= (m.at_most as number)));
       const meetsWith = (v: unknown, t: { is: unknown; not: unknown }) =>
@@ -428,6 +439,43 @@ export function decide(input: Input): Verdict {
     linked: (n, i) => link(n, i, true),
     unlinked: (n, i) => link(n, i, false),
 
+    // This thing is in nobody's hand: a lantern is set down on a surface before its wick is worked. Read from every
+    // node the state gives, so a thing in another Soul's hand is refused too; only the actor's own hold names a fix.
+    not_in_hand(_n, i) {
+      for (const holder of sorted(nodes)) {
+        const h = nodes[holder].hands;
+        if (!h || typeof h !== 'object') continue;
+        const hand = sorted(h).find((k) => h[k] === act.this);
+        if (hand === undefined) continue;
+        read.push([`${holder}/hand/${hand}`, act.this]);
+        return { ok: false, no: { verdict: 'no', reason: 'in_hand', need: i, detail: { node: holder, hand }, fix: holder === state.actor ? { step: 'put' } : null, read } };
+      }
+      return { ok: true };
+    },
+
+    // One end may be linked to at most `most_per` things of this kind under one parent (one signature per guestbook,
+    // one vote per poll), counted on this thing and its siblings: its parent's children of the same kind. A thing under
+    // no parent counts alone. A refusal lists the things that hold the actor (`on`); taking one back is an act there.
+    most_per(n, i) {
+      const type = n.link ?? '';
+      const def = has(entry.links, type) ? entry.links![type] : undefined;
+      if (!def) return { ok: false, no: bad(i, 'no_such_link', { link: type }) };
+      if (!whole(def.most_per) || def.per !== 'parent') return { ok: false, no: bad(i, 'malformed_need') };
+      if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, link: type, read } };
+      const parent = sorted(nodes).find((id) => Array.isArray(nodes[id].children) && nodes[id].children!.includes(act.this));
+      const siblings = parent === undefined ? [act.this] : nodes[parent].children!.filter((id) => has(nodes, id) && nodes[id].kind === self.kind);
+      if (siblings.length > MAX_SIBLINGS) return { ok: false, no: bad(i, 'too_many_children') };
+      const on: string[] = [];
+      for (const id of [...siblings].sort()) {
+        const ends = nodes[id].links?.[type];
+        read.push([`${id}/link/${def.n}`, Array.isArray(ends) ? ends.length : 0]);
+        if (Array.isArray(ends) && ends.includes(state.actor)) on.push(id);
+      }
+      if (on.length < def.most_per) return { ok: true };
+      const fix = on.includes(act.this) ? formFix((e) => e.change === 'unlink' && e.link === type) : null;
+      return { ok: false, no: { verdict: 'no', reason: 'already_linked', need: i, detail: { link: type, most_per: def.most_per, on }, fix, read } };
+    },
+
     // Every amount the form moves has room where it lands (SA-F2b): a pour never overflows. `enough`: every amount the
     // form asks is there to give, so a pour of three units from a pitcher holding two is refused rather than made smaller.
     room: (_n, i) => moves(i, 'room'),
@@ -570,8 +618,15 @@ export function decide(input: Input): Verdict {
     const list = self!.links?.[type];
     const count = Array.isArray(list) ? list.length : 0;
     read.push([`${act.this}/link/${def.n}`, count]);
-    if (count > 0 === wantLinked) return { ok: true };
     const change = wantLinked ? 'link' : 'unlink';
+    if (n.end === 'actor') {
+      // Whether the actor is one of the ends (only its author takes a note down; a Soul signs a line once).
+      if ((Array.isArray(list) && list.includes(state.actor)) === wantLinked) return { ok: true };
+      // Not on it: linking is a fix only while the link has room; another's place is not this actor's to free.
+      const fix = !wantLinked || count < def.most ? formFix((e) => e.change === change && e.link === type) : null;
+      return { ok: false, no: { verdict: 'no', reason: wantLinked ? 'not_linked' : 'already_linked', need: i, detail: { link: type, count }, fix, read } };
+    }
+    if (count > 0 === wantLinked) return { ok: true };
     const fix = formFix((e) => e.change === change && e.link === type);
     return { ok: false, no: { verdict: 'no', reason: wantLinked ? 'not_linked' : 'already_linked', need: i, detail: { link: type, count }, fix, read } };
   }

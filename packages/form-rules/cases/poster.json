@@ -1,6 +1,6 @@
 {
  "format": "souls-form-cases/1",
- "about": "eden:poster (from Soul Actions entry 38, landed in #493: the poster wall). A wall holds four posters (eden:poster_wall's children), two per Soul (the author link's most_per); a poster is a title and an optional detail by reference, and its author as a link. Putting one up needs the place free and within reach, and sets a timer: three world days later it goes out of date (POSTER_STALE_DAYS). Only its author takes it down ('Only Ana takes \"Jumble sale\" down until it is out of date'), which the unlink refuses for anyone else (the effect case). The timer's form needs a poster still up and not yet out of date.",
+ "about": "eden:poster (from Soul Actions entry 38, landed in #493: the poster wall). A wall holds four posters (eden:poster_wall's children), two per Soul (the author link's most_per); a poster is a title and an optional detail by reference, and its author as a link. Putting one up needs the place free and within reach, and sets a timer: three world days later it goes out of date (POSTER_STALE_DAYS). Only its author takes it down ('Only Ana takes \"Jumble sale\" down until it is out of date'), which the unlink refuses for anyone else (the effect case). The timer's form needs a poster still up and not yet out of date. Anyone takes down a poster once it is out of date (take_down_out_of_date); before then only its author does, with the original's words.",
  "cases": [
   {
    "name": "put_up_every_need_met",
@@ -476,6 +476,338 @@
     "verdict": "no",
     "reason": "field_differs",
     "need": 1
+   }
+  },
+  {
+   "name": "take_down_someone_elses",
+   "act": {
+    "this": "t1",
+    "form": "take_down"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:poster",
+      "links": {
+       "author": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 0,
+    "detail": {
+     "link": "author",
+     "count": 1
+    },
+    "fix": null,
+    "says": "author_only"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "take_down_out_of_date_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "take_down_out_of_date"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "t1": {
+      "kind": "eden:poster",
+      "fields": {
+       "out_of_date": true
+      },
+      "links": {
+       "author": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "yes"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "take_down_out_of_date_nothing_there",
+   "act": {
+    "this": "t1",
+    "form": "take_down_out_of_date"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "t1": {
+      "kind": "eden:poster",
+      "fields": {},
+      "links": {
+       "author": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 0,
+    "detail": {
+     "link": "author",
+     "count": 0
+    },
+    "fix": {
+     "form": "put_up"
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "take_down_out_of_date_still_fresh",
+   "act": {
+    "this": "t1",
+    "form": "take_down_out_of_date"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "t1": {
+      "kind": "eden:poster",
+      "fields": {
+       "out_of_date": false
+      },
+      "links": {
+       "author": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "out_of_date",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": null,
+    "says": "author_only"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "take_down_out_of_date_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "take_down_out_of_date"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "t1": {
+      "kind": "eden:poster",
+      "fields": {
+       "out_of_date": true
+      },
+      "links": {
+       "author": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       1200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       1200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "fix": {
+     "step": "walk_to",
+     "point": "sheet"
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
    }
   }
  ]
