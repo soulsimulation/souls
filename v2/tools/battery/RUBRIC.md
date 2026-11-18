@@ -10,11 +10,13 @@ row `judged_from: receipts`, the acting Soul's receipts and the other Soul's cop
 transcript of the agent's reasoning, no knowledge of how the engine works.
 
 **The window** runs from the turn's start for 10 minutes of world time, or longer when the request names a time
-(tonight, tomorrow, every morning, for an hour, until dark): then to the end of that time.
+(tonight, tomorrow, every morning, until dark): then to the end of that time. A duration (for an hour, for the
+afternoon) counts from the act's start, and the window runs until it has passed.
 
 **Judge facts, never looks.** Who ended up where, in what posture, holding or using what, with whom, and when. A
-place counts when S is inside it or within 3 m of its named thing; "near" a Soul is within 3 m; "with" is a link or
-a joint act between them. How well it was drawn, the gait's style, and the words of speech (a reference on the
+place counts when S is inside it or within 3 m of its named thing; "near" a Soul is within 3 m, except in a
+question's answer, where "around" or "nearby" means in the same place as S; "with" is a link or a joint act between
+them. How well it was drawn, the gait's style, and the words of speech (a reference on the
 sheet) are not judged, except that speech addressed to a partner must be addressed to that partner.
 
 ## The four outcomes
@@ -22,8 +24,8 @@ sheet) are not judged, except that speech addressed to a partner must be address
 | Outcome | When |
 |---|---|
 | **done as meant** | Every fact in `must` is on the record within the window, and nothing on it contradicts the request (another place, thing or Soul than the one named; undone before the window ends when the request asked it to last). |
-| **done differently** | S acted toward the request but a `must` fact is missing or other than asked: the wrong bench, standing instead of sitting, alone when a partner was named, at the wrong time. |
-| **refused rightly** | S did not act, and the reply gives a reason the owner can understand that is true by the record (no such thing, the partner declined, the request should be refused). |
+| **done differently** | S acted toward the request but a `must` fact is missing or other than asked: the wrong bench, standing instead of sitting, alone when a partner was named, at the wrong time. This holds even when the reply claims the named target. |
+| **refused rightly** | S did not carry it out (walking up or offering is not carrying out), and the reply gives a reason the owner can understand that is true by the record (no such thing, the partner declined, the request should be refused). |
 | **failed** | Anything else: nothing done; the reply says done with no fact to show it; a refusal whose reason is false or missing; an act on a `refuse` request. |
 
 ## By class
