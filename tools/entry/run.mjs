@@ -342,6 +342,9 @@ export async function runOnce(t, kinds, rows) {
     if (unloaded) r = {result: 'skip', why: unloaded};
     else try { r = await {rule: ruleCase, effect: effectCase, disturb: disturbCase}[row.type](t, row, kinds, placed); }
     catch (e) { r = {result: 'fail', why: `the run broke: ${String(e.message ?? e).split(ROOT).join('')}`}; }
+    // the Soul puts down what a case left in its hands (a take), so the things can be removed and the next case starts
+    // with free hands
+    await t.reset?.().catch(() => {});
     for (const id of mine) await t.remove(id).catch(() => {});
     out.push({case: row.name, type: row.type, kind: row.kind, form: row.form, file: row.file, ...r, ms: Date.now() - t0});
   }
@@ -424,6 +427,8 @@ export function todayTransport({world, god = process.cwd(), soul, launcher: laun
       throw new Error(`no room to place ${kind} beside the Soul`);
     },
     async set(id, fields) { godCli(['set', id, '--state', JSON.stringify(fields)]); },
+    // a held thing is put down first: today's world does not remove a thing from a hand, so the hand would stay full
+    async reset() { for (let i = 0; i < 2 && soulCli(['here']).me?.holding; i++) soulCli(['act', 'put-down:here', '--wait', '--json']); },
     async remove(id) { godCli(['remove', id]); },
     async offers(id) { return (thing(id).acts ?? []).map(a => a.split(':').at(-1)); },
     async fields(id) { return thing(id).state ?? null; },
