@@ -10,7 +10,7 @@
 # checks from that event, so a green dispatch never clears a deferred ci-ok. Any other label starts the same kind of run
 # (#2018): the queue reads only the newest ci run at a head, so a run without ci-ok would hide the real one. A label run
 # queues behind a run in progress, cancels nothing, and does no heavy work if the head's newest run passed, so its ci-ok
-# repeats that result. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still runs a PR's path-scoped CI by hand, but its
+# repeats that result in about a minute (scope and ci-ok only; repo skips too). `gh workflow run ci.yml --ref <branch> -f pr=<n>` still runs a PR's path-scoped CI by hand, but its
 # checks don't count for the queue.
 # Pull request, merge_group and push runs never run the qualify legs ci-scope.mjs marks `heavy: true` (lightOnly): the
 # full battery runs once a day on main (schedule, 06:23 UTC), on a manual run, and before a release in the remote gate,
@@ -55,6 +55,7 @@ jobs:
       scope: ${{ steps.scope.outputs.scope }}
       smoke: ${{ steps.scope.outputs.smoke }}
       deferred: ${{ steps.scope.outputs.deferred }}
+      green: ${{ steps.scope.outputs.green }}
       window: ${{ steps.scope.outputs.window }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,8 +85,11 @@ jobs:
         # The daily run and a manual run check everything (FULL_EVENTS); the merge train reads those runs.
         run: node .github/scripts/ci-scope.mjs --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --draft "$DRAFT" --labels "$LABELS" --green-at-head "$GREEN"
 
-  # Fast, dependency-free checks of the repo's own tooling; always runs.
+  # Fast, dependency-free checks of the repo's own tooling. Skipped only when scope found the head already green (a label
+  # run at a head whose newest ci run passed): the tree is the one that passed, so ci-ok repeats that result in seconds.
   repo:
+    needs: scope
+    if: needs.scope.outputs.green != 'true'
     runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
@@ -380,9 +384,10 @@ jobs:
           ANY: ${{ needs.scope.outputs.any }}
           SMOKE: ${{ needs.smoke.result }}
           SMOKE_SELECTED: ${{ needs.scope.outputs.smoke }}
+          GREEN: ${{ needs.scope.outputs.green }}
         run: |
-          echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED"
+          echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED green_at_head=$GREEN"
           test "$SCOPE" = success
-          test "$REPO" = success
+          if [ "$GREEN" = true ]; then test "$REPO" = skipped; else test "$REPO" = success; fi
           if [ "$ANY" = true ]; then test "$QUALIFY" = success; else test "$QUALIFY" = skipped; fi
           if [ "$SMOKE_SELECTED" = true ]; then test "$SMOKE" = success; else test "$SMOKE" = skipped; fi
