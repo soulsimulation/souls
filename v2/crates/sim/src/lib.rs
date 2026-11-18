@@ -4,6 +4,7 @@
 pub mod clock;
 pub mod commit;
 pub mod controller;
+pub mod edit;
 pub mod frozen;
 pub mod ground;
 pub mod host;

@@ -8,6 +8,7 @@ pub mod apply;
 pub mod audience;
 pub mod bodies;
 pub mod durability;
+pub mod edit;
 pub mod effects;
 pub mod encode;
 pub mod hash;
