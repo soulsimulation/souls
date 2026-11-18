@@ -1,0 +1,381 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:pinned_note (from Soul Actions entry 19, landed in #493: core-notice-board@3, the pinboard). A board holds up to six notes (eden:pin_board's children); each is one place with its author as a link and its words by reference. Pinning needs the place free and the card within reach; taking down needs a note there. The original's limits: six notes ('The board is full (6 notes); a note comes down only when its author takes it down.'), two per Soul (the author link's most_per), and only the author takes a note down ('You have no note on this board; only its author takes a note down.'), which the unlink refuses for anyone else (the effect case).",
+ "cases": [
+  {
+   "name": "pin_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "pin",
+    "args": {
+     "words": "w_choir"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:pinned_note",
+      "links": {
+       "author": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "pin_already_taken",
+   "act": {
+    "this": "t1",
+    "form": "pin",
+    "args": {
+     "words": "w_choir"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:pinned_note",
+      "links": {
+       "author": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 0,
+    "detail": {
+     "link": "author",
+     "count": 1
+    }
+   }
+  },
+  {
+   "name": "pin_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "pin",
+    "args": {
+     "words": "w_choir"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:pinned_note",
+      "links": {
+       "author": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       1506
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "fix": {
+     "step": "walk_to",
+     "point": "card"
+    }
+   }
+  },
+  {
+   "name": "take_down_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "take_down"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:pinned_note",
+      "links": {
+       "author": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "take_down_nothing_there",
+   "act": {
+    "this": "t1",
+    "form": "take_down"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:pinned_note",
+      "links": {
+       "author": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 0,
+    "detail": {
+     "link": "author",
+     "count": 0
+    }
+   }
+  },
+  {
+   "name": "take_down_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "take_down"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:pinned_note",
+      "links": {
+       "author": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       1506
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "fix": {
+     "step": "walk_to",
+     "point": "card"
+    }
+   }
+  }
+ ]
+}
