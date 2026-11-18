@@ -549,12 +549,10 @@ fn eden_shores_and_crossings() {
         spot(&map, [-251.0, -60.8], Ground::Dry),
         spot(&map, [-226.0, -55.2], Ground::Dry),
     );
-    // Not met: the bridge's deck rises in steps above the ground cover's height, so it is cut as a floor of its own
-    // with no link to the ground, and a body goes round the river's end instead. Printed, not asserted.
-    let over = judge(&mut map, &im.tree, b0, b1, DRY, Expect::DryOnly);
-    println!(
-        "UNMET a bridge: a body that cannot swim crosses the river on it: {} (the bridge is 28 m long)",
-        over.unwrap_or_else(|e| e)
+    // Its deck joins the ground by steps since #3224 (#3226).
+    check(
+        "a bridge: a body that cannot swim crosses the river on it (the bridge is 28 m long)",
+        judge(&mut map, &im.tree, b0, b1, DRY, Expect::DryOnly),
     );
     // A shore: the west lake's, waded into by a body that may wade.
     let wet = find(&map, ground, [-101.5, 2.0], Ground::Wading, 4.0)
