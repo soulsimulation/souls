@@ -23,6 +23,11 @@
 //!
 //! Not here: choosing among seats (I5), queueing for one (B7), sitting where there is no seat (E3), sleep, a seat
 //! edited away under its sitter (G2), a thing with several seats, writing the hold into the tree (the writer's).
+//!
+//! **Hands** (B4, #2739, [`hands`]) are slots of the same model: a slot of a node, named by a [`Frame`], holds one
+//! occupant. A seat holds a body (this table, until the hold is written into the tree); a hand's slot, a shelf's or a
+//! table's holds a thing, as a child of that slot in the tree. [`Slots::occupant`] answers who is in a slot for both,
+//! so a thing is never put into a seat a body holds, and take and put refuse a filled slot by one name.
 
 use std::collections::BTreeMap;
 
@@ -33,6 +38,7 @@ use replica::ids::{Id, Minter};
 use replica::moves::{Move, Place};
 use replica::pose::{Frame, HandOff, Quat, Vec3};
 use replica::time::Micros;
+use replica::tree::Tree;
 use replica::world_model::show;
 
 use crate::controller::{Controller, Driver, Part, Stance};
@@ -142,6 +148,17 @@ impl Slots {
     /// Who holds the seat of `thing`: one lookup.
     pub fn holder(&self, thing: Id) -> Option<Id> {
         self.held.get(&thing).map(|h| h.body)
+    }
+
+    /// Who is in slot `at` (a node and its slot): the body holding it when it is a seat, else the thing the tree
+    /// holds there. None for a frame with no slot, or an empty one.
+    pub fn occupant(&self, tree: &Tree, at: Frame) -> Option<Id> {
+        let slot = at.slot?;
+        self.seats
+            .get(&at.node)
+            .filter(|s| s.seat.slot == slot)
+            .and_then(|_| self.holder(at.node))
+            .or_else(|| in_slot(tree, at.node, slot))
     }
 
     /// The seat `body` holds, if any.
@@ -478,5 +495,12 @@ pub fn clear_spot(
         })
 }
 
+pub mod hands;
+pub use hands::{
+    Cx, Entry, Hand, Holding, Log, free_hands, hands, in_slot, occupies, steer, transfer,
+};
+
+#[cfg(test)]
+mod hands_tests;
 #[cfg(test)]
 mod tests;
