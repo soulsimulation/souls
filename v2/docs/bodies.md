@@ -84,6 +84,30 @@ asked of the geometry first (`out-of-reach` with the distance), the claim is a c
 each resource it holds, and each phase end is one timer in K9's due list. Nothing polls; a later claim that takes the
 move's resources cancels it at its next phase end (`claim-taken`).
 
+## Postures and seats (B3)
+
+`v2/crates/sim/src/slots` (B3 #2682) seats bodies. A seat is one slot of a thing, with its kind's data
+(`replica::moves::Seat`, fixture `v2/crates/replica/fixtures/seats/`): the slot's height above the floor, taken from
+the model geometry, and a point to stand at. Sitting and lying are moves (`sit.diag`, `lie.diag`). At a move's contact
+instant the controller hands the body from the floor into the slot (`Controller::seat`, T4's hand-off from mover to
+slot) with the stance the request named. Postures are the controller's stance input: stand, sit, lie. Rising
+(`rise.diag`) is the reverse: at contact the body is handed back onto the floor at the stand point
+(`Controller::stand`).
+
+- **Reserved at commit.** One tick's requests are taken together and ordered by a stable key: the body's id, then the
+  seat's. The first takes the seat. Each later request is refused `seat-taken`, and the refusal names the holder. The
+  hold is keyed by the seat's thing, so finding the holder is one lookup, never a scan.
+- **A seat above standing reach is refused** `seat-out-of-reach`. Its height alone is compared with the move's reach.
+- **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
+  controller keeps it apart from the bodies it steps, so a tick never visits it.
+- **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
+  when the sit is cancelled before contact by a later claim on its legs.
+- **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is
+  then handed back onto the floor at the stand point, under the new claim's driver, and the seat is released. Left in
+  the slot, it would be stuck, because a tick never steps a body in a slot.
+- **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
+  appears there.
+
 ## The code hatch, shape only
 
 10. **The hatch is one pure function named by the hash of its module** (SA-F9, #3000): `{1: module (its SHA-256

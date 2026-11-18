@@ -1,0 +1,13 @@
+# Lying down in a slot (Engine v2 B3, #2682; v2/crates/replica/src/moves.rs). The sit's shape, slower: it claims every
+# locomotion resource, the body reaches the slot's point with itself, and at contact `sim::slots` hands it to the slot
+# with the stance lie. A new claim on locomotion cancels it. Times in µs, reach in µm.
+{
+  1: "souls:lie", 2: 1,
+  3: [{1: 1, 2: 1}],                        # claims every locomotion resource
+  5: [1],                                   # a new claim on locomotion cancels it
+  6: [{1: "souls:start-up", 2: 900000},     # lowering; contact with the slot at its end
+      {1: "souls:settle", 2: 600000}],
+  7: {1: 1},                                # the body itself
+  8: 600000,
+  9: "souls:seat"
+}

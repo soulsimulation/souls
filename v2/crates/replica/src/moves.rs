@@ -294,6 +294,53 @@ impl MoveRecord {
     }
 }
 
+/// A seat (Engine v2 B3, #2682): one slot of a thing, as its kind's data. Its height above the floor the thing stands on
+/// comes from the kind's model geometry (SEATDEF), and its stand point is where a body stands to sit down and is set
+/// back on rising, in the slot's frame (x and z). Decoded from `{1: slot, 2: height mm, 3: [x, z] mm}`; fixture
+/// `v2/crates/replica/fixtures/seats/`. A seat holds one body.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Seat {
+    pub slot: u64,
+    /// µm above the floor, never below it.
+    pub height: i64,
+    /// µm, x and z in the slot's frame.
+    pub stand: [i64; 2],
+}
+
+impl Seat {
+    /// Reads a seat, refusing anything else as `not-a-seat` (unknown fields included).
+    pub fn from_value(v: &Value) -> R<Seat> {
+        let um = |v: &Value| match v {
+            Value::Uint(n) => i64::try_from(*n).ok()?.checked_mul(1000),
+            Value::Nint(n) => (-1 - i64::try_from(*n).ok()?).checked_mul(1000),
+            _ => None,
+        };
+        let Value::Map(m) = v else {
+            return refuse("not-a-seat", "a seat is a map");
+        };
+        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 3) {
+            return refuse("not-a-seat", format!("field {k}"));
+        }
+        let stand = match m.get(&3) {
+            Some(Value::Array(a)) if a.len() == 2 => (um(&a[0]), um(&a[1])),
+            _ => (None, None),
+        };
+        match (m.get(&1), m.get(&2).and_then(um), stand) {
+            (Some(Value::Uint(slot)), Some(height), (Some(x), Some(z))) if height >= 0 => {
+                Ok(Seat {
+                    slot: *slot,
+                    height,
+                    stand: [x, z],
+                })
+            }
+            _ => refuse(
+                "not-a-seat",
+                "{1: slot, 2: height mm (not below the floor), 3: [x, z] mm}",
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,7 +373,7 @@ mod tests {
     #[test]
     fn every_fixture_reads_and_its_record_encodes() {
         let moves = fixtures();
-        assert_eq!(moves.len(), 3);
+        assert_eq!(moves.len(), 5);
         let mut mint = Minter::new(Scope([0x2b; 16]));
         let (body, target) = (mint.mint().expect("id"), mint.mint().expect("id"));
         for mv in &moves {

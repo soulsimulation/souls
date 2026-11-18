@@ -1,529 +1,420 @@
-//! B4's checks (#2739): a thing goes shelf to hand to table as two transfers, with one parent at every position of
-//! the log (A1, A2); a held pole reaches what the bare hand cannot (A3); a handless body is refused by name (A4); a
-//! body that retires puts down what it holds first (A5). The kinds, the world and the moves are data, read here.
+//! B3's checks (#2682) on one chair: one body per seat whatever the order, the seat released when a sit is cancelled
+//! before contact and when its holder rises, a body never stuck when a sit is cancelled after contact or a rise
+//! before it, a seat above reach refused by name, and the nearest clear spot. The
+//! 300-seat hall is the `seats` bench (`v2/tools/bench/src/seats.rs`).
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use replica::bodies::{Class, Family};
-use replica::effects::{Body, Effect, Header, Part, TransferRec, fixture_bytes, schema_hash};
-use replica::encode::{Name, Value, decode, encode};
-use replica::ids::{FIXTURE_SCOPE_A, Hash, Id, Minter, Purpose, Scope};
-use replica::moves::{Effector, Move};
-use replica::pose::{Frame, Quat, Vec3};
-use replica::time::Micros;
-use replica::tree::{Rules, Tree};
-use replica::world_model::{parse_kinds, parse_world};
+use replica::effects::fixture_bytes;
+use replica::encode::{Name, Value, decode};
+use replica::ids::{Id, Minter, Scope};
+use replica::moves::{Effector, Move, Seat};
+use replica::pose::{Frame, Quat, Support, Vec3, fixture};
+use replica::world_model::show;
 
-use super::{Cx, Holding, Log, hands, in_slot};
-use crate::controller::Controller;
+use super::{Request, SeatAt, Slots, clear_spot, seated_shape};
+use crate::controller::{Controller, Part, Stance};
 use crate::ground::Piece;
 use crate::mover::Surface;
-use crate::moves::{Fired, Moves, Reach, load};
+use crate::moves::{Moves, Reach, load};
 use crate::timers::DueList;
 
 const FAMILIES: &str = include_str!("../../../replica/fixtures/bodies/families.diag");
+const CHAIR: &str = include_str!("../../../replica/fixtures/seats/chair.diag");
 
-/// The kinds: one place, a two-handed walker, a handless family, two things held in one hand, a stand with one slot,
-/// a table with two, and a thing with a point to press. Section 18 says how a thing moves.
-const KINDS: &str = r#"
-{1: "test:ground", 2: "place", 11: ["body", "thing"]}
-{1: "test:walker", 2: "family", 6: {1: ["thing"], 2: ["thing"]}}
-{1: "test:hound", 2: "family"}
-{1: "test:mug", 2: "thing", 18: {1: "one_hand"}}
-{1: "test:pole", 2: "thing", 18: {1: "one_hand"}}
-{1: "test:stand", 2: "thing", 6: {1: ["thing"]}}
-{1: "test:table", 2: "thing", 6: {1: ["thing"], 2: ["thing"]}}
-{1: "test:switch", 2: "thing", 18: {1: "fixed"}}
-"#;
-
-/// The world: the walker (2), the hound (3), the stand (4) with the mug (6) in its slot, the table (5), the pole (7) on
-/// the ground and the switch (8).
-const WORLD: &str = r#"
-{
-  1: [],
-  2: {},
-  3: [
-    {1: 1, 2: "test:ground"},
-    {1: 2, 2: "test:walker", 3: 1},
-    {1: 3, 2: "test:hound", 3: 1},
-    {1: 4, 2: "test:stand", 3: 1},
-    {1: 5, 2: "test:table", 3: 1},
-    {1: 6, 2: "test:mug", 3: 4, 4: 1},
-    {1: 7, 2: "test:pole", 3: 1},
-    {1: 8, 2: "test:switch", 3: 1}
-  ],
-  4: []
-}
-"#;
-
-/// Take and put, as data: one hand reaches the thing's grip, or the place it is put; contact ends start-up.
-const TAKE: &str = r#"{1: "souls:take", 2: 1, 3: [{1: 2, 2: 2}], 4: [2], 5: [2],
-  6: [{1: "souls:start-up", 2: 400000}, {1: "souls:recovery", 2: 300000}], 7: {1: 2}, 8: 600000, 9: "souls:grip"}"#;
-const PUT: &str = r#"{1: "souls:put", 2: 1, 3: [{1: 2, 2: 2}], 4: [2], 5: [2],
-  6: [{1: "souls:start-up", 2: 500000}, {1: "souls:recovery", 2: 300000}], 7: {1: 2}, 8: 600000, 9: "souls:rest"}"#;
-
-fn id(n: u64) -> Id {
-    Id::new(FIXTURE_SCOPE_A, n).expect("an id")
-}
-
-fn read_move(text: &str) -> Move {
-    let v = decode(&fixture_bytes(text).expect("bytes"))
+fn value(text: &str) -> Value {
+    decode(&fixture_bytes(text).expect("bytes"))
         .expect("decodes")
-        .value;
-    Move::from_value(&v).expect("a move")
+        .value
 }
 
-/// B2's press, from its fixture file.
-fn press() -> Move {
+fn mv(name: &str) -> Move {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../replica/fixtures/moves");
     load(&dir)
         .expect("the fixture moves")
         .into_iter()
-        .find(|m| m.name.as_str() == "souls:press")
-        .expect("the press")
+        .find(|m| m.name.as_str() == name)
+        .expect("in the fixtures")
 }
 
-fn families() -> (Family, Family) {
-    let v = decode(&fixture_bytes(FAMILIES).expect("bytes"))
-        .expect("decodes")
-        .value;
-    let Value::Array(fs) = v else {
+fn family() -> Family {
+    let Value::Array(fs) = value(FAMILIES) else {
         panic!("a list")
     };
-    let fs: Vec<Family> = fs
-        .iter()
+    fs.iter()
         .map(|f| Family::from_value(f).expect("a family"))
-        .collect();
-    let has = |f: &&Family| f.resources.iter().any(|r| r.class == Class::Manipulator);
-    let with = fs.iter().find(has).expect("hands").clone();
-    let without = fs.iter().find(|f| !has(f)).expect("no hands").clone();
-    (with, without)
+        .find(|f| f.resources.iter().any(|r| r.class == Class::Manipulator))
+        .expect("a family with legs and hands")
 }
 
-/// A geometry on a line: each node's x in µm, the hand at its body's x. A tool held lengthens the hand to its tip.
-struct Line {
-    x: BTreeMap<Id, i64>,
-    tools: BTreeMap<Id, (Name, i64)>,
-    held: RefCell<BTreeMap<Name, Id>>,
-}
+/// Each body's point (its feet, or its seat's point while it is in one) and each named point of the chair, µm.
+struct Geo(BTreeMap<Id, Vec3>, BTreeMap<&'static str, Vec3>);
 
-impl Reach for Line {
+impl Reach for Geo {
     fn distance(
         &self,
         body: Id,
-        e: &Effector,
-        limb: Option<&Name>,
-        target: Id,
-        _: &Name,
+        _: &Effector,
+        _: Option<&Name>,
+        _: Id,
+        point: &Name,
     ) -> Option<i64> {
-        let mut from = *self.x.get(&body)?;
-        if let Effector::HeldPoint(p) = e {
-            let held = *self.held.borrow().get(limb?)?;
-            let (tip, length) = self.tools.get(&held)?;
-            assert_eq!(tip, p, "reached from the tool's tip");
-            from += length;
-        }
-        Some((self.x.get(&target)? - from).abs())
-    }
-
-    fn tip(&self, _: Id, limb: &Name) -> Option<Name> {
-        let held = *self.held.borrow().get(limb)?;
-        self.tools.get(&held).map(|t| t.0.clone())
+        let (a, b) = (self.0.get(&body)?, self.1.get(point.as_str())?);
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        i64::try_from((d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)).isqrt()).ok()
     }
 }
 
 struct World {
-    tree: Tree,
-    log: Log,
     c: Controller,
     due: DueList,
     mint: Minter,
     moves: Moves,
-    holding: Holding,
-    geo: Line,
-    family: Family,
+    slots: Slots,
+    floors: BTreeMap<Id, Surface>,
+    chair: Id,
+    bodies: Vec<Id>,
 }
 
-fn load_world() -> (Tree, Rules) {
-    let kinds = parse_kinds(KINDS).expect("the kinds");
-    Tree::load(&parse_world(&kinds, WORLD).expect("the world")).expect("loads")
-}
+const FLOOR: i64 = 5_000_000;
 
-fn header(zone: Id) -> Header {
-    let v = Value::Map(BTreeMap::from([
-        (
-            1,
-            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/b4-hands/1").to_bytes()),
-        ),
-        (2, Value::Bytes(schema_hash().to_bytes())),
-        (3, Value::Bytes(zone.scope().0.to_vec())),
-        (4, zone.to_value()),
-        (5, Value::Uint(0)),
-        (6, Value::Array(Vec::new())),
-        (7, Value::Array(Vec::new())),
-    ]));
-    Header::read(&encode(&v).expect("bytes")).expect("a header")
-}
-
-fn world() -> World {
-    let (tree, rules) = load_world();
-    let next = tree.to_state().next;
-    let ground_id = id(1);
+fn world(seat: Seat) -> World {
+    let floor = fixture(1);
     let corners = vec![
-        [-5_000_000, 0, -5_000_000],
-        [5_000_000, 0, -5_000_000],
-        [5_000_000, 0, 5_000_000],
-        [-5_000_000, 0, 5_000_000],
+        [-5_000, 0, -5_000],
+        [5_000, 0, -5_000],
+        [5_000, 0, 5_000],
+        [-5_000, 0, 5_000],
     ];
-    let ground = Surface::new(
-        ground_id,
+    let surface = Surface::new(
+        floor,
         vec![Piece {
             outline: vec![corners.clone()],
             vertices: corners,
             triangles: vec![[0, 2, 1], [0, 3, 2]],
         }],
     );
-    let frame = Frame {
-        node: ground_id,
-        slot: None,
-    };
-    let (with, without) = families();
+    let mut mint = Minter::new(Scope([0xb3; 16]));
+    let chair = mint.mint().expect("id");
     let mut c = Controller::new();
-    for (body, family) in [(id(2), with.clone()), (id(3), without)] {
-        let placed = ground
-            .place(body, frame, Vec3::ZERO, Quat::IDENTITY)
+    let mut bodies = Vec::new();
+    // Two bodies by the chair's stand point (300 mm in front of it), 100 mm either side.
+    for x in [-100_000, 100_000] {
+        let id = mint.mint().expect("id");
+        let frame = Frame {
+            node: floor,
+            slot: None,
+        };
+        let placed = surface
+            .place(id, frame, Vec3::new(x, 0, 300_000), Quat::IDENTITY)
             .expect("placed");
-        c.add(family, placed).expect("added");
+        c.add(family(), placed).expect("added");
+        bodies.push(id);
     }
-    // The walker and the hound stand at 0; the stand at 0.3 m, the table at 0.4 m, the pole at 0.2 m, the switch at
-    // 1.2 m: beyond the press's 0.6 m from the hand, within it from the tip of the 1 m pole.
-    let x = BTreeMap::from([
-        (id(2), 0),
-        (id(3), 0),
-        (id(4), 300_000),
-        (id(5), 400_000),
-        (id(6), 300_000),
-        (id(7), 200_000),
-        (id(8), 1_200_000),
-    ]);
-    let tip = Name::new("souls:tip").expect("a name");
+    let mut slots = Slots::new();
+    slots
+        .add(SeatAt {
+            thing: chair,
+            point: Vec3::new(0, seat.height, 0),
+            seat,
+            facing: Quat::IDENTITY,
+            floor,
+        })
+        .expect("a seat");
     World {
-        log: Log::new(header(ground_id), rules, next),
-        tree,
         c,
         due: DueList::new(),
-        mint: Minter::new(Scope([0xb4; 16])),
+        mint,
         moves: Moves::new(),
-        holding: Holding::new(),
-        geo: Line {
-            x,
-            tools: BTreeMap::from([(id(7), (tip, 1_000_000))]),
-            held: RefCell::new(BTreeMap::new()),
-        },
-        family: with,
+        slots,
+        floors: BTreeMap::from([(floor, surface)]),
+        chair,
+        bodies,
     }
-}
-
-/// What holding works on, borrowed from the world's fields (not its holding).
-macro_rules! cx {
-    ($w:expr) => {
-        Cx {
-            tree: &mut $w.tree,
-            log: &mut $w.log,
-            c: &mut $w.c,
-            due: &mut $w.due,
-            mint: &mut $w.mint,
-            moves: &mut $w.moves,
-            geo: &$w.geo,
-        }
-    };
 }
 
 impl World {
-    /// Runs every timer to the end, answering each contact; returns the contacts' results and the moves' ends.
-    fn run(&mut self) -> (Vec<Result<(), &'static str>>, Vec<String>) {
-        let (mut contacts, mut ends) = (Vec::new(), Vec::new());
-        while let Some(t) = self.due.fire(Micros::MAX) {
-            let Some(f) =
-                self.moves
-                    .fire(&mut self.c, &mut self.due, &mut self.mint, &self.geo, &t)
-            else {
-                continue;
-            };
-            if let Some(r) = self.holding.fired(&mut cx!(self), &f) {
-                contacts.push(r.map_err(|e| e.name));
-            }
-            match f {
-                Fired::Done(r) | Fired::Cancelled(r) => {
-                    ends.push(r.ended.expect("ended").how.as_str().to_owned());
-                }
-                Fired::Phase { .. } => {}
-            }
-            self.sync();
-        }
-        (contacts, ends)
-    }
-
-    /// What the walker's hands hold, for the geometry.
-    fn sync(&self) {
-        let mut held = self.geo.held.borrow_mut();
-        held.clear();
-        for h in hands(&self.family) {
-            if let Some(t) = in_slot(&self.tree, id(2), h.slot) {
-                held.insert(h.resource, t);
-            }
-        }
-    }
-
-    fn parent(&self, n: Id) -> (Option<Id>, Option<u64>) {
-        let node = self
-            .tree
-            .node(self.tree.handle(n).expect("live"))
-            .expect("a node");
-        (node.parent(), node.slot())
-    }
-}
-
-/// Every node that lists `thing` as a child, after each part of the log, replayed from the start.
-fn holders_over_log(w: &World, thing: Id) -> Vec<Vec<Id>> {
-    let (mut tree, _) = load_world();
-    let ids: Vec<Id> = (1..=8).map(id).collect();
-    let holders = |tree: &Tree| {
-        let Some(h) = tree.handle(thing) else {
-            return Vec::new();
-        };
-        ids.iter()
-            .copied()
-            .filter(|p| {
-                tree.handle(*p)
-                    .and_then(|ph| tree.children(ph))
-                    .is_some_and(|cs| cs.contains(&h))
+    fn geo(&self) -> Geo {
+        let at = self.slots.seat(self.chair).expect("the chair");
+        let stand = at.stand().expect("a stand point");
+        let points = BTreeMap::from([("souls:seat", at.point), ("souls:stand", stand)]);
+        let bodies = self
+            .bodies
+            .iter()
+            .map(|&b| {
+                let p = self.c.body(b).expect("a body").pose;
+                (
+                    b,
+                    if p.support == Support::Slot {
+                        at.point
+                    } else {
+                        p.position
+                    },
+                )
             })
-            .collect()
-    };
-    let mut out = vec![holders(&tree)];
-    for effects in &w.log.parts {
-        let bytes = encode(&Value::Map(BTreeMap::from([
-            (1, Value::Bytes(w.log.header.hash().to_bytes())),
-            (
-                2,
-                Value::Array(effects.iter().map(Effect::to_value).collect()),
-            ),
-        ])))
-        .expect("bytes");
-        tree.apply(&w.log.header, &Part::read(&bytes).expect("a part"))
-            .expect("the log replays");
-        out.push(holders(&tree));
+            .collect();
+        Geo(bodies, points)
     }
-    out
-}
 
-/// The transfer ids of a part: each a leave and an arrive under one id.
-fn transfers(part: &[Effect]) -> Vec<(Id, &'static str)> {
-    part.iter()
-        .filter_map(|e| match &e.body {
-            Body::Transfer(TransferRec::Leave { transfer, .. }) => Some((*transfer, "leave")),
-            Body::Transfer(TransferRec::Arrive { transfer, .. }) => Some((*transfer, "arrive")),
-            _ => None,
-        })
-        .collect()
-}
-
-#[test]
-fn a_thing_goes_stand_to_hand_to_table_as_two_transfers_with_one_parent_throughout() {
-    let mut w = world();
-    let (walker, stand, table, mug) = (id(2), id(4), id(5), id(6));
-    assert_eq!(w.parent(mug), (Some(stand), Some(1)));
-    let take = read_move(TAKE);
-    w.holding
-        .take(&mut cx!(w), walker, &take, mug, 0)
-        .expect("take started");
-    assert_eq!(
-        w.parent(mug),
-        (Some(stand), Some(1)),
-        "nothing moves before contact"
-    );
-    let (contacts, ends) = w.run();
-    assert_eq!(contacts, vec![Ok(())]);
-    assert_eq!(ends, vec!["done"]);
-    // A2: while held, it is a child of the hand's slot.
-    let hand = hands(&w.family)[0].clone();
-    assert_eq!(w.parent(mug), (Some(walker), Some(hand.slot)));
-    assert_eq!(in_slot(&w.tree, walker, hand.slot), Some(mug));
-    let put = read_move(PUT);
-    let onto = Frame {
-        node: table,
-        slot: Some(2),
-    };
-    w.holding
-        .put(&mut cx!(w), walker, &put, mug, onto, 1_000_000)
-        .expect("put started");
-    let (contacts, ends) = w.run();
-    assert_eq!((contacts, ends), (vec![Ok(())], vec!["done".to_owned()]));
-    assert_eq!(w.parent(mug), (Some(table), Some(2)));
-    // Two transfers, each a leave and an arrive under one id in one part.
-    assert_eq!(w.log.parts.len(), 2);
-    for part in &w.log.parts {
-        let t = transfers(part);
-        assert_eq!(t.len(), 2);
-        assert_eq!((t[0].1, t[1].1), ("leave", "arrive"));
-        assert_eq!(t[0].0, t[1].0, "one transfer id");
+    /// Fires every timer due before `until`, each against the world as it stands.
+    fn run(&mut self, until: i64) {
+        while let Some(t) = self.due.fire(until) {
+            let geo = self.geo();
+            let w = &mut *self;
+            w.slots
+                .fire(
+                    &mut w.c,
+                    &mut w.due,
+                    &mut w.mint,
+                    &mut w.moves,
+                    &geo,
+                    &w.floors,
+                    &t,
+                )
+                .expect("a move's timer");
+        }
     }
-    // A1: at every position of the log, exactly one parent.
-    let over = holders_over_log(&w, mug);
-    assert_eq!(over, vec![vec![stand], vec![walker], vec![table]]);
-    let shown: Vec<Vec<String>> = over
-        .iter()
-        .map(|ps| ps.iter().map(|p| replica::world_model::show(*p)).collect())
-        .collect();
-    println!("parents of the thing over the log: {shown:?}");
-}
 
-#[test]
-fn a_held_pole_presses_what_the_bare_hand_cannot() {
-    let mut w = world();
-    let (walker, pole, switch) = (id(2), id(7), id(8));
-    let r = w
-        .moves
-        .start(
+    fn sit(
+        &mut self,
+        order: &[usize],
+        m: &Move,
+    ) -> Vec<(Id, Result<u64, replica::effects::Refusal>)> {
+        let geo = self.geo();
+        let reqs: Vec<Request> = order
+            .iter()
+            .map(|&i| Request {
+                body: self.bodies[i],
+                thing: self.chair,
+                mv: m,
+                stance: Stance::Sit,
+            })
+            .collect();
+        let w = &mut *self;
+        w.slots.commit(
             &mut w.c,
             &mut w.due,
             &mut w.mint,
-            &w.geo,
-            walker,
-            &press(),
-            switch,
+            &mut w.moves,
+            &geo,
+            &reqs,
             0,
         )
-        .expect_err("refused bare-handed");
-    assert_eq!(r.name, "out-of-reach");
-    println!("bare hand: {r}");
-    w.holding
-        .take(&mut cx!(w), walker, &read_move(TAKE), pole, 0)
-        .expect("take the pole");
-    assert_eq!(w.run().0, vec![Ok(())]);
-    let hand = hands(&w.family)
-        .into_iter()
-        .find(|h| in_slot(&w.tree, walker, h.slot) == Some(pole))
-        .expect("held");
-    let mv = super::steer(&press(), &[hand.resource]);
-    w.moves
-        .start(
+    }
+}
+
+fn chair() -> Seat {
+    Seat::from_value(&value(CHAIR)).expect("the chair's seat")
+}
+
+#[test]
+fn a_seat_takes_one_body_whatever_the_order() {
+    let sit = mv("souls:sit");
+    for order in [[0, 1], [1, 0]] {
+        let mut w = world(chair());
+        let first = *w.bodies.iter().min().expect("bodies");
+        let out = w.sit(&order, &sit);
+        assert_eq!(out[0].0, first, "the stable key, not arrival");
+        assert!(out[0].1.is_ok());
+        let r = out[1].1.as_ref().expect_err("the second is refused");
+        assert_eq!(r.name, "seat-taken");
+        assert!(r.detail.contains(&show(first)), "names the holder: {r}");
+        w.run(i64::MAX);
+        let p = w.c.body(first).expect("a body").pose;
+        assert_eq!(p.support, Support::Slot);
+        assert_eq!(
+            p.frame,
+            Frame {
+                node: w.chair,
+                slot: Some(1)
+            }
+        );
+        assert_eq!(w.c.input(first).expect("a body").stance, Stance::Sit);
+        let running = w.c.claims(first).expect("a body").running().clone();
+        assert!(running.values().all(|i| i.shape == seated_shape()));
+        assert!(w.due.is_empty() && w.moves.is_empty(), "no timer, no move");
+        assert_eq!(w.slots.holder(w.chair), Some(first));
+        assert!(w.c.step(&w.floors, 50_000, 2_000_000).refused.is_empty());
+    }
+}
+
+#[test]
+fn a_sit_cancelled_before_contact_frees_the_seat() {
+    let sit = mv("souls:sit");
+    let mut w = world(chair());
+    let b = w.bodies[0];
+    w.sit(&[0], &sit)[0].1.as_ref().expect("started");
+    w.c.claim(b, &seated_shape())
+        .expect("a later claim on the legs");
+    w.run(i64::MAX);
+    assert_eq!(w.slots.holder(w.chair), None, "released by the engine");
+    assert_eq!(
+        w.c.body(b).expect("a body").pose.support.clone(),
+        Support::Surface {
+            surface: fixture(1),
+            height: 0
+        }
+    );
+    assert!(w.sit(&[1], &sit)[0].1.is_ok(), "the seat is free again");
+}
+
+#[test]
+fn a_seat_above_standing_reach_is_refused_by_name() {
+    let sit = mv("souls:sit");
+    let mut w = world(Seat {
+        height: sit.reach + 1,
+        ..chair()
+    });
+    let r = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
+    assert_eq!(r.name, "seat-out-of-reach");
+    assert!(w.moves.is_empty() && w.slots.is_empty());
+}
+
+#[test]
+fn rising_hands_the_body_back_at_the_stand_point() {
+    let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
+    let mut w = world(chair());
+    let b = *w.bodies.iter().min().expect("bodies");
+    w.sit(&[0, 1], &sit);
+    w.run(i64::MAX);
+    let geo = w.geo();
+    let n = w
+        .slots
+        .rise(
             &mut w.c,
             &mut w.due,
             &mut w.mint,
-            &w.geo,
-            walker,
-            &mv,
-            switch,
-            1_000_000,
+            &mut w.moves,
+            &geo,
+            b,
+            &rise,
+            2_000_000,
         )
-        .expect("pressed with the pole");
-    assert_eq!(w.run().1, vec!["done"], "contact within reach of the tip");
-}
-
-#[test]
-fn a_handless_body_asking_to_take_is_refused_by_name() {
-    let mut w = world();
-    let r = w
-        .holding
-        .take(&mut cx!(w), id(3), &read_move(TAKE), id(6), 0)
-        .expect_err("refused");
-    assert_eq!(r.name, "take-needs-hands");
-    assert!(w.moves.is_empty() && w.holding.is_empty() && w.log.parts.is_empty());
-    assert!(
-        w.c.claims(id(3)).expect("a body").running().is_empty(),
-        "no claim"
-    );
-}
-
-#[test]
-fn a_body_that_retires_holding_a_thing_puts_it_down_first() {
-    let mut w = world();
-    let (walker, table, mug) = (id(2), id(5), id(6));
-    w.holding
-        .take(&mut cx!(w), walker, &read_move(TAKE), mug, 0)
-        .expect("take");
-    w.run();
-    let down = [Frame {
-        node: table,
-        slot: Some(1),
-    }];
-    w.holding
-        .retire(&mut cx!(w), walker, &down, 2_000_000)
-        .expect("retired");
-    assert!(w.tree.handle(walker).is_none(), "the body is gone");
+        .expect("rising");
     assert_eq!(
-        w.parent(mug),
-        (Some(table), Some(1)),
-        "the thing is still in the world"
+        w.c.input(b).expect("a body").stance,
+        Stance::Sit,
+        "seated until contact"
     );
-    // The retirement's part puts down first, then removes the body.
-    let last = w.log.parts.last().expect("a part");
-    assert_eq!(transfers(last).len(), 2);
-    assert_eq!(last.last().map(|e| e.envelope.node), Some(walker));
+    let contact = w.moves.record(n).expect("in progress").contact_at();
+    w.run(contact + 1);
+    let p = w.c.body(b).expect("a body").pose;
+    let stand = w
+        .slots
+        .seat(w.chair)
+        .expect("the chair")
+        .stand()
+        .expect("a point");
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (stand.x, stand.z),
+        "on its feet at the stand point"
+    );
+    assert!(matches!(p.support, Support::Surface { .. }));
+    assert_eq!(w.c.input(b).expect("a body").stance, Stance::Stand);
+    assert_eq!(
+        w.slots.holder(w.chair),
+        None,
+        "released when the holder left"
+    );
+    w.run(i64::MAX);
+    assert!(w.c.claims(b).expect("a body").running().is_empty());
 }
 
-#[test]
-fn a_put_into_a_slot_filled_since_the_check_is_refused_and_the_thing_stays_held() {
-    let mut w = world();
-    let (walker, table, mug, pole) = (id(2), id(5), id(6), id(7));
-    w.holding
-        .take(&mut cx!(w), walker, &read_move(TAKE), mug, 0)
-        .expect("take");
-    w.run();
-    let onto = Frame {
-        node: table,
-        slot: Some(1),
-    };
-    w.holding
-        .put(&mut cx!(w), walker, &read_move(PUT), mug, onto, 1_000_000)
-        .expect("put");
-    // Before contact, the pole is set into that slot (by another writer).
-    let id_ = w.mint.mint().expect("an id");
-    let entries = super::transfer(
-        &w.log.header,
-        pole,
-        replica::world_model::Audience::Everyone,
-        onto,
-        id_,
-    );
-    w.log
-        .write(&mut w.tree, 1_100_000, entries.to_vec())
-        .expect("filled");
-    let (contacts, _) = w.run();
-    assert_eq!(contacts, vec![Err("slot-occupied")]);
-    assert!(w.moves.is_empty(), "the put is cancelled");
-    assert_eq!(w.parent(mug).0, Some(walker), "still in the hand");
+/// A later claim on the legs that nothing cancels: a walk.
+fn walk_shape() -> replica::bodies::SkillShape {
+    replica::bodies::SkillShape {
+        name: Name::new("test:walk").expect("a name"),
+        claims: vec![replica::bodies::Want::All(Class::Locomotion)],
+        blocks: vec![],
+        cancelled_by: vec![],
+    }
 }
 
-#[test]
-fn a_move_cancelled_before_contact_transfers_nothing() {
-    let mut w = world();
-    let (walker, stand, mug) = (id(2), id(4), id(6));
-    let n = w
-        .holding
-        .take(&mut cx!(w), walker, &read_move(TAKE), mug, 0)
-        .expect("take");
-    w.moves.cancel(
-        &mut w.c,
-        &mut w.due,
-        n,
-        100_000,
-        Name::new("test:cancelled").expect("a name"),
-    );
-    let (contacts, _) = w.run();
-    assert!(contacts.is_empty());
-    let probe = Fired::Phase {
-        instance: n,
-        phase: 1,
-    };
+/// Never stuck: the walk that took `b`'s legs (`driver`) walks it away from the seat, and the seat is free.
+fn walks_away(w: &mut World, b: Id, driver: u64) {
     assert!(
-        w.holding.fired(&mut cx!(w), &probe).is_none(),
-        "nothing pending"
+        w.due.is_empty() && w.moves.is_empty(),
+        "nothing left running"
     );
-    assert_eq!(w.parent(mug), (Some(stand), Some(1)));
-    assert!(w.log.parts.is_empty());
+    let p = w.c.body(b).expect("a body").pose;
+    assert!(matches!(p.support, Support::Surface { .. }), "on the floor");
+    assert_eq!(
+        (w.slots.held_by(b), w.slots.holder(w.chair)),
+        (None, None),
+        "the seat is free"
+    );
+    let v = Vec3::new(0, 0, 1_000_000);
+    w.c.set(b, driver, Part::Velocity(v, replica::pose::Mode::Surface))
+        .expect("steered by the walk");
+    assert!(w.c.step(&w.floors, 50_000, 9_000_000).refused.is_empty());
+    let q = w.c.body(b).expect("a body").pose.position;
+    assert_eq!(q.z - p.position.z, 50_000, "walked one tick at 1 m/s");
+}
+
+#[test]
+fn a_sit_cancelled_after_contact_never_leaves_the_body_stuck() {
+    let sit = mv("souls:sit");
+    let mut w = world(chair());
+    let b = w.bodies[0];
+    let n = w.sit(&[0], &sit)[0].1.clone().expect("started");
+    let contact = w.moves.record(n).expect("in progress").contact_at();
+    w.run(contact + 1);
+    assert_eq!(
+        w.c.body(b).expect("a body").pose.support,
+        Support::Slot,
+        "in the slot"
+    );
+    let d = w.c.claim(b, &walk_shape()).expect("a walk takes the legs");
+    w.run(i64::MAX);
+    walks_away(&mut w, b, d);
+}
+
+#[test]
+fn a_rise_cancelled_before_contact_never_leaves_the_body_stuck() {
+    let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
+    let mut w = world(chair());
+    let b = w.bodies[0];
+    w.sit(&[0], &sit)[0].1.clone().expect("started");
+    w.run(i64::MAX);
+    let geo = w.geo();
+    w.slots
+        .rise(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &geo,
+            b,
+            &rise,
+            2_000_000,
+        )
+        .expect("rising");
+    let d = w.c.claim(b, &walk_shape()).expect("a walk takes the legs");
+    w.run(i64::MAX);
+    walks_away(&mut w, b, d);
+}
+
+#[test]
+fn the_nearest_clear_spot_is_clear_and_nearest() {
+    let w = world(chair());
+    let floor = &w.floors[&fixture(1)];
+    assert_eq!(
+        clear_spot(floor, [0, 300_000], &[], 560_000, 50_000, 3_000_000),
+        Some([0, 300_000])
+    );
+    let taken = [[0, 300_000]];
+    let p = clear_spot(floor, [0, 300_000], &taken, 560_000, 50_000, 3_000_000).expect("a spot");
+    let d2 = |a: [i64; 2], b: [i64; 2]| (a[0] - b[0]).pow(2) + (a[1] - b[1]).pow(2);
+    assert!(d2(p, taken[0]) >= 560_000i64.pow(2));
+    assert!(
+        d2(p, taken[0]) < 610_000i64.pow(2),
+        "the nearest on the grid"
+    );
+    assert!(
+        clear_spot(floor, [FLOOR + 1_000_000, 0], &[], 1, 50_000, 500_000).is_none(),
+        "off the floor"
+    );
 }

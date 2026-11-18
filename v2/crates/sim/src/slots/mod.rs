@@ -1,48 +1,50 @@
-//! Hands, holding and tools (Engine v2 B4, #2739): a hand holds a thing, so that a thing taken or put is never in two
-//! places or in none, and a held tool lengthens the hand. No code here names a kind or a move.
+//! Postures and seats (Engine v2 B3, #2682): a body sits, lies and rises by moves (B2's data) that hand it between the
+//! floor and a seat's slot through the controller, and a seat holds one body.
 //!
-//! - **A hand is a resource and a slot.** A family's manipulators that name a slot (`replica::bodies::Resource`) are
-//!   its hands ([`hands`]). A thing held is a child of that hand's slot of the body (`v2/docs/world-model.md` rule
-//!   2): a change of parent, never a link, so it moves with the hand and ends with the body.
-//! - **Take and put are moves** (B2's `crate::moves`), steered to the hand they use ([`steer`]). Their contact instant
-//!   does the transfer: T1's leave and arrive under one transfer id, written in one part, so that at every position
-//!   of the log the thing has exactly one parent. A move cancelled before contact transfers nothing. A transfer is
-//!   written for any parent and slot ([`transfer`]), not only a hand: E4's setting down uses the same one.
-//! - **What a thing occupies.** Its kind says how many hands it takes, one or two (`replica::world_model::Kind::hands`,
-//!   section 18). A two-handed thing is a child of one hand's slot, and the other hand counts as full while it is held
-//!   ([`free_hands`]). A thing whose kind says neither is not taken (`thing-not-carried`).
-//! - **Refusals by name.** A body with no hands asking to take: `take-needs-hands`, before any claim, so it never gets
-//!   an imaginary grip (`docs/design/custom-bodies.md`). Not enough free hands: `hands-full`. A put of a thing the body
-//!   does not hold: `not-held`. A put target filled at the check, or filled since (at contact): `slot-occupied`, and
-//!   the thing stays in the hand. A thing gone by contact: `thing-missing`. A refusal at contact cancels the move.
-//! - **A held tool's tip.** Reach is measured from the effector: the hand, or the named tip of the tool held in it
-//!   (`crate::moves::Reach::tip`), so a body holding a pole presses what its bare hand cannot reach.
-//! - **Retiring.** A parent is lifetime, so a body that retires puts down what it holds first, into the free slots in
-//!   reach the caller names, in the same part as its removal ([`Holding::retire`]); with nowhere to put a thing, the
-//!   retirement is refused (`retire-nowhere-to-put`) and nothing changes.
+//! - **A seat** is one slot of a thing, with its kind's data ([`replica::moves::Seat`]): the slot's height above the
+//!   floor from the kind's model geometry, and a stand point. A seat higher than the move's reach (the body's standing
+//!   reach) is refused `seat-out-of-reach`, by its height alone.
+//! - **Reserved at commit.** The requests of one tick are taken together ([`Slots::commit`]) and ordered by a stable
+//!   key, the body's id and then the seat's, never by arrival. The first takes the seat; every later one is refused
+//!   `seat-taken`, naming the holder. The hold is a field of this table, keyed by the seat's thing, so the holder is
+//!   one lookup and never a scan.
+//! - **Contact hands the body over.** At the sit's (or lie's) contact instant the body is handed from the floor into
+//!   the slot ([`Controller::seat`], T4's hand-off from mover to slot) with the stance the request named; at the rise's
+//!   contact it is handed back onto the floor at the seat's stand point ([`Controller::stand`]), standing. Postures
+//!   are the controller's stance input: stand, sit, lie.
+//! - **A seated body has no timer and no mover.** When the move is done, a driver with no timer ([`seated_shape`])
+//!   holds its legs and its stance, and the controller's tick never visits it.
+//! - **The engine releases the seat**, never the skill: when the holder rises (at the rise's contact), and when the
+//!   sit is cancelled before contact (a later claim on its legs, `claim-taken`). A body is never left stuck: when a
+//!   later claim cancels a sit after contact, or a rise before it, the body is handed back onto the floor at the stand
+//!   point under that claim's driver and the seat is released, since a tick never steps a body in a slot.
+//! - **Rising onto a taken spot.** The stand point may be taken: [`clear_spot`] finds the nearest clear point, and the
+//!   body walks there by the mover. It never appears there.
 //!
-//! Not here: amounts (F4), handing to another Soul (E8), setting down where there is no slot (E4), things worn (E15),
-//! carrying by two (B9: the load is a child of the carry activity's node, which nothing here prevents), throwing (N14),
-//! and the route mask for a door that needs a free hand (N5).
+//! Not here: choosing among seats (I5), queueing for one (B7), sitting where there is no seat (E3), sleep, a seat
+//! edited away under its sitter (G2), a thing with several seats, writing the hold into the tree (the writer's).
+//!
+//! **Hands** (B4, #2739, [`hands`]) are slots of the same model: a slot of a node, named by a [`Frame`], holds one
+//! occupant. A seat holds a body (this table, until the hold is written into the tree); a hand's slot, a shelf's or a
+//! table's holds a thing, as a child of that slot in the tree. [`Slots::occupant`] answers who is in a slot for both,
+//! so a thing is never put into a seat a body holds, and take and put refuse a filled slot by one name.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use replica::bodies::{Class, Family, Want};
-use replica::effects::{
-    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Refusal, Rest,
-    TransferRec,
-};
-use replica::encode::{Name, Value, encode};
+use replica::bodies::{Class, SkillShape, Want};
+use replica::effects::Refusal;
+use replica::encode::Name;
 use replica::ids::{Id, Minter};
-use replica::moves::Move;
-use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::moves::{Move, Seat};
+use replica::pose::{Frame, HandOff, Quat, Vec3};
 use replica::time::Micros;
-use replica::tree::{Rules, Tree};
-use replica::world_model::{Audience, show};
+use replica::tree::Tree;
+use replica::world_model::show;
 
-use crate::controller::Controller;
+use crate::controller::{Controller, Driver, Part, Stance};
+use crate::mover::Surface;
 use crate::moves::{Fired, Instance, Moves, Reach};
-use crate::timers::DueList;
+use crate::timers::{DueList, Timer};
 
 type R<T> = Result<T, Refusal>;
 
@@ -53,420 +55,452 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
     })
 }
 
-/// A hand: a manipulator resource, and the body's slot that holds what it holds.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Hand {
-    pub resource: Name,
-    pub slot: u64,
+/// A seat where it is: its thing, its kind's data, its slot's point and facing in the floor's frame (µm), and the
+/// floor's node, whose surface a body stands on to sit and is set back on.
+#[derive(Clone, Debug)]
+pub struct SeatAt {
+    pub thing: Id,
+    pub seat: Seat,
+    pub point: Vec3,
+    pub facing: Quat,
+    pub floor: Id,
 }
 
-/// A family's hands, in its order: its manipulators that name a slot. A beak or a trunk with a slot is a hand too.
-pub fn hands(family: &Family) -> Vec<Hand> {
-    family
-        .resources
-        .iter()
-        .filter(|r| r.class == Class::Manipulator)
-        .filter_map(|r| {
-            r.slot.map(|slot| Hand {
-                resource: r.name.clone(),
-                slot,
-            })
-        })
-        .collect()
-}
-
-/// The thing in slot `slot` of node `parent`, if any.
-pub fn in_slot(tree: &Tree, parent: Id, slot: u64) -> Option<Id> {
-    let h = tree.handle(parent)?;
-    tree.children(h)?
-        .iter()
-        .filter_map(|c| tree.node(*c))
-        .find(|n| n.slot() == Some(slot))
-        .map(|n| n.id())
-}
-
-/// The hands a thing of kind `kind` (full name) occupies when held: 1 or 2, or none when it is not held in a hand.
-pub fn occupies(rules: &Rules, kind: &str) -> Option<u8> {
-    rules.kinds.get(kind).and_then(|k| k.hands)
-}
-
-/// `body`'s hands that are free: their slot holds nothing, and no two-handed thing held in another hand counts them.
-pub fn free_hands(tree: &Tree, rules: &Rules, body: Id, all: &[Hand]) -> Vec<Hand> {
-    let mut free = Vec::new();
-    let mut second = 0usize;
-    for h in all {
-        match in_slot(tree, body, h.slot) {
-            None => free.push(h.clone()),
-            Some(t) => {
-                let kind = tree.handle(t).and_then(|x| tree.node(x));
-                if kind.is_some_and(|n| occupies(rules, n.kind().as_str()) == Some(2)) {
-                    second += 1;
-                }
-            }
-        }
-    }
-    free.truncate(free.len().saturating_sub(second));
-    free
-}
-
-/// `mv` steered to `hands`: its claims of any one manipulator name these hands, in order, and a hand left over is
-/// added as a claim by name (a two-handed take holds both). Other claims are kept.
-pub fn steer(mv: &Move, hands: &[Name]) -> Move {
-    let mut left = hands.iter();
-    let mut out = mv.clone();
-    for w in &mut out.claims {
-        if *w == Want::One(Class::Manipulator)
-            && let Some(h) = left.next()
-        {
-            *w = Want::Named(h.clone());
-        }
-    }
-    out.claims.extend(left.cloned().map(Want::Named));
-    out
-}
-
-/// The pose a thing arrives at in `to`: the frame's origin, held by the slot, or standing on the parent with none.
-fn arrival(to: Frame) -> Pose {
-    Pose {
-        frame: to,
-        position: Vec3::ZERO,
-        orientation: Quat::IDENTITY,
-        support: match to.slot {
-            Some(_) => Support::Slot,
-            None => Support::Surface {
-                surface: to.node,
-                height: 0,
-            },
-        },
+impl SeatAt {
+    /// The stand point in the floor's frame, µm (its height is the floor's, found when the body is placed).
+    pub fn stand(&self) -> R<Vec3> {
+        let [x, z] = self.seat.stand;
+        let d = self
+            .facing
+            .rotate(Vec3::new(x, 0, z))
+            .map_err(|e| Refusal {
+                name: e.name(),
+                detail: "a stand point".into(),
+            })?;
+        Ok(Vec3::new(self.point.x + d.x, 0, self.point.z + d.z))
     }
 }
 
-/// One entry of a part: the node whose system writes it, the audience, and what it writes.
-pub type Entry = (Id, Audience, Body);
-
-/// The transfer of `thing` (whose audience is `audience`) into `to`, any parent and slot: T1's leave, written by the
-/// thing's entry, and the arrive, written by the new parent's, under the one id `transfer`, inside this zone.
-pub fn transfer(header: &Header, thing: Id, audience: Audience, to: Frame, id: Id) -> [Entry; 2] {
-    [
-        (
-            thing,
-            audience,
-            Body::Transfer(TransferRec::Leave {
-                transfer: id,
-                node: thing,
-                lineage: header.lineage,
-                zone: header.zone,
-                pose: arrival(to),
-            }),
-        ),
-        (
-            to.node,
-            audience,
-            Body::Transfer(TransferRec::Arrive {
-                transfer: id,
-                carried: Vec::new(),
-            }),
-        ),
-    ]
+/// One request of a tick: `body` asks to take the seat of `thing` by move `mv`, to be held there in `stance`.
+#[derive(Clone, Debug)]
+pub struct Request<'a> {
+    pub body: Id,
+    pub thing: Id,
+    pub mv: &'a Move,
+    pub stance: Stance,
 }
 
-/// The zone's writer for holding: each part it commits, in order, is the log.
-pub struct Log {
-    pub header: Header,
-    pub rules: Rules,
-    /// The zone's next sequence.
-    pub next: u64,
-    /// Every part committed, in order.
-    pub parts: Vec<Vec<Effect>>,
-}
-
-impl Log {
-    pub fn new(header: Header, rules: Rules, next: u64) -> Log {
-        Log {
-            header,
-            rules,
-            next,
-            parts: Vec::new(),
-        }
-    }
-
-    /// Commits `entries` at `at` as one part, all or none: T2's checks at commit (a slot that does not admit the thing
-    /// is `child-not-admitted`).
-    pub fn write(&mut self, tree: &mut Tree, at: Micros, entries: Vec<Entry>) -> R<()> {
-        let effects: Vec<Effect> = entries
-            .into_iter()
-            .zip(self.next..)
-            .map(|((node, audience, body), sequence)| Effect {
-                envelope: Envelope {
-                    sequence,
-                    at,
-                    cause: Cause::World,
-                    actor: Actor::World,
-                    audience,
-                    node,
-                },
-                body,
-                events: None,
-                rest: Rest::new(),
-            })
-            .collect();
-        let bytes = encode(&Value::Map(BTreeMap::from([
-            (1, Value::Bytes(self.header.hash().to_bytes())),
-            (
-                2,
-                Value::Array(effects.iter().map(Effect::to_value).collect()),
-            ),
-        ])))
-        .or_else(|e| refuse("encoding", e.to_string()))?;
-        tree.commit(&self.header, &Part::read(&bytes)?, &self.rules)?;
-        self.next += effects.len() as u64;
-        self.parts.push(effects);
-        Ok(())
-    }
-}
-
-/// What the engine's holding works on: the tree and its writer, the controller, the due list, the minter, the moves
-/// in progress and the geometry.
-pub struct Cx<'a, G: Reach> {
-    pub tree: &'a mut Tree,
-    pub log: &'a mut Log,
-    pub c: &'a mut Controller,
-    pub due: &'a mut DueList,
-    pub mint: &'a mut Minter,
-    pub moves: &'a mut Moves,
-    pub geo: &'a G,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum State {
+    /// The sit or lie in progress; `in_slot` once its contact handed the body over.
+    Lowering {
+        instance: Instance,
+        in_slot: bool,
+    },
+    /// In the slot, its legs held by a driver with no timer (none when another claim took them).
+    Seated(Option<Driver>),
+    Rising(Instance),
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Pending {
-    thing: Id,
-    to: Frame,
+struct Hold {
+    body: Id,
+    stance: Stance,
+    state: State,
 }
 
-/// The takes and puts in progress, by their move's instance: each transfers at its contact instant.
+/// The claim that holds a seated body's legs and stance: no timer, nothing cancels it; [`Slots::rise`] ends it.
+pub fn seated_shape() -> SkillShape {
+    SkillShape {
+        name: Name::new("souls:seated").unwrap_or_else(|| unreachable!("a literal name")),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: vec![],
+        cancelled_by: vec![],
+    }
+}
+
+/// Every seat, and who holds each.
 #[derive(Default)]
-pub struct Holding {
-    pending: BTreeMap<Instance, Pending>,
+pub struct Slots {
+    seats: BTreeMap<Id, SeatAt>,
+    held: BTreeMap<Id, Hold>,
+    by_body: BTreeMap<Id, Id>,
 }
 
-fn node_of(tree: &Tree, id: Id) -> R<(Name, Audience, Option<Id>, Option<u64>)> {
-    let n = tree
-        .handle(id)
-        .and_then(|h| tree.node(h))
-        .ok_or_else(|| Refusal {
-            name: "thing-missing",
-            detail: show(id),
-        })?;
-    Ok((n.kind().clone(), n.audience(), n.parent(), n.slot()))
-}
-
-fn family(c: &Controller, body: Id) -> R<Family> {
-    c.claims(body)
-        .map(|b| b.family().clone())
-        .ok_or_else(|| Refusal {
-            name: "body-unknown",
-            detail: show(body),
-        })
-}
-
-impl Holding {
-    pub fn new() -> Holding {
-        Holding::default()
+impl Slots {
+    pub fn new() -> Slots {
+        Slots::default()
     }
 
-    /// Takes and puts in progress.
+    /// Adds a seat (`seat-duplicate` when its thing has one).
+    pub fn add(&mut self, seat: SeatAt) -> R<()> {
+        if self.seats.contains_key(&seat.thing) {
+            return refuse("seat-duplicate", show(seat.thing));
+        }
+        self.seats.insert(seat.thing, seat);
+        Ok(())
+    }
+
+    pub fn seat(&self, thing: Id) -> Option<&SeatAt> {
+        self.seats.get(&thing)
+    }
+
+    /// Who holds the seat of `thing`: one lookup.
+    pub fn holder(&self, thing: Id) -> Option<Id> {
+        self.held.get(&thing).map(|h| h.body)
+    }
+
+    /// Who is in slot `at` (a node and its slot): the body holding it when it is a seat, else the thing the tree
+    /// holds there. None for a frame with no slot, or an empty one.
+    pub fn occupant(&self, tree: &Tree, at: Frame) -> Option<Id> {
+        let slot = at.slot?;
+        self.seats
+            .get(&at.node)
+            .filter(|s| s.seat.slot == slot)
+            .and_then(|_| self.holder(at.node))
+            .or_else(|| in_slot(tree, at.node, slot))
+    }
+
+    /// The seat `body` holds, if any.
+    pub fn held_by(&self, body: Id) -> Option<Id> {
+        self.by_body.get(&body).copied()
+    }
+
+    /// Seats held.
     pub fn len(&self) -> usize {
-        self.pending.len()
+        self.held.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.pending.is_empty()
+        self.held.is_empty()
     }
 
-    /// Starts `mv`, steered to free hands, for `body` to take `thing` at `now`: at contact the thing becomes a child of
-    /// the first of those hands' slots. Refused, with nothing changed: `take-needs-hands`, `thing-missing`,
-    /// `thing-not-carried`, `hands-full`, then the move's own refusals (`out-of-reach` among them).
-    pub fn take<G: Reach>(
+    /// Commits one tick's requests at `now`, in the stable order (body id, then seat), whatever order they came in.
+    /// Each is reserved and its move started, or refused by name: `seat-unknown`, `seat-taken` (naming the holder),
+    /// `seat-already-held` (the body holds another), `seat-out-of-reach`, or the move's own refusals (B2).
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit(
         &mut self,
-        cx: &mut Cx<'_, G>,
-        body: Id,
-        mv: &Move,
-        thing: Id,
+        c: &mut Controller,
+        due: &mut DueList,
+        mint: &mut Minter,
+        moves: &mut Moves,
+        geo: &impl Reach,
+        requests: &[Request],
         now: Micros,
-    ) -> R<Instance> {
-        let all = hands(&family(cx.c, body)?);
-        if all.is_empty() {
-            return refuse("take-needs-hands", format!("{} has no hands", show(body)));
-        }
-        let (kind, ..) = node_of(cx.tree, thing)?;
-        let Some(need) = occupies(&cx.log.rules, kind.as_str()) else {
-            return refuse(
-                "thing-not-carried",
-                format!("{} is not held in a hand", show(thing)),
-            );
-        };
-        let free = free_hands(cx.tree, &cx.log.rules, body, &all);
-        if free.len() < usize::from(need) {
-            return refuse(
-                "hands-full",
-                format!("{} has {} free of {need} needed", show(body), free.len()),
-            );
-        }
-        let using: Vec<Name> = free[..usize::from(need)]
-            .iter()
-            .map(|h| h.resource.clone())
-            .collect();
-        let n = cx.moves.start(
-            cx.c,
-            cx.due,
-            cx.mint,
-            cx.geo,
-            body,
-            &steer(mv, &using),
-            thing,
-            now,
-        )?;
-        let to = Frame {
-            node: body,
-            slot: Some(free[0].slot),
-        };
-        self.pending.insert(n, Pending { thing, to });
-        Ok(n)
-    }
-
-    /// Starts `mv`, steered to the hand that holds `thing`, for `body` to put it into `to` (a parent and its slot) at
-    /// `now`. Refused, with nothing changed: `thing-missing`, `not-held`, `slot-occupied`, then the move's own.
-    pub fn put<G: Reach>(
-        &mut self,
-        cx: &mut Cx<'_, G>,
-        body: Id,
-        mv: &Move,
-        thing: Id,
-        to: Frame,
-        now: Micros,
-    ) -> R<Instance> {
-        let (_, _, parent, slot) = node_of(cx.tree, thing)?;
-        let hand = hands(&family(cx.c, body)?)
+    ) -> Vec<(Id, R<Instance>)> {
+        let mut order: Vec<&Request> = requests.iter().collect();
+        order.sort_by_key(|r| (r.body, r.thing));
+        order
             .into_iter()
-            .find(|h| parent == Some(body) && slot == Some(h.slot));
-        let Some(hand) = hand else {
-            return refuse(
-                "not-held",
-                format!("{} holds no {}", show(body), show(thing)),
-            );
-        };
-        occupied(cx.tree, to)?;
-        let n = cx.moves.start(
-            cx.c,
-            cx.due,
-            cx.mint,
-            cx.geo,
-            body,
-            &steer(mv, &[hand.resource]),
-            to.node,
-            now,
-        )?;
-        self.pending.insert(n, Pending { thing, to });
-        Ok(n)
+            .map(|r| (r.body, self.take(c, due, mint, moves, geo, r, now)))
+            .collect()
     }
 
-    /// Answers what a move's timer did ([`Moves::fire`]): at a take's or a put's contact the thing is transferred, in
-    /// one part. A refusal then (`slot-occupied`, `thing-missing`, or T2's at commit) cancels the move, under that name,
-    /// and the thing stays where it was. A move that ended before contact transfers nothing. `None` when `fired` is
-    /// not a contact of a take or a put.
-    pub fn fired<G: Reach>(&mut self, cx: &mut Cx<'_, G>, fired: &Fired) -> Option<R<()>> {
-        let moves = &*cx.moves;
-        self.pending.retain(|n, _| moves.record(*n).is_some());
-        match fired {
-            Fired::Phase { instance, phase: 1 } => self.pending.remove(instance).map(|p| {
-                let at = cx.moves.record(*instance).map_or(0, |r| r.contact_at());
-                let done = self.contact(cx, p, at);
-                if let Err(r) = &done {
-                    cx.moves.cancel(
-                        cx.c,
-                        cx.due,
-                        *instance,
-                        at,
-                        Name::new(r.name).unwrap_or_else(|| unreachable!("a refusal's name")),
+    #[allow(clippy::too_many_arguments)]
+    fn take(
+        &mut self,
+        c: &mut Controller,
+        due: &mut DueList,
+        mint: &mut Minter,
+        moves: &mut Moves,
+        geo: &impl Reach,
+        r: &Request,
+        now: Micros,
+    ) -> R<Instance> {
+        let Some(at) = self.seats.get(&r.thing) else {
+            return refuse("seat-unknown", show(r.thing));
+        };
+        if let Some(h) = self.held.get(&r.thing) {
+            return refuse(
+                "seat-taken",
+                format!("{}: held by {}", show(r.thing), show(h.body)),
+            );
+        }
+        if let Some(t) = self.by_body.get(&r.body) {
+            return refuse(
+                "seat-already-held",
+                format!("{} holds {}", show(r.body), show(*t)),
+            );
+        }
+        if at.seat.height > r.mv.reach {
+            return refuse(
+                "seat-out-of-reach",
+                format!(
+                    "{}: {} µm above the floor, standing reach {} µm",
+                    show(r.thing),
+                    at.seat.height,
+                    r.mv.reach
+                ),
+            );
+        }
+        let instance = moves.start(c, due, mint, geo, r.body, r.mv, r.thing, now)?;
+        self.held.insert(
+            r.thing,
+            Hold {
+                body: r.body,
+                stance: r.stance,
+                state: State::Lowering {
+                    instance,
+                    in_slot: false,
+                },
+            },
+        );
+        self.by_body.insert(r.body, r.thing);
+        Ok(instance)
+    }
+
+    /// Starts `body` rising from its seat by move `mv` at `now`: the seated driver ends and the rise claims the legs,
+    /// holding the stance until contact. `not-seated` when it is in no seat or still on its way down.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rise(
+        &mut self,
+        c: &mut Controller,
+        due: &mut DueList,
+        mint: &mut Minter,
+        moves: &mut Moves,
+        geo: &impl Reach,
+        body: Id,
+        mv: &Move,
+        now: Micros,
+    ) -> R<Instance> {
+        let not_seated = || refuse("not-seated", show(body));
+        let Some(&thing) = self.by_body.get(&body) else {
+            return not_seated();
+        };
+        let Some(hold) = self.held.get(&thing).copied() else {
+            return not_seated();
+        };
+        let State::Seated(driver) = hold.state else {
+            return not_seated();
+        };
+        if let Some(d) = driver {
+            c.release(body, d)?;
+        }
+        match moves.start(c, due, mint, geo, body, mv, thing, now) {
+            Ok(n) => {
+                if let Some(d) = moves.driver(n) {
+                    c.set(body, d, Part::Stance(hold.stance))?;
+                }
+                self.set(thing, State::Rising(n));
+                Ok(n)
+            }
+            Err(r) => {
+                self.sit_still(c, thing);
+                Err(r)
+            }
+        }
+    }
+
+    fn set(&mut self, thing: Id, state: State) {
+        if let Some(h) = self.held.get_mut(&thing) {
+            h.state = state;
+        }
+    }
+
+    fn release(&mut self, thing: Id) {
+        if let Some(h) = self.held.remove(&thing) {
+            self.by_body.remove(&h.body);
+        }
+    }
+
+    /// The body stays in the slot with no move: a driver with no timer holds its legs and its stance, if it can.
+    fn sit_still(&mut self, c: &mut Controller, thing: Id) {
+        let Some(h) = self.held.get(&thing).copied() else {
+            return;
+        };
+        let d = c.claim(h.body, &seated_shape()).ok();
+        if let Some(d) = d {
+            let _ = c.set(h.body, d, Part::Stance(h.stance));
+        }
+        self.set(thing, State::Seated(d));
+    }
+
+    /// A body left in its slot while another driver holds its legs (a walk claimed them and cancelled the sit after
+    /// contact, or the rise before it) would be stuck: a tick never steps a body in a slot. So it is handed back onto
+    /// the floor at the stand point under that driver, standing, and the seat is released.
+    fn give_way(
+        &mut self,
+        c: &mut Controller,
+        at: &SeatAt,
+        floors: &BTreeMap<Id, Surface>,
+        thing: Id,
+        now: Micros,
+    ) -> Option<R<HandOff>> {
+        let h = self.held.get(&thing).copied()?;
+        if h.state != State::Seated(None) {
+            return None;
+        }
+        let claims = c.claims(h.body)?;
+        let leg = claims
+            .family()
+            .resources
+            .iter()
+            .find(|r| r.class == Class::Locomotion)?;
+        let d = claims.holder(&leg.name)?;
+        let handed = self.stand(c, at, floors, h.body, d, now);
+        if handed.is_ok() {
+            let _ = c.set(h.body, d, Part::Stance(Stance::Stand));
+            self.release(thing);
+        }
+        Some(handed)
+    }
+
+    /// Runs a due timer through [`Moves::fire`], then does what it means for a seat: at a sit's contact the body is
+    /// handed into the slot, at a rise's onto the floor at the stand point (its surface in `floors`) and the seat is
+    /// released; a sit done leaves it seated; a sit cancelled before contact releases the seat. Returns what the move
+    /// did and the hand-off made, or why it could not be (the rise is then cancelled and the body stays seated).
+    #[allow(clippy::too_many_arguments)]
+    pub fn fire(
+        &mut self,
+        c: &mut Controller,
+        due: &mut DueList,
+        mint: &mut Minter,
+        moves: &mut Moves,
+        geo: &impl Reach,
+        floors: &BTreeMap<Id, Surface>,
+        t: &Timer,
+    ) -> Option<(Fired, Option<R<HandOff>>)> {
+        let fired = moves.fire(c, due, mint, geo, t)?;
+        let Some(&thing) = self.by_body.get(&t.node) else {
+            return Some((fired, None));
+        };
+        let (hold, at) = (
+            self.held.get(&thing).copied()?,
+            self.seats.get(&thing)?.clone(),
+        );
+        let instance = match hold.state {
+            State::Lowering { instance, .. } | State::Rising(instance) => instance,
+            State::Seated(_) => return Some((fired, None)),
+        };
+        let mine = matches!(fired, Fired::Phase { instance: n, .. } if n == instance)
+            || moves.record(instance).is_none();
+        if !mine {
+            return Some((fired, None));
+        }
+        let (body, now) = (hold.body, t.due);
+        let handed = match (&fired, hold.state) {
+            (Fired::Phase { phase: 1, .. }, State::Lowering { .. }) => {
+                let frame = Frame {
+                    node: thing,
+                    slot: Some(at.seat.slot),
+                };
+                let d = moves.driver(instance).unwrap_or(0);
+                let h = c
+                    .seat(body, d, frame, now)
+                    .and_then(|h| c.set(body, d, Part::Stance(hold.stance)).map(|()| h));
+                if h.is_ok() {
+                    self.set(
+                        thing,
+                        State::Lowering {
+                            instance,
+                            in_slot: true,
+                        },
                     );
                 }
-                done
-            }),
+                Some(h)
+            }
+            (Fired::Phase { phase: 1, .. }, State::Rising(_)) => {
+                let d = moves.driver(instance).unwrap_or(0);
+                let h = self.stand(c, &at, floors, body, d, now);
+                match &h {
+                    Ok(_) => {
+                        let _ = c.set(body, d, Part::Stance(Stance::Stand));
+                        self.release(thing);
+                    }
+                    Err(_) => {
+                        moves.cancel(c, due, instance, now, lit("stand-point-off-floor"));
+                        self.sit_still(c, thing);
+                    }
+                }
+                Some(h)
+            }
+            (Fired::Done(_), State::Lowering { .. }) => {
+                self.sit_still(c, thing);
+                None
+            }
+            (Fired::Cancelled(_), State::Lowering { in_slot: false, .. }) => {
+                self.release(thing);
+                None
+            }
+            (Fired::Cancelled(_), _) => {
+                self.sit_still(c, thing);
+                self.give_way(c, &at, floors, thing, now)
+            }
             _ => None,
-        }
+        };
+        Some((fired, handed))
     }
 
-    fn contact<G: Reach>(&mut self, cx: &mut Cx<'_, G>, p: Pending, at: Micros) -> R<()> {
-        let (_, audience, ..) = node_of(cx.tree, p.thing)?;
-        occupied(cx.tree, p.to)?;
-        let id = cx.mint.mint().map_err(|e| Refusal {
-            name: "id-counter-exhausted",
-            detail: e.to_string(),
-        })?;
-        let entries = transfer(&cx.log.header, p.thing, audience, p.to, id).to_vec();
-        cx.log.write(cx.tree, at, entries)
-    }
-
-    /// Retires `body` at `at`: first each thing it holds is put down, each into the first free slot of `down` (slots
-    /// in reach, the caller's), then the body is removed, all in one part. Refused with nothing changed:
-    /// `retire-nowhere-to-put` when a held thing has no free slot left, or T2's refusal at commit.
-    pub fn retire<G: Reach>(
-        &mut self,
-        cx: &mut Cx<'_, G>,
+    fn stand(
+        &self,
+        c: &mut Controller,
+        at: &SeatAt,
+        floors: &BTreeMap<Id, Surface>,
         body: Id,
-        down: &[Frame],
-        at: Micros,
-    ) -> R<()> {
-        let (_, body_audience, ..) = node_of(cx.tree, body)?;
-        let all =
-            cx.c.claims(body)
-                .map(|b| hands(b.family()))
-                .unwrap_or_default();
-        let mut used = BTreeSet::new();
-        let mut entries = Vec::new();
-        for h in &all {
-            let Some(thing) = in_slot(cx.tree, body, h.slot) else {
-                continue;
-            };
-            let to = down.iter().enumerate().find(|(i, f)| {
-                !used.contains(i) && f.slot.is_none_or(|s| in_slot(cx.tree, f.node, s).is_none())
-            });
-            let Some((i, to)) = to else {
-                return refuse(
-                    "retire-nowhere-to-put",
-                    format!("{} holds {}", show(body), show(thing)),
-                );
-            };
-            used.insert(i);
-            let (_, audience, ..) = node_of(cx.tree, thing)?;
-            let id = cx.mint.mint().map_err(|e| Refusal {
-                name: "id-counter-exhausted",
-                detail: e.to_string(),
-            })?;
-            entries.extend(transfer(&cx.log.header, thing, audience, *to, id));
-        }
-        entries.push((
-            body,
-            body_audience,
-            Body::Changes(vec![ChangeRec {
-                change: Change::Remove { node: body },
-                rest: Rest::new(),
-            }]),
-        ));
-        cx.log.write(cx.tree, at, entries)
+        driver: Driver,
+        now: Micros,
+    ) -> R<HandOff> {
+        let Some(floor) = floors.get(&at.floor) else {
+            return refuse("no-surface", show(at.floor));
+        };
+        let frame = Frame {
+            node: at.floor,
+            slot: None,
+        };
+        let placed = floor.place(body, frame, at.stand()?, at.facing)?;
+        c.stand(body, driver, placed, now)
     }
 }
 
-/// `slot-occupied` when `to` names a slot that holds something.
-fn occupied(tree: &Tree, to: Frame) -> R<()> {
-    match to.slot.and_then(|s| in_slot(tree, to.node, s)) {
-        Some(t) => refuse(
-            "slot-occupied",
-            format!("slot {:?} of {} holds {}", to.slot, show(to.node), show(t)),
-        ),
-        None => Ok(()),
-    }
+fn lit(s: &'static str) -> Name {
+    Name::new(s).unwrap_or_else(|| unreachable!("a literal name"))
 }
 
+/// The nearest point to `from` (µm, x and z) on `floor` at least `apart` µm from every point of `taken`, searched on
+/// a grid of `step` µm out to `most` µm, nearest first (ties by x, then z): where a body that rose onto a taken stand
+/// point walks. None when no such point is that near.
+pub fn clear_spot(
+    floor: &Surface,
+    from: [i64; 2],
+    taken: &[[i64; 2]],
+    apart: i64,
+    step: i64,
+    most: i64,
+) -> Option<[i64; 2]> {
+    let n = most / step;
+    let mut grid: Vec<(i64, i64, i64)> = (-n..=n)
+        .flat_map(|i| (-n..=n).map(move |j| (i * step, j * step)))
+        .map(|(dx, dz)| (dx * dx + dz * dz, dx, dz))
+        .filter(|(d2, ..)| *d2 <= most * most)
+        .collect();
+    grid.sort_unstable();
+    let frame = Frame {
+        node: floor.node,
+        slot: None,
+    };
+    let clear = |p: [i64; 2]| {
+        taken.iter().all(|q| {
+            let (dx, dz) = (i128::from(p[0] - q[0]), i128::from(p[1] - q[1]));
+            dx * dx + dz * dz >= i128::from(apart) * i128::from(apart)
+        })
+    };
+    grid.into_iter()
+        .map(|(_, dx, dz)| [from[0] + dx, from[1] + dz])
+        .find(|&p| {
+            clear(p)
+                && floor
+                    .place(floor.node, frame, Vec3::new(p[0], 0, p[1]), Quat::IDENTITY)
+                    .is_ok()
+        })
+}
+
+pub mod hands;
+pub use hands::{
+    Cx, Entry, Hand, Holding, Log, free_hands, hands, in_slot, occupies, steer, transfer,
+};
+
+#[cfg(test)]
+mod hands_tests;
 #[cfg(test)]
 mod tests;
