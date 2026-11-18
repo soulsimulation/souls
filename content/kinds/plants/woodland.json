@@ -1,0 +1,60 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:woodland",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      10000,
+      8000,
+      10000
+    ]
+  },
+  "forms": {
+    "go_to_glade": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "glade"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "areas": {
+    "glade": {
+      "at_mm": [
+        0,
+        0,
+        0
+      ],
+      "radius_mm": 2500,
+      "allows": {
+        "sit": "on",
+        "lie": "on"
+      }
+    }
+  },
+  "looks": {
+    "model": "look:woodland",
+    "shape": {"round":20,"shapes":[{"kind":"cyl","at":[-3000,1120,-2000],"r":256,"h":2240,"segments":7,"r2":160,"tint":"bark"},{"kind":"cyl","at":[-2640,2400,-1920],"r":96,"h":1210,"segments":5,"r2":56,"tint":"bark","pitch":37529,"yaw":77464},{"kind":"cyl","at":[-3280,2600,-2120],"r":88,"h":1206,"segments":5,"r2":48,"tint":"bark","pitch":30367,"yaw":-113216},{"kind":"sphere","at":[-3000,3680,-2000],"r":1760,"segments":8,"tint":"leaf","scale":[1000,850,1000]},{"kind":"sphere","at":[-1960,3280,-1680],"r":1200,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[-3960,3440,-2400],"r":1200,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[-2840,4480,-2480],"r":1040,"segments":7,"tint":"leaf3"},{"kind":"cyl","at":[3000,960,-3000],"r":192,"h":1920,"segments":6,"r2":112,"tint":"bark"},{"kind":"cone","at":[3000,2560,-3000],"r":1600,"h":2400,"segments":9,"tint":"needle"},{"kind":"cone","at":[3000,4000,-3000],"r":1240,"h":2160,"segments":9,"tint":"needle2"},{"kind":"cone","at":[3000,5360,-3000],"r":880,"h":1920,"segments":8,"tint":"needle"},{"kind":"cone","at":[3000,6560,-3000],"r":520,"h":1440,"segments":7,"tint":"needle2"},{"kind":"cyl","at":[500,1760,3000],"r":120,"h":3520,"segments":6,"r2":72,"tint":"birchbark"},{"kind":"cyl","at":[500,960,3000],"r":122,"h":48,"segments":6,"tint":"mark"},{"kind":"cyl","at":[500,1600,3000],"r":112,"h":48,"segments":6,"tint":"mark"},{"kind":"cyl","at":[500,2320,3000],"r":102,"h":48,"segments":6,"tint":"mark"},{"kind":"cyl","at":[500,2880,3000],"r":93,"h":48,"segments":6,"tint":"mark"},{"kind":"cyl","at":[740,3200,3040],"r":48,"h":1076,"segments":4,"r2":24,"tint":"birchbark","pitch":26872,"yaw":80558},{"kind":"sphere","at":[500,4480,3000],"r":1120,"segments":8,"tint":"leaf","scale":[900,1350,900]},{"kind":"sphere","at":[1140,3920,3240],"r":720,"segments":6,"tint":"leaf2","scale":[1000,1200,1000]},{"kind":"sphere","at":[-60,4000,2760],"r":760,"segments":6,"tint":"leaf2","scale":[1000,1200,1000]},{"kind":"sphere","at":[-3000,300,3000],"r":600,"segments":7,"tint":"bush","scale":[1000,600,1000]},{"kind":"sphere","at":[3500,250,2000],"r":500,"segments":7,"tint":"bush","scale":[1000,600,1000]}],"palette":{"bark":"#4d3420","leaf":"#4f7f3a","leaf2":"#5f9142","leaf3":"#6aa152","needle":"#2f5d3a","needle2":"#3a6b43","birchbark":"#ece8df","mark":"#2e2b28","bush":"#486e38"},"tags":["plant","woodland","forest","area"]}
+  },
+  "text": {
+    "card": "A mixed wood of oak, pine and birch: walk in it, rest in a glade.",
+    "place": "place",
+    "woods": "woods",
+    "forest": "forest",
+    "trees": "trees"
+  },
+  "card": {
+    "text": "card",
+    "category": "place",
+    "synonyms": [
+      "woods",
+      "forest",
+      "trees"
+    ]
+  }
+}

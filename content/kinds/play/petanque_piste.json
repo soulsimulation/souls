@@ -1,0 +1,86 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:petanque_piste",
+  "owner": "thing",
+  "state": { "jack_out": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "links": { "player": { "n": 1, "from": "body", "most": 6, "audience": { "rule": "everyone" } } },
+  "points": {
+    "by_circle": { "role": "stand", "at_mm": [0, 0, -5400] },
+    "far_end": { "role": "contact", "at_mm": [0, 40, 4000] },
+    "jack": { "role": "stand", "at_mm": [0, 0, 3500] }
+  },
+  "slots": { "circle": { "admits": "body", "most": 6, "at_mm": [0, 0, -5400], "stand": "by_circle" } },
+  "geometry": { "bounds_mm": [3000, 100, 12000] },
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
+      "effects": [
+        { "change": "link", "link": "player", "from": "actor", "event": "joined_the_game" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "took_a_place" }
+      ]
+    },
+    "leave": {
+      "who": { "link": "player" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": [
+        { "change": "unlink", "link": "player", "from": "actor", "event": "left_the_game" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stepped_away" }
+      ]
+    },
+    "throw_jack": {
+      "who": { "link": "player" },
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "jack_out", "is": false }, { "need": "hand", "free": true }],
+      "steps": [{ "step": "move", "move": "point", "at": "far_end" }],
+      "effects": [{ "change": "set", "field": "jack_out", "to": true, "event": "jack_thrown" }]
+    },
+    "throw_boule": {
+      "who": { "link": "player" },
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "jack_out", "is": true }, { "need": "hand", "free": true }],
+      "steps": [{ "step": "move", "move": "point", "at": "far_end" }],
+      "effects": []
+    },
+    "gather": {
+      "who": { "link": "player" },
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "jack_out", "is": true }],
+      "steps": [{ "step": "walk_to", "point": "jack" }, { "step": "wait", "us": 10000000 }],
+      "effects": [{ "change": "set", "field": "jack_out", "to": false, "event": "boules_gathered" }]
+    }
+  },
+  "roles": { "player": { "need": "required", "places": { "in": "this", "slots": ["circle"] } } },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:petanque_piste",
+    "shape": {"shapes":[{"kind":"box","at":[0,20,0],"size":[3000,40,12000],"color":"#cbb894","collide":false},{"kind":"box","at":[-1550,50,0],"size":[100,100,12000],"color":"#8a6a45","collide":false},{"kind":"box","at":[1550,50,0],"size":[100,100,12000],"color":"#8a6a45","collide":false},{"kind":"sphere","at":[300,60,3500],"r":30,"segments":8,"color":"#e8743a","role":"fill"}],"tags":["eden","sport","petanque"]},
+    "table": [{ "part": "fill", "field": "jack_out", "do": "show", "at": { "true": 1, "false": 0 } }]
+  },
+  "text": {
+    "card": "A gravel pétanque piste: throw the jack, then boules toward it.",
+    "sport": "sport",
+    "petanque": "petanque",
+    "boules": "boules",
+    "play": "play",
+    "howto_round": "Join at the circle, throw the jack, throw your boules, then gather them."
+  },
+  "card": { "text": "card", "category": "sport", "synonyms": ["petanque", "boules", "play"] },
+  "howtos": {
+    "round": {
+      "text": "howto_round",
+      "steps": [{ "form": "play" }, { "form": "throw_jack" }, { "form": "throw_boule" }, { "form": "gather" }]
+    }
+  }
+}

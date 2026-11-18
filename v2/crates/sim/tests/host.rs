@@ -47,7 +47,7 @@ impl Geometry for Open {
     fn ask(&self, _body: Id, q: &Ask) -> Option<Answer> {
         match q {
             Ask::Toward { to, .. } => Some(Answer::Point(*to)),
-            Ask::Distance { .. } => None,
+            Ask::Distance { .. } | Ask::Near { .. } => None,
         }
     }
 }

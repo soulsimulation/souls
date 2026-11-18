@@ -23,6 +23,10 @@ path = "src/frozen.rs"
 name = "gateway-restart"
 path = "gateway-restart/main.rs"
 
+[[bin]]
+name = "walkers"
+path = "walkers/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 sim = { path = "../../crates/sim" }
@@ -30,3 +34,4 @@ gatewayd = { path = "../../crates/gatewayd" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+import-eden = { path = "../import-eden" }
