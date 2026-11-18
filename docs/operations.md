@@ -60,7 +60,8 @@ world whose next event is at least 60 s away, then a world with no act and no vi
 one acted in longest ago first; a world someone is acting in or watching is never unloaded. When nothing can go the load
 waits up to 20 s for room, reading each world's still answer afresh every 5 s (#2367), and is then refused with
 `503 world.waking` and `Retry-After: 15`; the world stays `unloaded`, never `failed`, and `/__sim/healthz` carries the host problem code
-`worlds.capacity` for 10 minutes. Each world's `state` (`awake`, `still`, `unloaded`, `starting`, `failed`) is in
+`worlds.capacity` for 10 minutes. A load that finds no free port in the children's range is refused the same way, and
+a still world's alarm asks again on its next pass. Each world's `state` (`awake`, `still`, `unloaded`, `starting`, `failed`) is in
 `/__sim/worlds.json` beside the old `status`; the health page (`/__sim/health?json=1`) adds per world its ticks computed
 and jumped in the last hour (from the world's own counters, once it reports them), seconds in memory in 24 h, Pss and
 last load reason, and in total the worlds awake, still and unloaded and the memory used against the figure.
@@ -166,6 +167,15 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor
   can alert on `hostOk`.
+- **Low disk (#2378, #2538).** An overload guard against filling the disk, not a limit on visitors or agents. Each world
+  reads its free space every minute; under `SIM_DISK_MIN_FREE_MB` (default 1,024 MB) it logs `[load] disk.low`, prunes
+  by the retention rules, holds its hourly copy and refuses uploads (god assets and thumbnails, art media, bodies) with
+  `507 host.disk-low` and `Retry-After: 300`; the god's command-line tool prints the refusal and when to retry. Acts,
+  ticks, snapshots, the journal and viewing never read it. With `--disk-min-free-mb N` the launcher also refuses new
+  worlds under N MB free on its data disk (read at most every 30 s) with `503 host.disk-low` and `Retry-After: 600`,
+  and healthz raises the host code `disk` at once. It is off when absent (development machines, hosted CI);
+  `install.sh` writes `--disk-min-free-mb 4096` into a new production file, and on a host whose file already exists the
+  operator adds it to `SIM_WORLDS_ARGS` once (it takes effect at the next restart).
 
 ## Soul API ceilings
 
@@ -184,6 +194,17 @@ audit log, uploaded assets, old-world fork inputs and the stage's non-secret hos
 restic snapshot. Retention keeps 7 daily, 4 weekly and 6 monthly snapshots (`SIM_BACKUP_KEEP`), locally and
 off-site. Every release also takes its own compact pre-release copy. Commands are in the
 [runbook](operations/runbook.md#backups).
+
+**Hourly run (#2542).** `sim-worlds-backup-hourly@<stage>.timer` (minute 15 of each hour) runs
+`deploy/backup-restic.mjs backup-hourly <stage>`: it copies only the databases written since their last copy (online
+backup and `quick_check`), skips the rest, takes one snapshot tagged `<stage>,hourly` and copies it off-site. It runs no
+forget, prune or check; the nightly run keeps the newest 24 hourly snapshots (`SIM_BACKUP_KEEP_HOURLY`) beside its own
+rule, which never removes an hourly one. Each hourly snapshot holds every database, so it restores the whole stage. Once
+enabled, a dead disk loses at most about an hour (a day with the nightly run alone; the maintainer accepted the hour, with
+continuous replication as a later task). `install.sh` installs the timer on every release and never enables it:
+enabling it is the maintainer's step, `systemctl enable --now sim-worlds-backup-hourly@production.timer` on the host,
+then one restore drill from an hourly snapshot ([runbook](operations/runbook.md#hourly-run)). Each world itself keeps
+only its newest 2 in-process copies (`backup-YYYYMMDDHH.db`; it kept up to 15 before #2542).
 
 ### Off-site copy
 

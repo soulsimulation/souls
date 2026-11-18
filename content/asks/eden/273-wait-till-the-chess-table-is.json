@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":273,"group":"over-time","words":"wait till the chess table is free then grab it","obvious":2,"when":"when it is free","things":{"chess":"eden:chess_table"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"chess"}}]}

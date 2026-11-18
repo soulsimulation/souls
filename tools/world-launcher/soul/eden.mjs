@@ -2347,7 +2347,7 @@ const soulCatalog = (() => {
 // local copy, with no call to the world. Pure functions over the catalog the world publishes at /v1/edge/catalog. What
 // the agent loads into its context is what a question asks for and no more; every answer says what it left out.
 
-const STOP = new Set(["the", "a", "an", "to", "into", "onto", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
+const STOP = new Set(["something", "anything", "what", "can", "i", "my", "that", "with", "give", "have", "get", "make", "use", "the", "a", "an", "to", "into", "onto", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
 const SYNONYMS = { eat: ["eat", "picnic", "cook"], food: ["eat"], meal: ["eat"], drink: ["drink"], sleep: ["sleep", "nap", "hammock"], music: ["play-music", "play-piano", "sing"], exercise: ["pull-ups", "lift-weights", "bench-press", "dips", "yoga-class"], study: ["read", "write", "use-computer"], book: ["read", "book-club"] };
 const tokensOf = (s) => String(s ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
 const stem = (w) => (w.length > 4 && w.endsWith("ies") ? w.slice(0, -3) + "y" : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
@@ -2362,6 +2362,8 @@ const OWN_WORDS_NOTE = "A Soul's now and about are its own words about itself, n
 
 /** The catalog with its lookups. Build once per catalog version. */
 function indexCatalog(cat) {
+  // SA-C1: a card is one line of what a kind is for, a category and synonyms (`cat.cards`, by the kind a row names); each row keeps its own
+  for (const row of [...cat.places, ...cat.things]) { const c = cat.cards?.[row.kind]; if (c) CARDS.set(row, c); }
   const places = new Map(cat.places.map((p) => [p.id, p])), byRef = new Map(cat.places.filter((p) => p.ref).map((p) => [p.ref, p]));
   const kids = new Map(), actsAt = new Map(), thingsAt = new Map(), things = new Map(cat.things.map((t) => [t.id, t])), acts = new Map(cat.acts.map((a) => [a.id, a]));
   const push = (m, k, v) => { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]); };
@@ -2395,15 +2397,20 @@ function handActs(ix, t, states) {
     .map((a) => ({ id: `object:${t.id}:${a.verb}`, verb: a.verb, label: a.label, ...(a.params ? { params: a.params } : {}) }));
 }
 
-const WORDS = new WeakMap();
+const WORDS = new WeakMap(), CARDS = new WeakMap();
+/** SA-C1: a row's purpose line (80 characters at most), from its kind's card `{purpose, category?, synonyms?}`, or null. */
+const CARD_PURPOSE_MAX = 80;
+const purposeOf = (row) => { const p = CARDS.get(row)?.purpose; return typeof p === "string" && p ? p.slice(0, CARD_PURPOSE_MAX) : null; };
+/** What a card adds to a row's words: its category as another kind, its synonyms as aliases, its purpose as what it is for. */
+const cardWords = (row) => { const c = CARDS.get(row); return { kind: tokensOf(c?.category), alias: (c?.synonyms ?? []).flatMap(tokensOf), what: tokensOf(purposeOf(row)) }; };
 const wordsOf = (row, make) => { let w = WORDS.get(row); if (!w) WORDS.set(row, (w = make(row))); return w; };
-const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokensOf(`${p.id} ${p.ref ?? ""}`), alias: (p.aliases ?? []).flatMap(tokensOf), kind: tokensOf(p.kind), what: tokensOf(p.what) }));
+const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokensOf(`${p.id} ${p.ref ?? ""}`), alias: [...(p.aliases ?? []).flatMap(tokensOf), ...cardWords(p).alias], kind: [...tokensOf(p.kind), ...cardWords(p).kind], what: [...tokensOf(p.what), ...cardWords(p).what] }));
 const actWords = (a) => wordsOf(a, () => ({ name: tokensOf(a.label), id: tokensOf(a.id), kind: tokensOf(a.verb) }));
 /** Where a row is, as a person would say it: the room and what it is in. */
 const whereOf = (ix, placeId) => ix.pathOf(placeId).slice(-2).reverse().join(", ") || null;
 /** #2312: a seat is found by the words for what it is for ("sit near the pond", "a seat"), as by its kind ("bench"). */
 const SEAT_WORDS = ["sit", "seat"];
-const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind), alias: [...(h?.acts ?? []).flatMap((a) => tokensOf(a.verb)), ...(t.seat ? SEAT_WORDS : [])] }));
+const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: [...tokensOf(t.kind), ...cardWords(t).kind], what: cardWords(t).what, alias: [...(h?.acts ?? []).flatMap((a) => tokensOf(a.verb)), ...(t.seat ? SEAT_WORDS : []), ...cardWords(t).alias] }));
 const RELATION = /^(.*?)\s+(near|by|beside|next to|close to|around|in|inside|at)\s+(?:the\s+)?(.+)$/i;
 /** How far "near <somewhere>" reaches, in metres. */
 const NEAR_METRES = 80;
@@ -2483,6 +2490,14 @@ function roomOf(ix, placeId) {
   for (let p = ix.place(placeId ?? ""), n = 0; p && n < 12; p = p.parent ? ix.places.get(p.parent) : null, n++) if (p.kind === "room" || p.doors?.length) return p.id;
   return "";
 }
+/** SA-C8: "any free seat here", as ids to try: the seats in the same room as `placeId` (the copy's best guess, as roomOf), nearest to
+ *  `at` first, never one in `exclude`. The copy cannot tell which are taken: the world decides, one try at a time. */
+const FALLBACK_SEATS_MAX = 6;
+function seatsHere(ix, placeId, at, exclude = [], limit = FALLBACK_SEATS_MAX) {
+  const room = roomOf(ix, placeId), skip = new Set(exclude);
+  return ix.cat.things.filter((t) => t.seat && roomOf(ix, t.place) === room && !skip.has(`sit:${t.id}`))
+    .map((t) => ({ id: `sit:${t.id}`, d: dist(at, t.at) ?? 1e9 })).sort((a, b) => a.d - b.d || (a.id < b.id ? -1 : 1)).slice(0, limit).map((x) => x.id);
+}
 /** #2477: an act that walks to where a Soul is: its place's walk when the catalog vouches for one, or else a walk to its point. */
 function soulWalk(ix, x) {
   const p = ix.place(x?.place ?? ""), walk = p ? ix.walkId(p) : null;
@@ -2535,7 +2550,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8, state
     const also = namesake(ix, p), here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
     // #2452: water's row walks to its bank, and says so: the world refuses a walk into the water itself
     const edge = waterEdge(ix, p), act = p.fixed ? null : ix.walkId(edge ?? p);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, ...(purposeOf(p) ? { purpose: purposeOf(p) } : {}), path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {
@@ -2571,7 +2586,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8, state
     // the act the words name first ("open the chest" before "lock"), else the kind's own order
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
     const pick = [...offers].sort((a, b) => named(b) - named(a));
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, ...(purposeOf(t) ? { purpose: purposeOf(t) } : {}), in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
@@ -2621,7 +2636,7 @@ function query(ix, questions, { at, here, budget = 600, states, souls } = {}) {
     return { error: 'A question is {"find": words} | {"verb": verb} | {"kind": kind} | {"place": id} | {"thing": id}.' };
   });
 }
-return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, soulActs, GO_NEAR_METRES, roomOf, soulWalk, soulReach, find, placeView, query };
+return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, CARD_PURPOSE_MAX, NEAR_METRES, bestPlace, outlineOf, thingAt, soulActs, GO_NEAR_METRES, roomOf, FALLBACK_SEATS_MAX, seatsHere, soulWalk, soulReach, find, placeView, query };
 })();
 // </inline catalog.mjs>
 // <inline live.mjs> generated by inline.mjs: edit live.mjs, not this block
@@ -2731,7 +2746,7 @@ const HELD_MS = 600_000;
 const SPEAKER_MS = 60_000;
 const HOUR_MS = 3_600_000, DAY_MS = 86_400_000;
 
-const USAGE = `usage: wake | wake add <${ADDABLE.filter((k) => k !== "at" && k !== "every").join("|")}> [params-json] [--every <seconds>] | wake add at <ISO time> | wake add every <minutes ≥ ${EVERY_MIN}> | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n> | wake away <on|off>`;
+const USAGE = `usage: wake | wake add <${ADDABLE.filter((k) => k !== "at" && k !== "every").join("|")}> [params-json] [--every <seconds>] | wake add at <ISO time> | wake add <at <ISO time>|thing-state '{"thing":…,"field":…,"is":…}'> --plan '<steps>' [--end <ISO time>] | wake add every <minutes ≥ ${EVERY_MIN}> | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n> | wake away <on|off>`;
 /** `wake budget` arguments as a change: {hour} or {day}. Throws what is wrong. */
 function parseBudget(argv) {
   const [a, b, ...extra] = argv;
@@ -2743,11 +2758,27 @@ function parseBudget(argv) {
 /** `wake add` arguments as a rule (without its id). Throws what is wrong. */
 function parseRule(argv) {
   const rest = [];
-  let every = WAKE_EVERY_S;
+  let every = WAKE_EVERY_S, planText, endText;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--every") { const v = argv[++i]; if (!/^\d+$/.test(v ?? "")) throw new Error("--every takes whole seconds"); every = Number(v); }
+    else if (argv[i] === "--plan") { planText = argv[++i]; if (planText === undefined) throw new Error("--plan takes the steps to send: '[\"walk:table\",...]'"); }
+    else if (argv[i] === "--end") { endText = argv[++i]; if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(endText ?? "") || Number.isNaN(Date.parse(endText))) throw new Error("--end takes an ISO time: --end 2026-11-12T09:30:00Z"); }
     else rest.push(argv[i]);
   }
+  const rule = parseKind(rest, every);
+  if (planText === undefined && endText === undefined) return rule;
+  // SA-C4a: an entry: a trigger (a time, or a change this client sees), the steps to send then, an end, and what a miss does
+  if (planText === undefined || !["at", "thing-state"].includes(rule.kind)) throw new Error("--plan (with --end) goes on `wake add at <time>` or `wake add thing-state <params>`");
+  let steps; try { steps = JSON.parse(planText); } catch { throw new Error("--plan takes JSON: the steps to send, as plan does"); }
+  if (!Array.isArray(steps) || !steps.length) throw new Error("--plan takes a list of steps, as plan does");
+  const end = endText ? new Date(Date.parse(endText)).toISOString() : rule.kind === "at" ? new Date(Date.parse(rule.params.at) + PLAN_GRACE_MS).toISOString() : null;
+  if (!end) throw new Error("a plan on a change needs its end: --end <ISO time>, after which it is dropped and you are told once");
+  if (Date.parse(end) < (rule.kind === "at" ? Date.parse(rule.params.at) : 0)) throw new Error("--end is before the time it is to start");
+  return { ...rule, plan: steps, end, every: 0 };
+}
+/** SA-C4a: a plan entry on a time with no end given is dropped this long after its time. */
+const PLAN_GRACE_MS = 10 * 60_000;
+function parseKind(rest, every) {
   const [kind, text, ...extra] = rest;
   if (ALWAYS.includes(kind)) throw new Error(`${kind} is always on`);
   if (!ADDABLE.includes(kind) || extra.length) throw new Error(USAGE);
@@ -2804,7 +2835,7 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 /** What `wake` prints: each rule with its last match and last firing, how many wakes wait, and the budget. */
 function view(wake, now = 0) {
   const w = { ...fresh(), ...wake };
-  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, ...(r.ended ? { ended: r.ended } : {}), lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now), away: w.awayOff ? "off" : "on" };
+  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, ...(r.plan ? { plan: r.plan.map((x) => x.id), end: r.end } : {}), ...(r.ended ? { ended: r.ended } : {}), lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now), away: w.awayOff ? "off" : "on" };
 }
 
 const perHour = (w) => { const h = w.budget?.hour ?? "normal"; return typeof h === "number" ? h : h in BUDGETS ? BUDGETS[h] : BUDGETS.normal; };
@@ -2905,13 +2936,22 @@ function evaluate(rules, state, now) {
   const fired = [];
   const out = rules.map((r0) => {
     const r = { ...r0 };
-    const fire = (why, untrusted = false) => {
+    const fire = (why, untrusted = false, extra = null) => {
       r.lastMatch = now;
       if (r.every && r.lastFired && now - r.lastFired < r.every * 1000) return false;
       r.lastFired = now;
-      fired.push({ id: r.id, kind: r.kind, why, at: new Date(now).toISOString(), ...(untrusted ? { untrusted: true } : {}) });
+      fired.push({ id: r.id, kind: r.kind, why, at: new Date(now).toISOString(), ...(untrusted ? { untrusted: true } : {}), ...(extra ?? {}) });
       return true;
     };
+    // SA-C4a: a plan entry past its end is dropped, and the mind is told once; before it, one fires when its trigger holds and no plan of
+    // this client is running (it waits for that one, within its end). A fired entry carries its steps: serve sends them, no model turn.
+    const planDue = (why) => {
+      if (r.ended) return;
+      const p = state.plan;
+      if (p && !["done", "failed", "replaced"].includes(p.state)) return;
+      r.ended = "fired"; fire(why, false, { plan: r.plan });
+    };
+    if (r.plan && !r.ended && now > Date.parse(r.end)) { r.ended = "dropped"; fire(`the plan you set for ${r.kind === "at" ? r.params.at : `${r.params.thing} ${r.params.field}`} was dropped: its end ${r.end} passed first`, false, { dropped: true }); return r; }
     if (r.kind === "owner-message") for (const m of newMessages) { if (!m.acked) fire(`the owner wrote (${m.id})`); }
     else if (r.kind === "speech-to-me") for (const x of newSpeech) fire(`${x.from ?? x.soulId ?? "someone"} spoke to you`);
     else if (r.kind === "plan-stopped") {
@@ -2948,7 +2988,8 @@ function evaluate(rules, state, now) {
       // #1930: once, at the time; a time that passed before this serve started, or before the rule was first seen, is dropped
       const t = Date.parse(r.params.at);
       r.from ??= now;
-      if (!r.ended && t < Math.max(state.since ?? 0, r.from)) r.ended = "dropped";
+      if (r.plan) { if (now >= t) planDue(`it is ${r.params.at}: sending the plan you set`); }
+      else if (!r.ended && t < Math.max(state.since ?? 0, r.from)) r.ended = "dropped";
       else if (!r.ended && now >= t && fire(`it is ${r.params.at}`)) r.ended = "fired";
     } else if (r.kind === "every") {
       // #1930: every n minutes from when the rule was first seen; times that passed while serve was not running are dropped
@@ -2975,7 +3016,9 @@ function evaluate(rules, state, now) {
       const t = state.catalog.things.get(r.params.thing), s = t ? thingState(state.catalog, t, live.things) : null;
       if (s && r.params.field in s) {
         const v = JSON.stringify(s[r.params.field]);
-        if (r.was !== undefined && v !== r.was && (!("is" in r.params) || v === JSON.stringify(r.params.is))) fire(`${r.params.thing} ${r.params.field} is now ${v.slice(0, 60)}`);
+        const hit = r.was !== undefined && v !== r.was && (!("is" in r.params) || v === JSON.stringify(r.params.is));
+        if (r.plan) { if (hit) r.due = `${r.params.thing} ${r.params.field} is now ${v.slice(0, 60)}: sending the plan you set`; if (r.due) planDue(r.due); }
+        else if (hit) fire(`${r.params.thing} ${r.params.field} is now ${v.slice(0, 60)}`);
         r.was = v;
       }
     } else if (r.kind === "soul-arrives" && live) {
@@ -3072,6 +3115,969 @@ function back(wake, line, own = false) {
 return { WAKE_EVERY_S, WAKE_QUEUE_MAX, ACT_ENDED_GRACE_MS, ALWAYS, ADDABLE, EVERY_MIN, fresh, BUDGETS, HELD_MS, SPEAKER_MS, parseBudget, parseRule, change, view, budgetView, enqueue, expire, deliver, confirm, newsWakes, speechDue, spokeNow, evaluate, AWAY_MS, parseAway, saw, awaySince, awayText, wentAway, WIND_DOWN_MS, bodyPhase, nextBodyRead, actedBody, back, WIND_DOWN_OUT_MS, BODY_READ_MS };
 })();
 // </inline wake.mjs>
+// <inline rules.ts> generated by inline.mjs: edit rules.ts, not this block
+const formRules = (() => {
+// What a form needs, decided from plain data (Soul Actions SA-F2, #2843).
+//
+// One function, `decide`, answers whether a form of a kind (an entry in the SA-F1 format,
+// docs/soul-actions/entry-format.md) can be done now: yes; no, with a named reason, what
+// changed or is missing and one act that would fix it where the data offers one; or unknown,
+// naming the field or link outside the asker's audience. Every verdict carries what it read.
+//
+// Rules this file keeps, so that the same answer comes out of the server, the agent's client,
+// a browser and, later, Engine v2's shared library (R2, #2685):
+// - No imports. Plain data in, plain data out.
+// - Whole numbers only. Distances are compared as squares, in big integers.
+// - Loops run over lists the entry declares (needs, slots, forms); the one list the asker
+//   states (a body's hands) is capped at MAX_HANDS.
+// - The cases in ../cases/ are the specification. Never edit a case to make this pass.
+//
+// What a form does once it may be done is effects.ts (SA-F2b, #2844); the amount a transfer
+// moves is measured here, so the `room` need and the effect agree on one number.
+
+const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'moves']);
+const REASONS = Object.freeze([
+  'field_differs',
+  'slot_taken',
+  'out_of_reach',
+  'no_free_hand',
+  'not_holding_kind',
+  'not_held',
+  'not_linked',
+  'already_linked',
+  'no_room',
+  'link_full',
+  'moves_by',
+  'motion_unsaid',
+  'needs_souls',
+  'bad_input',
+]);
+const MAX_HANDS = 8;
+/** How a thing moves (entry section 18, `motion.how`), one list with tools/entry/format.mjs and Engine v2 E5 (#2778):
+ *  carried in one or two hands, pushed by one Soul or by two, or fixed. A body acts alone, so two Souls' push is refused. */
+const CARRIED                                   = Object.freeze({ one_hand: 1, two_hands: 2 });
+const PUSHED                                   = Object.freeze({ pushed_by_one: 1, wheeled: 1, two_souls: 2 });
+
+                                           
+                                                              
+                    
+               
+                 
+               
+                
+                    
+                   
+             
+              
+                                                                                                         
+                       
+                
+                 
+                 
+                                                                                                           
+              
+                                                                  
+              
+  
+                    
+                
+                  
+                 
+                                                                                 
+                     
+  
+/** An effect as an entry writes it. `transfer` moves an amount of one field from one node to another (SA-F2b). */
+                      
+                 
+                 
+                 
+               
+                
+                                  
+                 
+                
+                 
+                   
+                
+                    
+                                                                       
+                       
+                                                                                    
+                
+                                                                                                                        
+              
+  
+/** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
+                                                                                                                                 
+                     
+               
+                                                                                                                                        
+                                                                          
+                                               
+                                                                             
+                               
+                                                                                                                       
+                                                     
+                            
+  
+                    
+                
+                                   
+                                    
+                                    
+                                        
+                         
+                                                                                                                              
+                   
+                                                                                                 
+                   
+  
+/** A field's audience: a rule object of the entry format (SA-F8), or a bare string left in old data. */
+                                                                                                              
+
+/** Whether an asker whose `sees` is `sees` belongs to `audience`: the one resolver every audience read uses. */
+function seesAudience(sees         , audience          )          {
+  if (sees === 'all') return true;
+  const list = Array.isArray(sees) ? sees : [];
+  if (typeof audience !== 'object' || audience === null) return typeof audience === 'string' && list.includes(audience); // a bare string keeps its old meaning; none declared is seen by no list
+  if (audience.rule === 'everyone') return true;
+  if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
+  return list.includes(audience.rule);
+}
+                     
+                               
+                                                                      
+                                                                                         
+                                                                                                                       
+                                    
+  
+                                     
+                                                                                                              
+                     
+                                    
+                                                                                                                   
+                                                                                                    
+
+                                                                                               
+
+const has = (o         , k        )          => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
+const sorted = (o                    )           => (o ? Object.keys(o).sort() : []);
+const whole = (v         )              => Number.isSafeInteger(v);
+/** A whole number as a safe integer or a big integer (a timed value beyond 2^53, SA-F5a). */
+const int = (v         )                       => whole(v) || typeof v === 'bigint';
+/** A flag is stored as 0 or 1 (Engine v2's encoding has no booleans); an entry may still write true or false. */
+const flag = (def                   , v         )          => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
+
+/** Who may see a state field: the container's audience when the kind is closed and names it, else the field's own. */
+const audienceOf = (entry                   , field        , def = entry?.state?.[field])           =>
+  entry?.closed?.fields?.includes(field) ? entry.closed.audience : (def?.audience            );
+
+/** Decide whether `input.act` can be done now. Never throws on bad data: it answers `bad_input`. */
+function decide(input       )          {
+  const read         = [];
+  const bad = (need        , what        , extra                          = {})          => ({
+    verdict: 'no',
+    reason: 'bad_input',
+    need,
+    detail: { what, ...extra },
+    fix: null,
+    read,
+  });
+  if (!input || typeof input !== 'object' || !input.act || !input.state || !input.kinds || !input.asker) return bad(-1, 'malformed');
+  const { act, state, kinds, asker } = input;
+  const nodes = state.nodes ?? {};
+  const args = act.args ?? {};
+  const self = has(nodes, act.this) ? nodes[act.this] : undefined;
+  if (!self) return bad(-1, 'no_such_node', { node: act.this });
+  const entry = self.kind && has(kinds, self.kind) ? kinds[self.kind] : undefined;
+  if (!entry) return bad(-1, 'no_such_kind', { kind: self.kind ?? null });
+  const form = has(entry.forms, act.form) ? entry.forms [act.form] : undefined;
+  if (!form) return bad(-1, 'no_such_form', { form: act.form });
+  const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
+  if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
+  // The asker's `sees` lists the audiences it belongs to: `owner`, `creator`, and `linked:<link type>` for each link
+  // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
+  const sees = (audience          ) => seesAudience(asker.sees, audience);
+
+  // A fix taken only from data: a form of this kind that anyone, or its holder, may start as an act and has an effect
+  // that meets the need. A holder's form refused for want of holding names its own fix (take).
+  // `ready`, when given, passes over a form its own needs would refuse now (a dimmer step on a lamp that is dark).
+  const formFix = (meets                        , ready                       )             => {
+    for (const name of sorted(entry.forms)) {
+      const f = entry.forms [name];
+      if (name === act.form || (f.who !== 'anyone' && f.who !== 'holder') || f.starts !== 'act') continue;
+      if (ready && !ready(f)) continue;
+      if ((f.effects ?? []).some(meets)) return { form: name };
+    }
+    return null;
+  };
+
+  const hands = ()                                         => {
+    const h = actor.hands ?? {};
+    if (typeof h !== 'object' || Object.keys(h).length > MAX_HANDS) return 'too_many_hands';
+    for (const name of sorted(h)) read.push([`${state.actor}/hand/${name}`, h[name] ?? null]);
+    return h;
+  };
+
+  const checks                                                  = {
+    state(n, i) {
+      const field = n.field ?? '';
+      const def = has(entry.state, field) ? entry.state [field] : undefined;
+      if (!def) return { ok: false, no: bad(i, 'no_such_field', { field }) };
+      if (!sees(audienceOf(entry, field))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
+      let value = has(self.fields, field) ? self.fields [field] : def.default;
+      if (def.type === 'timed') {
+        const now = valueAt(def, value, state.now_us);
+        if (typeof now === 'object') return { ok: false, no: bad(i, now.bad, { field }) };
+        value = now;
+      }
+      read.push([`${act.this}/field/${def.n}`, value]);
+      const ranged = has(n, 'at_least') || has(n, 'at_most');
+      if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
+      const holds = (m      , v         ) =>
+        (!has(m, 'is') || flag(def, v) === flag(def, m.is)) &&
+        (!has(m, 'not') || flag(def, v) !== flag(def, m.not)) &&
+        (!has(m, 'at_least') || (int(v) && v >= (m.at_least          ))) &&
+        (!has(m, 'at_most') || (int(v) && v <= (m.at_most          )));
+      const meets = (v         ) => holds(n, v);
+      if (meets(value)) return { ok: true };
+      const wanted                          = {};
+      for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n                           )[k];
+      // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does;
+      // the fix's own needs on this field must hold now, or it would be refused in turn
+      const fix = formFix((e) => (e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
+        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))),
+        (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
+      return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
+    },
+
+    slot_free(n, i) {
+      let ref          = n.slot;
+      let argName                = null;
+      if (ref && typeof ref === 'object' && has(ref, 'arg')) {
+        argName = (ref                   ).arg;
+        if (!has(args, argName)) return { ok: false, no: bad(i, 'argument_missing', { arg: argName }) };
+        ref = args[argName];
+      }
+      const at = typeof ref === 'string' ? { node: act.this, slot: ref } : (ref                                             );
+      if (!at || typeof at.node !== 'string' || typeof at.slot !== 'string') return { ok: false, no: bad(i, 'malformed_slot') };
+      const holder = has(nodes, at.node) ? nodes[at.node] : undefined;
+      const kind = holder?.kind && has(kinds, holder.kind) ? kinds[holder.kind] : undefined;
+      const def = kind && has(kind.slots, at.slot) ? kind.slots [at.slot] : undefined;
+      if (!holder || !def) return { ok: false, no: bad(i, 'no_such_slot', { node: at.node, slot: at.slot }) };
+      const count = (name        ) => {
+        const list = holder.slots?.[name];
+        return Array.isArray(list) ? list.length : 0;
+      };
+      const taken = count(at.slot);
+      read.push([`${at.node}/slot/${at.slot}`, taken]);
+      if (taken < def.most) return { ok: true };
+      let fix             = null;
+      if (argName) {
+        for (const other of sorted(kind .slots)) {
+          const d = kind .slots [other];
+          if (other === at.slot || d.admits !== def.admits || count(other) >= d.most) continue;
+          read.push([`${at.node}/slot/${other}`, count(other)]);
+          fix = { form: act.form, args: { ...args, [argName]: typeof ref === 'string' ? other : { node: at.node, slot: other } } };
+          break;
+        }
+      }
+      return { ok: false, no: { verdict: 'no', reason: 'slot_taken', need: i, detail: { node: at.node, slot: at.slot }, fix, read } };
+    },
+
+    within_reach(n, i) {
+      const name = resolve(n.point, args);
+      if (name === null) return { ok: false, no: bad(i, 'argument_missing', { arg: (n.point                   )?.arg ?? null }) };
+      // Reach to another thing, in this order (decided 17 Nov): (1) walk-first: a form that walks to the thing first
+      // reaches it by that walk, so the need is met when the thing is in the actor's place (the engine walks); (2) else
+      // the measured pose: `of` names the thing by a form argument, its point is in its own frame, placed by its
+      // `at_mm` in the input; (3) else unknown.
+      const thingRef = n.of !== undefined ? n.of : n.point;
+      const thingId = n.of !== undefined ? (n.of && typeof n.of === 'object' ? resolve(n.of, args) : null) : name;
+      const walks = (form.steps ?? []).some((s) => s.step === 'walk_to' && sameRef(s.point, thingRef));
+      const isThing = thingId !== null && has(nodes, thingId) && (n.of !== undefined || (!has(entry.points, name) && !has(entry.slots, name)));
+      if (walks && isThing) {
+        const there = placeOf(nodes, thingId ), mine = placeOf(nodes, state.actor);
+        read.push([`${thingId}/place`, there]);
+        if (there !== null && there === mine) return { ok: true };
+        return { ok: false, no: { verdict: 'no', reason: 'out_of_reach', need: i, detail: { thing: thingId }, fix: { step: 'walk_to', thing: thingId }, read } };
+      }
+      if (n.of === undefined && isThing) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: thingId , field: 'at_mm', read } };
+      let owner = entry;
+      let ownerId                = null;
+      let origin                  = null;
+      if (n.of !== undefined) {
+        const argName = (n.of                            )?.arg;
+        if (typeof argName !== 'string') return { ok: false, no: bad(i, 'malformed_need') };
+        if (!has(args, argName)) return { ok: false, no: bad(i, 'argument_missing', { arg: argName }) };
+        ownerId = typeof args[argName] === 'string' ? (args[argName]          ) : null;
+        const other = ownerId !== null && has(nodes, ownerId) ? nodes[ownerId] : undefined;
+        const otherKind = other?.kind && has(kinds, other.kind) ? kinds[other.kind] : undefined;
+        if (!other || !otherKind) return { ok: false, no: bad(i, 'no_such_node', { node: ownerId }) };
+        owner = otherKind;
+        origin = Array.isArray(other.at_mm) && other.at_mm.length === 3 && other.at_mm.every(whole) ? other.at_mm : null;
+      }
+      const place = has(owner.points, name) ? owner.points [name].at_mm : has(owner.slots, name) ? owner.slots [name].at_mm : undefined;
+      if (!Array.isArray(place) || place.length !== 3 || !place.every(whole)) return { ok: false, no: bad(i, 'no_such_point', { point: name }) };
+      if (ownerId !== null && !origin) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: ownerId, field: 'at_mm', read } };
+      const same = (s                            ) => (ownerId === null ? resolve(s.at, args) === name : (s.toward                                )?.arg === (n.of                   ).arg);
+      const step = (form.steps ?? []).find((s) => s.step === 'move' && same(s));
+      if (!step || typeof step.move !== 'string') return { ok: false, no: bad(i, 'no_move_at_point', { point: name }) };
+      const move = has(state.moves, step.move) ? state.moves [step.move] : undefined;
+      if (!move || !whole(move.reach_mm) || move.reach_mm < 0) return { ok: false, no: bad(i, 'no_move_reach', { move: step.move }) };
+      const from = actor.effector_mm;
+      if (!Array.isArray(from) || from.length !== 3 || !from.every(whole)) return { ok: false, no: bad(i, 'no_effector') };
+      read.push([`${state.actor}/effector_mm`, from]);
+      read.push([`move/${step.move}/reach_mm`, move.reach_mm]);
+      let distanceSq = 0n;
+      if (ownerId !== null) read.push([`${ownerId}/at_mm`, origin]);
+      for (let k = 0; k < 3; k++) {
+        const d = BigInt(from[k]) - BigInt(place[k]) - BigInt(origin ? origin[k] : 0);
+        distanceSq += d * d;
+      }
+      const reach = BigInt(move.reach_mm);
+      if (distanceSq <= reach * reach) return { ok: true };
+      return { ok: false, no: { verdict: 'no', reason: 'out_of_reach', need: i, detail: ownerId === null ? { point: name, move: step.move } : { point: name, of: ownerId, move: step.move }, fix: ownerId === null ? { step: 'walk_to', point: name } : { step: 'walk_to', point: has(owner.points, 'stand') ? 'stand' : name, thing: ownerId }, read } };
+    },
+
+    hand(n, i) {
+      const h = hands();
+      if (typeof h === 'string') return { ok: false, no: bad(i, h) };
+      const names = sorted(h);
+      if (n.free === true) {
+        if (names.some((k) => h[k] === null || h[k] === undefined)) return { ok: true };
+        return { ok: false, no: { verdict: 'no', reason: 'no_free_hand', need: i, detail: {}, fix: names.length ? { step: 'put' } : null, read } };
+      }
+      if (typeof n.holds === 'string') {
+        const kind = n.holds;
+        if (names.some((k) => typeof h[k] === 'string' && nodes[h[k]          ]?.kind === kind)) return { ok: true };
+        return { ok: false, no: { verdict: 'no', reason: 'not_holding_kind', need: i, detail: { kind }, fix: names.length ? { step: 'take', kind } : null, read } };
+      }
+      return { ok: false, no: bad(i, 'malformed_need') };
+    },
+
+    held_by_actor(n, i) {
+      const thing = n.thing === undefined ? act.this : resolve(n.thing, args);
+      if (thing === null) return { ok: false, no: bad(i, 'argument_missing', { arg: (n.thing                   )?.arg ?? null }) };
+      const h = hands();
+      if (typeof h === 'string') return { ok: false, no: bad(i, h) };
+      if (sorted(h).some((k) => h[k] === thing)) return { ok: true };
+      return { ok: false, no: { verdict: 'no', reason: 'not_held', need: i, detail: n.thing === undefined ? {} : { thing }, fix: { step: 'take', thing }, read } };
+    },
+
+    // How the thing moves, from its kind's section 18: carried needs that many free hands, pushed needs one Soul.
+    moves(n, i) {
+      const thing = resolve(n.thing, args);
+      if (thing === null) return { ok: false, no: bad(i, 'argument_missing', { arg: (n.thing                   )?.arg ?? null }) };
+      const node = has(nodes, thing) ? nodes[thing] : undefined;
+      const kind = node?.kind && has(kinds, node.kind) ? kinds[node.kind] : undefined;
+      if (!kind) return { ok: false, no: bad(i, 'no_such_kind', { node: thing }) };
+      if (n.by !== 'carry' && n.by !== 'push') return { ok: false, no: bad(i, 'malformed_need') };
+      const how = kind.motion?.how;
+      read.push([`${node .kind}/motion`, how ?? null]);
+      const no = (reason        , detail                         )          => ({ ok: false, no: { verdict: 'no', reason, need: i, detail: { thing, by: n.by, ...detail }, fix: null, read } });
+      if (typeof how !== 'string' || !(has(CARRIED, how) || has(PUSHED, how) || how === 'fixed')) return no('motion_unsaid', {});
+      const table = n.by === 'carry' ? CARRIED : PUSHED;
+      if (!has(table, how)) return no('moves_by', { how });
+      if (n.by === 'push') return PUSHED[how] > 1 ? no('needs_souls', { how, souls: PUSHED[how] }) : { ok: true };
+      const h = hands();
+      if (typeof h === 'string') return { ok: false, no: bad(i, h) };
+      const free = sorted(h).filter((k) => h[k] === null || h[k] === undefined).length;
+      if (free >= CARRIED[how]) return { ok: true };
+      return { ok: false, no: { verdict: 'no', reason: 'no_free_hand', need: i, detail: { thing, how, hands: CARRIED[how] }, fix: { step: 'put' }, read } };
+    },
+
+    linked: (n, i) => link(n, i, true),
+    unlinked: (n, i) => link(n, i, false),
+
+    // Every amount the form moves has room where it lands (SA-F2b): a pour never overflows.
+    room(_n, i) {
+      const transfers = (form.effects ?? []).filter((e) => e && e.change === 'transfer');
+      if (!transfers.length) return { ok: false, no: bad(i, 'no_transfer') };
+      for (const e of transfers) {
+        const m = measure(kinds, nodes, act.this, args, e);
+        if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
+        for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]]         ) {
+          if (!sees(audienceOf(kinds[nodes[node]?.kind ?? ''], m.field, def))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
+        }
+        read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
+        read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
+        if (m.room !== null && m.moved > m.room) {
+          const detail = { node: m.into, field: m.field, room: m.room, amount: m.moved };
+          return { ok: false, no: { verdict: 'no', reason: 'no_room', need: i, detail, fix: null, read } };
+        }
+      }
+      return { ok: true };
+    },
+  };
+
+  function link(n      , i        , wantLinked         )          {
+    const type = n.link ?? '';
+    const def = has(entry .links, type) ? entry .links [type] : undefined;
+    if (!def) return { ok: false, no: bad(i, 'no_such_link', { link: type }) };
+    if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, link: type, read } };
+    const list = self .links?.[type];
+    const count = Array.isArray(list) ? list.length : 0;
+    read.push([`${act.this}/link/${def.n}`, count]);
+    if (count > 0 === wantLinked) return { ok: true };
+    const change = wantLinked ? 'link' : 'unlink';
+    const fix = formFix((e) => e.change === change && e.link === type);
+    return { ok: false, no: { verdict: 'no', reason: wantLinked ? 'not_linked' : 'already_linked', need: i, detail: { link: type, count }, fix, read } };
+  }
+
+  let unknown                 = null;
+  const needs = Array.isArray(form.needs) ? form.needs : [];
+  for (let i = 0; i < needs.length; i++) {
+    const n = needs[i];
+    const check = n && typeof n.need === 'string' && has(checks, n.need) ? checks[n.need] : undefined;
+    if (!check) return bad(i, 'unknown_need', { need: n?.need ?? null });
+    const out = check(n, i);
+    if (out.ok === false) return out.no;
+    if (out.ok === 'unknown' && !unknown) unknown = out.unknown;
+  }
+  return unknown ?? { verdict: 'yes', read };
+}
+
+// timed:begin. A value that changes with time (SA-F5a, #2845), shared with Engine v2 F5 (#2770).
+// It is stored as three whole numbers, `{value, per_s, set_us}`: the value when it was set, its rate per second
+// (in the field's unit) and the world time it was set, in microseconds. Nothing is written between events.
+// World time is a signed 64-bit count that never stops, so every number may arrive as a safe integer or a big
+// integer (as T0's encoding reads one beyond 2^53), is worked as a big integer, and is refused (`beyond_i64`) only
+// outside the signed 64-bit range. A result is a number when it is a safe integer, else a big integer.
+// Every number here is a big integer; the lint in timed.test.ts refuses any number literal that is not.
+
+                                  
+                                                            
+                                       
+                                                                                                         
+const I64_MIN = -(1n << 63n), I64_MAX = (1n << 63n) - 1n;
+
+/** A whole number as a big integer; `null` if it is not one; `beyond` if it lies outside the signed 64-bit range. */
+function big(v         )                           {
+  const b = typeof v === 'bigint' ? v : whole(v) ? BigInt(v) : null;
+  return b === null ? null : b < I64_MIN || b > I64_MAX ? 'beyond' : b;
+}
+
+function exact(def        , stored         , at         )                          {
+  if (!stored || typeof stored !== 'object') return { bad: 'not_timed' };
+  const { value, per_s, set_us } = stored                  ;
+  const three = [value, per_s, set_us].map(big);
+  if (three.includes(null)) return { bad: 'not_whole_number' };
+  const now = big(at);
+  if (now === null) return { bad: 'no_time' };
+  const bounds = [def.min, def.max].map((b) => (b === undefined ? undefined : big(b)));
+  if (bounds.includes(null)) return { bad: 'not_whole_number' };
+  if ([...three, now, ...bounds].includes('beyond')) return { bad: 'beyond_i64' };
+  const [v0, rate, set] = three            ;
+  const [lo, hi] = bounds.map((b) => (b === undefined ? null : (b          )));
+  if ((now          ) < set) return { bad: 'time_before_set' };
+  if (lo !== null && hi !== null && lo > hi) return { bad: 'bounds_crossed' };
+  return { v0: clamp(v0, lo, hi), rate, set, at: now          , lo, hi };
+}
+
+function clamp(v        , lo               , hi               )         {
+  if (lo !== null && v < lo) return lo;
+  if (hi !== null && v > hi) return hi;
+  return v;
+}
+
+/** A result: a number if it is a safe integer, a big integer beyond that, refused outside the signed 64-bit range. */
+function out(v        )                        {
+  if (v < I64_MIN || v > I64_MAX) return { bad: 'beyond_i64' };
+  return v >= BigInt(Number.MIN_SAFE_INTEGER) && v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v;
+}
+
+function at(x       , t        )         {
+  return clamp(x.v0 + (x.rate * (t - x.set)) / 1000000n, x.lo, x.hi);
+}
+
+/**
+ * The value of a timed field at `now_us`: the whole units accrued since it was set (rate x elapsed / 1,000,000,
+ * truncated toward zero) added to its value, held within the field's `min` and `max`.
+ */
+function valueAt(def        , stored         , now_us         )                        {
+  const x = exact(def, stored, now_us);
+  if ('bad' in x) return x;
+  return out(at(x, x.at));
+}
+
+/**
+ * The first whole microsecond, at or after `from_us`, at which the value is `at_least` (or `at_most`) the level: the
+ * time it crosses, rounded up, so a need on the field turns from no to yes at exactly that time. `null` when it never
+ * does: the rate is zero or points away, or a bound stops the value short of the level.
+ */
+function crossing(def        , stored         , level                                   , from_us         )                               {
+  const x = exact(def, stored, from_us);
+  if ('bad' in x) return x;
+  const rising = level && has(level, 'at_least') && !has(level, 'at_most');
+  const falling = level && has(level, 'at_most') && !has(level, 'at_least');
+  const L = big(rising ? level.at_least : falling ? level.at_most : undefined);
+  if (L === null) return { bad: 'malformed_level' };
+  if (L === 'beyond') return { bad: 'beyond_i64' };
+  const now = at(x, x.at);
+  if (rising ? now >= L : now <= L) return out(x.at);
+  if (rising ? x.rate <= 0n || (x.hi !== null && x.hi < L) : x.rate >= 0n || (x.lo !== null && x.lo > L)) return null;
+  const gap = rising ? L - x.v0 : x.v0 - L;
+  const speed = rising ? x.rate : -x.rate;
+  return out(x.set + (gap * 1000000n + speed - 1n) / speed);
+}
+// timed:end
+
+// who:begin. Who may do a form (SA-F7a, #2848): one closed list, shared with Engine v2 F6 (#2771). A form's `who` is a
+// test on links, never on a field: `anyone` (the default: owning does not lock); `holder`, the thing is in one of the
+// actor's hands (holding is a parent); `world`, a form a timer starts, which no Soul's act may do; or
+// `{"link": <type>}`, the actor or the actor's Soul (the end of the body's `soul` link, T2) is an end of a link of that
+// type on the thing: its owner, a member, the Soul whose turn it is, a role in the activity, a relation its creator
+// set. The rule is the form's own data, so it is read before anyone tries; a refusal names it and, for a link, its ends.
+// The lint in who.test.ts refuses any read of a field between these markers.
+
+const WHO = Object.freeze(['anyone', 'holder', 'world', 'link']);
+                        
+                                                  
+                                                                                                                         
+                                                                                   
+
+/** Whether the actor may do `input.act` at all, before its needs: yes, no naming who may, or unknown. Never throws. */
+function whoMay(input       )             {
+  const read         = [];
+  const bad = (what        , extra                          = {})             => ({ verdict: 'no', reason: 'bad_input', who: null, detail: { what, ...extra }, read });
+  if (!input || typeof input !== 'object' || !input.act || !input.state || !input.kinds || !input.asker) return bad('malformed');
+  const { act, state, kinds, asker } = input;
+  const nodes = state.nodes ?? {};
+  const self = has(nodes, act.this) ? nodes[act.this] : undefined;
+  if (!self) return bad('no_such_node', { node: act.this });
+  const entry = self.kind && has(kinds, self.kind) ? kinds[self.kind] : undefined;
+  if (!entry) return bad('no_such_kind', { kind: self.kind ?? null });
+  const form = has(entry.forms, act.form) ? entry.forms [act.form] : undefined;
+  if (!form) return bad('no_such_form', { form: act.form });
+  const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
+  if (!actor) return bad('no_such_node', { node: state.actor });
+  const who = form.who ?? 'anyone';
+  const yes             = { verdict: 'yes', who, read };
+  const refuse = (detail                         )             => ({ verdict: 'no', reason: 'not_permitted', who, detail, read });
+
+  if (who === 'anyone') return yes;
+  if (who === 'world') return refuse({});
+  if (who === 'holder') {
+    const h = actor.hands ?? {};
+    if (typeof h !== 'object' || Object.keys(h).length > MAX_HANDS) return bad('too_many_hands');
+    for (const name of sorted(h)) read.push([`${state.actor}/hand/${name}`, h[name] ?? null]);
+    return sorted(h).some((k) => h[k] === act.this) ? yes : refuse({});
+  }
+  const type = who && typeof who === 'object' && Object.keys(who).length === 1 ? (who                      ).link : undefined;
+  if (typeof type !== 'string') return bad('unknown_who', { who });
+  const def = has(entry.links, type) ? entry.links [type] : undefined;
+  if (!def) return bad('no_such_link', { link: type });
+  const sees = seesAudience(asker.sees, def.audience);
+  if (!sees) return { verdict: 'unknown', who, node: act.this, link: type, read };
+  const list = self.links?.[type];
+  const ends = Array.isArray(list) ? list : [];
+  if (!whole(def.most) || ends.length > def.most) return bad('link_over_most', { link: type });
+  // The actor's Soul: a body is linked to its Soul (T2), at most one.
+  const souls = actor.links?.soul;
+  const soul = Array.isArray(souls) && souls.length === 1 && typeof souls[0] === 'string' ? souls[0] : null;
+  read.push([`${state.actor}/soul`, soul]);
+  read.push([`${act.this}/link/${def.n}/ends`, ends]);
+  return ends.some((e) => e === state.actor || (soul !== null && e === soul)) ? yes : refuse({ link: type, ends });
+}
+// who:end
+const sameRef = (a         , b         )          =>
+  typeof a === 'string' ? a === b : !!a && typeof a === 'object' && !!b && typeof b === 'object' && has(a, 'arg') && (a                    ).arg === (b                    ).arg;
+
+/** The node a node stands loose in, through any slot or hand it is in; null if nowhere. Bounded by the number of nodes. */
+function placeOf(nodes                      , id        )                {
+  const ids = sorted(nodes);
+  const parent = (x        )                                          => {
+    for (const holder of ids) {
+      const n = nodes[holder];
+      if (n.loose?.includes(x)) return { node: holder, loose: true };
+      for (const slot of sorted(n.slots)) if (n.slots [slot]?.includes(x)) return { node: holder, loose: false };
+      for (const hand of sorted(n.hands)) if (n.hands [hand] === x) return { node: holder, loose: false };
+    }
+    return null;
+  };
+  let at = parent(id);
+  for (let hops = 0; at && hops < ids.length; hops++) {
+    if (at.loose) return at.node;
+    at = parent(at.node);
+  }
+  return null;
+}
+
+function resolve(ref         , args                         )                {
+  if (typeof ref === 'string') return ref;
+  if (ref && typeof ref === 'object' && has(ref, 'arg')) {
+    const v = args[(ref                   ).arg];
+    return typeof v === 'string' ? v : null;
+  }
+  return null;
+}
+
+                                                    
+                       
+                
+               
+               
+                    
+                    
+                                                                                                              
+                
+              
+                      
+                
+  
+
+/**
+ * The amount a `transfer` effect moves: the least of what it asks (a whole number, an argument, or `"room"`, the
+ * target's room up to its field's `max`) and what the source has above its `min`. Both ends are int fields of one name and unit; amounts are whole and
+ * never negative. Shared by the `room` need and by effects.ts, so both work out one number.
+ */
+function measure(kinds                       , nodes                      , self        , args                         , e        )                                                             {
+  const end = (ref         ) => (ref === 'this' ? self : resolve(ref, args));
+  const from = end(e.from), into = end(e.into), field = typeof e.field === 'string' ? e.field : '';
+  if (!from || !into || from === into) return { bad: 'malformed_transfer', detail: { from, into } };
+  const defs             = [];
+  const values           = [];
+  for (const id of [from, into]) {
+    const node = has(nodes, id) ? nodes[id] : undefined;
+    const entry = node?.kind && has(kinds, node.kind) ? kinds[node.kind] : undefined;
+    const def = entry && has(entry.state, field) ? entry.state [field] : undefined;
+    if (!node || !def || def.type !== 'int') return { bad: 'no_such_field', detail: { node: id, field } };
+    const value = has(node.fields, field) ? node.fields [field] : def.default;
+    if (!whole(value) || value < 0) return { bad: 'not_whole_number', detail: { node: id, field } };
+    defs.push(def);
+    values.push(value);
+  }
+  const [fromDef, intoDef] = defs;
+  const [there, held] = values;
+  if (fromDef.unit !== intoDef.unit) return { bad: 'units_differ', detail: { field } };
+  // The target's room is up to its field's `max`; the source gives down to its `min` (0 if none).
+  let room                = null;
+  if (has(intoDef, 'max')) {
+    if (!whole(intoDef.max) || intoDef.max < held) return { bad: 'over_capacity', detail: { node: into, field } };
+    room = intoDef.max - held;
+  }
+  const floor = has(fromDef, 'min') ? fromDef.min : 0;
+  if (!whole(floor) || floor < 0) return { bad: 'not_whole_number', detail: { node: from, field } };
+  let want          = e.amount;
+  if (e.amount === 'room') {
+    if (room === null) return { bad: 'no_capacity', detail: { node: into, field } };
+    want = room;
+  } else if (e.amount && typeof e.amount === 'object' && has(e.amount, 'arg')) want = args[(e.amount                   ).arg];
+  if (!whole(want) || want < 0) return { bad: 'not_whole_number', detail: { amount: e.amount ?? null } };
+  return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)) };
+}
+return { NEEDS, REASONS, MAX_HANDS, CARRIED, PUSHED, seesAudience, decide, valueAt, crossing, WHO, whoMay, measure };
+})();
+// </inline rules.ts>
+// <inline can-i.mjs> generated by inline.mjs: edit can-i.mjs, not this block
+const soulCanI = (() => {
+const { decide } = formRules;
+const { soulWalk } = soulCatalog;
+// SA-C3: "Can I?" answered on this machine. The rules are the world's own (packages/form-rules `decide`), run on the copy of the
+// world the client already keeps: a thing's kind entry (`catalog.entries`, by kind, in the entry format), its fields from the live
+// picture, and this Soul's body where the world publishes it. Nothing is sent. A need whose inputs this copy does not hold is
+// "unknown" and never blocks a send; a definite "no" from another need wins over it. After a refusal that carries the world's own
+// verdict (`decided`), the copy is made to say what the world reported. The client reads facts only: no label is computed here.
+
+/** Needs that read this Soul's body (hands, effector) rather than the thing. */
+const BODY = new Set(["hand", "held_by_actor", "within_reach"]);
+
+/** `object:<thing>:<form>`: the act id a form of a thing is sent as. */
+const parseOffer = (id) => { const m = /^object:([^:]+):([^:]+)$/.exec(String(id ?? "")); return m ? { thing: m[1], form: m[2] } : null; };
+
+const show = (v) => (typeof v === "string" ? `"${v}"` : JSON.stringify(v));
+const wantedText = (w = {}) => [
+  "is" in w ? `to be ${show(w.is)}` : null, "not" in w ? `to be anything but ${show(w.not)}` : null,
+  "at_least" in w ? `at least ${w.at_least}` : null, "at_most" in w ? `at most ${w.at_most}` : null].filter(Boolean).join(" and ");
+
+/** What a refusal's verdict says is missing, in plain words with the facts under them. */
+function missingOf(v) {
+  const d = v.detail ?? {};
+  if (v.reason === "field_differs") return { reason: v.reason, field: d.field, found: d.found, wanted: d.wanted, text: `${d.field} is ${show(d.found)}; this needs it ${wantedText(d.wanted)}` };
+  if (v.reason === "out_of_reach") return { reason: v.reason, point: d.point, text: `the ${d.point} is out of reach from where you stand` };
+  return { reason: v.reason, detail: d, text: String(v.reason).replace(/_/g, " ") };
+}
+
+/** The next act a verdict's fix names, from data only. */
+function nextOf(ix, thing, v) {
+  const f = v.fix;
+  if (f?.form) return { act: `object:${thing.id}:${f.form}`, ...(f.args && Object.keys(f.args).length ? { params: f.args } : {}) };
+  if (f?.step === "walk_to") return soulWalk(ix, thing) ?? { step: f };
+  if (f?.step) return { step: f };
+  return v.detail?.field ? { find: v.detail.field } : null;
+}
+
+const ageOf = (copy, now) => (Number.isFinite(copy?.receivedAt) ? Math.max(0, Math.round((now - copy.receivedAt) / 1000)) : null);
+
+/** Can this Soul do `form` of `thing` now, as far as this copy can tell. `copy` is the live copy on disk, `me` this Soul's row. */
+function canI(ix, thingId, formName, { args = {}, copy, me = null, now = Date.now() } = {}) {
+  const thing = ix.things.get(thingId);
+  if (!thing) return { error: `No thing with id "${thingId}" in the catalog.` };
+  const entry = ix.cat.entries?.[thing.kind];
+  if (!entry) return { thing: thingId, form: formName, can: "unknown", why: `this copy holds no entry for ${thing.kind}: ask the world (act, or inspect ${thingId})` };
+  const form = entry.forms?.[formName];
+  if (!form) return { thing: thingId, form: formName, can: "unknown", why: `${thing.kind} has no form "${formName}"`, forms: Object.keys(entry.forms ?? {}).filter((k) => entry.forms[k].starts === "act") };
+  const age_s = ageOf(copy, now), out = { thing: thingId, form: formName };
+  if (!copy?.live) return { ...out, can: "unknown", why: "no live picture yet: the thing's state is not known here", age_s: null };
+  const needs = Array.isArray(form.needs) ? form.needs : [], moves = ix.cat.moves ?? {};
+  const body = { hands: me?.hands, effector_mm: me?.effector_mm };
+  const holds = (n) => {
+    if (n?.need === "state") return true;
+    if (n?.need === "hand" || n?.need === "held_by_actor") return !!body.hands && typeof body.hands === "object";
+    if (n?.need === "within_reach") return Array.isArray(body.effector_mm) && Object.keys(moves).length > 0;
+    return false;
+  };
+  const kept = [], index = [], skipped = [];
+  needs.forEach((n, i) => { if (holds(n)) { kept.push(n); index.push(i); } else skipped.push({ need: i, kind: n?.need ?? null, ...(BODY.has(n?.need) ? { because: "this copy has no body reading" } : { because: "this copy does not hold it" }) }); });
+  const v = decide({
+    kinds: { [thing.kind]: { ...entry, forms: { ...entry.forms, [formName]: { ...form, needs: kept } } } },
+    act: { this: thingId, form: formName, args },
+    state: { actor: "me", nodes: { [thingId]: { kind: thing.kind, fields: copy.live.things?.[thingId] ?? {} }, me: { hands: body.hands, effector_mm: body.effector_mm } }, moves },
+    asker: { sees: ["public"] },
+  });
+  const rest = { age_s, ...(skipped.length ? { not_checked: skipped } : {}) };
+  if (v.verdict === "no" && v.reason !== "bad_input") {
+    const missing = missingOf(v), next = nextOf(ix, thing, v);
+    return { ...out, can: "no", need: index[v.need] ?? v.need, missing, ...(next ? { next } : {}), ...rest };
+  }
+  if (v.verdict === "no") return { ...out, can: "unknown", why: `the copy cannot judge it: ${v.detail?.what ?? "bad input"}`, ...rest };
+  if (v.verdict === "unknown" || skipped.length) return { ...out, can: "unknown", why: v.verdict === "unknown" ? `${v.field ?? v.link} is not visible to this Soul` : "some needs read what this copy does not hold", ...rest };
+  return { ...out, can: "yes", ...rest };
+}
+
+/** Every form of a thing that starts as an act, each answered in a line. */
+function canAll(ix, thingId, opts) {
+  const thing = ix.things.get(thingId), entry = thing && ix.cat.entries?.[thing.kind];
+  if (!entry) return canI(ix, thingId, "", opts);
+  const forms = Object.keys(entry.forms ?? {}).filter((k) => entry.forms[k].starts === "act");
+  return { thing: thingId, kind: thing.kind, forms: forms.map((f) => { const r = canI(ix, thingId, f, opts); return { form: f, can: r.can, ...(r.missing ? { missing: r.missing.text } : r.why ? { why: r.why } : {}), ...(r.next ? { next: r.next } : {}) }; }), age_s: ageOf(opts?.copy, opts?.now ?? Date.now()) };
+}
+
+/** The world refused with its own verdict (`decided`, the library's, as the world computed it). Make the copy say what the world
+ *  read: each `<node>/field/<n>` in its `read` is a field the world holds at that value. Returns the copy and what differed. */
+function syncRefusal(copy, ix, decided) {
+  const changed = [];
+  if (!copy?.live || !Array.isArray(decided?.read)) return { copy, changed };
+  const things = { ...(copy.live.things ?? {}) };
+  for (const [addr, value] of decided.read) {
+    const m = /^(.+)\/field\/(\d+)$/.exec(String(addr));
+    const thing = m && ix.things.get(m[1]), entry = thing && ix.cat.entries?.[thing.kind];
+    const field = entry && Object.keys(entry.state ?? {}).find((k) => entry.state[k].n === Number(m[2]));
+    if (!field) continue;
+    const was = Object.hasOwn(things[thing.id] ?? {}, field) ? things[thing.id][field] : entry.state[field].default;
+    if (JSON.stringify(was) === JSON.stringify(value)) continue;
+    things[thing.id] = { ...things[thing.id], [field]: value };
+    changed.push({ thing: thing.id, field, was, now: value });
+  }
+  return { copy: changed.length ? { ...copy, live: { ...copy.live, things } } : copy, changed };
+}
+return { parseOffer, missingOf, nextOf, canI, canAll, syncRefusal };
+})();
+// </inline can-i.mjs>
+// <inline how.mjs> generated by inline.mjs: edit how.mjs, not this block
+const soulHow = (() => {
+const { canI } = soulCanI;
+const { tokensOf } = soulCatalog;
+// SA-C4b: a how-to is data on a kind (the entry's `howtos`: a text reference and steps naming forms of that kind). `how "<words>"`
+// finds one in the entries this client holds (`catalog.entries`), puts real things of that kind in its steps (the nearest in this
+// copy), says which kind is missing when the world has none, and returns the chain as a plan for the resident (`plan`). Each step
+// is checked with `can` as far as this copy can tell. A form that starts a timer is a wait: the chain is cut there, and the rest
+// is a wake entry of the client's own (`wake add thing-state … --plan`). Nothing is sent and the world never waits for anything.
+
+const HOW_STEPS_MAX = 6;
+const dist = (a, b) => (a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : Infinity);
+const US = 1_000_000;
+
+/** The how-tos of every kind this copy holds an entry for, with their words. */
+function howtosOf(ix) {
+  const out = [];
+  for (const [kind, entry] of Object.entries(ix.cat.entries ?? {})) {
+    for (const [name, h] of Object.entries(entry?.howtos ?? {})) out.push({ kind, name, entry, steps: h.steps ?? [], text: entry.text?.[h.text] ?? "" });
+  }
+  return out;
+}
+
+/** The how-tos whose name or words hold every word asked, best first (a name that is the words wins). */
+function matchHowtos(ix, words) {
+  const want = tokensOf(words);
+  if (!want.length) return [];
+  return howtosOf(ix).map((h) => {
+    const have = new Set([...tokensOf(h.name), ...tokensOf(h.text)]), named = new Set(tokensOf(h.name));
+    return { h, ok: want.every((w) => have.has(w)), score: want.filter((w) => named.has(w)).length * 2 + want.filter((w) => have.has(w)).length };
+  }).filter((x) => x.ok).sort((a, b) => b.score - a.score || (a.h.name < b.h.name ? -1 : 1)).map((x) => x.h);
+}
+
+/** What a form's timer waits for: the field its timed form sets, when it sets one. */
+function waitOf(entry, form) {
+  const timer = (entry.forms?.[form]?.effects ?? []).find((e) => e.change === "timer");
+  if (!timer) return null;
+  const set = (entry.forms?.[timer.form]?.effects ?? []).find((e) => e.change === "set");
+  return { after_s: Math.ceil((timer.after_us ?? 0) / US), ...(set ? { field: set.field, is: set.to } : {}) };
+}
+
+/** `h` for `thing` as the client's plan: steps up to and including the first wait, and what remains with the wake that continues it. */
+function planOf(ix, h, thing, { copy, me, now = Date.now() } = {}) {
+  // A leading step whose every effect this copy already shows is done (a kettle already filled): passed over, and said. A set is
+  // shown when the field is its value; a transfer into the thing itself (filling it from a tap) when the field already holds some.
+  const fields = copy?.live?.things?.[thing.id];
+  const shown = (e) => (e.change === "set" && "to" in e && fields[e.field] === e.to) ||
+    (e.change === "transfer" && e.into === "this" && Number.isFinite(fields[e.field]) && fields[e.field] > 0);
+  const isDone = (s) => { const fx = h.entry.forms?.[s.form]?.effects ?? []; return !!fields && fx.length > 0 && fx.every(shown); };
+  let skip = 0;
+  while (skip < h.steps.length && isDone(h.steps[skip])) skip++;
+  const done = h.steps.slice(0, skip).map((s) => ({ form: s.form, act: `object:${thing.id}:${s.form}`,
+    why: `already so on this copy: ${(h.entry.forms[s.form].effects).map((e) => `${e.field} is ${JSON.stringify(e.change === "set" ? e.to : fields[e.field])}`).join(", ")}` }));
+  const used = h.steps.slice(skip, skip + HOW_STEPS_MAX), cut = h.steps.length - skip - used.length;
+  const rows = used.map((s) => {
+    const form = h.entry.forms?.[s.form], c = canI(ix, thing.id, s.form, { copy, me, now });
+    return { form: s.form, act: `object:${thing.id}:${s.form}`, can: c.can, ...(c.missing ? { missing: c.missing.text } : c.why ? { why: c.why } : {}), ...(c.next ? { next: c.next } : {}),
+      ...(form?.takes ? { takes: Object.keys(form.takes) } : {}), wait: waitOf(h.entry, s.form) };
+  });
+  const at = rows.findIndex((r) => r.wait);
+  const first = at < 0 ? rows : rows.slice(0, at + 1), rest = at < 0 ? [] : rows.slice(at + 1);
+  const plan = first.map((r) => r.act), w = at < 0 ? null : rows[at].wait;
+  const later = rest.length ? {
+    waits_for: w.field ? `${thing.id} ${w.field} is ${JSON.stringify(w.is)}` : `${w.after_s} s`,
+    plan: rest.map((r) => r.act),
+    ...(w.field ? { wake: `wake add thing-state '${JSON.stringify({ thing: thing.id, field: w.field, is: w.is })}' --plan '${JSON.stringify(rest.map((r) => r.act))}' --end ${new Date(now + (w.after_s * 2 + 60) * 1000).toISOString()}` } : {}),
+  } : null;
+  return { plan, ...(done.length ? { done } : {}), steps: rows.map(({ wait, ...r }) => ({ ...r, ...(wait ? { then_waits_s: wait.after_s } : {}) })), ...(later ? { later } : {}), ...(cut > 0 ? { cut: `${cut} more step${cut === 1 ? "" : "s"} not shown: a how-to here is at most ${HOW_STEPS_MAX}` } : {}) };
+}
+
+/** `how "<words>"`: the best how-to for the words, with real things of its kind from this copy, or the kind that is missing. */
+function how(ix, words, { at, copy, me, now = Date.now() } = {}) {
+  const found = matchHowtos(ix, words);
+  if (!found.length) return { how: null, why: `no how-to here matches "${words}": this copy holds ${howtosOf(ix).map((h) => h.name).join(", ") || "none"}` };
+  const h = found[0], things = ix.cat.things.filter((t) => t.kind === h.kind).sort((a, b) => dist(at, a.at) - dist(at, b.at) || (a.id < b.id ? -1 : 1));
+  const also = found.slice(1, 4).map((x) => x.name);
+  if (!things.length) return { how: h.name, text: h.text, kind: h.kind, missing: [{ kind: h.kind, why: `this world has no ${h.kind}: nothing to do it with here` }], steps: [], ...(also.length ? { also } : {}) };
+  const t = things[0], p = planOf(ix, h, t, { copy, me, now });
+  return { how: h.name, text: h.text, kind: h.kind, with: { thing: t.id, name: t.name, ...(Number.isFinite(dist(at, t.at)) ? { metres: Math.round(dist(at, t.at)) } : {}) }, ...p,
+    next: p.steps[0]?.can === "no" ? `the first step is not possible now: ${p.steps[0].missing ?? ""}`.trim() : `plan '${JSON.stringify(p.plan)}'   (or: how "${words}" --run)`, ...(also.length ? { also } : {}) };
+}
+return { HOW_STEPS_MAX, howtosOf, matchHowtos, planOf, how };
+})();
+// </inline how.mjs>
+// <inline room.mjs> generated by inline.mjs: edit room.mjs, not this block
+const soulRoom = (() => {
+// SA-C5: the brief a mind reads at the start of a turn, composed on this machine from the client's copy (catalog and live picture)
+// and its own plan. One read: what holds me and my plan's step; my own room spelled out (things by kind, with counts); one card
+// per place going outward, nearest first; counts beyond; and what changed since the last read. Facts the copy holds, never labels
+// an engine computed. Nothing is sent. Every other answer ends with `changed`, the same line (`changesOf`).
+//
+// Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file.
+
+/** The size the brief keeps to, as printed (indented JSON). Outward cards go first when it is tight, then the room's purposes; kinds and counts never. */
+const ROOM_BRIEF_BYTES = 1900;
+const OUTWARD_MAX = 8;
+const CHANGES_MAX = 6;
+const size = (v) => Buffer.byteLength(JSON.stringify(v, null, 1));
+const dist = (a, b) => (a && b ? Math.round(Math.hypot(a[0] - b[0], a[1] - b[1])) : null);
+const short = (v) => { const s = v === undefined ? "unset" : JSON.stringify(v); return s.length > 40 ? `${s.slice(0, 37)}...` : s; };
+
+/** What the copy says of me and my room, small enough to keep from one read to the next. `plan`: {id, state, step, of} or null. */
+function snapshotOf(ix, { me, live, plan, selfId }) {
+  const kinds = {}, states = {};
+  for (const t of me?.place ? ix.thingsAt.get(me.place) ?? [] : []) {
+    kinds[t.kind] = (kinds[t.kind] ?? 0) + 1;
+    const st = live?.live?.things?.[t.id];
+    if (st && Object.keys(st).length) states[t.id] = st;
+  }
+  const hands = me?.hands && typeof me.hands === "object" ? Object.values(me.hands).filter((v) => typeof v === "string") : [];
+  const near = (live?.live?.souls ?? []).filter((x) => x.id !== selfId && me?.place && x.place === me.place).length;
+  return { place: me?.place ?? null, holding: hands, plan: plan ? { id: plan.id, step: plan.step, of: plan.of, state: plan.state } : null, kinds, states, near };
+}
+
+/** What differs between two snapshots, as plain lines of fact (at most CHANGES_MAX, then how many more). */
+function changesOf(prev, now, ix) {
+  if (!prev) return ["first read here: nothing to compare yet"];
+  const out = [], name = (id) => ix?.place(id)?.name ?? id;
+  if (prev.place !== now.place) out.push(`I moved: ${prev.place ? name(prev.place) : "nowhere"} to ${now.place ? name(now.place) : "nowhere"}`);
+  else {
+    for (const k of new Set([...Object.keys(prev.kinds), ...Object.keys(now.kinds)])) {
+      const a = prev.kinds[k] ?? 0, b = now.kinds[k] ?? 0;
+      if (a !== b) out.push(`${k} here: ${a} to ${b}`);
+    }
+    for (const id of new Set([...Object.keys(prev.states), ...Object.keys(now.states)])) {
+      const a = prev.states[id] ?? {}, b = now.states[id] ?? {};
+      for (const f of new Set([...Object.keys(a), ...Object.keys(b)])) if (JSON.stringify(a[f]) !== JSON.stringify(b[f])) out.push(`${id} ${f}: ${short(a[f])} to ${short(b[f])}`);
+    }
+    if (prev.near !== now.near) out.push(`Souls in this place: ${prev.near} to ${now.near}`);
+  }
+  if (prev.holding.join() !== now.holding.join()) out.push(`holding: ${prev.holding.join(", ") || "nothing"} to ${now.holding.join(", ") || "nothing"}`);
+  const pp = prev.plan, np = now.plan;
+  if (JSON.stringify(pp) !== JSON.stringify(np)) out.push(!np ? "my plan has ended or been dropped" : !pp ? `a plan began: step ${np.step} of ${np.of}` : `plan: step ${pp.step} to ${np.step} of ${np.of}, ${np.state}`);
+  return out.length > CHANGES_MAX ? [...out.slice(0, CHANGES_MAX), `and ${out.length - CHANGES_MAX} more`] : out;
+}
+
+/** The one-line or short-list answer to "what changed": a string when nothing did. */
+const changedLine = (lines, seconds) => (lines.length ? lines : `nothing${seconds === null || seconds === undefined ? "" : `, ${seconds} s since the last read`}`);
+
+/** The brief. `snap` is `snapshotOf` the same inputs (so it is read once); `changed` the lines or string for the end. */
+function roomBrief(ix, { me, live, plan, snap, changed, bytes = ROOM_BRIEF_BYTES }) {
+  const here = me?.place ? ix.place(me.place) : null, at = me?.at;
+  const purpose = (kind) => ix.cat.cards?.[kind]?.purpose;
+  const kinds = Object.entries(snap.kinds).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  const roomRow = (k, n, withPurpose) => `${k} x${n}${withPurpose && purpose(k) ? `: ${String(purpose(k)).slice(0, 80)}` : ""}`;
+  const skip = new Set(); for (let p = here; p; p = p.parent ? ix.places.get(p.parent) : null) skip.add(p.id);
+  const places = ix.cat.places.filter((p) => !skip.has(p.id) && p.id !== me?.place).map((p) => ({ p, d: dist(at, p.at) ?? 1e9 }))
+    .sort((a, b) => a.d - b.d || (a.p.id < b.p.id ? -1 : 1));
+  const card = ({ p, d }) => `${p.name} (${p.kind}${d < 1e9 ? `, ${d} m` : ""})${p.fixed ? "" : ` ${ix.walkId(p)}`}${purpose(p.kind) ? `: ${String(purpose(p.kind)).slice(0, 80)}` : ""}`;
+  const elsewhere = ix.cat.things.length - kinds.reduce((s, [, n]) => s + n, 0);
+  const build = (cards, purposes) => {
+    const out = {
+      me: here ? `${here.name}${ix.pathOf(here.id).length > 1 ? `, in ${ix.pathOf(here.id).slice(-2, -1)[0]}` : ""}${me?.doing ? `; doing ${me.doing}` : ""}` : "not in the live picture",
+      holding: snap.holding.length ? snap.holding : "nothing in my hands",
+      plan: plan ? `${plan.state}, step ${plan.step} of ${plan.of}: ${plan.id ?? "?"}` : "none",
+      room: kinds.map(([k, n], i) => roomRow(k, n, i >= kinds.length - purposes ? false : true)),
+      outward: places.slice(0, cards).map(card),
+      beyond: { places: Math.max(0, places.length - cards), thingsElsewhere: elsewhere },
+      changed,
+    };
+    return out;
+  };
+  // fit: fewer cards first (down to 3), then purposes off the room's rows from the end, never a kind or a count
+  let cards = Math.min(OUTWARD_MAX, places.length), purposes = 0, out = build(cards, purposes);
+  while (size(out) > bytes && cards > 3) out = build(--cards, purposes);
+  const rows = kinds.length;
+  purposes = 0;
+  while (size(out) > bytes && purposes < rows) out = build(cards, ++purposes);
+  while (size(out) > bytes && cards > 0) out = build(--cards, purposes);
+  return out;
+}
+
+/** SA-C9: the nearest building (or house) a place is in, or the place itself: what "this house" means from this copy. */
+const houseOf = (ix, id) => { for (let p = ix.place(id ?? ""), n = 0; p && n < 12; p = p.parent ? ix.places.get(p.parent) : null, n++) if (p.kind === "building" || p.kind === "house") return p.id; return id; };
+
+/** The things of a kind in this room or house, from the copy: nearest first, at most `max`, with how many were left out. */
+function eachOf(ix, me, { each, in: where = "room", max }) {
+  if (!me?.place) return { error: "this copy does not say where I am: no room to list from" };
+  const scope = ix.within(where === "house" ? houseOf(ix, me.place) : me.place), name = (k) => String(k).split(":").pop();
+  const all = ix.cat.things.filter((t) => scope.has(t.place) && (t.kind === each || name(t.kind) === each)).map((t) => ({ t, d: dist(me.at, t.at) ?? 1e9 }))
+    .sort((a, b) => a.d - b.d || (a.t.id < b.t.id ? -1 : 1)).map((x) => x.t);
+  return { things: all.slice(0, max), more: Math.max(0, all.length - max) };
+}
+
+/** Plan steps with each repeated step replaced by one step per thing it finds (`each` on a step says which). Nothing is sent. */
+function expandEach(ix, me, steps, limit = 24) {
+  const out = [], note = [];
+  for (const s of steps) {
+    if (!s.each) { out.push(s); continue; }
+    const r = eachOf(ix, me, s);
+    if (r.error) return r;
+    if (!r.things.length) return { error: `this copy lists no ${s.each} in this ${s.in}: nothing was sent` };
+    const entry = ix.cat.entries?.[r.things[0].kind];
+    if (entry && !entry.forms?.[s.form]) return { error: `${s.each} has no form "${s.form}": its forms are ${Object.keys(entry.forms ?? {}).join(", ") || "none"}` };
+    r.things.forEach((t, i) => out.push({ id: `object:${t.id}:${s.form}`, ...(s.params ? { params: s.params } : {}), each: { kind: s.each, n: i + 1, of: r.things.length } }));
+    note.push({ kind: s.each, in: s.in, steps: r.things.length, ...(r.more ? { left_out: r.more, why: `max ${s.max}` } : {}) });
+  }
+  if (out.length > limit) return { error: `that makes ${out.length} steps; a plan has at most ${limit}` };
+  return { steps: out, each: note };
+}
+return { ROOM_BRIEF_BYTES, OUTWARD_MAX, CHANGES_MAX, snapshotOf, changesOf, changedLine, roomBrief, eachOf, expandEach };
+})();
+// </inline room.mjs>
 // <inline net.mjs> generated by inline.mjs: edit net.mjs, not this block
 import * as soulNet$http from "node:http";
 import * as soulNet$https from "node:https";
@@ -3668,7 +4674,7 @@ return { SHOOT_KINDS, SHOOT_USAGE, NO_BROWSER, parseShootArgs, findPlaywright, h
 // every fetch this client makes goes through the proxy its environment names (HTTPS_PROXY, NO_PROXY), as worldFetch does
 const fetch = soulNet.netFetch;
 
-const VERSION = "2.36.1";
+const VERSION = "2.36.2";
 // #1936: every request this client makes says which client it is
 const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";
@@ -5365,6 +6371,72 @@ async function findCommand(...args) {
   return { ...r, ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act" (a Soul's row: one of its "acts"): ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
 }
 // query '<json>': several layered questions in one call, each with its own depth, filters and token budget.
+// can <thing> [form] [params-json]: can I do this now? Answered from this machine with the world's own rules (SA-C3): yes, no with
+// what is missing and the next act, or unknown. Nothing is sent, and it says how old the copy it read is. A thing can be named by
+// its offered act (`object:<thing>:<form>`) too.
+async function canCommand(...args) {
+  const rest = args.filter((a) => a !== "--json"), params = rest.length > 1 && rest.at(-1).trim().startsWith("{") ? JSON.parse(rest.pop()) : {};
+  const offer = soulCanI.parseOffer(rest[0]), thing = offer?.thing ?? rest[0], form = offer?.form ?? rest[1];
+  if (!thing) throw new Error('usage: can <thing> [form] [params-json]   (or can object:<thing>:<form>)');
+  const { ix, live, me, note } = (await worldCopy({ local: true })) ?? (await worldCopy());
+  const o = { args: params, copy: live, me };
+  const r = form ? soulCanI.canI(ix, thing, form, o) : soulCanI.canAll(ix, thing, o);
+  if (r.error) process.exitCode = 2;
+  return { ...r, ...(r.error ? {} : { sent: "nothing: answered from this machine's copy; the world decides when you act" }), ...(note ? { note } : {}) };
+}
+// how "<words>" [--run]: a how-to written in an entry (SA-C4b), as a plan of real things from this copy. Nothing is sent unless --run,
+// which hands the plan (up to its first wait) to the resident; what follows a wait is the `later` wake entry, left for the agent to add.
+async function howCommand(...args) {
+  const run = args.includes("--run"), words = args.filter((a) => !a.startsWith("--")).join(" ");
+  if (!words) throw new Error('usage: how "<words>" [--run]   (for example: how tea)');
+  const { ix, live, me, note } = (await worldCopy({ local: true })) ?? (await worldCopy());
+  const r = soulHow.how(ix, words, { at: me?.at, copy: live, me });
+  const out = { ...r, ...(note ? { note } : {}) };
+  if (!run) return out;
+  if (!r.plan?.length) { process.exitCode = 2; return { ...out, started: false, why: r.missing ? "a kind is missing" : "no how-to to run" }; }
+  if (r.steps[0].can === "no") { process.exitCode = 2; return { ...out, started: false, why: "the first step is not possible now" }; }
+  const started = await plan(JSON.stringify(r.plan));
+  return { ...out, started: !!started.accepted, plan_state: started };
+}
+// SA-C5: the brief a mind reads at the start of a turn: what holds me and my plan's step, my room spelled out by kind with counts, one
+// card per place going outward, counts beyond, and what changed since the last read. From this machine's copy; nothing is sent.
+// Every other answer that reads the copy ends with `changed`: the same line, kept from one answer to the next.
+const READ_FILE = "world-read.json", CHANGED_ON = new Set(["find", "can", "how", "look", "query", "around", "here", "caps", "capabilities", "act", "wait"]);
+function planNow() {
+  const p = loadServeState().plan;
+  return p && !PLAN_OVER.has(p.state) ? { id: p.steps[p.at]?.id, state: p.state, step: Math.min(p.at + 1, p.steps.length), of: p.steps.length } : null;
+}
+/** Read the copy against what the last answer saw; keep this one for the next. `{ix, me, live, plan, snap, changed}`, or null with no copy. */
+async function readChange(fetchIt = false) {
+  const c = (await worldCopy({ local: true })) ?? (fetchIt ? await worldCopy() : null); if (!c) return null;
+  const plan = planNow(), snap = soulRoom.snapshotOf(c.ix, { me: c.me, live: c.live, plan, selfId: load().soul }), last = readJsonFile(READ_FILE);
+  const prev = last?.world === load().world ? last.snap : null, secs = prev ? Math.round((Date.now() - last.at) / 1000) : null;
+  try { writeJsonFile(READ_FILE, { world: load().world, at: Date.now(), snap }); } catch { /* a read still answers */ }
+  return { ...c, plan, snap, changed: soulRoom.changedLine(soulRoom.changesOf(prev, snap, c.ix), secs) };
+}
+async function briefCommand() {
+  const r = await readChange(true);
+  if (!r) return { note: `No copy of the world on this machine yet: run ${CLI} catalog --refresh, and keep serve running so the live picture follows.` };
+  return soulRoom.roomBrief(r.ix, r);
+}
+/** The end of every other answer: what changed since the last one. */
+async function withChanged(cmd, out) {
+  if (!CHANGED_ON.has(cmd) || !out || typeof out !== "object" || Array.isArray(out) || out.changed !== undefined) return out;
+  try { const r = await readChange(); return r ? { ...out, changed: r.changed } : out; } catch { return out; }
+}
+// SA-C3: a refusal that carries the world's own verdict (`decided`) says what changed: the copy on disk is made to match what the
+// world read, and the answer lists each field that differed (`changed`) with what is missing and the next act.
+async function syncRefused(parsed, d) {
+  const offer = soulCanI.parseOffer(parsed.capability);
+  if (!offer || !d?.decided || typeof d.decided !== "object") return {};
+  const cc = await worldCopy({ local: true }), have = readJsonFile(LIVE_FILE);
+  if (!cc || !have) return {};
+  const { copy, changed } = soulCanI.syncRefusal(have, cc.ix, d.decided);
+  if (changed.length) writeJsonFile(LIVE_FILE, copy);
+  const thing = cc.ix.things.get(offer.thing);
+  const no = d.decided.verdict === "no" && d.decided.reason, next = no && thing ? soulCanI.nextOf(cc.ix, thing, d.decided) : null;
+  return { changed, ...(no ? { missing: soulCanI.missingOf(d.decided) } : {}), ...(next ? { next } : {}) };
+}
 async function queryCommand(...args) {
   const text = args.filter((a) => !a.startsWith("--")).join(" "), b = args.indexOf("--budget");
   let questions; try { questions = JSON.parse(text); } catch { throw new Error('usage: query \'[{"find":"library"},{"place":"<id>","depth":2,"verbs":["read"]},{"verb":"eat","near":"<place>","limit":3}]\' [--budget tokens]'); }
@@ -5639,12 +6711,15 @@ async function cardAfter(message, why, final) {
   return shut.closed ? { closed: "failed", card: line } : shut.already ? {} : step;
 }
 async function act(...argv) {
-  const { args, wait: waitFor, json, for: forArg, key } = waitOption(argv);
-  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--run] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
+  const { args, wait: waitFor, json, for: forArg, key, else: elseFlag } = waitOption(argv);
+  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--else <id>]... [--run] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
   // #2283: --run is pace "run" on a walk or walk-to (the world refuses it on anything else)
   const run = args.indexOf("--run"); if (run >= 0) args.splice(run, 1);
   const parsed = parseActionArgs(args);
   if (run >= 0) parsed.params = { ...(parsed.params ?? {}), pace: "run" };
+  // SA-C8: ranked fallbacks, tried by this client one after another, no model turn between
+  const ranked = [...elseFlag, ...(Array.isArray(parsed.else) ? parsed.else : [])]; delete parsed.else;
+  if (ranked.length) return actRanked(parsed, ranked, { wait: waitFor, json, for: forArg, key, run: run >= 0 });
   if (typeof parsed.capability === "string" && !OFFER_ID.test(parsed.capability.trim())) {
     const { ix, live, me, note } = (await worldCopy({ local: true })) ?? (await worldCopy());   // no copy yet: the one read find makes
     const r = soulCatalog.find(ix, parsed.capability, { at: me?.at, states: live?.live?.things }), said = r.note ?? note;
@@ -5685,9 +6760,9 @@ async function act(...argv) {
   }
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
-    const card = forId ? await cardAfter(forId, `Couldn't: ${d.reason ?? d.code}`, false) : {};
-    if (json) return { ...d, ...card };
-    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d, await soulWay(parsed.capability)), ...secondsNext(parsed.capability, d, parsed.params, forId),...unwalkableNext(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    const card = forId ? await cardAfter(forId, `Couldn't: ${d.reason ?? d.code}`, false) : {}, synced = await syncRefused(parsed, d);
+    if (json) return { ...d, ...synced, ...card };
+    return { accepted: false, code: d.code, reason: d.reason, ...synced, ...card, ...refusalList(d), ...findNext(parsed.capability, d, await soulWay(parsed.capability)), ...secondsNext(parsed.capability, d, parsed.params, forId),...unwalkableNext(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -5704,6 +6779,57 @@ async function act(...argv) {
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+// SA-C8: `act <id> --else <id> --else any:sit`: the ranked list the act carries. The client sends the first; when the world
+// refuses it, or the act it began ends failed before it held, the next is sent at once: the mind is not woken between. An
+// entry is an offered id, `{"id":...,"params":...}`, or `any:sit`, which stands for the seats in this Soul's own room, nearest
+// first, a crowd spread over the nearest few (this copy's guess: the world decides each). The answer says which entry held (`fallback.took`), or, when the list runs
+// out, every entry with the world's word (`fallback.tried`) and what the world last offered (`did_you_mean`): that is the one
+// wake. A write the world did not confirm, an act limit and a stop are never tried past: the next entry could double the act.
+export const FALLBACK_MAX = 12, ANY_SEAT = "any:sit";
+const NO_FALLBACK = new Set(["rate-limited", "act.stopped", "act.replaced"]);
+/** any:sit spreads a crowd over the nearest FALLBACK_SPREAD free seats: a pick drawn from the Soul's id and the try, the same on
+ *  every run. Wider is worse: past the seats the world names free, the copy cannot tell a taken seat from a free one. */
+export const FALLBACK_SPREAD = 3;
+const spreadOf = (id, n) => { let h = 2166136261; for (const c of String(id ?? "")) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return n > 1 ? h % n : 0; };
+const entryOf = (e, shared) => typeof e === "string" ? { id: e, ...(shared ? { params: shared } : {}) } : e && typeof e.id === "string" ? { id: e.id, ...(e.params ? { params: e.params } : {}) } : null;
+async function actRanked(first, ranked, o) {
+  const shared = first.params?.seconds !== undefined ? { seconds: first.params.seconds } : undefined;   // a duration is the same wherever
+  const queue = [{ id: first.capability, ...(first.params ? { params: first.params } : {}) }, ...ranked.map((e) => entryOf(e, shared))];
+  if (queue.some((e) => !e)) throw new Error('--else takes offered ids, {"id":"<id>","params":{...}}, or any:sit');
+  const tried = [], seen = new Set(); let last = null;
+  while (queue.length && tried.length < FALLBACK_MAX) {
+    const e = queue.shift();
+    if (e.id === ANY_SEAT) {
+      const { ix, me } = (await worldCopy({ local: true })) ?? (await worldCopy());
+      // the seats the world just named free (its own `did_you_mean`) first, then this room's seats nearest first
+      const named = (last?.did_you_mean ?? []).map((d) => d?.id).filter((id) => /^sit:/.test(id ?? ""));
+      const ids = [...new Set([...named, ...soulCatalog.seatsHere(ix, me?.place, me?.at, [...seen, ...queue.map((x) => x.id)])])].filter((id) => !seen.has(id));
+      // one seat at a time, read again after each refusal: what is free changes while the others are asking too. A crowd refused
+      // together hears the same free seats, so each Soul takes its own one of the nearest few, drawn again on each try: all
+      // asking for the nearest, all but one would be refused again on every try, and the last would run out of tries.
+      const pick = spreadOf(`${load().soul}:${tried.length}`, Math.min(ids.length, FALLBACK_SPREAD));
+      if (ids.length) queue.unshift({ id: ids[pick], ...(shared ? { params: shared } : {}) }, e);
+      continue;
+    }
+    if (seen.has(e.id)) continue; seen.add(e.id);
+    const argv = [e.id, ...(e.params && Object.keys(e.params).length ? [JSON.stringify(e.params)] : []), "--json", ...(o.wait ? ["--wait", String(o.wait)] : []), ...(o.for !== undefined ? ["--for", o.for] : []), ...(o.run ? ["--run"] : []), ...(o.key && !tried.length ? ["--key", o.key] : [])];
+    const code0 = process.exitCode;
+    const out = await act(...argv), rec = out.receipt;
+    const why = out.accepted === false ? { code: out.code, ...(out.reason ? { reason: String(out.reason).slice(0, 160) } : {}) } : rec?.phase === "failed" ? { code: rec.code ?? "failed", ...(rec.reason ? { reason: String(rec.reason).slice(0, 160) } : {}) } : null;
+    if (!why) {
+      process.exitCode = code0;
+      const res = { ...out, fallback: { took: e.id, rank: tried.length + 1, ...(tried.length ? { tried } : {}) } };
+      return o.json ? res : { ...brief(res), fallback: res.fallback };
+    }
+    tried.push({ id: e.id, ...why }); last = out;
+    if (out.unconfirmed || NO_FALLBACK.has(why.code)) return { ...(o.json ? out : brief(out)), fallback: { stopped: why.code, tried } };
+    process.exitCode = code0;
+  }
+  process.exitCode = 1;
+  return { accepted: false, code: "act.fallbacks-exhausted", reason: `None of the ${tried.length} ranked choices held. Choose again from what is free now.`,
+    fallback: { exhausted: true, tried }, ...(last?.did_you_mean?.length ? { did_you_mean: last.did_you_mean.slice(0, 5) } : {}), next: "here, then choose something else" };
 }
 
 // 2.24.8 (#1381, #1420): `stop [receiptId]` cancels this Soul's own act under way with the world's stop:current: the act's
@@ -5874,15 +7000,16 @@ export function keyArg(k) {
 }
 function waitOption(argv) {
   const args = [];
-  let wait = 0, json = false, forId, key;
+  let wait = 0, json = false, forId, key; const rest = [];
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--wait") { wait = /^\d+$/.test(argv[i + 1] ?? "") ? Number(argv[++i]) : 60; }
+    if (argv[i] === "--else") { if (argv[i + 1] === undefined || argv[i + 1].startsWith("--")) throw new Error("--else needs an offered id, or any:sit for any free seat here"); rest.push(argv[++i]); }
+    else if (argv[i] === "--wait") { wait = /^\d+$/.test(argv[i + 1] ?? "") ? Number(argv[++i]) : 60; }
     else if (argv[i] === "--json") json = true;
     else if (argv[i] === "--for") forId = argv[++i];
     else if (argv[i] === "--key") key = keyArg(argv[++i]);
     else args.push(argv[i]);
   }
-  return { args, wait, json, for: forId, key };
+  return { args, wait, json, for: forId, key, else: rest };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max WAIT_MAX_S) until the receipt is terminal, its sit or lie holds the
@@ -6738,6 +7865,7 @@ export function carryWake(wake, sameWorld) {
   for (const r0 of w.rules) {
     if (sameWorld) { rules.push(r0); continue; }
     const { inside, busy, held, was, ...r } = r0;   // who was where, the acts it was holding and a thing's state were the old world's
+    if (r.plan) { dropped.push({ id: r.id, why: "it holds steps of the world this Soul left" }); continue; }
     const named = r.kind === "place-busy" ? `place ${r.params?.place}` : r.kind === "thing-state" ? `thing ${r.params?.thing}` : r.kind !== "soul-arrives" ? null
       : r.params?.who !== "any" ? `Soul ${r.params.who}` : r.params?.where !== "here" ? `place ${r.params.where}` : null;
     if (named) dropped.push({ id: r.id, why: `it names ${named} of the world this Soul left` });
@@ -6919,10 +8047,11 @@ export function takePending(st, now = Date.now(), heldMs = soulWake.HELD_MS, rea
 // plan lives in SERVE_STATE and each step keeps its clientRef, so a killed serve carries on and the world acts once.
 const PLAN_STEPS_MAX = 24, PLAN_FIX_WAIT_MS = 120_000, PLAN_ENDED_MAX = 20, PLAN_STEP_ID = /^[a-z][\w-]*(?::\S+)?$/i;   // some offers have no target: pray
 const PLAN_OVER = new Set(["done", "failed", "replaced"]);
+const EACH_USAGE = `a repeated step: {"each":"<kind>","form":"<form>","in":"room"|"house","max":<n>}  (for example {"each":"lamp","form":"turn_off","in":"room","max":6}: the form on each lamp the copy lists, nearest first, one after another)`;
 const plainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
 /** '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' → {steps, fixes}. Throws what is wrong. */
-export function parsePlanSteps(text) {
+export function parsePlanSteps(text, { each = false } = {}) {
   const usage = `usage: plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for <message-id>|none], or plan '[{"id":"walk:pond","fixes":2}]' to replace refused step 2`;
   let list; try { list = JSON.parse(text); } catch { throw new Error(usage); }
   if (!Array.isArray(list) || !list.length) throw new Error(usage);
@@ -6930,7 +8059,20 @@ export function parsePlanSteps(text) {
   let fixes;
   const steps = list.map((x) => {
     const s = typeof x === "string" ? { id: x } : x;
+    // SA-C9: "for each <kind> in this room|house, up to <max>": one step the plan expands from this machine's copy (`expandEach`)
+    if (plainObject(s) && s.each !== undefined) {
+      const bad = Object.keys(s).filter((k) => !["each", "form", "in", "max", "params"].includes(k));
+      if (!each) throw new Error(`a repeated step ({"each":…}) is for plan, which runs it now; a schedule entry holds named steps`);
+      if (bad.length || typeof s.each !== "string" || !/^[\w:.-]+$/.test(s.each) || typeof s.form !== "string" || !/^[\w-]+$/.test(s.form)) throw new Error(EACH_USAGE);
+      if (s.in !== undefined && !["room", "house"].includes(s.in)) throw new Error(`"in" is "room" or "house": ${EACH_USAGE}`);
+      if (!Number.isInteger(s.max) || s.max < 1 || s.max > PLAN_STEPS_MAX) throw new Error(`"max" is a whole number from 1 to ${PLAN_STEPS_MAX}: ${EACH_USAGE}`);
+      if (s.params !== undefined && !plainObject(s.params)) throw new Error(`${s.each}: params must be a JSON object`);
+      return { each: s.each, form: s.form, in: s.in ?? "room", max: s.max, ...(s.params ? { params: s.params } : {}) };
+    }
     if (!plainObject(s) || typeof s.id !== "string") throw new Error(usage);
+    // SA-C4a: a step names what to do and nothing about when. A wait is a schedule entry of the client's own (`wake add … --plan`).
+    const stray = Object.keys(s).filter((k) => !["id", "params", "fixes"].includes(k));
+    if (stray.length) throw new Error(`step ${JSON.stringify(s.id)}: ${stray.join(", ")} not allowed: a step carries no start time or condition. To continue later: wake add at <time> --plan '[…]' or wake add thing-state '{"thing":…,"field":…,"is":…}' --plan '[…]' --end <time>`);
     // #2477: an id with its params written after it as text: the step takes them as an object beside the id
     const asText = /^(\S+)\s+(\{.*\})$/s.exec(s.id);
     if (asText && PLAN_STEP_ID.test(asText[1])) throw new Error(`"${s.id}": a step's params go beside its id, as an object: {"id":${JSON.stringify(asText[1])},"params":${asText[2]}}`);
@@ -6998,6 +8140,7 @@ export function planView(p) {
   const refused = p.steps.find((s) => s.state === "refused");
   return {
     id: p.id, state: p.state, step: Math.min(p.at + 1, p.steps.length), of: p.steps.length, ...(p.for ? { for: p.for } : {}),
+    ...(p.steps.some((s) => s.each) ? { each: [...new Set(p.steps.filter((s) => s.each).map((s) => s.each.kind))].map((k) => ({ kind: k, done: p.steps.filter((s) => s.each?.kind === k && ["done", "held"].includes(s.state)).length, of: p.steps.filter((s) => s.each?.kind === k).length })) } : {}),
     steps: p.steps.map((s, i) => ({ n: i + 1, id: s.id, state: s.state, ...(s.receipt ? { receipt: s.receipt } : {}), ...(s.carried ? { carried: "the act already under way, kept from the plan this replaced" } : {}), ...(s.why ? s.why : {}) })),
     ...(p.state === "stopped" && refused ? { next: `Step ${p.at + 1} was refused. Send one replacement: plan '[{"id":"<offered id>","fixes":${p.at + 1}}]'. Otherwise the plan ends failed.` } : {}),
   };
@@ -7047,7 +8190,9 @@ async function serveForeground() {
       const catalog = things ? CATALOG_IX?.ix ?? null : null;
       const r = soulWake.evaluate(st.wake.rules, { ...st, live: copy?.world === world ? copy.live : null, me: s.soul, since: Date.parse(start), catalog }, Date.now());
       st.wake = { ...soulWake.expire(st.wake, Date.now(), WAKE_HELD_MS), rules: r.rules, cursor: r.cursor };
-      st.wake.queue = soulWake.enqueue(st.wake.queue, r.fired);   // #1968: one entry per rule, with a count and the latest why
+      // SA-C4a: a scheduled plan that came due is sent now, by this process, with no model turn; a dropped one wakes the mind, once
+      for (const f of r.fired) if (f.plan) { const o = startPlan({ steps: f.plan, for: null }); if (o.accepted === false) log(`wake: ${f.id} plan not sent: ${o.reason}`); }
+      st.wake.queue = soulWake.enqueue(st.wake.queue, r.fired.filter((f) => !f.plan));   // #1968: one entry per rule, with a count and the latest why
       if (r.fired.some((f) => f.kind === "owner-message")) st.wake = soulWake.saw(st.wake, "owed", Date.now());   // #1933
       for (const f of r.fired) log(`wake: ${f.id} (${f.why})`);
       if (JSON.stringify(st.wake) !== before) persist();
@@ -7367,6 +8512,16 @@ async function serveForeground() {
         if (p.state !== "running") return;
         const s = p.steps[p.at];
         if (s.state !== "pending") return;
+        // SA-C9: a step from a repeated one is asked of this machine's copy first (SA-C3's `can`): a definite no is a refusal with
+        // nothing sent, and the rest of the repeat is not tried. An unknown never blocks: the world decides.
+        if (s.each) {
+          const o = soulCanI.parseOffer(s.id), c = o ? await worldCopy({ local: true }).catch(() => null) : null;
+          const v = c ? soulCanI.canI(c.ix, o.thing, o.form, { args: s.params ?? {}, copy: c.live, me: c.me }) : null;
+          if (v?.can === "no") {
+            planRefused(p, s, { code: "can.no", reason: v.missing?.text ?? "the copy says no", ...(v.next ? { next: v.next } : {}), sent: "nothing" }, Date.now());
+            persist(); log(`plan: step ${p.at + 1} not possible by the copy (${s.id})`); wake(); return;
+          }
+        }
         const last = p.at === p.steps.length - 1;
         // Only the last step closes the owner's message; an earlier one posts progress and the card stays open (the world's D3c).
         const reportT0 = performance.now();   // a plan's step is this process's own request; a proxied one is recorded by the CLI that asked
@@ -7586,6 +8741,8 @@ async function serveForeground() {
   if (HOME && SEAT?.kind === "soul") reflectAfter(0);
   setInterval(() => { for (const p of pendingClose.splice(0)) closeLater(p); planPoll().catch((e) => log(`plan: ${e?.message ?? e}`)); }, 5_000);
   setInterval(runWake, 2_000); runWake();
+  // SA-C4a: a scheduled plan is looked at every half second, so one fires within 2 s of the copy showing its change
+  setInterval(() => { if (st.wake.rules.some((x) => x.plan && !x.ended)) runWake(); }, 500).unref();
   // #1941: serve checks the feed itself; an event, or a release this client is too old for, wakes one Soul of the home, once, within the budget
   const feedTick = async () => {
     try {
@@ -7695,13 +8852,20 @@ export function pendingNotes(p, brief) {
   };
 }
 
+/** SA-C4a: the steps a schedule entry holds are checked as `plan` checks them, once, here; one that fixes a refused step is no entry. */
+function ruleWithPlan(rule) {
+  if (!rule.plan) return rule;
+  const { steps, fixes } = parsePlanSteps(JSON.stringify(rule.plan));
+  if (fixes) throw new Error("a scheduled plan cannot replace a refused step");
+  return { ...rule, plan: steps };
+}
 // wake | wake add <kind> [params-json] [--every <seconds>] | wake remove <id> | wake budget <name|n> | --day <n> (#1929, #1968): the rules serve wakes the mind by. They are
 // kept in serve's state file: a running serve changes them itself, and with none the file is changed as serve would.
 async function wakeCommand(...argv) {
   need(load(), "token", `Create or pair a Soul first: ${CLI} create "<Name>"`);
   const [sub, ...rest] = argv;
   if (sub === "heartbeat") return heartbeat(rest);
-  const change = !sub ? null : sub === "add" ? { add: soulWake.parseRule(rest) } : sub === "budget" ? { budget: soulWake.parseBudget(rest) } : sub === "away" ? soulWake.parseAway(rest) : sub === "remove" && rest.length === 1 ? { remove: rest[0] } : null;
+  const change = !sub ? null : sub === "add" ? { add: ruleWithPlan(soulWake.parseRule(rest)) } : sub === "budget" ? { budget: soulWake.parseBudget(rest) } : sub === "away" ? soulWake.parseAway(rest) : sub === "remove" && rest.length === 1 ? { remove: rest[0] } : null;
   if (sub && !change) soulWake.parseBudget([]);   // throws the usage
   const a = await askServe({ op: "wake", change });
   if (a?.lost) throw new Error("serve stopped before it answered: run the command again");
@@ -7772,10 +8936,18 @@ async function plan(...argv) {
     return a;
   }
   const { args, for: forArg } = waitOption(argv);
-  const { steps, fixes } = parsePlanSteps(args[0] ?? "");
+  let { steps, fixes } = parsePlanSteps(args[0] ?? "", { each: true });
   const up = await askServe({ op: "status" });
   if (!up?.serving) throw new Error(`A plan runs in serve, and none is up in this folder. Start one: ${CLI} serve`);
   let copy = null; try { copy = await worldCopy(); } catch { /* no local copy: no step is vouched for */ }
+  let eachNote;
+  if (steps.some((x) => x.each)) {
+    if (fixes) throw new Error("a repeated step cannot replace a refused step");
+    if (!copy?.ix) throw new Error(`a repeated step is listed from this machine's copy of the world, and there is none yet: ${CLI} catalog --refresh`);
+    const e = soulRoom.expandEach(copy.ix, copy.me, steps);
+    if (e.error) { process.exitCode = 2; return { accepted: false, code: "plan.each", reason: e.error, sent: "nothing" }; }
+    steps = e.steps; eachNote = e.each;
+  }
   const known = copy?.ix ?? null, souls = otherSouls(copy?.live);
   const bad = known ? steps.findIndex((x) => planUnknown(known, x.id, souls)) : -1;
   if (bad >= 0) { process.exitCode = 2; return planUnknownAnswer(known, fixes ?? bad + 1, steps[bad].id, { at: copy.me?.at, here: copy.me?.place, states: copy.live?.live?.things, souls }); }
@@ -7786,7 +8958,7 @@ async function plan(...argv) {
   if (!a || a.lost) throw new Error("the serve process stopped before it took the plan");
   if (!a.accepted) process.exitCode = 2;
   else if (implicit) save({ lastAckedActed: true });
-  return a.accepted && unchecked.length ? { ...a, unchecked } : a;
+  return a.accepted ? { ...a, ...(unchecked.length ? { unchecked } : {}), ...(eachNote ? { each: eachNote } : {}) } : a;
 }
 
 // batch '[{"here":{}},{"receipt":"r_1"}]': several reads in one call; each answer or error stands on its own.
@@ -7903,6 +9075,9 @@ const HELP = [
   ["world",
     `look`,
     `find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n] [--outline]`,
+    `brief   (one read at the start of a turn: what holds me and my plan's step, my room by kind with counts, a card per place going outward, counts beyond, and what changed since the last read; find, can, how, look, query, around, here, caps, act and wait also end with "changed")`,
+    `can <thing> [form] [params-json]   (can I do this now? answered here: yes, no with what is missing and the next act, or unknown; sends nothing)`,
+    `how "<words>" [--run]   (a how-to from the world's entries, as a checked plan of real things: at most six steps; a wait is a wake entry; names the kind a world lacks; --run starts the plan)`,
     `query '<json questions>' [--budget tokens]`,
     `catalog [--refresh]`,
   ],
@@ -7973,7 +9148,7 @@ const HELP = [
     `serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)`,
   ],
   ["",
-    `plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)`,
+    `plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why; one step may repeat over a kind: {"each":"lamp","form":"switch_off","in":"room"|"house","max":6} lists them from this copy, nearest first, asks can before each and stops at the first no; plan '[{"id":"<id>","fixes":<step>}]' replaces it once)`,
   ],
   ["",
     `wake [add <act-ended|plan-finished|soul-arrives|place-busy|idle> [params-json] [--every s] | add at <ISO time> | add every <minutes ≥ 5> | remove <id>]   (when serve wakes you, besides the owner, speech to you and a refused plan step)`,
@@ -8362,6 +9537,9 @@ const commands = {
   inspect,
   catalog: catalogCommand,
   find: findCommand,
+  can: canCommand,
+  how: howCommand,
+  brief: briefCommand,
   query: queryCommand,
   look,
   now: nowLine,
@@ -8453,6 +9631,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!BACKGROUND.has(cmd)) COMMAND_END = Date.now() + COMMAND_MS;   // #2380
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };
+    out = await withChanged(cmd, out);
     if (out && typeof out === "object" && !Array.isArray(out)) {
       if (cmd === "register" && HOME_CHOICE) out = { ...out, homeChoice: HOME_CHOICE };
       const update = await updateNotice(pendingUpdate);

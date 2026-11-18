@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":46,"group":"object","words":"open the top drawer","obvious":3,"things":{"dresser":"eden:dresser"},"chain":[{"this":"dresser","form":"open","args":{"drawer":"top"}}]}

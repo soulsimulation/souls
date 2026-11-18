@@ -25,7 +25,9 @@ import { kettleHeat, type WorldModel } from '@souls/world-compiler';
 import { accompanistOf, crackle, drumHits, PIANO_FADE, pianoEndAt, pianoNotes, pianoReadyAt, recordNotes, sungNotes, type Accompanist } from '../../../../mars/viewer/app/engine-view/piano-score.ts';
 import { RADIO_STATIONS, stationEvents, TUNE, type RadioEvent } from './radio-stations.ts';
 import { makeSinger, micChain, type Singer } from './voice.ts';
-import { ambienceAt, condition, distanceTo, emittersOf, exposureAt, falloff, Movement, notesToSound, QueuedNotes, treeIndex, treesOf, type Emitter, type Resident, type SoundKind, type Source, type TreeIndex } from './sound-plan.ts';
+import { looks as lookTable, pickTune, tuneNotes, type Tune } from '../../../../packages/form-rules/src/looks.ts';
+import tunesDoc from '../../../../content/tunes/tunes.json' with { type: 'json' };
+import { ambienceAt, condition, tableOf, distanceTo, emittersOf, exposureAt, falloff, Movement, notesToSound, QueuedNotes, treeIndex, treesOf, type Emitter, type Resident, type SoundKind, type Source, type TreeIndex } from './sound-plan.ts';
 import { nightOf } from './motion.ts';
 import { sharedCoverProbe, type CoverProbe } from '../world-env.ts';
 import { arrivalOver } from '../arrival-marks.ts';
@@ -103,6 +105,35 @@ function playPianos(host: Host, x: number, y: number, z: number) {
   for (const o of pianoQueued.settle(audioNow, playing)) o.disconnect(); // the player stopped before this note began: it never sounds
   for (const [k, t] of pianoDone) if (t < now - 2) pianoDone.delete(k);
   for (const [k] of pianoAt) if (Number(k.slice(k.lastIndexOf(':') + 1)) < now - 4) pianoAt.delete(k);
+}
+// SA-D7: a thing whose looks table has a tune row plays it while the table says so (loudness by its field), heard within the
+// row's stated reach. Which note sounds when is a pure function of world time (tuneNotes), so every viewer is at the same
+// point of the tune; scheduled a short way ahead, each note once, and a note not yet begun is cancelled when the sound stops.
+const TUNES = (tunesDoc as unknown as { tunes: Tune[] }).tunes, TUNE_AHEAD = 0.35, tuneDone = new Map<string, number>(), tuneQueued = new QueuedNotes<OscillatorNode>();
+let tuneNear = false;
+const tuneEmitter = (e: Emitter) => e.spec.kind === 'music' && (e.spec.tune !== undefined || e.spec.mood !== undefined);
+function playTunes(host: Host, x: number, y: number, z: number) {
+  tuneNear = false;
+  const nowS = host.worldSeconds, model = host.layer.model; if (typeof nowS !== 'number' || !ctx || !master || !model) return;
+  const now = Math.round(nowS * 1e6), playing = new Set<string>(), seen = new Set<string>();
+  for (const e of objects) {
+    const id = e.id.split('#')[0]; if (!tuneEmitter(e) || seen.has(id)) continue; seen.add(id);
+    const ent = model.entities.get(id), def = ent && model.resolvedDef(ent.def); if (!ent || !def) continue;
+    const state = { ...e.state, ...ent.state } as Record<string, boolean | number | string>;
+    for (const [i, h] of (Object.values(lookTable({ table: tableOf(def), state })).flatMap((p) => p.sounds ?? [])).entries()) {
+      if (h.sound !== 'tune') continue;
+      const tune = h.tune !== undefined ? TUNES.find((t) => t.id === h.tune) : pickTune(TUNES, h.mood ?? '', id); if (!tune) continue;
+      const key = `${id}:${i}`, g = falloff(distanceTo(e, x, y, z), h.reach_mm / 1000, h.volume_permille / 1000); playing.add(key);
+      if (g <= 0.001) continue;
+      tuneNear = true;
+      for (const n of tuneNotes(tune, now - 50000, now + TUNE_AHEAD * 1e6)) {
+        const k = `${key}:${n.onset_us}:${n.midi}`; if (tuneDone.has(k)) continue; tuneDone.set(k, n.onset_us);
+        const at = audioNow + Math.max(0, (n.onset_us - now) / 1e6); tuneQueued.add(key, at, pianoKey(ctx, master, at, n.midi, g * 0.4));
+      }
+    }
+  }
+  for (const o of tuneQueued.settle(audioNow, playing)) o.disconnect();
+  for (const [k, t] of tuneDone) if (t < now - 2e6) tuneDone.delete(k);
 }
 // Entry 20: a jukebox a Soul switched on by hand plays a song from the same score clock as the piano (seeded by the
 // jukebox), with a soft beat, heard where it stands. Jukeboxes are picked out of the emitter scan (`objects`, rebuilt on
@@ -520,7 +551,7 @@ const musicOn = () => settings.music;
 // after the last near tick (hysteresis) and the music ramps the change over ~1 s (music.ts), so it breathes instead of
 // stepping.
 const DUCK_HOLD_MS = 2500; let duckHeldUntil = 0;
-const musicDuck = () => { const now = performance.now(); if (fluteAudio.near || pianoNear || jukeboxNear || drumsNear || radioNear || voiceNear) duckHeldUntil = now + DUCK_HOLD_MS; return now < duckHeldUntil ? 0.2 : 1; };
+const musicDuck = () => { const now = performance.now(); if (fluteAudio.near || pianoNear || tuneNear || jukeboxNear || drumsNear || radioNear || voiceNear) duckHeldUntil = now + DUCK_HOLD_MS; return now < duckHeldUntil ? 0.2 : 1; };
 const musicSync = () => syncMusic({ on: musicOn(), station: settings.station, audible: audible(), volume: settings.volume * musicDuck(), unlocked: !!ctx && ctx.state === 'running' });
 function unlock() {
   // #1389: a tap also wakes a context the browser suspended or interrupted (iOS after the page was in the background);
@@ -551,9 +582,10 @@ function step(host: Host) {
   // steps while the tick runs: read per instrument, the voice landed up to one step (2.9 ms) off the piano's note)
   audioNow = ctx?.currentTime ?? 0;
   if(ctx&&master&&typeof host.worldSeconds==='number')fluteAudio.update(ctx,master,host.worldSeconds,audioNow,host.residents?.()??[],[x,y,z],settings.muted);
-  if (!settings.muted) { playPianos(host, x, y, z); playJukeboxes(host, x, y, z); playDrums(host, x, y, z); playRadios(host, x, y, z); playSingers(host, x, y, z); } else { pianoNear = jukeboxNear = drumsNear = radioNear = voiceNear = false; for (const [id, r] of radios) dropRadio(id, r); if (singers.size && ctx) for (const [id, s] of singers) { s.voice.stop(ctx.currentTime); singers.delete(id); } }
+  if (!settings.muted) { playPianos(host, x, y, z); playTunes(host, x, y, z); playJukeboxes(host, x, y, z); playDrums(host, x, y, z); playRadios(host, x, y, z); playSingers(host, x, y, z); } else { pianoNear = tuneNear = jukeboxNear = drumsNear = radioNear = voiceNear = false; for (const [id, r] of radios) dropRadio(id, r); if (singers.size && ctx) for (const [id, s] of singers) { s.voice.stop(ctx.currentTime); singers.delete(id); } }
   const heard: Heard[] = [], playlist = musicPlaying();
   for (const e of [...objects, ...ambient, ...people]) {
+    if (tuneEmitter(e)) continue;   // a table's tune plays its notes (playTunes), never the generic music loop
     if (e.spec.kind === 'music' && (jukeboxIds.has(e.id) || radioIds.has(e.id))) continue;   // a jukebox plays its song (playJukeboxes), a radio its station (playRadios)
     if (playlist && e.spec.kind === 'music') continue;   // a world's own music things stay quiet under the playlist
     const d = e.follow ? 0 : distanceTo(e, x, y, z);
@@ -625,7 +657,7 @@ export function startSoundLayer() {
   subscribeAudioSettings(()=>{settings=audioSettings();applyMaster();lastAmb=0;musicSync();});
   const w = window as unknown as { __soulsEntity?: Host; __edenSound?: unknown };
   w.__edenSound = {
-    state: () => ({ ctx: ctx?.state ?? 'none', muted: settings.muted, music: settings.music, volume: settings.volume, covered, flute: fluteAudio.state(), piano: { near: pianoNear, scheduled: pianoDone.size }, jukebox: { near: jukeboxNear, ids: jukeboxIds.size, scheduled: jukeboxDone.size }, drums: { near: drumsNear, scheduled: drumDone.size },
+    state: () => ({ ctx: ctx?.state ?? 'none', muted: settings.muted, music: settings.music, volume: settings.volume, covered, flute: fluteAudio.state(), piano: { near: pianoNear, scheduled: pianoDone.size }, tunes: { near: tuneNear, scheduled: tuneDone.size }, jukebox: { near: jukeboxNear, ids: jukeboxIds.size, scheduled: jukeboxDone.size }, drums: { near: drumsNear, scheduled: drumDone.size },
       radio: { near: radioNear, ids: radioIds.size, scheduled: radioDone.size, radios: [...radios].map(([id, r]) => ({ id, on: r.on, station: r.station, gain: +r.gain.toFixed(3), tunes: r.tunes, tuning: typeof w.__soulsEntity?.worldSeconds === 'number' && w.__soulsEntity.worldSeconds - r.tunedAt < TUNE.toLocked, hiss: +r.hiss.gain.value.toFixed(3) })) }, voice: { near: voiceNear, singers: [...singers].map(([id, s]) => ({ id, with: s.with })), scheduled: voiceLog.length },
       world: { trees: trees.count, exposure: +exposure.toFixed(2), night: +night.toFixed(2), typicalGround: +typicalGround.toFixed(1) },
       emitters: [...objects, ...ambient, ...people].map((e) => ({ id: e.id, kind: e.spec.kind, variant: e.spec.variant ?? 0, source: e.source, when: e.spec.when ?? null, on: condition(e.spec.when, e.state, night) })),

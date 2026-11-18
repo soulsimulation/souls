@@ -1,0 +1,658 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The drilling panel and press (from #1860): four bores spend one press's cutter; a fifth panel on the spent press, a fifth hole on another press, and a bored cell again are each refused; the other cells are each bored once.",
+ "cases": [
+  {
+   "name": "bore_four_cells_spend_the_cutter_then_refused_twice",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "p1",
+       "p2",
+       "t2"
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "p2": {
+      "kind": "eden:camp_drill_press"
+     },
+     "t2": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_5",
+      "args": {
+       "press": "p1"
+      }
+     },
+     "receipt": "rd1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cell_5",
+        "n": 6,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 3,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cell_bored",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cutter_use_spent",
+        "node": "t1",
+        "changes": [
+         1,
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_1",
+      "args": {
+       "press": "p1"
+      }
+     },
+     "receipt": "rd2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cell_1",
+        "n": 2,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 2,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 2,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cell_bored",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cutter_use_spent",
+        "node": "t1",
+        "changes": [
+         1,
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_9",
+      "args": {
+       "press": "p1"
+      }
+     },
+     "receipt": "rd3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cell_9",
+        "n": 10,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 1,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 3,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cell_bored",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cutter_use_spent",
+        "node": "t1",
+        "changes": [
+         1,
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_3",
+      "args": {
+       "press": "p1"
+      }
+     },
+     "receipt": "rd4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cell_3",
+        "n": 4,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 0,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 4,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cell_bored",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cutter_use_spent",
+        "node": "t1",
+        "changes": [
+         1,
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t2",
+      "form": "bore_cell_7",
+      "args": {
+       "press": "p1"
+      }
+     },
+     "receipt": "rd5",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_enough",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_7",
+      "args": {
+       "press": "p2"
+      }
+     },
+     "receipt": "rd6",
+     "expect": {
+      "verdict": "no",
+      "reason": "no_room",
+      "need": 2
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_5",
+      "args": {
+       "press": "p2"
+      }
+     },
+     "receipt": "rd7",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:drilling_panel",
+     "fields": {
+      "cell_5": 1,
+      "cell_1": 1,
+      "cell_9": 1,
+      "cell_3": 1,
+      "cutter_uses": 4
+     }
+    },
+    "p1": {
+     "kind": "eden:camp_drill_press",
+     "slots": {
+      "bed": [
+       "t1"
+      ]
+     },
+     "fields": {
+      "cutter_uses": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "bore_each_remaining_cell_once",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "p1",
+       "p2",
+       "p3"
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "p2": {
+      "kind": "eden:camp_drill_press"
+     },
+     "p3": {
+      "kind": "eden:camp_drill_press"
+     },
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "t2": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_2",
+      "args": {
+       "press": "p1"
+      }
+     },
+     "receipt": "re2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cell_2",
+        "n": 3,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 3,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cell_bored",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cutter_use_spent",
+        "node": "t1",
+        "changes": [
+         1,
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_4",
+      "args": {
+       "press": "p1"
+      }
+     },
+     "receipt": "re4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cell_4",
+        "n": 5,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 2,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 2,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cell_bored",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cutter_use_spent",
+        "node": "t1",
+        "changes": [
+         1,
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_6",
+      "args": {
+       "press": "p1"
+      }
+     },
+     "receipt": "re6",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cell_6",
+        "n": 7,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 1,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 3,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cell_bored",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cutter_use_spent",
+        "node": "t1",
+        "changes": [
+         1,
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "bore_cell_7",
+      "args": {
+       "press": "p1"
+      }
+     },
+     "receipt": "re7",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cell_7",
+        "n": 8,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 0,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 4,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cell_bored",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cutter_use_spent",
+        "node": "t1",
+        "changes": [
+         1,
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t2",
+      "form": "bore_cell_8",
+      "args": {
+       "press": "p2"
+      }
+     },
+     "receipt": "re8",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t2",
+        "field": "cell_8",
+        "n": 9,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "p2",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 3,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "t2",
+        "field": "cutter_uses",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cell_bored",
+        "node": "t2",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cutter_use_spent",
+        "node": "t2",
+        "changes": [
+         1,
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ]
+  }
+ ]
+}
