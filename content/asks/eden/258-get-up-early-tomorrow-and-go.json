@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":258,"group":"over-time","words":"get up early tomorrow and go to the cafe","obvious":2,"when":"early tomorrow","things":{"bed":"eden:bed","counter":"eden:counter"},"chain":[{"this":"me","form":"lie_down","args":{"spot":"bed"}},{"this":"me","form":"stand"},{"this":"me","form":"go_to","args":{"place":"counter"}}]}

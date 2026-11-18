@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":67,"group":"object","words":"stand on the table","obvious":2,"things":{"table":"eden:table"},"chain":[{"this":"me","form":"stand_on","args":{"spot":"table"}}]}
