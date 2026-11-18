@@ -477,48 +477,55 @@ fn main() {
         }
     };
     let mut refused_orders = 0u64;
+    // A start the routes cannot leave (the jitter can land on a piece of its own) is drawn again: counted.
+    let mut restarts = 0u64;
     for k in 0..n {
         let who = walker_id(k as u64);
-        let body = loop {
-            let p = &places[seed.below(places.len())];
-            let j = Vec3::new(
-                p.at.x + seed.within(-1_500_000, 1_500_000),
-                p.at.y,
-                p.at.z + seed.within(-1_500_000, 1_500_000),
-            );
-            let Some(q) = w.t.nearest(p.node, j) else {
-                continue;
+        'start: loop {
+            let body = loop {
+                let p = &places[seed.below(places.len())];
+                let j = Vec3::new(
+                    p.at.x + seed.within(-1_500_000, 1_500_000),
+                    p.at.y,
+                    p.at.z + seed.within(-1_500_000, 1_500_000),
+                );
+                let Some(q) = w.t.nearest(p.node, j) else {
+                    continue;
+                };
+                if let Ok(b) = w.t.surfaces[&p.node].place(
+                    who,
+                    Frame {
+                        node: p.node,
+                        slot: None,
+                    },
+                    q,
+                    Quat::IDENTITY,
+                ) {
+                    break b;
+                }
             };
-            if let Ok(b) = w.t.surfaces[&p.node].place(
-                who,
-                Frame {
-                    node: p.node,
-                    slot: None,
-                },
-                q,
-                Quat::IDENTITY,
-            ) {
-                break b;
+            let mut tries = 0;
+            loop {
+                let g = &places[draw(&mut seed)];
+                orders += 1;
+                match ladder.add(
+                    &mut crowd,
+                    &mut w,
+                    body,
+                    SPEED,
+                    order_id(orders),
+                    g.node,
+                    g.at,
+                ) {
+                    Ok(()) => break 'start,
+                    Err(_) if tries < 5 => tries += 1,
+                    Err(_) => {
+                        restarts += 1;
+                        continue 'start;
+                    }
+                }
+                refused_orders += 1;
             }
-        };
-        let mut tries = 0;
-        loop {
-            let g = &places[draw(&mut seed)];
-            orders += 1;
-            match ladder.add(
-                &mut crowd,
-                &mut w,
-                body,
-                SPEED,
-                order_id(orders),
-                g.node,
-                g.at,
-            ) {
-                Ok(()) => break,
-                Err(_) if tries < 5 => tries += 1,
-                Err(e) => panic!("walker {k}: no order: {}: {}", e.name, e.detail),
-            }
-            refused_orders += 1;
         }
         plans[k] = Plan {
             run: if arm == "event" {
@@ -532,6 +539,7 @@ fn main() {
         };
     }
     w.ns = [0; 5];
+    println!("walkers: {n} placed; {restarts} starts drawn again (no route out of them)");
     let index: BTreeMap<Id, usize> = (0..n).map(|k| (walker_id(k as u64), k)).collect();
 
     // The trace's header: the surfaces with their floors, the outlines of every room and named place.
