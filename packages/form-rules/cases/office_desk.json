@@ -1,0 +1,152 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:office_desk (today's core-office-desk): its computer is on by default; anyone switches it off and on again.",
+  "cases": [
+    {
+      "name": "switch_off_a_computer_that_is_on",
+      "act": {
+        "this": "t1",
+        "form": "switch_off"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:office_desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "switch_off_when_off_fixed_by_switch_on",
+      "act": {
+        "this": "t1",
+        "form": "switch_off"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:office_desk",
+            "fields": {
+              "computer_on": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "computer_on",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": {
+          "form": "switch_on"
+        }
+      }
+    },
+    {
+      "name": "switch_on_a_computer_that_is_off",
+      "act": {
+        "this": "t1",
+        "form": "switch_on"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:office_desk",
+            "fields": {
+              "computer_on": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "switch_on_when_on_fixed_by_switch_off",
+      "act": {
+        "this": "t1",
+        "form": "switch_on"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:office_desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "computer_on",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": {
+          "form": "switch_off"
+        }
+      }
+    }
+  ]
+}

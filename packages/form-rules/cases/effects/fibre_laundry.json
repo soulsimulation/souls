@@ -1,0 +1,18 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Laundry (from #1707): the linen is washed (the board's soap and water 1 to 0, the linen's 0 to 1, dirty to wet), washing again is refused (not dirty), it is wrung (damp), folded, and taken.",
+  "cases": [
+    {
+      "name": "wash_wring_fold_take",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","n1","w1"]},"n1":{"kind":"eden:camp_linen"},"w1":{"kind":"eden:laundry_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"n1","form":"wash","args":{"board":"w1"}},"receipt":"rl1","expect":{"verdict":"yes","changes":[{"change":"set","node":"w1","field":"soap","n":1,"to":0,"by":-1},{"change":"set","node":"n1","field":"soap","n":2,"to":1,"by":1},{"change":"set","node":"w1","field":"water","n":2,"to":0,"by":-1},{"change":"set","node":"n1","field":"water","n":3,"to":1,"by":1},{"change":"set","node":"n1","field":"stage","n":1,"to":"wet"}],"events":[{"event":"eden:soap_used","node":"n1","changes":[0,1]},{"event":"eden:water_used","node":"n1","changes":[2,3]},{"event":"eden:washed","node":"n1","changes":[4]}],"timers":[]}},
+        {"act":{"this":"n1","form":"wash","args":{"board":"w1"}},"receipt":"rl2","expect":{"verdict":"no","reason":"field_differs","need":0}},
+        {"act":{"this":"n1","form":"wring","args":{"board":"w1"}},"receipt":"rl3","expect":{"verdict":"yes","changes":[{"change":"set","node":"n1","field":"stage","n":1,"to":"damp"}],"events":[{"event":"eden:wrung","node":"n1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"n1","form":"fold","args":{"board":"w1"}},"receipt":"rl4","expect":{"verdict":"yes","changes":[{"change":"set","node":"n1","field":"stage","n":1,"to":"folded"}],"events":[{"event":"eden:folded","node":"n1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"n1","form":"take"},"receipt":"rl5","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"n1","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"n1","changes":[0]}],"timers":[]}}
+      ],
+      "after": {"n1":{"kind":"eden:camp_linen","fields":{"soap":1,"water":1,"stage":"folded"}},"w1":{"kind":"eden:laundry_board","fields":{"soap":0,"water":0}},"b1":{"hands":{"left":"n1","right":null}}}
+    }
+  ]
+}

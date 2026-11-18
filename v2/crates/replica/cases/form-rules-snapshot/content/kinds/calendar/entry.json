@@ -1,0 +1,53 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:calendar_entry",
+  "owner": "thing",
+  "state": {
+    "start": { "n": 1, "type": "duration", "default": 0, "audience": { "rule": "everyone" } },
+    "end": { "n": 2, "type": "duration", "default": 0, "audience": { "rule": "everyone" } },
+    "words": { "n": 3, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "place": { "n": 1, "from": "thing", "most": 1, "audience": { "rule": "everyone" } },
+    "poster": { "n": 2, "from": "soul", "most": 1, "audience": { "rule": "everyone" } },
+    "interested": { "n": 3, "from": "soul", "most": 500, "audience": { "rule": "everyone" } }
+  },
+  "forms": {
+    "post": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "words": { "type": "text" }, "start": { "type": "duration" }, "end": { "type": "duration" } },
+      "needs": [{ "need": "unlinked", "link": "poster" }],
+      "steps": [],
+      "effects": [
+        { "change": "link", "link": "poster", "from": "actor", "event": "entry_posted" },
+        { "change": "set", "field": "words", "to": { "arg": "words" }, "event": "words_written" },
+        { "change": "set", "field": "start", "to": { "arg": "start" }, "event": "start_set" },
+        { "change": "set", "field": "end", "to": { "arg": "end" }, "event": "end_set" }
+      ]
+    },
+    "show_interest": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "unlinked", "link": "interested" }],
+      "steps": [],
+      "effects": [{ "change": "link", "link": "interested", "from": "actor", "event": "interest_shown" }]
+    },
+    "drop_interest": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "linked", "link": "interested" }],
+      "steps": [],
+      "effects": [{ "change": "unlink", "link": "interested", "from": "actor", "event": "interest_dropped" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "text": {
+    "card": "A notice of something that happens: where, when, and who is interested.",
+    "calendar": "calendar",
+    "event": "event",
+    "notice": "notice"
+  },
+  "card": { "text": "card", "category": "calendar", "synonyms": ["event", "notice"] }
+}

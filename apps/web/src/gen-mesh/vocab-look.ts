@@ -64,6 +64,7 @@ function placeParts(root: THREE.Object3D, placed: Record<string, Placement>) {
     // SA-D2: steam and growth are read by the page's plume and plant code from the part and the picture's root; flame is shown or put out here
     if (p.steam_permille !== undefined) { o.userData.lookSteam = p.steam_permille; root.userData.lookSteamPart = o; }
     if (p.growth_permille !== undefined) root.userData.lookGrowth = p.growth_permille;
+    if (p.wilt_permille !== undefined) root.userData.lookWilt = p.wilt_permille;
     const d = Math.PI / 180000;
     o.rotation.set(rest.rot[0] + (p.rotate_mdeg?.[0] ?? 0) * d, rest.rot[1] + (p.rotate_mdeg?.[1] ?? 0) * d, rest.rot[2] + (p.rotate_mdeg?.[2] ?? 0) * d);
     o.position.set(rest.pos[0] + (p.slide_mm?.[0] ?? 0) / 1000, rest.pos[1] + (p.slide_mm?.[1] ?? 0) / 1000, rest.pos[2] + (p.slide_mm?.[2] ?? 0) / 1000);
