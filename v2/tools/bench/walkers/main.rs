@@ -724,6 +724,8 @@ fn main() {
                             staying: false,
                             shoulder: false,
                             held: None,
+                            to: None,
+                            spot: None,
                         },
                     );
                     plans[k].due = Some(at + 10_000_000);
