@@ -9,8 +9,10 @@ on:
     types: [created]
   pull_request_review:
     types: [submitted]
+  # Not `assigned`: the job reads the issue's body and title, which an assignment does not change, so an assigned run
+  # could only repeat the opened run. Agents claim issues by assigning them, about a hundred skipped runs a day.
   issues:
-    types: [opened, assigned]
+    types: [opened]
 permissions:
   contents: read
 jobs:

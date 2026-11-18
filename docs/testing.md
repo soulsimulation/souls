@@ -156,7 +156,8 @@ therefore **windowed**:
   own `ci.yml`. It tells you the result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
   which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
-  `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
+  `proof-ok` is skipped there (no runner; a skipped required check counts as passing), because a PR passes it at its
+  head to enter the queue.
 
 **Low-risk paths.** When every file a PR or a merge group changes sits under `tools/entry/`, `content/kinds/`,
 `content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
