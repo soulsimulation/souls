@@ -57,7 +57,8 @@ export const ALLOWED = {
   // W1 (#2704): RS256 checks and random ids (ring), the one-file account store (rusqlite), JWKS (serde_json, ureq).
   directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim'],
   // O1 (#2730): the launcher reads a world's pin from its directory record.
-  supervisor: ['replica', 'directoryd'],
+  // O7 (#2804): the rehearsal reads a world's log and writes its scratch copy (K4's log).
+  supervisor: ['replica', 'directoryd', 'sim'],
 };
 
 const rsFiles = dir => readdirSync(dir, { recursive: true }).filter(f => /\.rs$/.test(f)).map(f => join(dir, f));
