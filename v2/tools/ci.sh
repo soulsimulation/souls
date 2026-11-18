@@ -84,3 +84,7 @@ step effects-goldens node --input-type=module -e '
   const got = r.effects_goldens(), want = readFileSync("crates/replica/fixtures/effects/goldens.txt", "utf8");
   console.log(`${got}effects-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
   if (got !== want) process.exit(1);'
+# The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
+# same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
+step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
+  node tools/bench/replica-equal/node.mjs target/wasm-load/pkg target/replica-equal crates/replica/tests/queries.txt'
