@@ -1,0 +1,19 @@
+# Two body families (Engine v2 T9, #2663, v2/docs/bodies.md rule 1), as replica holds them: a family is {1: name,
+# 2: [resource, ...]} and a resource {1: name, 2: class, 3: slot}, the class 1 locomotion, 2 manipulator, 3 gaze or
+# 4 voice, and a manipulator's slot the body's slot that holds what it holds. A decoded view, not an authored form: a
+# family is authored as a kind (owner family) whose resources are a section of its entry. Skills claim classes or
+# names, never anatomy.
+[
+  {1: "souls:quadruped", 2: [                  # four legs, no hands
+    {1: "souls:leg-front-left", 2: 1}, {1: "souls:leg-front-right", 2: 1},
+    {1: "souls:leg-back-left", 2: 1}, {1: "souls:leg-back-right", 2: 1},
+    {1: "souls:head", 2: 3},
+    {1: "souls:bark", 2: 4}
+  ]},
+  {1: "souls:humanoid", 2: [                   # two legs, two hands
+    {1: "souls:leg-left", 2: 1}, {1: "souls:leg-right", 2: 1},
+    {1: "souls:hand-left", 2: 2, 3: 1}, {1: "souls:hand-right", 2: 2, 3: 2},   # each hand holds in its slot
+    {1: "souls:eyes", 2: 3},
+    {1: "souls:voice", 2: 4}
+  ]}
+]

@@ -1,0 +1,260 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:pantry, from #1076 (core-pantry@1: \"a pantry of real things\"): an open shelf with four places in a row, each for one small thing (up to 200 x 280 x 300 mm: a mug, an apple, a bun), with no door and no owner. \"Stock the pantry with the mug\": the holder puts a held thing in a free place. Taking it out again is the thing's own take or the body's pick_up. A taken place names the nearest free place as the fix; a full shelf names none. The original's \"Put it down first\" for a thing not in her hand is the fix `take`.",
+  "cases": [
+    {
+      "name": "stock_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "stock",
+        "args": {
+          "thing": "c2",
+          "place": "place_2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "p1",
+              "b1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:pantry",
+            "slots": {
+              "place_1": [
+                "c1"
+              ]
+            }
+          },
+          "c1": {
+            "kind": "eden:cup"
+          },
+          "c2": {
+            "kind": "eden:cup"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "c2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes",
+        "read": [
+          [
+            "b1/hand/left",
+            null
+          ],
+          [
+            "b1/hand/right",
+            "c2"
+          ],
+          [
+            "p1/slot/place_2",
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "stock_not_held",
+      "act": {
+        "this": "p1",
+        "form": "stock",
+        "args": {
+          "thing": "s1",
+          "place": "place_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "p1",
+              "b1",
+              "s1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:pantry"
+          },
+          "s1": {
+            "kind": "eden:spoon"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "detail": {
+          "thing": "s1"
+        },
+        "fix": {
+          "step": "take",
+          "thing": "s1"
+        }
+      }
+    },
+    {
+      "name": "stock_named_place_taken",
+      "act": {
+        "this": "p1",
+        "form": "stock",
+        "args": {
+          "thing": "s1",
+          "place": "place_3"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "p1",
+              "b1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:pantry",
+            "slots": {
+              "place_3": [
+                "c1"
+              ]
+            }
+          },
+          "c1": {
+            "kind": "eden:cup"
+          },
+          "s1": {
+            "kind": "eden:spoon"
+          },
+          "b1": {
+            "hands": {
+              "left": "s1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": {
+          "node": "p1",
+          "slot": "place_3"
+        },
+        "fix": {
+          "form": "stock",
+          "args": {
+            "thing": "s1",
+            "place": "place_1"
+          }
+        }
+      }
+    },
+    {
+      "name": "stock_shelf_full",
+      "act": {
+        "this": "p1",
+        "form": "stock",
+        "args": {
+          "thing": "s1",
+          "place": "place_4"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "p1",
+              "b1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:pantry",
+            "slots": {
+              "place_1": [
+                "c1"
+              ],
+              "place_2": [
+                "c2"
+              ],
+              "place_3": [
+                "s2"
+              ],
+              "place_4": [
+                "c3"
+              ]
+            }
+          },
+          "c1": {
+            "kind": "eden:cup"
+          },
+          "c2": {
+            "kind": "eden:cup"
+          },
+          "c3": {
+            "kind": "eden:cup"
+          },
+          "s2": {
+            "kind": "eden:spoon"
+          },
+          "s1": {
+            "kind": "eden:spoon"
+          },
+          "b1": {
+            "hands": {
+              "left": "s1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": {
+          "node": "p1",
+          "slot": "place_4"
+        },
+        "fix": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# A held stance (rule 5): hold a guard stance until it expires, is cancelled or replaced.
+{1: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 2: "souls:hold", 4: {1: "souls:guard"}, 5: 10, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0], 1, 42], 7: 120000000}

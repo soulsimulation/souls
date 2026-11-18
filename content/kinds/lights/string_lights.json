@@ -1,0 +1,51 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:string_lights",
+  "owner": "thing",
+  "state": {
+    "on": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "switch": { "role": "contact", "at_mm": [-4000, 1200, 70] }
+  },
+  "geometry": { "bounds_mm": [8120, 3000, 160] },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": false },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [{ "change": "set", "field": "on", "to": true, "event": "switched_on" }]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": true },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [{ "change": "set", "field": "on", "to": false, "event": "switched_off" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:string_lights",
+    "table": [
+      { "part": "light", "field": "on", "do": "glow", "at": { "true": 1000, "false": 0 } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[-4000,1500,0],"r":60,"h":3000,"segments":5,"tint":"wood"},{"kind":"cyl","at":[4000,1500,0],"r":60,"h":3000,"segments":5,"tint":"wood"},{"kind":"box","at":[-3500,2802,0],"size":[12,12,1000],"tint":"cord","yaw":90000},{"kind":"box","at":[-2500,2633,0],"size":[12,12,1000],"tint":"cord","yaw":90000},{"kind":"box","at":[-1500,2520,0],"size":[12,12,1000],"tint":"cord","yaw":90000},{"kind":"box","at":[-500,2464,0],"size":[12,12,1000],"tint":"cord","yaw":90000},{"kind":"box","at":[500,2464,0],"size":[12,12,1000],"tint":"cord","yaw":90000},{"kind":"box","at":[1500,2520,0],"size":[12,12,1000],"tint":"cord","yaw":90000},{"kind":"box","at":[2500,2633,0],"size":[12,12,1000],"tint":"cord","yaw":90000},{"kind":"box","at":[3500,2802,0],"size":[12,12,1000],"tint":"cord","yaw":90000},{"kind":"sphere","at":[-3500,2715,0],"r":50,"segments":4,"tint":"bulb2","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[-2800,2591,0],"r":50,"segments":4,"tint":"bulb","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[-2100,2494,0],"r":50,"segments":4,"tint":"bulb","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[-1400,2425,0],"r":50,"segments":4,"tint":"bulb2","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[-700,2384,0],"r":50,"segments":4,"tint":"bulb","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[0,2370,0],"r":50,"segments":4,"tint":"bulb","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[700,2384,0],"r":50,"segments":4,"tint":"bulb2","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[1400,2425,0],"r":50,"segments":4,"tint":"bulb","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[2100,2494,0],"r":50,"segments":4,"tint":"bulb","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[2800,2591,0],"r":50,"segments":4,"tint":"bulb2","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[3500,2715,0],"r":50,"segments":4,"tint":"bulb","glow":1000,"role":"light","when":"@on"},{"kind":"sphere","at":[-3500,2715,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[-2800,2591,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[-2100,2494,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[-1400,2425,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[-700,2384,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[0,2370,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[700,2384,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[1400,2425,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[2100,2494,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[2800,2591,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"sphere","at":[3500,2715,0],"r":50,"segments":4,"tint":"off","when":"!@on"},{"kind":"box","at":[-4000,1200,65],"size":[40,60,12],"tint":"plate","role":"knob"}],"palette":{"wood":"#7a5a3c","cord":"#2b2623","bulb":"#ffd27a","bulb2":"#ffb0a0","off":"#8a8478","plate":"#3a3c3e"},"tags":["utility","lighting","light","object"]}
+  },
+  "text": {
+    "card": "A festoon of warm bulbs between two posts; switch it on or off at the post.",
+    "light": "light",
+    "fairy_lights": "fairy lights",
+    "festoon_lights": "festoon lights",
+    "party_lights": "party lights"
+  },
+  "card": { "text": "card", "category": "light", "synonyms": ["fairy_lights", "festoon_lights", "party_lights"] }
+}

@@ -23,7 +23,9 @@
 # times on the runner's own cores, after an untimed release build. The bin must be a [[bin]] of the ref's
 # v2/tools/bench/Cargo.toml and the bench's args plain tokens. The toolchain v2/rust-toolchain.toml pins is installed
 # with rustup in the per-run directory (RUSTUP_HOME, CARGO_HOME), so nothing lands in the shared home. Each repeat's
-# stdout goes to the job summary; the build and run logs are the artifact. No pnpm install, media or web build.
+# stdout goes to the job summary; the build and run logs are the artifact. No media or web build, and no pnpm install
+# unless args name a prep (#3185: `--prep eden-facts` writes Eden's facts and N18's labels into the per-run directory
+# before the build, untimed; the bench names them `@facts` and `@labels`). The prep's log is masked and scrubbed alike.
 name: timed-run
 on:
   workflow_dispatch:
@@ -49,7 +51,7 @@ on:
         description: Repeats, 1 to 3 (counted - cells per arm)
         default: '1'
       args:
-        description: 'Allowlisted: walk --world; eval-scripted --battery <name> --seat scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; load --world --boots --souls --profile --short; settled --world --souls --settle-min --short; hundred --small --eden --short --fixture-only --active-min --gap-min --settle-min --build-parallel; colocate --forms --settle-s --walk-s --busy --short; viewers --viewers --window-sec --short; counted --scenario --loop-sec; clip --kit --viewport; page --souls --shape --warm-sec --measure-sec --settle-sec --profile-sec --short; v2-bench --bin <name> [-- <plain tokens>]'
+        description: 'Allowlisted: walk --world; eval-scripted --battery <name> --seat scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; load --world --boots --souls --profile --short; settled --world --souls --settle-min --short; hundred --small --eden --short --fixture-only --active-min --gap-min --settle-min --build-parallel; colocate --forms --settle-s --walk-s --busy --short; viewers --viewers --window-sec --short; counted --scenario --loop-sec; clip --kit --viewport; page --souls --shape --warm-sec --measure-sec --settle-sec --profile-sec --short; v2-bench --bin <name> [--prep eden-facts] [-- <plain tokens or @facts @labels>]'
         default: ''
       cores:
         description: 'eval-load, bench-client, meetup, slopes-profile, viewers only: a core plan, world=N or world=N,launcher=M (physical cores); the load drivers get the rest. Blank: 2 for the world, the rest for the load'
@@ -137,11 +139,12 @@ jobs:
         working-directory: src
         run: echo "REF_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       # pnpm's version comes from the ref's package.json `packageManager`; pnpm itself goes in the per-run dir.
+      # v2-bench installs only for a prep (#3185: `--prep` in args, checked by Validate inputs); it needs no media.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        if: env.INPUT_COMMAND != 'v2-bench'
+        if: env.INPUT_COMMAND != 'v2-bench' || contains(env.INPUT_ARGS, '--prep')
         with: { package_json_file: src/package.json, dest: '${{ env.PER_RUN }}/setup-pnpm' }
       - name: Install
-        if: env.INPUT_COMMAND != 'v2-bench'
+        if: env.INPUT_COMMAND != 'v2-bench' || contains(env.INPUT_ARGS, '--prep')
         working-directory: src
         run: pnpm install --frozen-lockfile --store-dir "$npm_config_store_dir"
       - name: Pull media
