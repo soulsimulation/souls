@@ -1,0 +1,19 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:shop",
+  "owner": "place",
+  "state": {
+    "open": { "n": 1, "type": "bool", "default": false, "audience": "public" }
+  },
+  "links": {
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": "public" }
+  },
+  "forms": {
+    "close_until_eight": { "who": { "link": "owner" }, "starts": "act", "needs": [{ "need": "state", "field": "open", "is": true }], "steps": [], "effects": [{ "change": "set", "field": "open", "to": false, "event": "closed" }, { "change": "timer", "form": "opening", "after_us": 50400000000, "event": "opening_set" }] }
+  },
+  "reactions": {
+    "opens": { "when": { "on": "due", "timer": "opening" }, "do": [{ "change": "set", "field": "open", "to": true, "event": "opened" }] }
+  },
+  "text": { "card": "A test shop for reactions: its owner closes it at six in the evening and it opens at eight when that timer comes due." },
+  "card": { "text": "card" }
+}
