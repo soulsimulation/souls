@@ -1,0 +1,290 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:recycling_bins (content/kinds/lids/, from core/recycling-bins@1): the three lids lifted at their front edge and let down from near the hinge with a swing, each with every need met and each need unmet.",
+ "cases": [
+  {
+   "name": "open_shut_lids",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:recycling_bins",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1200,
+       250
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "open_lids_already_open_is_refused_and_told_to_close",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:recycling_bins",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1200,
+       250
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "open",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "close"
+    }
+   }
+  },
+  {
+   "name": "open_out_of_reach_of_the_lid_edge_walks_to_it",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:recycling_bins",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       1500
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "lid_edge",
+     "move": "swing"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "lid_edge"
+    }
+   }
+  },
+  {
+   "name": "close_open_lids",
+   "act": {
+    "this": "t1",
+    "form": "close"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:recycling_bins",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1200,
+       250
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "close_lids_already_shut_is_refused_and_told_to_open",
+   "act": {
+    "this": "t1",
+    "form": "close"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:recycling_bins",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1200,
+       250
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "open",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "open"
+    }
+   }
+  },
+  {
+   "name": "close_out_of_reach_of_the_hinge_walks_to_it",
+   "act": {
+    "this": "t1",
+    "form": "close"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:recycling_bins",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       1500
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "hinge",
+     "move": "swing"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "hinge"
+    }
+   }
+  }
+ ]
+}

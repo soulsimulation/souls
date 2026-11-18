@@ -248,7 +248,10 @@ classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_o
 `effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
 `start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
 includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
-point and then to a second one. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
+point and then to a second one. Five more hand moves share that shape (SA-D4b, [#2857](https://github.com/soulsimulation/souls/issues/2857)):
+`swing` (a hinged leaf pushed through its arc), `stroke` (a hand drawn along a line), `tug` (a handle drawn down) and
+`knock` and `lock` (one contact, like `press`, with their own timing). The middle phase of the first three is named
+`slide_us` and is the same straight path; an arc or a rotation is the viewer's to draw. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
 `held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
 contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
 the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free. `strike` and `pump` (SA-D5b, [#2859](https://github.com/soulsimulation/souls/issues/2859)) are the same shape with the effector at the tool's head (a hammer's face, a pump's nozzle): a window `strike_us` per blow or `pump_us` per stroke, `count` of them in the record, claiming the hand only.
