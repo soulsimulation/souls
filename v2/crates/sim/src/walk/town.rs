@@ -36,7 +36,7 @@ use crate::ground::scene::FLOOR;
 use crate::ground::{HUMAN_RADIUS, OpenGround, exits};
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
-use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
+use crate::links::{Building, Doors, F_OPEN, Open, back, floor_joins, ground_doors};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map};
 use crate::spots::{Ask, CLEAR, Ground, Spots, Target, flat, to_segment};
@@ -181,6 +181,7 @@ impl Town {
                     meets: &meets,
                     on: &on,
                     doors: &gdoors,
+                    terrain: open.terrain(),
                 };
                 if let Ok(b) = Building::read_on(&tree, id, Some(open)) {
                     for (&floor, (_, patch)) in &b.floors {
@@ -203,8 +204,12 @@ impl Town {
             meets: &meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
         buildings.push(Building::of_ground(&tree, open, &known)?);
+        for (i, l) in floor_joins(&buildings.iter().collect::<Vec<_>>()) {
+            buildings[i].links.push(l);
+        }
         let link_at = link_index(&buildings);
         Ok(Town {
             tree,
@@ -229,6 +234,14 @@ impl Town {
 
     fn building(&self, link: Id) -> Option<&Building> {
         self.buildings.iter().find(|b| b.link(link).is_some())
+    }
+
+    /// The frame on the open ground of the building that holds the floor `node`.
+    fn frame_of(&self, node: Id) -> Option<crate::ground::scene::Xform> {
+        self.buildings
+            .iter()
+            .find(|b| b.floors.contains_key(&node))
+            .map(|b| b.place)
     }
 
     /// The town as the host's questions read it in a tick: the map behind a cell (a route is cached as it is
@@ -806,9 +819,23 @@ impl Town {
                     .map_or(e.middle(), |s| {
                         Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
                     });
-                let stand = self
+                let mut stand = self
                     .landing(to, stand)
                     .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+                // The open ground's pieces are a plan at 0; a body there stands on its terrain (#3227).
+                if to == self.ground {
+                    let at = Frame {
+                        node: to,
+                        slot: None,
+                    };
+                    stand = self
+                        .surfaces
+                        .get(&to)
+                        .ok_or_else(|| refusal("no-surface", show(to)))?
+                        .place(body.id, at, stand, body.pose.orientation)?
+                        .pose
+                        .position;
+                }
                 let last = if to == self.ground {
                     back(&place, stand).map_err(out)?
                 } else {
@@ -823,6 +850,36 @@ impl Town {
                 for p in &mut line {
                     *p = place.point(*p).map_err(out)?;
                 }
+            }
+        } else if let Some(b) = self.building(link)
+            && let (Some(ph), Some(pt)) = (self.frame_of(here), self.frame_of(to))
+            && (!b.floors.contains_key(&here) || !b.floors.contains_key(&to))
+        {
+            // A step from one thing's floor onto another's (#3227): the line is followed in the frame of the floor
+            // the body stands on, and ends where it stands on the far floor, as on the open ground above.
+            let out = |e: String| refusal("out-of-range", e);
+            let to_here = |p: Vec3, from: &crate::ground::scene::Xform| {
+                from.point(p).and_then(|w| back(&ph, w))
+            };
+            if !b.floors.contains_key(&here) {
+                for p in &mut line {
+                    *p = to_here(*p, &b.place).map_err(out)?;
+                }
+            }
+            if let Some(e) = far {
+                let stand = self
+                    .map
+                    .spot_near(to, e.middle(), AT_EDGE)
+                    .map_or(e.middle(), |s| {
+                        Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
+                    });
+                let stand = self
+                    .landing(to, stand)
+                    .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+                if let Some(p) = line.last_mut() {
+                    *p = to_here(stand, &pt).map_err(out)?;
+                }
+                arrive = Some(stand);
             }
         } else if let Some(last) = line.last_mut() {
             *last = self
