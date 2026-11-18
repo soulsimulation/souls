@@ -175,6 +175,12 @@ impl Input {
     /// The bytes of [`Input::record`] (T0's encoding), written straight from the input: the same bytes as
     /// `encode(&self.record(at, body))`, without building the record a body a tick (#3213).
     pub fn bytes(&self, at: Micros, body: Id) -> Vec<u8> {
+        // A gaze other than ahead (field 8, gaze and voice) is rare: the general encoder writes that record.
+        if self.gaze != Gaze::Ahead
+            && let Ok(bytes) = replica::encode::encode(&self.record(at, body))
+        {
+            return bytes;
+        }
         let mut out = Vec::with_capacity(96);
         head(&mut out, 5, if self.moves.is_empty() { 6 } else { 7 });
         head(&mut out, 0, 1);
@@ -839,6 +845,14 @@ mod tests {
         held.moves
             .insert(name("souls:hand-right"), name("souls:hold"));
         inputs.push(held);
+        for gaze in [
+            Gaze::Point(Vec3::new(3_000_000, 1_600_000, 0)),
+            Gaze::Node(body),
+        ] {
+            let mut i = Input::neutral(Quat::IDENTITY);
+            i.gaze = gaze;
+            inputs.push(i);
+        }
         for at in [0, 23, 50_000, -7, 1 << 40] {
             for i in &inputs {
                 let want = encode(&i.record(at, body)).expect("encodes");
