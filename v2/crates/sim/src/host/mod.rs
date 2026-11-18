@@ -324,6 +324,35 @@ pub fn step(
     staged
 }
 
+/// Lends `f` the host `body` sees under `driver`, outside the tick's skill phase, its calls staged and counted in
+/// `staged` as [`step`]'s are: for a skill the world wakes on an event instead of stepping it each tick (F1 #2766).
+#[allow(clippy::too_many_arguments)]
+pub fn lend<T>(
+    tree: &Tree,
+    geometry: &impl Geometry,
+    now: Micros,
+    seed: u64,
+    minter: &mut Minter,
+    (body, driver): (Id, Driver),
+    staged: &mut Staged,
+    f: impl FnOnce(&mut dyn Host) -> T,
+) -> T {
+    let mut host = WorldHost {
+        tree,
+        geometry,
+        now,
+        seed,
+        body,
+        driver,
+        minter,
+        staged,
+        calls: Cell::new(0),
+    };
+    let out = f(&mut host);
+    host.staged.calls += host.calls.get();
+    out
+}
+
 /// Hands a tick's staged controller inputs to the controller, each under its run's driver: the one place a skill's
 /// inputs go on (B1 #2680). An input whose driver does not hold the body's locomotion is refused by the controller and
 /// changes nothing; the refusals are returned with their bodies.
