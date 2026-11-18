@@ -68,6 +68,9 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 10. **A cancel ends and a replace supersedes the actor's own earlier intent,** named by its sequence in field 10. A
     cancel without it is refused (`cancel-without-replaces`), and so is one that carries anything else
     (`cancel-not-bare`).
+    An answer's frame `{1: version, 2: answer}` may carry one optional field, 3: where the act's time went, in µs
+    between stamps of one machine's steady clock (O4, #2694; `replica::intents::ANSWER_TIMES`). It is added as the
+    answer leaves, so the logged answer never holds it.
 11. **A size limit applies before parsing:** an intent over 4,096 bytes is refused (`intent-too-large`) before any
     byte is read as CBOR.
 

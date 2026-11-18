@@ -1,0 +1,258 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Collage (from #1803): two pieces are taken and mounted on patches of the board; a mount on a taken patch is refused naming the next free one; the red piece is taken back off the board as the same piece (the original made a new portion and lost the old one's identity).",
+  "cases": [
+    {
+      "name": "mount_red_and_gold_then_recover_the_red",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "cb1",
+              "c1",
+              "c2"
+            ]
+          },
+          "cb1": {
+            "kind": "eden:collage_board"
+          },
+          "c1": {
+            "kind": "eden:collage_paper"
+          },
+          "c2": {
+            "kind": "eden:collage_paper",
+            "fields": {
+              "colour": "gold",
+              "shape": "tall"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "take"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "c1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "mount",
+            "args": {
+              "patch": {
+                "node": "cb1",
+                "slot": "patch_1"
+              }
+            }
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "c1",
+                "to": {
+                  "node": "cb1",
+                  "slot": "patch_1"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:mounted",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c2",
+            "form": "take"
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "c2",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "c2",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c2",
+            "form": "mount",
+            "args": {
+              "patch": {
+                "node": "cb1",
+                "slot": "patch_1"
+              }
+            }
+          },
+          "receipt": "r4",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 1,
+            "fix": {
+              "form": "mount",
+              "args": {
+                "patch": {
+                  "node": "cb1",
+                  "slot": "patch_2"
+                }
+              }
+            }
+          }
+        },
+        {
+          "act": {
+            "this": "c2",
+            "form": "mount",
+            "args": {
+              "patch": {
+                "node": "cb1",
+                "slot": "patch_2"
+              }
+            }
+          },
+          "receipt": "r5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "c2",
+                "to": {
+                  "node": "cb1",
+                  "slot": "patch_2"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:mounted",
+                "node": "c2",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "take"
+          },
+          "receipt": "r6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "c1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1",
+            "cb1"
+          ]
+        },
+        "cb1": {
+          "kind": "eden:collage_board",
+          "slots": {
+            "patch_1": [],
+            "patch_2": [
+              "c2"
+            ]
+          }
+        },
+        "c1": {
+          "kind": "eden:collage_paper"
+        },
+        "b1": {
+          "hands": {
+            "left": "c1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:channel",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      30000,
+      2000,
+      30000
+    ]
+  },
+  "areas": {
+    "start": {
+      "at_mm": [
+        -3500,
+        0,
+        15000
+      ],
+      "radius_mm": 1500
+    },
+    "end": {
+      "at_mm": [
+        -3500,
+        0,
+        -15000
+      ],
+      "radius_mm": 1500
+    }
+  },
+  "forms": {
+    "walk_along": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "start"
+        },
+        {
+          "step": "walk_to",
+          "point": "end"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "looks": {
+    "model": "look:channel",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            -950,
+            0
+          ],
+          "size": [
+            4000,
+            100,
+            30000
+          ],
+          "tint": "bed"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -3200,
+            -500,
+            0
+          ],
+          "size": [
+            3200,
+            100,
+            30000
+          ],
+          "roll": -18435,
+          "tint": "edge"
+        },
+        {
+          "kind": "box",
+          "at": [
+            3200,
+            -500,
+            0
+          ],
+          "size": [
+            3200,
+            100,
+            30000
+          ],
+          "roll": 18435,
+          "tint": "edge"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "bed": "#7d6a4f",
+        "edge": "#8a9a5a"
+      },
+      "tags": [
+        "terrain",
+        "channel",
+        "cutting"
+      ]
+    }
+  },
+  "text": {
+    "card": "A ditch or cutting with sloping sides; a canal where it holds water.",
+    "channel": "channel",
+    "canal": "canal",
+    "ditch": "ditch",
+    "cutting": "cutting"
+  },
+  "card": {
+    "text": "card",
+    "category": "channel",
+    "synonyms": [
+      "canal",
+      "ditch",
+      "cutting"
+    ]
+  }
+}

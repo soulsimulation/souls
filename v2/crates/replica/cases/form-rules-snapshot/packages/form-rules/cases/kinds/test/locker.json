@@ -1,0 +1,50 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:locker",
+  "owner": "thing",
+  "state": {
+    "locked": { "n": 1, "type": "bool", "default": true, "audience": {"rule": "everyone"} },
+    "alarm": { "n": 2, "type": "enum", "values": ["off", "armed"], "default": "off", "audience": {"rule": "owner"} },
+    "charge": { "n": 3, "type": "int", "unit": "permille", "default": 0, "audience": {"rule": "everyone"} },
+    "open": { "n": 4, "type": "bool", "default": false, "audience": {"rule": "everyone"} }
+  },
+  "points": {
+    "handle": { "role": "contact", "at_mm": [0, 900, 300] },
+    "port": { "role": "contact", "at_mm": [0, 200, 300] }
+  },
+  "geometry": { "bounds_mm": [600, 1800, 600] },
+  "forms": {
+    "unlock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "locked", "is": true }, { "need": "within_reach", "point": "handle" }],
+      "steps": [{ "step": "move", "move": "turn", "at": "handle" }],
+      "effects": [{ "change": "set", "field": "locked", "to": false, "event": "unlocked" }]
+    },
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "locked", "is": false },
+        { "need": "state", "field": "alarm", "is": "off" },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "handle" }
+      ],
+      "steps": [{ "step": "move", "move": "pull", "at": "handle" }],
+      "effects": [{ "change": "set", "field": "open", "to": true, "event": "opened" }]
+    },
+    "charge": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "charge", "at_most": 900 },
+        { "need": "hand", "holds": "test:battery" },
+        { "need": "within_reach", "point": "port" }
+      ],
+      "steps": [{ "step": "move", "move": "plug", "at": "port" }],
+      "effects": [{ "change": "set", "field": "charge", "to": 1000, "event": "charged" }]
+    }
+  },
+  "text": { "card": "A test locker for the rules' cases: a hidden alarm, a charge in a range and a hand need." },
+  "card": { "text": "card" }
+}

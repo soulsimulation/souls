@@ -1,0 +1,40 @@
+{
+  "about": "How a kind moves, how long it lasts loose, and the six base forms (SA-F10, #2882): data the entry tools and the new engine read unchanged. The six base forms are the body's own (content/kinds/body/humanoid.json); a kind writes none of them and may forbid one by name. Carrying and pushing are answered by moveBy(entry, {act, souls}).",
+  "kinds": {
+    "lamp_post": "content/kinds/street/lamp_post.json",
+    "chair": "content/kinds/seating/chair.json",
+    "sofa": "content/kinds/seating/sofa.json",
+    "railing": "content/kinds/street/railing.json"
+  },
+  "motion": [
+    { "say": "carry a chair", "entry": "chair", "act": "carry", "ok": true, "hands": 2 },
+    { "say": "carry a sofa", "entry": "sofa", "act": "carry", "ok": false, "code": "moves_by", "how": "pushed_by_one", "reason_has": "pushed_by_one" },
+    { "say": "push a sofa with one Soul", "entry": "sofa", "act": "push", "souls": 1, "ok": true, "how": "pushed_by_one" },
+    { "say": "push a chair", "entry": "chair", "act": "push", "ok": false, "code": "moves_by", "how": "two_hands", "reason_has": "two_hands" },
+    { "say": "carry a lamp post", "entry": "lamp_post", "act": "carry", "ok": false, "code": "moves_by", "how": "fixed", "reason_has": "fixed" }
+  ],
+  "base": {
+    "every_thing": ["lamp_post", "chair", "sofa", "railing"],
+    "forms": ["go_to", "look_at", "point", "touch", "lean_on", "wait_by"],
+    "allowed": [
+      { "entry": "lamp_post", "form": "lean_on" },
+      { "entry": "lamp_post", "form": "wait_by" },
+      { "entry": "railing", "form": "go_to" },
+      { "entry": "railing", "form": "look_at" },
+      { "entry": "railing", "form": "touch" }
+    ],
+    "forbidden": [
+      { "entry": "railing", "form": "lean_on", "name": "lean", "area": "rail" }
+    ]
+  },
+  "loose": {
+    "accepted": [{ "ever": true }, { "us": 604800000000 }],
+    "refused": [
+      { "set": {}, "path": "loose", "reason_has": "exactly one" },
+      { "set": { "ever": true, "us": 1 }, "path": "loose", "reason_has": "exactly one" },
+      { "set": { "us": 0 }, "path": "loose.us", "reason_has": "above zero" },
+      { "set": { "us": 1.5 }, "path": "loose.us", "reason_has": "floating" },
+      { "set": { "ever": false }, "path": "loose.ever", "reason_has": "for ever" }
+    ]
+  }
+}

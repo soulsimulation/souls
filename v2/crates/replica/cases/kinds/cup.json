@@ -33,6 +33,14 @@
       "needs": [{ "need": "held_by_actor" }, { "need": "room" }],
       "effects": [{ "change": "transfer", "field": "water_g", "from": "this", "into": { "arg": "into" }, "amount": { "arg": "grams" }, "event": "poured" }]
     },
+    "fill": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "tap": { "type": "thing" } },
+      "needs": [{ "need": "within_reach", "point": "outlet", "of": { "arg": "tap" } }],
+      "steps": [{ "step": "move", "move": "hold_under", "toward": { "arg": "tap" } }],
+      "effects": []
+    },
     "clink": {
       "who": "anyone",
       "starts": "act",

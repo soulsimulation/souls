@@ -5,20 +5,30 @@
 //! Each intent goes to the world (`worldd::answers`, I4 #2687): checked, committed at the next tick, logged, and
 //! answered after that tick's sync. A repeat gets the answer it had, across restarts too, since the world rebuilds
 //! its sequences from the log. The world here is I3's toggles world (`checkers::toggles`), `--rooms` rooms of `--bodies`
-//! bodies, each with a toggle; its log is `--log` (default: the socket's path and `.log`).
+//! bodies, each with a toggle, and `--items` items in each room; its log is `--log` (default: the socket's path and
+//! `.log`).
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
-//! [--arrivals <file>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the
-//! order taken, so a bench can check each actor's order across restarts.
+//! [--items <n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
+//! --stall-for <s>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the order
+//! taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
+//! hex>` after each tick that changed the world, so a test can check a client's copy against the place. Measures
+//! (O4, #2694) are on unless `--no-measures`; `health.json` goes to `--health` (default: the log's path with
+//! `.health.json`). `--stall-after` holds the clock thread `--stall-for` seconds, once, that many seconds after
+//! start: the stuck-thread run.
+//!
+//! The same socket carries R5's sync requests (R5b, #3164; `replica::sync::wire`), which the world answers for every
+//! actor over the place (`worldd::answers`).
 
 use std::fs::OpenOptions;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use replica::encode::from_hex;
 use replica::ids::Scope;
 use sim::log::FileStore;
-use worldd::answers::{self, Config};
+use worldd::answers::{self, Config, Event};
 use worldd::checkers::toggles;
 
 /// `worldd gateway-link ...`: listens for the gateway until killed.
@@ -31,34 +41,47 @@ pub fn run(args: &[String]) -> i32 {
     let usage = || {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
-             [--bodies <n>] [--arrivals <file>]"
+             [--bodies <n>] [--items <n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
+             [--stall-after <s> --stall-for <s>]"
         );
         2
     };
     let count = |name: &str, default: usize| arg(name).map_or(Some(default), |n| n.parse().ok());
-    let (Some(path), Some(lineage), Some(epoch), Some(rooms), Some(bodies)) = (
+    let (Some(path), Some(lineage), Some(epoch), Some(rooms), Some(bodies), Some(items)) = (
         arg("--socket").map(PathBuf::from),
         arg("--lineage").and_then(|h| from_hex(h).ok()?.try_into().ok()),
         arg("--epoch").and_then(|e| e.parse::<u64>().ok()),
         count("--rooms", 1),
         count("--bodies", 50),
+        count("--items", 0),
     ) else {
         return usage();
     };
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
-    if let Some(p) = arg("--arrivals") {
-        match OpenOptions::new().create(true).append(true).open(p) {
-            Ok(f) => cfg.arrivals = Some(f),
-            Err(e) => {
-                eprintln!("worldd: arrivals: {e}");
-                return 1;
+    cfg.measures = !args.iter().any(|a| a == "--no-measures");
+    cfg.health =
+        Some(arg("--health").map_or_else(|| log.with_extension("health.json"), PathBuf::from));
+    let stall = arg("--stall-after")
+        .and_then(|a| a.parse::<f64>().ok())
+        .zip(arg("--stall-for").and_then(|f| f.parse::<f64>().ok()));
+    for (flag, to) in [
+        ("--arrivals", &mut cfg.arrivals),
+        ("--roots", &mut cfg.roots),
+    ] {
+        if let Some(p) = arg(flag) {
+            match OpenOptions::new().create(true).append(true).open(p) {
+                Ok(f) => *to = Some(f),
+                Err(e) => {
+                    eprintln!("worldd: {}: {e}", &flag[2..]);
+                    return 1;
+                }
             }
         }
     }
     let world = FileStore::open(&log).and_then(|store| {
         answers::start(
-            toggles::World::build(rooms, bodies, 0).replica,
+            toggles::World::build(rooms, bodies, items).replica,
             toggles::rules(),
             store,
             cfg,
@@ -79,9 +102,16 @@ pub fn run(args: &[String]) -> i32 {
             return 1;
         }
     };
-    for stream in listener.incoming().flatten() {
+    if let Some((after, hold)) = stall {
         let events = world.events.clone();
-        std::thread::spawn(move || answers::serve(events, stream));
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs_f64(after));
+            let _ = events.send(Event::Stall(Duration::from_secs_f64(hold)));
+        });
+    }
+    for stream in listener.incoming().flatten() {
+        let door = world.door();
+        std::thread::spawn(move || answers::serve(door, stream));
     }
     0
 }

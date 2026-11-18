@@ -147,9 +147,18 @@ fn apply(
         events: None,
         rest: Rest::new(),
     };
+    write(live, &[effect])
+}
+
+/// The one write path: `effects` as one part, applied to `live` whole or not at all. Acts (above) and a creator's
+/// edits (`crate::edit`, G1, #2746) both commit through it.
+pub fn write(live: &mut Replica, effects: &[Effect]) -> Result<Arc<Part>, Refusal> {
     let v = Value::Map(BTreeMap::from([
         (1, Value::Bytes(live.header().hash().to_bytes())),
-        (2, Value::Array(vec![effect.to_value()])),
+        (
+            2,
+            Value::Array(effects.iter().map(Effect::to_value).collect()),
+        ),
     ]));
     let bytes = encode(&v).map_err(|e| Refusal {
         name: "encoding",

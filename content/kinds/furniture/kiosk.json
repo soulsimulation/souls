@@ -1,0 +1,85 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:kiosk",
+  "owner": "thing",
+  "state": {
+    "open": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "locked": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "open_times": {
+      "n": 3,
+      "type": "schedule",
+      "most": 14,
+      "default": [
+        {
+          "repeat": "weekly",
+          "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+          "from_us": 36000000000,
+          "to_us": 79200000000
+        }
+      ],
+      "audience": { "rule": "everyone" }
+    }
+  },
+  "points": {
+    "vendor": { "role": "stand", "at_mm": [0, 0, -250], "yaw_mdeg": 0 },
+    "customer": { "role": "stand", "at_mm": [0, 0, 1450], "yaw_mdeg": 180000 },
+    "shutter": { "role": "grip", "at_mm": [0, 1150, 900] }
+  },
+  "geometry": { "bounds_mm": [2140, 2730, 1980] },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "open", "is": false }, { "need": "state", "field": "locked", "is": false }],
+      "steps": [{ "step": "walk_to", "point": "customer" }, { "step": "move", "move": "slide", "at": "shutter" }],
+      "effects": [{ "change": "set", "field": "open", "to": true, "event": "shutter_opened" }]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "open", "is": true }],
+      "steps": [{ "step": "walk_to", "point": "customer" }, { "step": "move", "move": "slide", "at": "shutter" }],
+      "effects": [{ "change": "set", "field": "open", "to": false, "event": "shutter_closed" }]
+    },
+    "lock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "locked", "is": false }, { "need": "state", "field": "open", "is": false }],
+      "steps": [{ "step": "walk_to", "point": "customer" }, { "step": "move", "move": "press", "at": "shutter" }],
+      "effects": [{ "change": "set", "field": "locked", "to": true, "event": "locked" }]
+    },
+    "unlock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "locked", "is": true }],
+      "steps": [{ "step": "walk_to", "point": "customer" }, { "step": "move", "move": "press", "at": "shutter" }],
+      "effects": [{ "change": "set", "field": "locked", "to": false, "event": "unlocked" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:kiosk",
+    "shape": {"shapes":[{"kind":"extrude","at":[0,30,0],"polygon":[[-920,-820],[920,-820],[920,820],[-920,820]],"h":40,"tint":"base"},{"kind":"extrude","at":[0,130,-740],"polygon":[[-870,-30],[870,-30],[870,30],[-870,30]],"h":2140,"tint":"paint"},{"kind":"extrude","at":[-840,130,0],"polygon":[[-30,-770],[30,-770],[30,770],[-30,770]],"h":2140,"tint":"paint"},{"kind":"extrude","at":[840,130,0],"polygon":[[-30,-770],[30,-770],[30,770],[-30,770]],"h":2140,"tint":"paint"},{"kind":"extrude","at":[0,130,740],"polygon":[[-870,-30],[870,-30],[870,30],[-870,30]],"h":840,"tint":"paint"},{"kind":"box","at":[0,1030,860],"size":[1800,60,400],"round":0,"tint":"counter"},{"kind":"extrude","at":[0,2130,740],"polygon":[[-870,-30],[870,-30],[870,30],[-870,30]],"h":140,"tint":"paint"},{"kind":"extrude","at":[0,2340,50],"polygon":[[-1070,-970],[1070,-970],[1070,970],[-1070,970]],"h":100,"tint":"roof"},{"kind":"extrude","at":[0,2490,0],"polygon":[[-770,-670],[770,-670],[770,670],[-770,670]],"h":60,"tint":"roof"},{"kind":"extrude","at":[0,2510,620],"polygon":[[-620,-10],[620,-10],[620,10],[-620,10]],"h":220,"tint":"sign"},{"kind":"box","at":[0,1450,-600],"size":[1500,40,260],"round":0,"tint":"counter"},{"kind":"extrude","at":[-450,1500,-600],"polygon":[[-120,-60],[120,-60],[120,60],[-120,60]],"h":120,"tint":"goods"},{"kind":"extrude","at":[50,1500,-600],"polygon":[[-80,-50],[80,-50],[80,50],[-80,50]],"h":80,"tint":"sign"},{"kind":"extrude","at":[450,1500,-600],"polygon":[[-110,-60],[110,-60],[110,60],[-110,60]],"h":140,"tint":"goods"},{"kind":"box","at":[0,1600,840],"size":[1600,1000,50],"round":0,"tint":"shutter","role":"lid","pivot":[0,2100,840]},{"kind":"box","at":[0,1300,870],"size":[1500,20,10],"round":0,"tint":"trim","role":"lid","pivot":[0,2100,840]},{"kind":"box","at":[0,1600,870],"size":[1500,20,10],"round":0,"tint":"trim","role":"lid","pivot":[0,2100,840]},{"kind":"box","at":[0,1900,870],"size":[1500,20,10],"round":0,"tint":"trim","role":"lid","pivot":[0,2100,840]},{"kind":"box","at":[0,1150,880],"size":[300,40,40],"round":0,"tint":"trim","role":"lid","pivot":[0,2100,840]}],"palette":{"base":"#b9b3a6","paint":"#3f6b5c","counter":"#9a6b43","roof":"#c46a43","sign":"#d9a63a","goods":"#c23a2b","shutter":"#f2ead8","trim":"#36594d"},"tags":["building","commercial"]},
+    "table": [
+      {
+        "part": "lid",
+        "field": "open",
+        "do": "rotate",
+        "axis": "x",
+        "at": { "true": -80000, "false": 0 },
+        "over_us": 1000000
+      }
+    ]
+  },
+  "text": {
+    "card": "A street kiosk with a counter; its shutter lifts open and locks shut.",
+    "shop": "shop",
+    "booth": "booth",
+    "shutter": "shutter",
+    "open_times": "open times",
+    "open": "open",
+    "locked": "locked"
+  },
+  "card": { "text": "card", "category": "shop", "synonyms": ["booth", "shutter"] }
+}

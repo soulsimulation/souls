@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":178,"group":"getting-around","words":"walk along the canal","obvious":3,"things":{"canal":"eden:channel","path":"eden:footpath"},"chain":[{"this":"me","form":"go_to","args":{"place":"path"}},{"this":"canal","form":"walk_along"}]}

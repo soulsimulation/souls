@@ -235,12 +235,12 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
     let path = std::env::temp_dir().join(format!("i4b-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).unwrap();
-    let events = world.events.clone();
+    let door = world.door();
     let (ready, accepted) = channel();
     std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         ready.send(()).unwrap();
-        answers::serve(events, stream);
+        answers::serve(door, stream);
     });
     let stream = UnixStream::connect(&path).unwrap();
     stream
@@ -377,12 +377,12 @@ fn a_described_spot_is_resolved_by_a_checker_bound_at_commit_or_refused_by_name(
     let path = std::env::temp_dir().join(format!("e2-spot-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).unwrap();
-    let events = world.events.clone();
+    let door = world.door();
     let (ready, accepted) = channel();
     std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         ready.send(()).unwrap();
-        answers::serve(events, stream);
+        answers::serve(door, stream);
     });
     let stream = UnixStream::connect(&path).unwrap();
     stream
