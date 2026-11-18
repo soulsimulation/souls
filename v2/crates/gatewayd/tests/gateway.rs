@@ -1,6 +1,6 @@
 //! Engine v2 I1 (#2683): the token tests (A3) and the resume from a cursor (A4), through a real socket to an
 //! in-process gateway and a stand-in world on a local socket. The restart table (A1, A2, A5) is
-//! `v2/tools/bench/gateway-restart`.
+//! `v2/tools/bench/gateway-restart`. The receipts file (`r1_`..`r4_`): the usage roll-up's source (O21, #3325).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::{SinkExt, StreamExt};
+use gatewayd::receipts::Receipts;
 use gatewayd::token::{Grant, Token, Tokens};
 use gatewayd::{Gateway, Log, socket, world_link};
 use replica::effects::Actor;
@@ -63,8 +64,9 @@ fn intent_to(grant: Grant, sequence: u64, verb: &str) -> Vec<u8> {
     encode(&i.to_value()).unwrap()
 }
 
-/// A stand-in world: answers every intent with a receipt, one version per answer, except a [`REFUSED`] intent, which
-/// it refuses at the version it is at (a refusal does not move the version). `answered` counts its answers.
+/// A stand-in world: answers every intent with a receipt, one version per answer; from sequence 100, a refusal. A
+/// [`REFUSED`] intent it refuses at the version it is at, as `worldd` does (a refusal does not move the version).
+/// `answered` counts its answers.
 async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
     let mut sequence = 0;
     while let Ok((mut s, _)) = listener.accept().await {
@@ -83,6 +85,15 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     actor: i.actor,
                     sequence: i.sequence,
                     reason: Name::new("act.refused").unwrap(),
+                    now: version(sequence).to_value(),
+                    changed: Vec::new(),
+                }
+            } else if i.sequence >= 100 {
+                sequence += 1;
+                Answer::Refused {
+                    actor: i.actor,
+                    sequence: i.sequence,
+                    reason: Name::new("eden:out-of-reach").unwrap(),
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
                 }
@@ -116,6 +127,10 @@ struct Running {
 }
 
 async fn start(name: &str, tokens: Tokens) -> Running {
+    start_with(name, tokens, Receipts::off()).await
+}
+
+async fn start_with(name: &str, tokens: Tokens, receipts: Receipts) -> Running {
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("gw-{name}.sock"));
     let _ = std::fs::remove_file(&path);
     let answered = Arc::new(AtomicUsize::new(0));
@@ -123,7 +138,7 @@ async fn start(name: &str, tokens: Tokens) -> Running {
     let lines = Arc::new(Mutex::new(Vec::new()));
     let sink = lines.clone();
     let log: Log = Arc::new(move |l: &str| sink.lock().unwrap().push(l.to_owned()));
-    let gw = Gateway::new(tokens, BUILD.to_vec(), log);
+    let gw = Gateway::with_receipts(tokens, BUILD.to_vec(), log, receipts);
     tokio::spawn(world_link::run(gw.clone(), path));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}{}", listener.local_addr().unwrap(), socket::PATH);
@@ -490,4 +505,185 @@ async fn the_gateways_own_refusal_lost_on_a_drop_is_replayed_once_on_resume() {
     );
     put(&mut ws, intent(soul(32), 2)).await;
     assert_eq!(frame_sequence(&soon(&mut ws).await), Some(2), "once");
+}
+
+fn tmp(name: &str) -> PathBuf {
+    let d = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = std::fs::remove_dir_all(&d);
+    d
+}
+
+/// Signs in by header with a client name; the socket, after the outcome.
+async fn connect_as(url: &str, token: &Token, client: &str) -> Ws {
+    let mut req = url.into_client_request().unwrap();
+    let h = req.headers_mut();
+    h.insert(
+        "authorization",
+        format!("Bearer {}", token.reveal()).parse().unwrap(),
+    );
+    h.insert("souls-client", client.parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+    put(&mut ws, hello()).await;
+    next(&mut ws).await.unwrap();
+    assert_eq!(outcome(&next(&mut ws).await.unwrap()), "stream.started");
+    ws
+}
+
+/// Every line of the receipts files under `dir` (one per UTC day), once `n` are there.
+async fn receipt_lines(dir: &std::path::Path, n: usize) -> Vec<String> {
+    for _ in 0..400 {
+        let mut lines = Vec::new();
+        let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+            .map(|d| d.map(|e| e.unwrap().path()).collect())
+            .unwrap_or_default();
+        files.sort();
+        for f in files {
+            let text = std::fs::read_to_string(f).unwrap_or_default();
+            lines.extend(text.lines().map(str::to_owned));
+        }
+        if lines.len() >= n {
+            return lines;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    panic!("fewer than {n} receipt lines in {}", dir.display());
+}
+
+/// The scripted run behind `r1_`, `r3_` and `r4_`: two Souls of two accounts. One acts three times and is refused
+/// once by the world; the other acts once and is refused once by the world and once by the gateway (an intent
+/// naming another actor).
+async fn scripted_run(name: &str) -> (PathBuf, Vec<Token>, Vec<String>) {
+    let root = tmp(name);
+    let dir = root.join("worlds").join("w1").join("receipts");
+    let mut tokens = Tokens::default();
+    let a = issue(&mut tokens, soul(40));
+    let b = issue(&mut tokens, soul(41));
+    tokens.set_account(soul(40), "acct_one");
+    tokens.set_account(soul(41), "acct_two");
+    let r = start_with(name, tokens, Receipts::to_dir(dir.clone())).await;
+
+    let mut wa = connect_as(&r.url, &a, "souls-client/1.2.0").await;
+    for s in [1, 2, 3, 100] {
+        put(&mut wa, intent(soul(40), s)).await;
+        next(&mut wa).await.unwrap();
+    }
+    let mut wb = connect_as(&r.url, &b, "eden.mjs/0.9").await;
+    for bytes in [
+        intent(soul(41), 1),
+        intent(soul(41), 100),
+        intent(soul(40), 7),
+    ] {
+        put(&mut wb, bytes).await;
+        next(&mut wb).await.unwrap();
+    }
+    let lines = receipt_lines(&dir, 7).await;
+    assert_eq!(r.gw.receipts.dropped(), 0);
+    (root, vec![a, b], lines)
+}
+
+fn count(lines: &[String], soul: Grant, outcome: &str) -> usize {
+    let s = format!("\"soul\":\"{}\"", soul.to_text());
+    let o = format!("\"outcome\":\"{outcome}\"");
+    lines
+        .iter()
+        .filter(|l| l.contains(&s) && l.contains(&o))
+        .count()
+}
+
+#[tokio::test]
+async fn r1_each_answered_intent_is_one_line_accepted_and_refused() {
+    let (_, _, lines) = scripted_run("receipts-r1").await;
+    assert_eq!(lines.len(), 7, "{lines:#?}");
+    assert_eq!(count(&lines, soul(40), "receipt"), 3);
+    assert_eq!(count(&lines, soul(40), "refusal"), 1, "the world's refusal");
+    assert_eq!(count(&lines, soul(41), "receipt"), 1);
+    assert_eq!(
+        count(&lines, soul(41), "refusal"),
+        2,
+        "the world's and the gateway's"
+    );
+    for l in &lines {
+        // Exactly the five fields, in one JSON object.
+        let keys: Vec<&str> = l
+            .trim_matches(|c| c == '{' || c == '}')
+            .split(',')
+            .map(|kv| kv.split(':').next().unwrap())
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "\"t\"",
+                "\"soul\"",
+                "\"account\"",
+                "\"outcome\"",
+                "\"client\""
+            ],
+            "{l}"
+        );
+    }
+    assert!(
+        lines[0].contains("\"account\":\"acct_one\""),
+        "{}",
+        lines[0]
+    );
+    assert!(lines[0].contains("\"client\":\"souls-client/1.2.0\""));
+    assert!(
+        lines[6].contains("\"account\":\"acct_two\""),
+        "{}",
+        lines[6]
+    );
+    assert!(lines[6].contains("\"client\":\"eden.mjs/0.9\""));
+}
+
+#[tokio::test]
+async fn r2_a_failed_write_drops_and_counts_and_the_answer_still_comes() {
+    // The receipts folder cannot be made: a file stands where it would be.
+    let root = tmp("receipts-r2");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("receipts"), "not a folder").unwrap();
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(50));
+    let r = start_with(
+        "receipts-r2",
+        tokens,
+        Receipts::to_dir(root.join("receipts")),
+    )
+    .await;
+    let mut ws = connect_as(&r.url, &t, "souls-client/1.2.0").await;
+    for s in 1..=5 {
+        put(&mut ws, intent(soul(50), s)).await;
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(2), next(&mut ws))
+            .await
+            .expect("the answer is not held up");
+        assert_eq!(frame_sequence(&answer.unwrap()), Some(s));
+    }
+    for _ in 0..400 {
+        if r.gw.receipts.dropped() == 5 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert_eq!(r.gw.receipts.dropped(), 5, "each line dropped is counted");
+}
+
+#[tokio::test]
+async fn r3_no_intent_text_and_no_token_in_the_file() {
+    let (root, tokens, lines) = scripted_run("receipts-r3").await;
+    let file = lines.join("\n");
+    for t in &tokens {
+        assert!(!file.contains(t.reveal()), "a token in the receipts file");
+        assert!(!file.contains(&secret(t)), "a token's secret in it");
+    }
+    for text in ["eden:wave", "eden:out-of-reach", "intent-not-granted"] {
+        assert!(!file.contains(text), "intent or answer text in it: {text}");
+    }
+    assert!(root.join("worlds/w1/receipts").is_dir());
+}
+
+/// Leaves the scripted run's file where `usage.mjs rollup --root <root>` reads it (the PR shows the roll-up).
+#[tokio::test]
+async fn r4_scripted_run_for_the_usage_rollup() {
+    let (root, _, lines) = scripted_run("receipts-r4").await;
+    assert_eq!(lines.len(), 7);
+    println!("r4: {} lines under {}", lines.len(), root.display());
 }

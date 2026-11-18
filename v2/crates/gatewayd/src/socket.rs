@@ -18,6 +18,7 @@ use replica::intent_decode::{LIMITS, decode as decode_intent};
 use replica::intents::{Answer, PROTOCOL, answer_hello};
 
 use crate::Gateway;
+use crate::receipts::{Outcome, Who};
 use crate::resume::Cursor;
 use crate::times;
 use crate::token::{self, Grant, Token};
@@ -61,13 +62,25 @@ async fn upgrade(
         .get("souls-seen")
         .and_then(|v| v.to_str().ok())
         .and_then(|n| n.parse().ok());
+    // Which client, for the receipts file: its own header, else the browser's.
+    let client = ["souls-client", "user-agent"]
+        .iter()
+        .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()))
+        .map(str::to_owned);
     ws.read_buffer_size(READ_BUFFER)
         .write_buffer_size(0)
         .max_write_buffer_size(64 * 1024)
         .max_message_size(MESSAGE_MOST)
         .max_frame_size(MESSAGE_MOST)
         .on_upgrade(move |socket| async move {
-            serve(gw, socket, header_token, (header_cursor, header_seen)).await;
+            serve(
+                gw,
+                socket,
+                header_token,
+                (header_cursor, header_seen),
+                client,
+            )
+            .await;
         })
 }
 
@@ -103,6 +116,8 @@ fn refuse(
         return Some(own_answer(answer));
     };
     let frame = encode(&Value::Map([(1, now), (2, answer.to_value())].into())).unwrap_or_default();
+    // One line in the receipts file, as for a refusal sent at once.
+    gw.record(&grant.key(), Outcome::Refusal);
     gw.deliver(grant.key(), at, frame);
     None
 }
@@ -146,6 +161,7 @@ async fn serve(
     mut socket: WebSocket,
     header_token: Option<Option<Token>>,
     header_from: ResumeFrom,
+    client: Option<String>,
 ) {
     // 1. The first frame each way (T10 rule 12): the client's, then the gateway's for its world.
     let Ok(Some(first)) = tokio::time::timeout(SIGN_IN_WITHIN, next_binary(&mut socket)).await
@@ -169,21 +185,25 @@ async fn serve(
             _ => return,
         },
     };
-    let grant = token.and_then(|t| {
-        gw.tokens
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .check(&t)
+    let signed = token.and_then(|t| {
+        let tokens = gw.tokens.read().unwrap_or_else(|e| e.into_inner());
+        let grant = tokens.check(&t)?;
+        Some((grant, tokens.account(grant).map(str::to_owned)))
     });
-    let Some(grant) = grant else {
+    let Some((grant, account)) = signed else {
         (gw.log)("a sign-in was refused");
         let _ = send(&mut socket, control(token::REFUSED)).await;
         return;
     };
     let Grant::Actor(actor) = grant;
+    let who = Arc::new(Who::new(
+        grant.to_text(),
+        account.as_deref(),
+        client.as_deref(),
+    ));
 
     // 3. The outcome, and the kept frames after the cursor.
-    let mut attached = gw.attach(grant, cursor.as_ref(), seen.unwrap_or(1));
+    let mut attached = gw.attach(grant, cursor.as_ref(), seen.unwrap_or(1), who.clone());
     let mut ok = send(&mut socket, control(attached.outcome)).await;
     for frame in std::mem::take(&mut attached.replay) {
         ok = ok && send(&mut socket, times::finish(frame)).await;
@@ -200,6 +220,7 @@ async fn serve(
                     _ => break,
                 };
                 if let Some(answer) = take_intent(&gw, actor, grant, bytes, received) {
+                    gw.receipts.write(&who, Outcome::Refusal);
                     ok = send(&mut socket, answer).await;
                 }
             }
@@ -213,7 +234,8 @@ async fn serve(
     gw.detach(grant, attached.session);
 }
 
-/// Reads an intent and hands it to the world; the gateway's own answer to send now, if it gives one not kept.
+/// Reads an intent and hands it to the world; the gateway's own answer to send now, if it gives one not kept
+/// (always a refusal).
 fn take_intent(
     gw: &Gateway,
     actor: Actor,
