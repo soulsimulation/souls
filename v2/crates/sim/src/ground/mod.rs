@@ -44,7 +44,9 @@
 //!   under a pier): a floor is ground cover within [`STEP`] of it, a footprint below [`BODY_HIGH`] above it, a
 //!   doorway or a step meets the open ground's plan from its height above it, and an outline step steps down to it.
 //!   So Eden's 94 floors of buildings on its hills (a cottage 10.3 m up) are joined to the open ground like the
-//!   town's. Boxes on the open ground still span the body from the plan's 0.
+//!   town's. A box on the open ground is measured from the ground under its middle (#3241), so a fence or a tree on
+//!   a hill blocks at its foot as on flat ground; a doorway's wall and passage are read against the boxes at the
+//!   doorway's height above the ground.
 //! - **Steep cells.** A 1 m cell whose slope is above [`STEEP`] (a rise over run of 0.5774, today's) is taken from
 //!   the open ground before its cover is added back: no centre stands on it, so the mover slides along its edge and
 //!   a route goes round it. Cells are taken as they are, not grown by the radius: a body's edge may hang over one.
@@ -461,8 +463,19 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             None => grow(&r, d),
         };
         let bb = bounds(&gr);
-        flat.push((r, b.y0, b.y1));
-        boxes.push((gr, b.y0, b.y1, bb));
+        // On the open ground a box is measured from the ground under its middle, as a footprint is (#3241): a fence
+        // on a hill spans the body at its foot as on flat ground. The open ground's plan, cut at 0, meets it there.
+        let lift = if s.open {
+            let (x, z) = b
+                .ring
+                .iter()
+                .fold((0, 0), |(x, z), p| (x + p[0] / 4, z + p[1] / 4));
+            Terrain::ground(s.terrain.as_ref(), x, z, b.y0)
+        } else {
+            0
+        };
+        flat.push((r, b.y0 - lift, b.y1 - lift));
+        boxes.push((gr, b.y0 - lift, b.y1 - lift, bb));
     }
     let mut never = Vec::new();
     let mut doors = Vec::new();
@@ -503,7 +516,7 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             door.point(door.half + 50, 0),
         ];
         for (r, y0, y1) in &flat {
-            if spans(*y0, *y1, dw.y) && flank.iter().any(|f| inside_convex(r, *f)) {
+            if spans(*y0, *y1, dw.y - door.ground) && flank.iter().any(|f| inside_convex(r, *f)) {
                 // A box of the door's own wall runs along it. One that meets the opening end-on (a corridor's side
                 // wall starting at the jamb) runs through it, and would make the whole corridor doorway.
                 let cs: Vec<(i64, i64)> = r.iter().map(|p| door.coords(*p)).collect();
@@ -682,7 +695,7 @@ fn meets(
         }
         let mut clip = Vec::new();
         for (r, y0, y1, bb) in &g.boxes {
-            if spans(*y0, *y1, door.y) && meets_box(bb, &window) {
+            if spans(*y0, *y1, door.y - door.ground) && meets_box(bb, &window) {
                 clip.push(r.clone());
             }
         }

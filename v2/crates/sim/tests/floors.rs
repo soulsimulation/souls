@@ -6,9 +6,10 @@ use import_eden::Import;
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::world_model::{plain, show};
-use sim::ground::STEP;
 use sim::ground::Scene;
+use sim::ground::scene::above_ground;
 use sim::ground::scene::{FLOOR, Terrain, xform_to};
+use sim::ground::{BODY_HIGH, SQUARE, STEP};
 use sim::links::Kind;
 use sim::routes::{ALL, Hop, LinkInfo, Map, Spot};
 use std::collections::{BTreeMap, BTreeSet};
@@ -331,6 +332,85 @@ fn on_terrain_rings(im: &Import) -> (BTreeSet<Id>, Vec<Vec<[i64; 2]>>) {
     (floors, rings)
 }
 
+/// 16 m squares of the open ground (by index), each with what changed there.
+type Squares = BTreeMap<(i64, i64), &'static str>;
+
+/// What the open ground's plan is cut from differently since it was measured from 0 (before #3227), read from its
+/// scene now: the rings (mm) of floors that are footprints now and were not before (or the other way), and every
+/// 16 m square that holds such a change, with what changed there: a floor on the terrain that is now ground cover,
+/// a doorway or a step that now meets the ground (or is now cut from it) at its height above it, a box that now spans
+/// the body from the ground under it (#3241), or a footprint. With `boxes`, only the boxes (#3241 alone).
+fn cut_again(im: &Import, boxes: bool) -> (Vec<Vec<[i64; 2]>>, Squares) {
+    let s = Scene::of(&im.tree, im.nodes["ground"]).unwrap();
+    let t = s.terrain.as_ref();
+    let (mut rings, mut squares) = (Vec::new(), BTreeMap::new());
+    let mut mark = |bb: [i64; 4], why: &'static str| {
+        for j in bb[1].div_euclid(SQUARE)..=bb[3].div_euclid(SQUARE) {
+            for i in bb[0].div_euclid(SQUARE)..=bb[2].div_euclid(SQUARE) {
+                squares.entry((i, j)).or_insert(why);
+            }
+        }
+    };
+    // A ring's bounds in mm, grown by `d` mm.
+    let bounds = |r: &[[i64; 2]], d: i64| {
+        let (xs, zs) = (r.iter().map(|p| p[0] / 1000), r.iter().map(|p| p[1] / 1000));
+        [
+            xs.clone().min().unwrap() - d,
+            zs.clone().min().unwrap() - d,
+            xs.max().unwrap() + d,
+            zs.max().unwrap() + d,
+        ]
+    };
+    let (high, step) = (BODY_HIGH * 1000, STEP * 1000);
+    for f in s.footprints.iter().filter(|_| !boxes) {
+        let now = above_ground(t, f);
+        if (f.y < high) != (now < high) {
+            rings.push(f.ring.iter().map(|p| [p[0] / 1000, p[1] / 1000]).collect());
+            mark(bounds(&f.ring, 1000), "a building on the terrain");
+        } else if f.y.abs() <= step && now.abs() > step {
+            mark(
+                bounds(&f.ring, 1000),
+                "ground cover before, a floor on the terrain now",
+            );
+        }
+    }
+    for c in s.covers.iter().filter(|_| !boxes) {
+        if c.y.abs() > step {
+            mark(
+                bounds(&c.ring, 1000),
+                "a floor on the terrain now ground cover",
+            );
+        }
+    }
+    for d in s.doorways.iter().filter(|_| !boxes) {
+        let g = Terrain::ground(t, d.at[0], d.at[1], d.y);
+        let cut = |y: i64| !d.step && y.abs() < high;
+        let meet = |y: i64| y.abs() < step;
+        if cut(d.y) != cut(d.y - g) || meet(d.y) != meet(d.y - g) {
+            mark(
+                bounds(&[d.at], 2000),
+                "a doorway or a step meeting the ground above it",
+            );
+        }
+    }
+    let spans = |y0: i64, y1: i64| y1 > step && y0 < high;
+    for b in &s.solids {
+        let (x, z) = b
+            .ring
+            .iter()
+            .fold((0, 0), |(x, z), p| (x + p[0] / 4, z + p[1] / 4));
+        let g = Terrain::ground(t, x, z, b.y0);
+        if spans(b.y0, b.y1) != spans(b.y0 - g, b.y1 - g) {
+            rings.push(b.ring.iter().map(|p| [p[0] / 1000, p[1] / 1000]).collect());
+            mark(
+                bounds(&b.ring, 1000),
+                "a box measured from the terrain under it",
+            );
+        }
+    }
+    (rings, squares)
+}
+
 /// Whether  lies inside the ring , or within 400 mm of it (the cut grows a footprint by the body's clearance).
 fn inside(r: &[[i64; 2]], p: [i64; 2]) -> bool {
     let near = (0..r.len()).any(|k| {
@@ -341,7 +421,8 @@ fn inside(r: &[[i64; 2]], p: [i64; 2]) -> bool {
         let (dx, dz) = (a[0] + ex * t / l2 - p[0], a[1] + ez * t / l2 - p[1]);
         dx * dx + dz * dz <= 400 * 400
     });
-    let mut c = near;
+    // Near an edge, or inside it (an odd count of crossings): near an edge inside is not outside.
+    let mut c = false;
     for k in 0..r.len() {
         let (a, b) = (r[k], r[(k + 1) % r.len()]);
         let lhs = i128::from(p[0] - a[0]) * i128::from(b[1] - a[1]);
@@ -350,7 +431,7 @@ fn inside(r: &[[i64; 2]], p: [i64; 2]) -> bool {
             c = !c;
         }
     }
-    c
+    near || c
 }
 
 /// #3227's A3: N5's 10,000 Eden routes (A1's seed, drawn from the largest part) before and after. The first run
@@ -362,10 +443,15 @@ fn inside(r: &[[i64; 2]], p: [i64; 2]) -> bool {
 #[ignore = "needs the exported Eden facts file"]
 fn a3_eden_routes_before_and_after() {
     const ROUTES: usize = 10_000;
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../.local/routes/a3-3227.tsv"
+    // `A3_PAIRS` names another pairs file under the repository's `.local/routes/`, written on #3227's map: only the
+    // boxes measured from the terrain (#3241) changed since, so only they explain a change.
+    let since = std::env::var("A3_PAIRS").ok();
+    let name = since.clone().unwrap_or_else(|| "a3-3227.tsv".into());
+    let path = format!(
+        "{}/../../../.local/routes/{name}",
+        env!("CARGO_MANIFEST_DIR")
     );
+    let path = path.as_str();
     let im = eden();
     let ground = im.nodes["ground"];
     let mut map = Map::build(&im.tree, ground, &|_| 0).expect("the map");
@@ -419,7 +505,7 @@ fn a3_eden_routes_before_and_after() {
         }
         std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
         std::fs::write(path, out).unwrap();
-        println!("A3: {ROUTES} routes written to .local/routes/a3-3227.tsv");
+        println!("A3: {ROUTES} routes written to .local/routes/{name}");
         return;
     };
     let ids: BTreeMap<String, Id> = {
@@ -437,8 +523,14 @@ fn a3_eden_routes_before_and_after() {
             .collect();
         Vec3::new(v[0] * 1000, v[1] * 1000, v[2] * 1000)
     };
-    let (hill, rings) = on_terrain_rings(&im);
-    let through_hill = |w: &str| {
+    let (mut hill, mut rings) = on_terrain_rings(&im);
+    if since.is_some() {
+        (hill, rings) = Default::default();
+    }
+    let (more, squares) = cut_again(&im, since.is_some());
+    rings.extend(more);
+    // A route's waypoints, every 250 mm along it.
+    let along = |w: &str| -> Vec<[i64; 2]> {
         let pts: Vec<[i64; 2]> = w
             .split(';')
             .filter(|s| !s.is_empty())
@@ -447,21 +539,39 @@ fn a3_eden_routes_before_and_after() {
                 [v[0], v[1]]
             })
             .collect();
-        pts.windows(2).any(|s| {
+        let mut out = pts.first().copied().into_iter().collect::<Vec<_>>();
+        for s in pts.windows(2) {
             let (a, b) = (s[0], s[1]);
             let n = ((b[0] - a[0]).abs().max((b[1] - a[1]).abs()) / 250).max(1);
-            (0..=n).any(|k| {
-                let p = [a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n];
-                rings.iter().any(|r| inside(r, p))
-            })
-        })
+            out.extend(
+                (1..=n).map(|k| [a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]),
+            );
+        }
+        out
     };
-    let (mut same, mut changed, mut lost, mut lost_inside, mut near) = (0, 0, 0, 0, 0);
-    let (mut onto_hill, mut was_through, mut onto_floor, mut other) = (0, 0, 0, 0);
+    let through_hill = |w: &str| along(w).iter().any(|&p| rings.iter().any(|r| inside(r, p)));
+    // What changed in the first square, before or now, that the route crosses and that is cut again.
+    let cut_where = |was: &str, now: &str| {
+        along(was)
+            .into_iter()
+            .chain(along(now))
+            .find_map(|p| squares.get(&(p[0].div_euclid(SQUARE), p[1].div_euclid(SQUARE))))
+            .copied()
+    };
+    let (mut same, mut changed, mut lost, mut lost_inside, mut rounded) = (0, 0, 0, 0, 0);
+    let (mut onto_hill, mut was_through, mut onto_floor, mut near, mut on_edge, mut other) =
+        (0, 0, 0, 0, 0, 0);
+    let (mut off_mm, mut rounding) = (0, 0);
+    let mut again: BTreeMap<&str, usize> = BTreeMap::new();
     for row in before.lines() {
         let f: Vec<&str> = row.splitn(6, '\t').collect();
-        let (Some(a), Some(b)) = (map.spot(ids[f[0]], at(f[1])), map.spot(ids[f[2]], at(f[3])))
-        else {
+        // A saved spot is a triangle's middle, rounded to the millimetre: a sliver's lies up to 1 mm off it.
+        let find = |n: &str, v: Vec3| {
+            map.spot(ids[n], v)
+                .map(|s| (s, false))
+                .or_else(|| map.spot_near(ids[n], v, 1).map(|s| (s, true)))
+        };
+        let (Some((a, ra)), Some((b, rb))) = (find(f[0], at(f[1])), find(f[2], at(f[3]))) else {
             lost += 1;
             let w = |n: &str, v: Vec3| (n == show(ground)).then_some([v.x / 1000, v.z / 1000]);
             let gone = [w(f[0], at(f[1])), w(f[2], at(f[3]))]
@@ -469,11 +579,12 @@ fn a3_eden_routes_before_and_after() {
                 .flatten()
                 .any(|p| rings.iter().any(|r| inside(r, p)));
             lost_inside += usize::from(gone);
-            if lost - lost_inside <= 3 && !gone {
+            if !gone {
                 println!("  not found now: {row:.100}");
             }
             continue;
         };
+        rounded += usize::from(ra || rb);
         let r = match map.route(&im.tree, a, b, ALL) {
             Ok(r) => r,
             Err(e) => {
@@ -506,25 +617,45 @@ fn a3_eden_routes_before_and_after() {
             onto_hill += 1;
         } else if through_hill(f[5]) {
             was_through += 1;
-        } else if step {
+        } else if step && since.is_none() {
             onto_floor += 1;
+        } else if let Some(why) = cut_where(f[5], &wps(&r)) {
+            *again.entry(why).or_default() += 1;
+        } else if [f[1], f[3]].iter().any(|v| {
+            let v = at(v);
+            (v.x / 1000) % SQUARE == 0 || (v.z / 1000) % SQUARE == 0
+        }) {
+            // A spot on the edge between two squares is found on the piece of the square east or south of it.
+            on_edge += 1;
+        } else if ra || rb {
+            // Found within 1 mm: the route starts or ends at the piece's nearest point, not the saved one.
+            off_mm += 1;
+        } else if wps(&r) == f[5] && (r.length as i64 - f[4].parse::<i64>().unwrap()).abs() <= 1 {
+            // The same corners, a millimetre apart in length: the sum's rounding.
+            rounding += 1;
         } else if (r.length as i64 - f[4].parse::<i64>().unwrap()).abs() * 100 < r.length as i64 {
             near += 1;
+            println!(
+                "  changed by under 1 %: {row:.120}\n    now {} mm",
+                r.length
+            );
         } else {
             other += 1;
-            if other <= 5 {
-                println!(
-                    "  changed otherwise: {row}\n    now {} mm: {}",
-                    r.length,
-                    wps(&r)
-                );
-            }
+            println!(
+                "  changed otherwise: {row}\n    now {} mm: {}",
+                r.length,
+                wps(&r)
+            );
         }
     }
     println!(
         "A3: {same} routes unchanged, {changed} changed: {onto_hill} now over a floor of a building on the terrain, \
-         {was_through} were through such a building's footprint on the plan, {onto_floor} over a step onto another thing's floor, \
-         {near} by under 1 % (the open ground cut again), {other} otherwise; {lost} not found or refused, {lost_inside} \
-         of them a spot on the open ground now inside a building on the terrain"
+         {was_through} were through what is cut again (a building or a box on the terrain) on the plan, {onto_floor} over a \
+         step onto another thing's floor, {again:?} cross a square of the open ground cut again where that changed, \
+         {on_edge} from a spot on a square's edge, {off_mm} from a spot found within 1 mm, {rounding} by 1 mm on the same corners, {near} by under 1 % elsewhere, {other} otherwise; \
+         {lost} not found or refused, {lost_inside} of them a spot on the open ground now inside what is cut again (a building or a box on the terrain); \
+         {rounded} found within 1 mm (a sliver's middle, rounded)"
     );
+    assert_eq!(other + near, 0, "every changed route is explained");
+    assert_eq!(lost, lost_inside, "every lost pair is explained");
 }
