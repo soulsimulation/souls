@@ -1,0 +1,340 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:gravel_sieve (from #1802). One portable camp tray holds three mixed batches; each is one coarse and two fine units, so three mixed plus coarse plus fine is always nine. Sieving (three seconds, a hand free) separates one batch ('No mixed batch remains; remix one coarse and two fine units first.'); remixing reverses exactly that ('Remixing needs one coarse and two fine units; sieve a mixed batch first.'). A held thing refuses it ('Empty your hands before sieving or remixing.'). Handed back: the tray must rest on a fixed work table, and both hands empty rather than one free.",
+ "cases": [
+  {
+   "name": "sieve_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "sieve"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:gravel_sieve"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sieve_no_mixed_batch_names_remix",
+   "act": {
+    "this": "t1",
+    "form": "sieve"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:gravel_sieve",
+      "fields": {
+       "mixed": 0,
+       "coarse": 3,
+       "fine": 6
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "mixed",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": {
+     "form": "remix"
+    }
+   }
+  },
+  {
+   "name": "sieve_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "sieve"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:gravel_sieve"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "remix_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "remix"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:gravel_sieve",
+      "fields": {
+       "mixed": 2,
+       "coarse": 1,
+       "fine": 2
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "remix_no_coarse_names_sieve",
+   "act": {
+    "this": "t1",
+    "form": "remix"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:gravel_sieve"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "coarse",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": {
+     "form": "sieve"
+    }
+   }
+  },
+  {
+   "name": "remix_too_little_fine_names_sieve",
+   "act": {
+    "this": "t1",
+    "form": "remix"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:gravel_sieve",
+      "fields": {
+       "mixed": 2,
+       "coarse": 1,
+       "fine": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "fine",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": {
+     "form": "sieve"
+    }
+   }
+  },
+  {
+   "name": "remix_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "remix"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:gravel_sieve",
+      "fields": {
+       "mixed": 2,
+       "coarse": 1,
+       "fine": 2
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 2,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  }
+ ]
+}
