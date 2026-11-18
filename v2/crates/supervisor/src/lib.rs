@@ -11,9 +11,12 @@
 //!
 //! There is no start limit, no breaker and no resting state: systemd retries every failure, with a delay that grows
 //! from [`RESTART_SEC_MS`] to [`RESTART_MAX_MS`].
+//!
+//! Moving a live world to another machine (O9, #2828) is [`moving`].
 
 pub mod folder;
 pub mod health;
+pub mod moving;
 
 use std::path::{Path, PathBuf};
 
