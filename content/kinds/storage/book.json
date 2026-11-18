@@ -1,0 +1,165 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:book",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "title": {
+      "n": 2,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "first_page": {
+      "n": 3,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "spine": {
+      "role": "grip",
+      "at_mm": [
+        -85,
+        18,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      172,
+      50,
+      240
+    ]
+  },
+  "forms": {
+    "read": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "look",
+          "at": "spine"
+        },
+        {
+          "step": "wait",
+          "us": 30000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "read"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "spine"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "shut"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:book",
+    "table": [
+      {
+        "part": "body",
+        "field": "open",
+        "do": "show",
+        "at": {
+          "true": 0,
+          "false": 1
+        }
+      },
+      {
+        "part": "flip",
+        "field": "open",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {"shapes":[{"kind":"box","at":[0,18,0],"size":[170,35,240],"round":0,"tint":"cover","role":"body"},{"kind":"box","at":[4,18,0],"size":[160,26,230],"round":0,"tint":"pages","role":"body"},{"kind":"box","at":[-84,18,0],"size":[6,36,240],"round":0,"tint":"cover","role":"body"},{"kind":"box","at":[-85,4,0],"size":[170,8,240],"round":0,"tint":"cover","roll":4584,"role":"flip"},{"kind":"box","at":[-80,14,0],"size":[155,12,225],"round":0,"tint":"pages","roll":4584,"role":"flip"},{"kind":"box","at":[85,4,0],"size":[170,8,240],"round":0,"tint":"cover","roll":-4584,"role":"flip"},{"kind":"box","at":[80,14,0],"size":[155,12,225],"round":0,"tint":"pages","roll":-4584,"role":"flip"},{"kind":"box","at":[50,22,20],"size":[80,2,120],"round":0,"tint":"ink","role":"flip"}],"palette":{"cover":"#7a2e2e","pages":"#efe6cf","ink":"#3a3a3a"},"tags":["object","media"]}
+  },
+  "text": {
+    "card": "A hardback book: hold it to read; its title and first page come with it.",
+    "reading": "reading",
+    "novel": "novel",
+    "volume": "volume",
+    "howto_read": "Take a book from a shelf, hold it and read it; close it when done."
+  },
+  "card": {
+    "text": "card",
+    "category": "reading",
+    "synonyms": [
+      "novel",
+      "volume"
+    ]
+  },
+  "howtos": {
+    "read": {
+      "text": "howto_read",
+      "steps": [
+        {
+          "form": "read"
+        },
+        {
+          "form": "close"
+        }
+      ]
+    }
+  }
+}

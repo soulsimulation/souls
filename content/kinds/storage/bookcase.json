@@ -1,0 +1,226 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bookcase",
+  "owner": "thing",
+  "state": {
+    "books": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 120,
+      "default": 100,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "neat": {
+      "n": 2,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "shelves": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        1100,
+        200
+      ]
+    }
+  },
+  "slots": {
+    "shelf2": {
+      "admits": "thing",
+      "most": 12,
+      "at_mm": [
+        0,
+        470,
+        20
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    },
+    "shelf3": {
+      "admits": "thing",
+      "most": 12,
+      "at_mm": [
+        0,
+        860,
+        20
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1240,
+      2005,
+      380
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "books",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "stand"
+        }
+      ],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "eden:book",
+          "into": "actor_hand",
+          "event": "taken"
+        },
+        {
+          "change": "set",
+          "field": "neat",
+          "to": false,
+          "event": "left_untidy"
+        }
+      ]
+    },
+    "straighten": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "shelves"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "neat",
+          "to": true,
+          "event": "straightened"
+        }
+      ]
+    },
+    "dust": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "shelves"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "stock": {
+    "books": {
+      "kind": "eden:book",
+      "count": "books",
+      "take": "take",
+      "carries": [
+        "title",
+        "first_page"
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:bookcase",
+    "table": [
+      {
+        "part": "fill",
+        "field": "books",
+        "do": "show",
+        "range": [
+          0,
+          1
+        ],
+        "to": [
+          0,
+          1
+        ]
+      }
+    ],
+    "shape": {"shapes":[{"kind":"box","at":[-580,1000,0],"size":[40,2000,350],"round":0,"tint":"wood"},{"kind":"box","at":[580,1000,0],"size":[40,2000,350],"round":0,"tint":"wood"},{"kind":"box","at":[0,1000,-165],"size":[1160,2000,20],"round":0,"tint":"back","role":"fill","pivot":[0,0,-165]},{"kind":"box","at":[0,1980,10],"size":[1240,50,380],"round":0,"tint":"wood"},{"kind":"box","at":[0,60,0],"size":[1120,25,330],"round":0,"tint":"wood"},{"kind":"box","at":[-300,210,0],"size":[440,210,180],"round":0,"tint":"b0","role":"fill","pivot":[-300,105,0]},{"kind":"box","at":[270,190,0],"size":[440,180,180],"round":0,"tint":"b3","role":"fill","pivot":[270,100,0]},{"kind":"box","at":[-420,215,122],"size":[12,250,4],"round":0,"tint":"gilt","role":"fill","pivot":[-420,90,122]},{"kind":"box","at":[-60,215,122],"size":[12,220,4],"round":0,"tint":"gilt","role":"fill","pivot":[-60,105,122]},{"kind":"box","at":[300,215,122],"size":[12,190,4],"round":0,"tint":"gilt","role":"fill","pivot":[300,120,122]},{"kind":"box","at":[0,450,0],"size":[1120,25,330],"round":0,"tint":"wood"},{"kind":"box","at":[-300,600,0],"size":[440,210,180],"round":0,"tint":"b1","role":"fill","pivot":[-300,495,0]},{"kind":"box","at":[270,580,0],"size":[440,180,180],"round":0,"tint":"b4","role":"fill","pivot":[270,490,0]},{"kind":"box","at":[-420,605,122],"size":[12,250,4],"round":0,"tint":"gilt","role":"fill","pivot":[-420,480,122]},{"kind":"box","at":[-60,605,122],"size":[12,220,4],"round":0,"tint":"gilt","role":"fill","pivot":[-60,495,122]},{"kind":"box","at":[300,605,122],"size":[12,190,4],"round":0,"tint":"gilt","role":"fill","pivot":[300,510,122]},{"kind":"box","at":[0,840,0],"size":[1120,25,330],"round":0,"tint":"wood"},{"kind":"box","at":[-300,990,0],"size":[440,210,180],"round":0,"tint":"b2","role":"fill","pivot":[-300,885,0]},{"kind":"box","at":[270,970,0],"size":[440,180,180],"round":0,"tint":"b5","role":"fill","pivot":[270,880,0]},{"kind":"box","at":[-420,995,122],"size":[12,250,4],"round":0,"tint":"gilt","role":"fill","pivot":[-420,870,122]},{"kind":"box","at":[-60,995,122],"size":[12,220,4],"round":0,"tint":"gilt","role":"fill","pivot":[-60,885,122]},{"kind":"box","at":[300,995,122],"size":[12,190,4],"round":0,"tint":"gilt","role":"fill","pivot":[300,900,122]},{"kind":"box","at":[0,1230,0],"size":[1120,25,330],"round":0,"tint":"wood"},{"kind":"box","at":[-300,1380,0],"size":[440,210,180],"round":0,"tint":"b3","role":"fill","pivot":[-300,1275,0]},{"kind":"box","at":[270,1360,0],"size":[440,180,180],"round":0,"tint":"b0","role":"fill","pivot":[270,1270,0]},{"kind":"box","at":[-420,1385,122],"size":[12,250,4],"round":0,"tint":"gilt","role":"fill","pivot":[-420,1260,122]},{"kind":"box","at":[-60,1385,122],"size":[12,220,4],"round":0,"tint":"gilt","role":"fill","pivot":[-60,1275,122]},{"kind":"box","at":[300,1385,122],"size":[12,190,4],"round":0,"tint":"gilt","role":"fill","pivot":[300,1290,122]},{"kind":"box","at":[0,1620,0],"size":[1120,25,330],"round":0,"tint":"wood"},{"kind":"box","at":[-300,1770,0],"size":[440,210,180],"round":0,"tint":"b4","role":"fill","pivot":[-300,1665,0]},{"kind":"box","at":[270,1750,0],"size":[440,180,180],"round":0,"tint":"b1","role":"fill","pivot":[270,1660,0]},{"kind":"box","at":[-420,1775,122],"size":[12,250,4],"round":0,"tint":"gilt","role":"fill","pivot":[-420,1650,122]},{"kind":"box","at":[-60,1775,122],"size":[12,220,4],"round":0,"tint":"gilt","role":"fill","pivot":[-60,1665,122]},{"kind":"box","at":[300,1775,122],"size":[12,190,4],"round":0,"tint":"gilt","role":"fill","pivot":[300,1680,122]}],"palette":{"wood":"#8a5a36","back":"#5e3d27","b0":"#8a3b2c","b1":"#2f5d8b","b2":"#3f6b5c","b3":"#b8913f","b4":"#5e3d27","b5":"#6a4a7a","gilt":"#d8c08a","vase":"#2f6b6b"},"tags":["furniture","storage","library","books"]}
+  },
+  "text": {
+    "card": "A tall oak bookcase full of books: take one to read, straighten them, dust it.",
+    "storage": "storage",
+    "books": "books",
+    "library": "library",
+    "howto_read": "With a hand free, take a book from the shelves, then read it."
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "books",
+      "library"
+    ]
+  },
+  "howtos": {
+    "read": {
+      "text": "howto_read",
+      "steps": [
+        {
+          "form": "take"
+        }
+      ]
+    }
+  }
+}
