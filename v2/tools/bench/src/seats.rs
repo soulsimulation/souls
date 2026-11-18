@@ -24,14 +24,14 @@ use body_script::{TICK, humanoid, script_shape};
 use replica::effects::{Refusal, fixture_bytes};
 use replica::encode::{Name, decode};
 use replica::ids::{Id, Minter, Scope};
-use replica::moves::{Effector, Move, Seat};
+use replica::moves::{Effector, Move, Place};
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::world_model::show;
 use sim::controller::{Controller, Part, Stance};
 use sim::ground::{HUMAN_RADIUS, Piece};
 use sim::mover::Surface;
 use sim::moves::{Moves, Reach, load};
-use sim::slots::{Request, SeatAt, Slots, clear_spot};
+use sim::slots::{PlaceAt, Request, Slots, clear_spot};
 use sim::timers::DueList;
 use testworld::{
     BACK_ROW_Z, CENTRE_AISLE, HALL_DEPTH, HALL_ROWS, HALL_WIDTH, ROW_PITCH, SEAT_PITCH,
@@ -73,9 +73,9 @@ impl Reach for Geo {
         point: &Name,
     ) -> Option<i64> {
         let a = self.0.get(&body)?;
-        let [seat, stand] = self.1.get(&target)?;
+        let [place, stand] = self.1.get(&target)?;
         let b = match point.as_str() {
-            "souls:seat" => seat,
+            "souls:slot" => place,
             "souls:stand" => stand,
             _ => return None,
         };
@@ -97,7 +97,7 @@ struct Hall {
 }
 
 /// The hall's 300 chairs, and `per` bodies by each chair's stand point (100 mm apart in x when there are two).
-fn hall(seat: &Seat, per: usize) -> Hall {
+fn hall(place: &Place, per: usize) -> Hall {
     let floors = BTreeMap::from([(floor_id(), floor())]);
     let mut mint = Minter::new(Scope([0xb3; 16]));
     let mut slots = Slots::new();
@@ -107,16 +107,16 @@ fn hall(seat: &Seat, per: usize) -> Hall {
             let x = CENTRE_AISLE / 2 + SEAT_PITCH / 2 + k % (SEATS_PER_ROW / 2) * SEAT_PITCH;
             let x = if k < SEATS_PER_ROW / 2 { -x } else { x };
             let thing = mint.mint().expect("an id");
-            let point = Vec3::new(x * 1000, seat.height, (BACK_ROW_Z + r * ROW_PITCH) * 1000);
+            let point = Vec3::new(x * 1000, place.height, (BACK_ROW_Z + r * ROW_PITCH) * 1000);
             slots
-                .add(SeatAt {
+                .add(PlaceAt {
                     thing,
-                    seat: seat.clone(),
+                    place: place.clone(),
                     point,
                     facing: Quat::IDENTITY,
                     floor: floor_id(),
                 })
-                .expect("a seat");
+                .expect("a place");
             chairs.push(thing);
         }
     }
@@ -128,7 +128,7 @@ fn hall(seat: &Seat, per: usize) -> Hall {
     };
     for &chair in &chairs {
         let stand = slots
-            .seat(chair)
+            .place(chair)
             .expect("a chair")
             .stand()
             .expect("a stand point");
@@ -160,7 +160,7 @@ impl Hall {
     fn geo(&self) -> Geo {
         let mut points = BTreeMap::new();
         for &ch in &self.chairs {
-            let at = self.slots.seat(ch).expect("a chair");
+            let at = self.slots.place(ch).expect("a chair");
             points.insert(ch, [at.point, at.stand().expect("a stand point")]);
         }
         let bodies = self
@@ -256,8 +256,8 @@ fn timed(h: &mut Hall) -> f64 {
     t.elapsed().as_secs_f64() * 1e9 / TIMED as f64
 }
 
-fn seated_hall(seat: &Seat, sit: &Move) -> Hall {
-    let mut h = hall(seat, 1);
+fn seated_hall(place: &Place, sit: &Move) -> Hall {
+    let mut h = hall(place, 1);
     let order = h.bodies.clone();
     assert!(h.sit(&order, sit).iter().all(|(_, r)| r.is_ok()));
     h.settle();
@@ -277,17 +277,17 @@ fn main() {
     };
     let (sit, rise) = (pick("souls:sit"), pick("souls:rise"));
     let text = std::fs::read_to_string(dir.join("seats/chair.diag")).expect("the chair");
-    let seat = Seat::from_value(
+    let place = Place::from_value(
         &decode(&fixture_bytes(&text).expect("bytes"))
             .expect("decodes")
             .value,
     )
-    .expect("a seat");
+    .expect("a place");
     println!(
         "hall: {} chairs, seat {} mm, stand point {:?} mm; sit {} rev {}, rise {} rev {}; tick {TICK} µs",
         HALL_ROWS * SEATS_PER_ROW,
-        seat.height / 1000,
-        seat.stand.map(|v| v / 1000),
+        place.height / 1000,
+        place.stand.map(|v| v / 1000),
         sit.name.as_str(),
         sit.revision,
         rise.name.as_str(),
@@ -297,8 +297,8 @@ fn main() {
     // A1.
     let mut rows = Vec::new();
     for repeat in 1..=2 {
-        let empty = timed(&mut hall(&seat, 0));
-        let seated = timed(&mut seated_hall(&seat, &sit));
+        let empty = timed(&mut hall(&place, 0));
+        let seated = timed(&mut seated_hall(&place, &sit));
         println!(
             "A1 repeat {repeat}: empty hall {empty:.3} ns a tick, 300 seated {seated:.3} ns a tick"
         );
@@ -324,7 +324,7 @@ fn main() {
         "A2: | order | requests | seated | refused | refusals naming the holder | seats with two |"
     );
     for order_name in ["ids ascending", "ids descending", "seeded shuffle"] {
-        let mut h = hall(&seat, 2);
+        let mut h = hall(&place, 2);
         let mut order = h.bodies.clone();
         match order_name {
             "ids descending" => order.reverse(),
@@ -345,7 +345,7 @@ fn main() {
             .iter()
             .filter_map(|(_, r)| r.as_ref().err())
             .filter(|r| {
-                r.name == "seat-taken"
+                r.name == "place-taken"
                     && h.chairs.iter().any(|&ch| {
                         h.slots.holder(ch).is_some_and(|w| {
                             r.detail == format!("{}: held by {}", show(ch), show(w))
@@ -382,7 +382,7 @@ fn main() {
     println!("A2: the same 300 holders in all three orders");
 
     // A3.
-    let mut h = seated_hall(&seat, &sit);
+    let mut h = seated_hall(&place, &sit);
     let geo = h.geo();
     let now = h.tick * TICK;
     for &b in &h.bodies.clone() {
@@ -408,7 +408,7 @@ fn main() {
         let p = h.c.body(b).expect("a body").pose;
         let stand = h
             .slots
-            .seat(h.chairs[i])
+            .place(h.chairs[i])
             .expect("a chair")
             .stand()
             .expect("a stand point");
