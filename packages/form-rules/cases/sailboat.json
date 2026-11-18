@@ -1,0 +1,410 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:sailboat (core/sailboat@1, 21 placed): a ride with a set trip across the water and back. A seat is taken only while it is moored; whoever sails sets off; the trip's end is its track's (Engine v2 N12), which sets under_way back at its last stop, so no form of the kind ends it.",
+ "cases": [
+  {
+   "name": "sailboat_sail_standing_still_free_seat",
+   "act": {
+    "this": "t1",
+    "form": "sail",
+    "args": {
+     "seat": "port"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:sailboat",
+      "fields": {
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sailboat_sail_while_under_way_is_refused",
+   "act": {
+    "this": "t1",
+    "form": "sail",
+    "args": {
+     "seat": "port"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:sailboat",
+      "fields": {
+       "under_way": true
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "under_way",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "sailboat_sail_seat_full_names_the_other",
+   "act": {
+    "this": "t1",
+    "form": "sail",
+    "args": {
+     "seat": "port"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:sailboat",
+      "fields": {
+       "under_way": false
+      },
+      "slots": {
+       "port": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "t1",
+     "slot": "port"
+    },
+    "fix": {
+     "form": "sail",
+     "args": {
+      "seat": "port_aft"
+     }
+    }
+   }
+  },
+  {
+   "name": "sailboat_board_standing_still_free_seat",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "port"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:sailboat",
+      "fields": {
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sailboat_board_while_under_way_is_refused",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "port"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:sailboat",
+      "fields": {
+       "under_way": true
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "under_way",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "sailboat_board_seat_full_names_the_other",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "port"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:sailboat",
+      "fields": {
+       "under_way": false
+      },
+      "slots": {
+       "port": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "t1",
+     "slot": "port"
+    },
+    "fix": {
+     "form": "board",
+     "args": {
+      "seat": "port_aft"
+     }
+    }
+   }
+  }
+ ]
+}

@@ -17,6 +17,7 @@
 //           pick    no `part`: at maps a field value to the part shown; every other part named in at is hidden
 //           steam   permille of a plume leaving the part (0 none, 1000 full)       flame  permille of a flame burning on the part
 //           grow    a plant's stage in permille of a stage, from the part up (0 seed, 1000 sprout, 2000 leafy, 3000 flowering, 4000 fruiting)
+//           wilt    permille of how far the plants on the part hang (0 fresh, 1000 wilted)
 //   at      a table of field value (as text: "true", "hot", "3") to the amount; for bool and enum fields
 //   range   [min, max] whole numbers of a number field, with `to` [amount at min, amount at max]: linear between,
 //           clamped outside. A fractional field is carried in permille, so a half-full cup is 500.
@@ -29,7 +30,7 @@
 
 import { valueAt, type Timed } from './rules.ts';
 
-export const DOS = Object.freeze(['rotate', 'slide', 'scale', 'show', 'glow', 'tint', 'pick', 'steam', 'flame', 'grow', 'sound']);
+export const DOS = Object.freeze(['rotate', 'slide', 'scale', 'show', 'glow', 'tint', 'pick', 'steam', 'flame', 'grow', 'wilt', 'sound']);
 /** The synthesised sounds the page makes (apps/web/src/gen-mesh/sound-plan.ts KINDS: a test keeps the two equal), and a tune played as notes. */
 export const SOUNDS = Object.freeze(['water', 'stream', 'fire', 'wind', 'creak', 'birds', 'bell', 'hum', 'engine', 'chime', 'frogs', 'music', 'waves', 'crickets', 'chatter', 'footsteps', 'leaves', 'flag', 'waterfowl', 'bees', 'kettle', 'tune']);
 export const MODES = Object.freeze(['loop', 'once']);
@@ -69,6 +70,7 @@ export type Placement = {
   steam_permille?: number;
   flame_permille?: number;
   growth_permille?: number;
+  wilt_permille?: number;
   tint?: string;
   /** The sounds this part makes in this state; none when it is silent. */
   sounds?: Heard[];
@@ -300,6 +302,7 @@ export function looks(input: LooksInput): Record<string, Placement> {
     else if (row.do === 'steam' && typeof amount === 'number') p.steam_permille = clamp(amount, 0, 1000);
     else if (row.do === 'flame' && typeof amount === 'number') p.flame_permille = clamp(amount, 0, 1000);
     else if (row.do === 'grow' && typeof amount === 'number') p.growth_permille = clamp(amount, 0, 4000);
+    else if (row.do === 'wilt' && typeof amount === 'number') p.wilt_permille = clamp(amount, 0, 1000);
     else if (row.do === 'rotate' && typeof amount === 'number' && k >= 0) (p.rotate_mdeg ??= [0, 0, 0])[k] += amount;
     else if (row.do === 'slide' && typeof amount === 'number' && k >= 0) (p.slide_mm ??= [0, 0, 0])[k] += amount;
     else if (row.do === 'scale' && typeof amount === 'number') {
