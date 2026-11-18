@@ -5,11 +5,13 @@
 //!   to K4's log in `<work dir>/log`, followed by worldd's view tier and its stream writer, which writes the public
 //!   view under `<work dir>/www`. Even load: 40 motion samples a tick. Uneven: 200 a tick for two seconds in every
 //!   ten, 10 a tick otherwise. Every two seconds a body says something: the log holds a reference (`{21: id}`), and
-//!   the words go to `<work dir>/words.txt`, never to the log. Prints `stream <dir>`, then `done <parts> <entries>
-//!   <bytes per part, comma separated>`.
+//!   the words go to `<work dir>/words.txt`, never to the log. A private note (one audience's, #3239) is created in
+//!   the room, and each time a body speaks the note is written to as well, in an entry the public view skips; its id
+//!   and its references go to `<work dir>/private.txt`. Prints `stream <dir>`, then `done <parts> <entries> <bytes per
+//!   part, comma separated>`.
 //! - `scan <work dir>`: A5. Every part under `www` is unpacked and read; prints its text items (names only, T6 rule
-//!   10), the references found, and how many of the words in `words.txt` appear in any part's bytes, packed or not
-//!   (must be 0).
+//!   10), the references found, the gaps the parts declare, how many of the words in `words.txt` and of the private
+//!   ids in `private.txt` appear in any part's bytes, packed or not (both must be 0).
 
 // Runs a world on the wall clock: the wall-clock rule (K7) binds the engine, not this tool.
 #![allow(clippy::disallowed_methods)]
@@ -81,12 +83,18 @@ struct World {
     root: Id,
     room: Id,
     bodies: Vec<Id>,
+    /// The private note, its audience, and every private id written (the note's and its references).
+    note: Id,
+    secret: Audience,
+    private: Vec<Id>,
 }
 
 impl World {
     fn new() -> World {
+        let secret = Id::new(Scope([0x3a; 16]), 1).expect("an id");
         let rules = Rules {
             kinds: parse_kinds(KINDS).expect("kinds"),
+            audiences: BTreeMap::from([(secret, Default::default())]),
             ..Rules::default()
         };
         let mut kinds = BTreeMap::new();
@@ -126,6 +134,9 @@ impl World {
             root,
             room: root,
             bodies: Vec::new(),
+            note: root,
+            secret: Audience::Of(secret),
+            private: Vec::new(),
         }
     }
 
@@ -134,6 +145,10 @@ impl World {
     }
 
     fn entry(&mut self, node: Id, at: i64, changes: Vec<Change>) -> Effect {
+        self.entry_for(node, at, changes, Audience::Everyone)
+    }
+
+    fn entry_for(&mut self, node: Id, at: i64, changes: Vec<Change>, audience: Audience) -> Effect {
         self.next += 1;
         Effect {
             envelope: Envelope {
@@ -141,7 +156,7 @@ impl World {
                 at,
                 cause: Cause::World,
                 actor: Actor::World,
-                audience: Audience::Everyone,
+                audience,
                 node,
             },
             body: Body::Changes(
@@ -197,6 +212,15 @@ impl World {
         }
         let room = self.room;
         entries.push(self.entry(room, 0, inside));
+        // The private note: the public view skips its entries (#3239).
+        self.note = self.mint.mint().expect("an id");
+        self.private.push(self.note);
+        let mut note = self.create(self.note, "souls:body", room, BODIES as i64 * 1000);
+        if let Change::Create { audience, .. } = &mut note {
+            *audience = self.secret;
+        }
+        let secret = self.secret;
+        entries.push(self.entry_for(room, 0, vec![note], secret));
         self.commit(entries)
     }
 
@@ -234,6 +258,17 @@ impl World {
                 by: None,
             };
             entries.push(self.entry(b, at, vec![c]));
+            // And the private note is written to, after it: the public view's position moves past an entry it skips.
+            let r = self.mint.mint().expect("an id");
+            self.private.push(r);
+            let c = Change::Set {
+                node: self.note,
+                field: 2,
+                to: Value::Map(BTreeMap::from([(21, r.to_value())])),
+                by: None,
+            };
+            let (note, secret) = (self.note, self.secret);
+            entries.push(self.entry_for(note, at, vec![c], secret));
         }
         self.commit(entries)
     }
@@ -302,6 +337,12 @@ fn world(work: &Path, seconds: u64, arm: &str) {
         .expect("the writer")
         .expect("the writer wrote");
     std::fs::write(work.join("words.txt"), said.join("\n")).expect("the words");
+    let private: Vec<String> = w
+        .private
+        .iter()
+        .map(|i| replica::encode::to_hex(&encode(&i.to_value()).expect("bytes")))
+        .collect();
+    std::fs::write(work.join("private.txt"), private.join("\n")).expect("the private ids");
     let wr = writer.written();
     let sizes: Vec<String> = wr.bytes.iter().map(u64::to_string).collect();
     println!("done {} {} {}", wr.parts, wr.entries, sizes.join(","));
@@ -317,7 +358,18 @@ fn scan(work: &Path) {
         .lines()
         .map(|l| l.split_once(' ').map_or(l, |(_, w)| w).to_owned())
         .collect();
+    let private: Vec<Vec<u8>> = std::fs::read_to_string(work.join("private.txt"))
+        .expect("the private ids")
+        .lines()
+        .map(|l| {
+            (0..l.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&l[i..i + 2], 16).expect("hex"))
+                .collect()
+        })
+        .collect();
     let (mut parts, mut text_items, mut refs, mut found) = (0, 0, 0, 0);
+    let (mut gaps, mut leaked) = (0, 0);
     let mut stack = vec![work.join("www")];
     while let Some(d) = stack.pop() {
         for e in std::fs::read_dir(&d).expect("a folder") {
@@ -344,14 +396,21 @@ fn scan(work: &Path) {
                 .iter()
                 .filter(|w| find(&sp.part, w.as_bytes()) || find(&file, w.as_bytes()))
                 .count();
+            gaps += sp.gaps.len();
+            leaked += private
+                .iter()
+                .filter(|i| find(&sp.part, i) || find(&file, i))
+                .count();
             drop(part);
         }
     }
     println!(
-        "scan: {parts} parts, {text_items} text items (all names: T6 rule 10), {refs} references, {found} of {} lines said found in any part",
-        words.len()
+        "scan: {parts} parts, {text_items} text items (all names: T6 rule 10), {refs} references, {gaps} declared gaps, {found} of {} lines said found in any part, {leaked} of {} private ids found in any part",
+        words.len(),
+        private.len()
     );
     assert!(found == 0, "words were found in a part");
+    assert!(leaked == 0, "a private id was found in a part");
 }
 
 fn main() {
