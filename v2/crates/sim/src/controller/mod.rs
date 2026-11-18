@@ -231,6 +231,8 @@ struct Slot {
     moved: Moved,
     input: Input,
     logged: Option<Input>,
+    /// Whether the input may differ from the one logged: set by every change, so an unchanged body costs no compare.
+    touched: bool,
     track: Option<Track>,
 }
 
@@ -248,6 +250,7 @@ pub struct Controller {
 impl Slot {
     /// The parts `held` covered go back to neutral: locomotion to standing still, each resource's move to none.
     fn neutral(&mut self, held: &[Name]) {
+        self.touched = true;
         let family = self.claims.family();
         let locomotion = family
             .resources
@@ -311,6 +314,7 @@ impl Controller {
                 moved,
                 input,
                 logged: None,
+                touched: true,
                 track: None,
             },
         );
@@ -391,6 +395,7 @@ impl Controller {
             return refuse("crossing-under-way", replica::world_model::show(t.link));
         }
         s.input.velocity = Vec3::ZERO;
+        s.touched = true;
         s.track = Some(track);
         self.near.remove_body(body);
         Ok(())
@@ -414,6 +419,7 @@ impl Controller {
     /// Sets one part of `body`'s input, if `driver` holds its resources (`resource-not-held`, `resource-missing`).
     pub fn set(&mut self, body: Id, driver: Driver, part: Part) -> R<()> {
         let s = self.slot(body)?;
+        s.touched = true;
         match part {
             Part::Velocity(v, mode) => {
                 s.steers(driver)?;
@@ -456,7 +462,7 @@ impl Controller {
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {
         let mut out = Stepped::default();
         for (&id, s) in self.bodies.iter_mut() {
-            if s.logged.as_ref() != Some(&s.input) {
+            if s.touched && s.logged.as_ref() != Some(&s.input) {
                 match encode(&s.input.record(at, id)) {
                     Ok(bytes) => self.log.push(Logged {
                         at,
@@ -476,12 +482,15 @@ impl Controller {
                 }
                 s.logged = Some(s.input.clone());
             }
+            s.touched = false;
             s.moved.pose.orientation = s.input.facing;
             if let Some(t) = s.track.as_mut() {
                 match t.advance(&mut s.moved, surfaces, dt) {
                     Ok(true) => {
                         s.track = None;
                         s.input.velocity = Vec3::ZERO;
+                        // A changed input: logged at the next step (B2's `touched`).
+                        s.touched = true;
                     }
                     Ok(false) => {}
                     Err(r) => {
