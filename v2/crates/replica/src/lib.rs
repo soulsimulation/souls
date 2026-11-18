@@ -4,7 +4,10 @@
 
 pub mod encode;
 pub mod ids;
+pub mod pose;
+pub mod time;
 pub mod world_model;
+pub mod zones;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
