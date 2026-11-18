@@ -1,0 +1,6 @@
+# A room (Engine v2 K3, #2667): a place, the root the other fixture kinds stand in. A place has a kind too.
+{
+  1: "souls:room",
+  2: "place",
+  11: ["body", "thing"]                                      # what it admits as children (T2 rule 5)
+}

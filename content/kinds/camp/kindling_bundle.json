@@ -15,6 +15,8 @@
       "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:kindling_bundle",
     "shape": {"round":3,"shapes":[{"kind":"box","at":[-60,25,0],"size":[45,40,300],"tint":"wood"},{"kind":"box","at":[-60,70,0],"size":[45,40,300],"tint":"wood"},{"kind":"box","at":[0,25,0],"size":[45,40,280],"tint":"wood"},{"kind":"box","at":[0,70,0],"size":[45,40,280],"tint":"wood"},{"kind":"box","at":[60,25,0],"size":[45,40,260],"tint":"wood"},{"kind":"box","at":[60,70,0],"size":[45,40,260],"tint":"wood"},{"kind":"box","at":[0,55,0],"size":[210,110,25],"tint":"twine"}],"palette":{"wood":"#d1ac73","twine":"#79674e"},"tags":["camping","item","kindling","object"]}
