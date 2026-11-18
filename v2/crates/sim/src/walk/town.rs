@@ -19,10 +19,13 @@
 //! - **Sizes** (B12). A body walks on ground, routes and links cut for its own size class ([`Town::size`]): each
 //!   class is cut once, when a body of it is first sized, and kept ([`Cut`]). A body never sized is standard, the
 //!   class of the town's own map, surfaces and buildings. Turns read the standard cut: a link's width is the same.
+//!   A size change reads the new class's kept cut and cuts nothing ([`Town::change_size`]): a class is cut off the
+//!   world's tick ([`Town::prepare`]), and a change to a class not cut yet is refused as `size-not-ready`.
 
 use super::{Leg, Mark, Pass, World, node_of};
 use crate::ground::scene::FLOOR;
-use crate::ground::{OpenGround, Scene};
+use crate::ground::sizes::{Ready, change_size};
+use crate::ground::{OpenGround, Patch, Scene};
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
 use crate::mover::{Body, Surface};
@@ -30,7 +33,7 @@ use crate::routes::{HANDS, Hop, Map};
 use replica::effects::{Actor, Cause, Refusal};
 use replica::encode::Value;
 use replica::ids::Id;
-use replica::kinds::sizes::Size;
+use replica::kinds::sizes::{Build, Size};
 use replica::pose::{ControllerInput, Frame, Mode, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
@@ -63,6 +66,8 @@ pub struct Cut {
     pub map: Map,
     pub surfaces: BTreeMap<Id, Surface>,
     pub buildings: Vec<Building>,
+    /// Each square of the open ground, as cut: what a size change reads ([`crate::ground::sizes::Ready`]).
+    pub squares: BTreeMap<(i32, i32), Patch>,
 }
 
 /// The engine as the walk skill reads it.
@@ -81,6 +86,8 @@ pub struct Town {
     cuts: BTreeMap<Size, Cut>,
     /// Each sized body's class.
     sizes: BTreeMap<Id, Size>,
+    /// The standard class's squares of the open ground (the other classes' are in their cuts).
+    squares: BTreeMap<(i32, i32), Patch>,
 }
 
 impl Cut {
@@ -91,10 +98,12 @@ impl Cut {
         let mut surfaces = BTreeMap::new();
         let open = OpenGround::prepare(&Scene::of(tree, ground)?, r)?;
         let (mut pieces, mut meets) = (Vec::new(), Vec::new());
+        let mut squares = BTreeMap::new();
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
-            pieces.extend(p.pieces);
-            meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
+            pieces.extend(p.pieces.iter().cloned());
+            meets.extend(p.meets.iter().map(|m| ((i, j), m.clone())));
+            squares.insert((i, j), p);
         }
         let gh = tree.handle(ground).ok_or("no such ground")?;
         let gdoors = ground_doors(tree, ground)?;
@@ -143,6 +152,7 @@ impl Cut {
             map,
             surfaces,
             buildings,
+            squares,
         })
     }
 }
@@ -154,6 +164,7 @@ impl Town {
             map,
             surfaces,
             buildings,
+            squares,
         } = Cut::new(&tree, ground, Size::Standard)?;
         Ok(Town {
             tree,
@@ -166,17 +177,58 @@ impl Town {
             crossings: BTreeMap::new(),
             cuts: BTreeMap::new(),
             sizes: BTreeMap::new(),
+            squares,
         })
     }
 
-    /// From now on `body` walks as a body of the class `size`, on that class's cut, made here on its first use.
-    pub fn size(&mut self, body: Id, size: Size) -> Result<(), String> {
+    /// Cuts the class `size` if it is not cut yet: up to a second or two on Eden, so never on the world's tick.
+    pub fn prepare(&mut self, size: Size) -> Result<(), String> {
         if size != Size::Standard && !self.cuts.contains_key(&size) {
             let cut = Cut::new(&self.tree, self.ground, size)?;
             self.cuts.insert(size, cut);
         }
+        Ok(())
+    }
+
+    /// From now on `body` walks as a body of the class `size`, on that class's cut, made here on its first use.
+    pub fn size(&mut self, body: Id, size: Size) -> Result<(), String> {
+        self.prepare(size)?;
         self.sizes.insert(body, size);
         Ok(())
+    }
+
+    /// The cut of the class `size` as a size change reads it, if it is cut.
+    pub fn ready(&self, size: Size) -> Option<Ready<'_>> {
+        if size == Size::Standard {
+            return Some(Ready {
+                squares: &self.squares,
+                buildings: &self.buildings,
+            });
+        }
+        self.cuts.get(&size).map(|c| Ready {
+            squares: &c.squares,
+            buildings: &c.buildings,
+        })
+    }
+
+    /// Changes `build` to the class `to` for `body` standing at `at` (µm, the frame of `node`), reading the class's
+    /// kept cut and cutting nothing (`crate::ground::sizes::change_size`). A class not cut yet is refused as
+    /// `size-not-ready`: [`Town::prepare`] it off the tick, then retry.
+    pub fn change_size(
+        &self,
+        node: Id,
+        body: Id,
+        at: Vec3,
+        build: &mut Build,
+        to: Size,
+    ) -> Result<(), Refusal> {
+        let ready = self.ready(to).ok_or_else(|| {
+            refusal(
+                "size-not-ready",
+                format!("{} is not cut yet for {}; retry", to.name(), show(body)),
+            )
+        })?;
+        change_size(ready, self.ground, node, body, at, build, to)
     }
 
     /// The class `body` walks as.
