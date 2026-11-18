@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":164,"group":"getting-around","words":"find somewhere quiet","obvious":3,"things":{"bench":"eden:bench","woods":"eden:woodland"},"chain":[{"this":"me","form":"go_to","args":{"place":"woods"}},{"this":"bench","form":"sit","args":{"seat":"left"}}]}

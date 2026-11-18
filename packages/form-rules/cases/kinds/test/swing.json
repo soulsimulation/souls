@@ -1,0 +1,9 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:swing",
+  "owner": "thing",
+  "slots": {"seat": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 500, 0]}},
+  "forms": {},
+  "text": {"card": "A swing in a frame, with one seat."},
+  "card": {"text": "card"}
+}

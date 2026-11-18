@@ -1,0 +1,129 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:bicycle (core/bicycle@1, 9 placed): a vehicle; the saddle is the drive seat and its holder steers.",
+ "cases": [
+  {
+   "name": "bicycle_get_on_steer_and_a_second_rider",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "b2",
+       "b3"
+      ]
+     },
+     "t1": {
+      "kind": "eden:bicycle"
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "ride"
+     },
+     "receipt": "rbicycle_get_0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "saddle"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:mounted",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "steer",
+      "args": {
+       "toward": "b2"
+      }
+     },
+     "receipt": "rbicycle_get_1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "ride"
+     },
+     "actor": "b3",
+     "receipt": "rbicycle_get_2",
+     "expect": {
+      "verdict": "no",
+      "reason": "slot_taken",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:bicycle",
+     "slots": {
+      "saddle": [
+       "b1"
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

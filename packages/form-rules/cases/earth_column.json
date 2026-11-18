@@ -1,0 +1,364 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:earth_column (from #1834). One of an earthwork tray's six columns, holding 0 to 2 soil portions (one at first). Anyone with a free hand digs a portion from it into the nearest soil pail (an argument), or fills it from a loaded pail: one portion out of one and into the other, so the soil is conserved. Refused, as the original refused: no free hand ('Put down held items before digging or filling.'), digging an empty column or filling from an empty pail ('Dig from a nonempty column into an empty soil pail; fill a column first or empty this pail.' / 'Fill a column below two portions from a loaded soil pail; dig soil first or choose a lower column.'), and digging into a loaded pail or filling a full column (the same words). The original's choose-column and choose-pail acts are gone: the column is the thing acted on and the pail an argument.",
+  "cases": [
+    {
+      "name": "dig_every_need_met",
+      "act": {
+        "this": "c1",
+        "form": "dig",
+        "args": {
+          "pail": "p1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:earth_column"
+          },
+          "p1": {
+            "kind": "eden:soil_pail"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "dig_hands_full",
+      "act": {
+        "this": "c1",
+        "form": "dig",
+        "args": {
+          "pail": "p1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:earth_column"
+          },
+          "p1": {
+            "kind": "eden:soil_pail"
+          },
+          "x1": {
+            "kind": "eden:kindling_bundle"
+          },
+          "x2": {
+            "kind": "eden:kindling_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "dig_empty_column",
+      "act": {
+        "this": "c1",
+        "form": "dig",
+        "args": {
+          "pail": "p1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:earth_column",
+            "fields": {
+              "soil": 0
+            }
+          },
+          "p1": {
+            "kind": "eden:soil_pail"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 1,
+        "detail": {
+          "node": "c1",
+          "field": "soil",
+          "has": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "dig_into_loaded_pail",
+      "act": {
+        "this": "c1",
+        "form": "dig",
+        "args": {
+          "pail": "p1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:earth_column"
+          },
+          "p1": {
+            "kind": "eden:soil_pail",
+            "fields": {
+              "soil": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 2,
+        "detail": {
+          "node": "p1",
+          "field": "soil",
+          "room": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "fill_every_need_met",
+      "act": {
+        "this": "c1",
+        "form": "fill",
+        "args": {
+          "pail": "p1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:earth_column"
+          },
+          "p1": {
+            "kind": "eden:soil_pail",
+            "fields": {
+              "soil": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_hands_full",
+      "act": {
+        "this": "c1",
+        "form": "fill",
+        "args": {
+          "pail": "p1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:earth_column"
+          },
+          "p1": {
+            "kind": "eden:soil_pail",
+            "fields": {
+              "soil": 1
+            }
+          },
+          "x1": {
+            "kind": "eden:kindling_bundle"
+          },
+          "x2": {
+            "kind": "eden:kindling_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "fill_from_empty_pail",
+      "act": {
+        "this": "c1",
+        "form": "fill",
+        "args": {
+          "pail": "p1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:earth_column"
+          },
+          "p1": {
+            "kind": "eden:soil_pail"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 1,
+        "detail": {
+          "node": "p1",
+          "field": "soil",
+          "has": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "fill_full_column",
+      "act": {
+        "this": "c1",
+        "form": "fill",
+        "args": {
+          "pail": "p1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:earth_column",
+            "fields": {
+              "soil": 2
+            }
+          },
+          "p1": {
+            "kind": "eden:soil_pail",
+            "fields": {
+              "soil": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 2,
+        "detail": {
+          "node": "c1",
+          "field": "soil",
+          "room": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    }
+  ]
+}

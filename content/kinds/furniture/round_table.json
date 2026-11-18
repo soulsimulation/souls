@@ -1,0 +1,34 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:round_table",
+  "owner": "thing",
+  "state": { "clean": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "points": {
+    "side": { "role": "stand", "at_mm": [0, 0, 850], "yaw_mdeg": 180000 },
+    "top": { "role": "contact", "at_mm": [0, 750, 0] }
+  },
+  "geometry": { "bounds_mm": [900, 750, 900], "front": "none" },
+  "forms": {
+    "wipe": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "walk_to", "point": "side" }, { "step": "move", "move": "slide", "at": "top" }],
+      "effects": [{ "change": "set", "field": "clean", "to": true, "event": "wiped" }]
+    }
+  },
+  "motion": { "how": "pushed_by_one" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:round_table",
+    "shape": {"shapes":[{"kind":"cyl","at":[0,730,0],"r":450,"h":40,"segments":14,"tint":"top"},{"kind":"cyl","at":[0,370,0],"r":45,"h":700,"segments":6,"tint":"legs"},{"kind":"cyl","at":[0,25,0],"r":220,"h":50,"segments":10,"r2":180,"tint":"legs"},{"kind":"cyl","at":[0,752,0],"r":140,"h":3,"segments":12,"tint":"spill","role":"fill"}],"palette":{"top":"#9a6b43","legs":"#3b3d40","spill":"#6b4a2e"},"tags":["furniture","table","surface","cafe"],"round":15},
+    "table": [{ "part": "fill", "field": "clean", "do": "show", "at": { "true": 0, "false": 1 } }]
+  },
+  "text": {
+    "card": "A round café table for two or three; wipe it clean.",
+    "table": "table",
+    "cafe_table": "cafe table",
+    "wipe": "wipe"
+  },
+  "card": { "text": "card", "category": "table", "synonyms": ["cafe_table"] }
+}

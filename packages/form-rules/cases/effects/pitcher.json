@@ -1,0 +1,59 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Decanting (from #1868), both ways between two pitchers: a full one (1000 g) is taken and 500 g poured into an empty one; asking it for 750 g more is refused (it has 500) and nothing moves; the second is taken in the other hand and 250 g poured back. Every pour is two sets whose amounts sum to zero; the total stays 1000 g.",
+  "cases": [
+    {
+      "name": "decant_forward_refuse_too_much_decant_back",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "p1", "p2"] },
+          "p1": { "kind": "eden:pitcher", "fields": { "water": 1000 } },
+          "p2": { "kind": "eden:pitcher" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "p1", "form": "take" }, "receipt": "rp1",
+          "expect": { "verdict": "yes", "changes": [{ "change": "reparent", "node": "p1", "to": { "node": "b1", "hand": "left" } }], "events": [{ "event": "eden:taken", "node": "p1", "changes": [0] }], "timers": [] }
+        },
+        {
+          "act": { "this": "p1", "form": "pour", "args": { "into": "p2", "amount": 500 } }, "receipt": "rp2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "p1", "field": "water", "n": 1, "to": 500, "by": -500 },
+              { "change": "set", "node": "p2", "field": "water", "n": 1, "to": 500, "by": 500 }
+            ],
+            "events": [{ "event": "eden:poured", "node": "p1", "changes": [0, 1] }],
+            "timers": []
+          }
+        },
+        {
+          "act": { "this": "p1", "form": "pour", "args": { "into": "p2", "amount": 750 } }, "receipt": "rp3",
+          "expect": { "verdict": "no", "reason": "not_enough", "need": 2 }
+        },
+        {
+          "act": { "this": "p2", "form": "take" }, "receipt": "rp4",
+          "expect": { "verdict": "yes", "changes": [{ "change": "reparent", "node": "p2", "to": { "node": "b1", "hand": "right" } }] }
+        },
+        {
+          "act": { "this": "p2", "form": "pour", "args": { "into": "p1", "amount": 250 } }, "receipt": "rp5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "p2", "field": "water", "n": 1, "to": 250, "by": -250 },
+              { "change": "set", "node": "p1", "field": "water", "n": 1, "to": 750, "by": 250 }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "p1": { "kind": "eden:pitcher", "fields": { "water": 750 } },
+        "p2": { "kind": "eden:pitcher", "fields": { "water": 250 } },
+        "b1": { "hands": { "left": "p1", "right": "p2" } }
+      }
+    }
+  ]
+}

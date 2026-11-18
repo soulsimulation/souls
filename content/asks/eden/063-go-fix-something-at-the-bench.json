@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":63,"group":"object","words":"go fix something at the bench","obvious":2,"things":{"workbench":"eden:workbench","toolbox":"eden:toolbox"},"chain":[{"this":"toolbox","form":"open"},{"this":"workbench","form":"repair"}]}

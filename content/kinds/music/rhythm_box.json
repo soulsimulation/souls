@@ -1,0 +1,572 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:rhythm_box",
+  "owner": "thing",
+  "state": {
+    "kick_1": {
+      "n": 1,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "hit",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "kick_2": {
+      "n": 2,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "kick_3": {
+      "n": 3,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "kick_4": {
+      "n": 4,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "kick_5": {
+      "n": 5,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "hit",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "kick_6": {
+      "n": 6,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "kick_7": {
+      "n": 7,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "kick_8": {
+      "n": 8,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "snare_1": {
+      "n": 9,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "snare_2": {
+      "n": 10,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "snare_3": {
+      "n": 11,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "hit",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "snare_4": {
+      "n": 12,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "snare_5": {
+      "n": 13,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "snare_6": {
+      "n": 14,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "snare_7": {
+      "n": 15,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "hit",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "snare_8": {
+      "n": 16,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "hat_1": {
+      "n": 17,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "hit",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "hat_2": {
+      "n": 18,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "hat_3": {
+      "n": 19,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "hit",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "hat_4": {
+      "n": 20,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "hat_5": {
+      "n": 21,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "hit",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "hat_6": {
+      "n": 22,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "hat_7": {
+      "n": 23,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "hit",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "hat_8": {
+      "n": 24,
+      "type": "enum",
+      "values": ["rest", "hit"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tempo": {
+      "n": 25,
+      "type": "enum",
+      "values": ["bpm_60", "bpm_90", "bpm_120"],
+      "default": "bpm_90",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "playing": {
+      "n": 26,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [210, 40, 0]
+    },
+    "pads": {
+      "role": "contact",
+      "at_mm": [0, 90, 25]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 600]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [420, 110, 220]
+  },
+  "forms": {
+    "program": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "step": {
+          "type": "field",
+          "of": ["kick_1", "kick_2", "kick_3", "kick_4", "kick_5", "kick_6", "kick_7", "kick_8", "snare_1", "snare_2", "snare_3", "snare_4", "snare_5", "snare_6", "snare_7", "snare_8", "hat_1", "hat_2", "hat_3", "hat_4", "hat_5", "hat_6", "hat_7", "hat_8"]
+        },
+        "beat": {
+          "type": "value",
+          "of": ["hit", "rest"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "playing",
+          "is": false,
+          "says": "stop_to_edit"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pads"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "step"
+          },
+          "to": {
+            "arg": "beat"
+          },
+          "event": "programmed"
+        }
+      ]
+    },
+    "set_tempo": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tempo": {
+          "type": "value",
+          "of": ["bpm_60", "bpm_90", "bpm_120"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "playing",
+          "is": false,
+          "says": "stop_for_tempo"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pads"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tempo",
+          "to": {
+            "arg": "tempo"
+          },
+          "event": "tempo_set"
+        }
+      ]
+    },
+    "start": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "playing",
+          "is": false,
+          "says": "already_playing"
+        },
+        {
+          "need": "any",
+          "fields": ["kick_1", "kick_2", "kick_3", "kick_4", "kick_5", "kick_6", "kick_7", "kick_8", "snare_1", "snare_2", "snare_3", "snare_4", "snare_5", "snare_6", "snare_7", "snare_8", "hat_1", "hat_2", "hat_3", "hat_4", "hat_5", "hat_6", "hat_7", "hat_8"],
+          "not": "rest",
+          "says": "empty_rhythm"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pads"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": true,
+          "event": "started"
+        }
+      ]
+    },
+    "stop": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "playing",
+          "is": true,
+          "says": "already_stopped"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pads"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": false,
+          "event": "stopped"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:rhythm_box",
+    "table": [
+      {
+        "part": "light",
+        "field": "playing",
+        "do": "glow",
+        "at": {
+          "true": 1000,
+          "false": 0
+        }
+      },
+      {
+        "sound": "music",
+        "field": "playing",
+        "at": {
+          "true": 800,
+          "false": 0
+        },
+        "reach_mm": 10000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"box","at":[0,40,0],"size":[420,80,220],"tint":"case"},
+        {"kind":"box","at":[0,82,-85],"size":[400,6,30],"tint":"panel"},
+        {"kind":"box","at":[-175,84,-30],"size":[38,8,38],"tint":"pad","when":"@kick_1=rest"},
+        {"kind":"box","at":[-175,84,-30],"size":[38,14,38],"tint":"kick","when":"@kick_1=hit"},
+        {"kind":"box","at":[-125,84,-30],"size":[38,8,38],"tint":"pad","when":"@kick_2=rest"},
+        {"kind":"box","at":[-125,84,-30],"size":[38,14,38],"tint":"kick","when":"@kick_2=hit"},
+        {"kind":"box","at":[-75,84,-30],"size":[38,8,38],"tint":"pad","when":"@kick_3=rest"},
+        {"kind":"box","at":[-75,84,-30],"size":[38,14,38],"tint":"kick","when":"@kick_3=hit"},
+        {"kind":"box","at":[-25,84,-30],"size":[38,8,38],"tint":"pad","when":"@kick_4=rest"},
+        {"kind":"box","at":[-25,84,-30],"size":[38,14,38],"tint":"kick","when":"@kick_4=hit"},
+        {"kind":"box","at":[25,84,-30],"size":[38,8,38],"tint":"pad","when":"@kick_5=rest"},
+        {"kind":"box","at":[25,84,-30],"size":[38,14,38],"tint":"kick","when":"@kick_5=hit"},
+        {"kind":"box","at":[75,84,-30],"size":[38,8,38],"tint":"pad","when":"@kick_6=rest"},
+        {"kind":"box","at":[75,84,-30],"size":[38,14,38],"tint":"kick","when":"@kick_6=hit"},
+        {"kind":"box","at":[125,84,-30],"size":[38,8,38],"tint":"pad","when":"@kick_7=rest"},
+        {"kind":"box","at":[125,84,-30],"size":[38,14,38],"tint":"kick","when":"@kick_7=hit"},
+        {"kind":"box","at":[175,84,-30],"size":[38,8,38],"tint":"pad","when":"@kick_8=rest"},
+        {"kind":"box","at":[175,84,-30],"size":[38,14,38],"tint":"kick","when":"@kick_8=hit"},
+        {"kind":"box","at":[-175,84,25],"size":[38,8,38],"tint":"pad","when":"@snare_1=rest"},
+        {"kind":"box","at":[-175,84,25],"size":[38,14,38],"tint":"snare","when":"@snare_1=hit"},
+        {"kind":"box","at":[-125,84,25],"size":[38,8,38],"tint":"pad","when":"@snare_2=rest"},
+        {"kind":"box","at":[-125,84,25],"size":[38,14,38],"tint":"snare","when":"@snare_2=hit"},
+        {"kind":"box","at":[-75,84,25],"size":[38,8,38],"tint":"pad","when":"@snare_3=rest"},
+        {"kind":"box","at":[-75,84,25],"size":[38,14,38],"tint":"snare","when":"@snare_3=hit"},
+        {"kind":"box","at":[-25,84,25],"size":[38,8,38],"tint":"pad","when":"@snare_4=rest"},
+        {"kind":"box","at":[-25,84,25],"size":[38,14,38],"tint":"snare","when":"@snare_4=hit"},
+        {"kind":"box","at":[25,84,25],"size":[38,8,38],"tint":"pad","when":"@snare_5=rest"},
+        {"kind":"box","at":[25,84,25],"size":[38,14,38],"tint":"snare","when":"@snare_5=hit"},
+        {"kind":"box","at":[75,84,25],"size":[38,8,38],"tint":"pad","when":"@snare_6=rest"},
+        {"kind":"box","at":[75,84,25],"size":[38,14,38],"tint":"snare","when":"@snare_6=hit"},
+        {"kind":"box","at":[125,84,25],"size":[38,8,38],"tint":"pad","when":"@snare_7=rest"},
+        {"kind":"box","at":[125,84,25],"size":[38,14,38],"tint":"snare","when":"@snare_7=hit"},
+        {"kind":"box","at":[175,84,25],"size":[38,8,38],"tint":"pad","when":"@snare_8=rest"},
+        {"kind":"box","at":[175,84,25],"size":[38,14,38],"tint":"snare","when":"@snare_8=hit"},
+        {"kind":"box","at":[-175,84,80],"size":[38,8,38],"tint":"pad","when":"@hat_1=rest"},
+        {"kind":"box","at":[-175,84,80],"size":[38,14,38],"tint":"hat","when":"@hat_1=hit"},
+        {"kind":"box","at":[-125,84,80],"size":[38,8,38],"tint":"pad","when":"@hat_2=rest"},
+        {"kind":"box","at":[-125,84,80],"size":[38,14,38],"tint":"hat","when":"@hat_2=hit"},
+        {"kind":"box","at":[-75,84,80],"size":[38,8,38],"tint":"pad","when":"@hat_3=rest"},
+        {"kind":"box","at":[-75,84,80],"size":[38,14,38],"tint":"hat","when":"@hat_3=hit"},
+        {"kind":"box","at":[-25,84,80],"size":[38,8,38],"tint":"pad","when":"@hat_4=rest"},
+        {"kind":"box","at":[-25,84,80],"size":[38,14,38],"tint":"hat","when":"@hat_4=hit"},
+        {"kind":"box","at":[25,84,80],"size":[38,8,38],"tint":"pad","when":"@hat_5=rest"},
+        {"kind":"box","at":[25,84,80],"size":[38,14,38],"tint":"hat","when":"@hat_5=hit"},
+        {"kind":"box","at":[75,84,80],"size":[38,8,38],"tint":"pad","when":"@hat_6=rest"},
+        {"kind":"box","at":[75,84,80],"size":[38,14,38],"tint":"hat","when":"@hat_6=hit"},
+        {"kind":"box","at":[125,84,80],"size":[38,8,38],"tint":"pad","when":"@hat_7=rest"},
+        {"kind":"box","at":[125,84,80],"size":[38,14,38],"tint":"hat","when":"@hat_7=hit"},
+        {"kind":"box","at":[175,84,80],"size":[38,8,38],"tint":"pad","when":"@hat_8=rest"},
+        {"kind":"box","at":[175,84,80],"size":[38,14,38],"tint":"hat","when":"@hat_8=hit"},
+        {"kind":"sphere","at":[170,92,-85],"r":14,"segments":10,"tint":"lamp","role":"light"}
+      ],
+      "palette": {
+        "case": "#2e3238",
+        "panel": "#1c1f23",
+        "pad": "#55595f",
+        "kick": "#d0573c",
+        "snare": "#e3b341",
+        "hat": "#6fb3d2",
+        "lamp": "#7ee08a"
+      },
+      "tags": ["music", "drum-machine", "object"]
+    }
+  },
+  "text": {
+    "card": "A rhythm box: three lanes (kick, snare, hat) of eight steps, looped at a tempo.",
+    "music": "music",
+    "drums": "drums",
+    "beat": "beat",
+    "put_down_first": "Empty your hands before working the rhythm box.",
+    "stop_to_edit": "Stop the loop before editing its rhythm lanes.",
+    "stop_for_tempo": "Stop the loop before changing tempo.",
+    "already_playing": "The rhythm is already playing; stop it before restarting.",
+    "empty_rhythm": "Program at least one selected step before starting an empty rhythm.",
+    "already_stopped": "The rhythm is already stopped.",
+    "howto_play": "With empty hands and the loop stopped, set steps of the kick, snare and hat lanes to hit or rest, choose a tempo, then start it."
+  },
+  "card": {
+    "text": "card",
+    "category": "music",
+    "synonyms": ["drums", "beat"]
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "program"
+        },
+        {
+          "form": "set_tempo"
+        },
+        {
+          "form": "start"
+        }
+      ]
+    }
+  }
+}

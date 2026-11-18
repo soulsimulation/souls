@@ -1,0 +1,30 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:earthwork_tray",
+  "owner": "thing",
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 900] }
+  },
+  "slots": {
+    "back_1": { "admits": "thing", "kinds": ["eden:earth_column"], "most": 1, "at_mm": [-250, 40, -120], "fits_mm": [230, 170, 210], "row": "back", "place": 1, "end": "first" },
+    "back_2": { "admits": "thing", "kinds": ["eden:earth_column"], "most": 1, "at_mm": [0, 40, -120], "fits_mm": [230, 170, 210], "row": "back", "place": 2 },
+    "back_3": { "admits": "thing", "kinds": ["eden:earth_column"], "most": 1, "at_mm": [250, 40, -120], "fits_mm": [230, 170, 210], "row": "back", "place": 3, "end": "last" },
+    "front_1": { "admits": "thing", "kinds": ["eden:earth_column"], "most": 1, "at_mm": [-250, 40, 120], "fits_mm": [230, 170, 210], "row": "front", "place": 1, "end": "first" },
+    "front_2": { "admits": "thing", "kinds": ["eden:earth_column"], "most": 1, "at_mm": [0, 40, 120], "fits_mm": [230, 170, 210], "row": "front", "place": 2 },
+    "front_3": { "admits": "thing", "kinds": ["eden:earth_column"], "most": 1, "at_mm": [250, 40, 120], "fits_mm": [230, 170, 210], "row": "front", "place": 3, "end": "last" }
+  },
+  "geometry": { "bounds_mm": [800, 240, 500] },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:earthwork_tray",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,20,0],"size":[800,40,500],"tint":"wood"},{"kind":"box","at":[-390,130,0],"size":[20,220,500],"tint":"wood"},{"kind":"box","at":[390,130,0],"size":[20,220,500],"tint":"wood"},{"kind":"box","at":[0,130,-240],"size":[760,220,20],"tint":"wood"},{"kind":"box","at":[0,130,240],"size":[760,220,20],"tint":"wood"}],"palette":{"wood":"#65513a"},"tags":["art","earthwork","tray","object"]}
+  },
+  "text": {
+    "card": "A raised earthwork tray of six soil columns in two rows, reshaped by pail.",
+    "art": "art",
+    "earthwork": "earthwork",
+    "landscape": "landscape"
+  },
+  "card": { "text": "card", "category": "art", "synonyms": ["earthwork", "landscape"] }
+}

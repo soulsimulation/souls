@@ -1,0 +1,15 @@
+# A pour (Engine v2 B2, #2681; v2/crates/replica/src/moves.rs). The hand holds a vessel; reach is measured from the
+# vessel's spout to the receiving thing's mouth. Contact begins when start-up ends and the pour runs for its own phase.
+# Times in µs, reach in µm. From Soul Actions' content/moves (SA-D4).
+{
+  1: "souls:pour", 2: 1,
+  3: [{1: 2, 2: 2}],                        # claims any one manipulator
+  4: [2],
+  5: [2],
+  6: [{1: "souls:start-up", 2: 700000},     # contact at its end
+      {1: "souls:pour", 2: 2500000},        # the contact window
+      {1: "souls:recovery", 2: 500000}],
+  7: {1: 3, 2: "souls:spout"},              # a named point of the thing held
+  8: 600000,
+  9: "souls:mouth"
+}
