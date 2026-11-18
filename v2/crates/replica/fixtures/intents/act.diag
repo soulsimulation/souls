@@ -1,0 +1,3 @@
+# A checked act (Engine v2 T10, #2664, v2/docs/intents.md): Soul 100 sits on the sofa, claiming every locomotion
+# resource (`{1: 1 all, 2: class 1}`), decided against version 42, expiring at world time 60 s.
+{1: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 2: "eden:sit", 3: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8], 5: 7, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0], 1, 42], 7: 60000000, 8: [{1: 1, 2: 1}]}
