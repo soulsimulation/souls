@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":148,"group":"two-things","words":"put the easel by the pond","obvious":2,"things":{"easel":"eden:easel","pond":"eden:pond"},"chain":[{"this":"me","form":"pick_up","carry":"easel","args":{"thing":"easel"}},{"this":"me","form":"put","place":{"at":"next_to","thing":"easel","anchor":"pond"},"args":{"thing":"easel"}}]}

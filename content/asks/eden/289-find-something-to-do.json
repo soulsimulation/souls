@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":289,"group":"open-ended","words":"find something to do","obvious":3,"things":{"piano":"eden:piano","path":"eden:footpath"},"chain":[{"any":[[{"this":"piano","form":"play"}],[{"this":"me","form":"go_to","args":{"place":"path"}}]]}]}

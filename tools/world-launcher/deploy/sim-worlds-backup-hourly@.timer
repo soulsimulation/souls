@@ -1,0 +1,12 @@
+# Installed by install.sh and NOT enabled by it (#2542): enabling is the maintainer's step.
+#   systemctl enable --now sim-worlds-backup-hourly@production.timer
+[Unit]
+Description=Hourly backup of sim-worlds@%i changed databases (minute 15 of each hour, UTC)
+
+[Timer]
+OnCalendar=*-*-* *:15:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

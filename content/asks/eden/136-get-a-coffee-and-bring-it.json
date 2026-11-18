@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":136,"group":"two-things","words":"get a coffee and bring it to the table","obvious":3,"things":{"coffee":"eden:cup_of_coffee_pack","counter":"eden:counter","table":"eden:round_table"},"chain":[{"this":"counter","form":"take"},{"this":"me","form":"put","place":{"at":"on","thing":"coffee","anchor":"table"},"args":{"thing":"coffee"}}]}
