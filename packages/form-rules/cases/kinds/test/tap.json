@@ -3,7 +3,7 @@
   "kind": "test:tap",
   "owner": "thing",
   "state": {
-    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 1000000000, "audience": "public" }
+    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 1000000000, "audience": {"rule": "everyone"} }
   },
   "geometry": { "bounds_mm": [80, 200, 200] },
   "forms": {},

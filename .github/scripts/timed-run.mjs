@@ -16,6 +16,10 @@
 // `runner=souls-wide` (D5) is one instance on the cores of four souls-timed ones, 12 or more physical cores, for the gates'
 // wide runs: the split commands with a core plan, and settled; viewer arms above 2,000 run there only. It and the narrow
 // instances share CPUs, so the start gate is the soft mutex between them (docs/testing.md, "Wide runner").
+// `v2-bench` runs an Engine v2 bench (a [[bin]] of the ref's v2/tools/bench/Cargo.toml) in release from v2/, `repeats`
+// times, on the runner's own cores as walk does; its stdout goes to the job summary. The Rust toolchain the ref's
+// v2/rust-toolchain.toml pins is installed in the per-run directory by the workflow. `--prep <name>` (#3185) first writes
+// named inputs into the per-run directory with the ref's own code, untimed; the bench's args name them `@<output>`.
 //
 //   node timed-run.mjs inputs                                        validate INPUT_* env; write step outputs (`target`)
 //   node timed-run.mjs load   --record <file>                        starting load; refuse to start above the gate
@@ -34,7 +38,7 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
 
-export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'load', 'settled', 'hundred', 'colocate', 'viewers', 'counted', 'clip', 'page'];
+export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'load', 'settled', 'hundred', 'colocate', 'viewers', 'counted', 'clip', 'page', 'v2-bench'];
 /** Proof clip kits live here in the workflow's commit; each holds kit.json ({template, eden?, viewport?, localStorage?}) and steps.mjs. */
 export const CLIP_KITS = 'tools/proof/clips';
 /** Counted scenarios: name → kit directory (repository-relative) and its files. Each kit runs one cell with
@@ -84,6 +88,55 @@ export const ARG_ALLOW = {
   page: { '--souls': list(/^(500|[1-4]\d\d|[1-9]\d?)$/, 4), '--shape': (v) => v === 'event' || v === 'uniform', '--warm-sec': int(1, 120), '--measure-sec': int(5, 300), '--settle-sec': int(1, 600), '--profile-sec': int(1, 60), '--short': FLAG },
 };
 
+/** v2-bench: the bench crate's manifest in the ref, and what may follow `--`: plain tokens only, never shell syntax. */
+export const V2_BENCH = 'v2/tools/bench/Cargo.toml';
+const BENCH_BIN = /^[a-z0-9][a-z0-9_-]{0,40}$/, BENCH_TOKEN = /^[A-Za-z0-9._=/-]{1,200}$/;
+/** #3185: the inputs a v2-bench may have prepared before its build (untimed), each written into the per-run directory
+ *  by the ref's own code and named in the bench's arguments as `@<output>`. `eden-facts`: N1's export of Eden 2026 (the
+ *  ref's v2/tools/import-eden/export/export.ts) and N18's labels of today's engine (v2-prep/eden-labels.ts, from this
+ *  workflow's commit, run against the ref), which N15's walkers read. Only these need pnpm install and media. */
+export const V2_PREPS = { 'eden-facts': { facts: 'eden-2026.facts.json', labels: 'labels.json' } };
+/** v2-bench `args`: `--bin <name>`, optionally `--prep <name>` (V2_PREPS), then optionally `--` and up to 20 plain
+ *  tokens for the bench; with a prep, a token may also be `@<output>` of it. The name is checked against the ref's
+ *  manifest when the run starts (benchBins). */
+export function checkBenchArgs(args) {
+  const t = String(args ?? '').trim().split(/\s+/).filter(Boolean);
+  if (t[0] !== '--bin' || !BENCH_BIN.test(t[1] ?? '')) throw new Error(`input args: v2-bench needs --bin <name> first (a [[bin]] of ${V2_BENCH})`);
+  const prep = t[2] === '--prep' ? t[3] : null, at = prep === null ? 2 : 4, pass = t.slice(at + 1);
+  if (prep !== null && !Object.hasOwn(V2_PREPS, prep ?? '')) throw new Error(`input args: --prep ${JSON.stringify(prep ?? '')} is not a prep (${Object.keys(V2_PREPS).join(', ')})`);
+  if (t.length > at && t[at] !== '--') throw new Error(`input args: ${JSON.stringify(t[at])}: the bench's own arguments follow --`);
+  if (pass.length > 20) throw new Error('input args: at most 20 arguments for the bench');
+  for (const x of pass) {
+    if (x.startsWith('@')) { if (prep === null || !Object.hasOwn(V2_PREPS[prep], x.slice(1))) throw new Error(`input args: ${JSON.stringify(x)} names no output of --prep ${prep ?? '(none)'}`); continue; }
+    if (!BENCH_TOKEN.test(x)) throw new Error(`input args: ${JSON.stringify(x)} is not a plain token (letters, digits, . _ = / -)`);
+  }
+  return ['--bin', t[1], ...(prep === null ? [] : ['--prep', prep]), ...(t.length > at ? ['--', ...pass] : [])];
+}
+/** The parts of checked v2-bench args. */
+export function benchParts(args) {
+  const prep = args[2] === '--prep' ? args[3] : null;
+  return { bin: args[1], prep, pass: args.slice(prep === null ? 2 : 4) };
+}
+/** The binaries a Cargo.toml declares: the name of each [[bin]] table. */
+export function benchBins(toml) {
+  const bins = [];
+  let inBin = false;
+  for (const l of String(toml).split('\n')) {
+    const h = /^\s*(\[\[?)\s*([^\]]+?)\s*\]\]?\s*(#.*)?$/.exec(l);
+    if (h) { inBin = h[1] === '[[' && h[2] === 'bin'; continue; }
+    const m = inBin && /^\s*name\s*=\s*"([^"]+)"/.exec(l);
+    if (m) bins.push(m[1]);
+  }
+  return bins;
+}
+/** v2-bench: cargo's arguments for the build (untimed) and for each timed repeat (cwd: the ref's v2/). `prepDir` turns
+ *  each `@<output>` into its file there; without it they stay as written (for the logs). */
+export function benchLines(inp, prepDir = null) {
+  const { bin, prep, pass } = benchParts(inp.args), files = prep === null ? {} : V2_PREPS[prep];
+  const fill = (x) => (prepDir && x.startsWith('@') ? join(prepDir, files[x.slice(1)]) : x);
+  return { build: ['build', '-p', 'bench', '--release', '--locked', '--bin', bin], run: ['run', '-p', 'bench', '--release', '--locked', '--bin', bin, ...pass.map(fill)] };
+}
+
 /** `args` → a checked argument list for `command`: whitespace-separated `--flag value` pairs (or bare flags) from its
  *  allowlist, once each. */
 export function checkArgs(command, args) {
@@ -113,7 +166,7 @@ export function parseInputs(env) {
   if (!RUNNERS.includes(runner)) bad('runner', runner, RUNNERS.join(' or '));
   if (runner === 'hosted' && command !== 'counted') bad('runner', runner, `${command} is a timing run and runs on souls-timed only`);
   if (runner === 'souls-wide' && !WIDE.includes(command)) bad('runner', runner, `souls-wide runs ${WIDE.join(', ')} only`);
-  const args = checkArgs(command, env.INPUT_ARGS), inp = { ref, command, repeats: Number(repeats), args };
+  const args = command === 'v2-bench' ? checkBenchArgs(env.INPUT_ARGS) : checkArgs(command, env.INPUT_ARGS), inp = { ref, command, repeats: Number(repeats), args };
   const cores = String(env.INPUT_CORES ?? '').trim();   // #2507: a core plan, for the split commands only
   if (cores && !SPLIT.includes(command)) bad('cores', cores, `a core plan is for ${SPLIT.join(', ')} only`);
   if (cores) inp.cores = parseCorePlan(cores) ?? bad('cores', cores, 'world=N or world=N,launcher=M (physical cores, 1 to 64); the load drivers get the rest');
@@ -168,7 +221,7 @@ export function countedSteps(inp, { kit, out, port }) {
   ];
 }
 /** The log of repeat k: walk writes one per repeat, the others one in all. */
-export const logName = (command, k) => (command === 'walk' ? `walk-r${k}.log` : command === 'eval-scripted' ? 'eval.log' : command === 'counted' ? `counted/${k}.log` : `${command}.log`);
+export const logName = (command, k) => (command === 'walk' || command === 'v2-bench' ? `${command}-r${k}.log` : command === 'eval-scripted' ? 'eval.log' : command === 'counted' ? `counted/${k}.log` : `${command}.log`);
 /** A clip's frame timing from its frames' presentation times (seconds) → count, span, mean fps, largest gap. */
 export function frameTiming(pts) {
   const t = pts.filter(Number.isFinite).sort((a, b) => a - b), gaps = t.slice(1).map((x, i) => x - t[i]), r3 = (x) => +x.toFixed(3);
@@ -273,6 +326,7 @@ export const PUBLISH = {
   // the clip, its sidecar (scrubbed) and a still of a page that never arrived; the world's data and the Soul folders stay
   clip: ['clip/*.mp4', 'clip/*.webm', 'clip/*.json', 'clip/*.open-failed.png', 'clip.log'],
   page: ['page/results.json', 'page/REPORT.md', 'page/*.png', 'page/world.log', 'page.log'],
+  'v2-bench': ['v2-bench-prep.log', 'v2-bench-build.log', ...[1, 2, 3].map((k) => `v2-bench-r${k}.log`)],
 };
 /** Media a timed run publishes byte for byte (never scrubbed as text). */
 export const BINARY = /\.(mp4|webm|png)$/;
@@ -457,6 +511,62 @@ async function runClip(inp, rec, out, env) {
   writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, runs: [{ repeat: 1, exitCode: code, wallMs: clip.wallMs, clip }] }, null, 1));
   if (code !== 0) throw new Error(`the recorder exited ${code}${code === 5 ? ' (no hardware GL renderer)' : code === 4 ? ' (privacy hit: the take is not published)' : ''}`);
 }
+/** One cargo call (cwd: the ref's v2/), its stdout and stderr to the log and the job log; resolves to its exit code and stdout. */
+async function cargo(args, { env, log }) {
+  const ws = createWriteStream(log), child = spawn('cargo', args, { cwd: 'v2', env, stdio: ['ignore', 'pipe', 'pipe'] }), so = [];
+  child.stdout.on('data', (b) => { so.push(b); ws.write(b); process.stdout.write(b); });
+  child.stderr.on('data', (b) => { ws.write(b); process.stdout.write(b); });
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
+  const code = await new Promise((r) => { child.on('error', () => r(127)); child.on('close', (c) => r(c ?? 1)); }); ws.end();
+  return { code, stdout: Buffer.concat(so).toString('utf8') };
+}
+/** An Engine v2 bench of the ref (cwd: its checkout): the binary must be a [[bin]] of its v2/tools/bench/Cargo.toml; it is
+ *  built in release (untimed), then run `repeats` times on the runner's own cores. Each repeat's stdout (the bench's
+ *  table) goes to the job summary, scrubbed; HOME is inside the per-run directory. */
+/** #3185: a v2-bench prep (V2_PREPS), before the build and untimed: each step a node process of the ref (cwd: its root),
+ *  writing into `dir` in the per-run directory. Its output goes to v2-bench-prep.log and, scrubbed, to the job log.
+ *  Returns each output's bytes and SHA-256 for the record. */
+async function prepV2(prep, dir, { env, log, sw }) {
+  mkdirSync(dir, { recursive: true });
+  const f = V2_PREPS[prep], ws = createWriteStream(log), steps = prep === 'eden-facts' ? [
+    ['facts', ['v2/tools/import-eden/export/export.ts', '--out', join(dir, f.facts)], {}],
+    ['labels', [join(import.meta.dirname, 'v2-prep/eden-labels.ts'), '--out', join(dir, f.labels)], { DATA_DIR: join(dir, 'data') }],
+  ] : [];
+  const t0 = Date.now();
+  for (const [what, args, extra] of steps) {
+    console.log(`v2-bench prep ${prep}: ${what}`);
+    const child = spawn(process.execPath, args, { env: { ...env, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
+    for (const s of [child.stdout, child.stderr]) s.on('data', (b) => { ws.write(b); process.stdout.write(scrub(b.toString('utf8'), sw)); });
+    const code = await new Promise((r) => { child.on('error', () => r(127)); child.on('close', (c) => r(c ?? 1)); });
+    if (code !== 0) { ws.end(); throw new Error(`v2-bench: prep ${prep}, ${what}, exited ${code}`); }
+  }
+  ws.end();
+  const outputs = Object.fromEntries(Object.entries(f).map(([k, name]) => { const b = readFileSync(join(dir, name)); return [k, { bytes: b.length, sha256: createHash('sha256').update(b).digest('hex') }]; }));
+  for (const [k, o] of Object.entries(outputs)) console.log(`v2-bench prep ${prep}: @${k} ${o.bytes} bytes, sha256 ${o.sha256}`);
+  return { prep, wallMs: Date.now() - t0, outputs };
+}
+async function runV2Bench(inp, rec, out, env) {
+  const bins = existsSync(V2_BENCH) ? benchBins(readFileSync(V2_BENCH, 'utf8')) : [], { bin, prep } = benchParts(inp.args);
+  if (!bins.includes(bin)) throw new Error(`v2-bench: ${bin} is not a [[bin]] of ${V2_BENCH} in the ref (${bins.join(', ') || 'no manifest or no [[bin]]'})`);
+  env.HOME = join(env.PER_RUN, 'home'); mkdirSync(env.HOME, { recursive: true });
+  const sw = scrubWith(), summary = (t) => { if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, t); };
+  const prepDir = prep === null ? null : join(env.PER_RUN, 'prep'), shown = benchLines(inp), lines = benchLines(inp, prepDir);
+  const prepped = prep === null ? null : await prepV2(prep, prepDir, { env, log: join(out, 'v2-bench-prep.log'), sw });
+  if (prepped) rec = { ...rec, prep: prepped };
+  console.log(`v2-bench: cargo ${lines.build.join(' ')}`);
+  const t0 = Date.now(), b = await cargo(lines.build, { env, log: join(out, 'v2-bench-build.log') }), build = { exitCode: b.code, wallMs: Date.now() - t0 };
+  const runs = [];
+  if (b.code === 0) for (let k = 1; k <= inp.repeats; k++) {
+    console.log(`v2-bench ${k}/${inp.repeats}: cargo ${shown.run.join(' ')}`);
+    const load = la(), t = Date.now(), r = await cargo(lines.run, { env, log: join(out, logName('v2-bench', k)) });
+    runs.push({ repeat: k, exitCode: r.code, wallMs: Date.now() - t, load: { start: load, end: la() }, cpus: ownCpus().length });
+    summary(`### v2-bench ${bin}, repeat ${k} of ${inp.repeats} (exit ${r.code})\n\n\`cargo ${shown.run.join(' ')}\` from \`v2/\` at ${String(env.REF_COMMIT ?? '').slice(0, 12)}, 1- and 5-min load ${load.join(' ')}\n\n\`\`\`text\n${scrub(r.stdout, sw).slice(-60_000)}\n\`\`\`\n\n`);
+  }
+  writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, build, runs }, null, 1));
+  if (b.code !== 0) throw new Error(`v2-bench: the release build exited ${b.code}`);
+  const failed = runs.filter((r) => r.exitCode !== 0);
+  if (failed.length) throw new Error(`${failed.length} of ${runs.length} run(s) exited non-zero`);
+}
 const scrubWith = () => { const env = process.env, u = (() => { try { return userInfo().username; } catch { return env.USER; } })();
   return { paths: [[env.PER_RUN, '<per-run>'], [env.GITHUB_WORKSPACE, '.'], [env.RUNNER_WORKSPACE, '<runner-work>'], [env.RUNNER_TEMP, '<runner-temp>'], [env.HOME, '~']], names: [[hostname(), '<host>'], [u, '<user>']] }; };
 
@@ -499,6 +609,7 @@ async function main(cmd) {
     mkdirSync(out, { recursive: true });
     if (inp.command === 'counted') return runCounted(inp, rec, out, env);
     if (inp.command === 'clip') return runClip(inp, rec, out, env);
+    if (inp.command === 'v2-bench') return runV2Bench(inp, rec, out, env);
     // #1970: the world on two physical cores, the load generator (the driver and all it starts but the world) on the rest
     // (one or two). HOME goes inside the per-run directory: the capacity bench moves finished world data under ~/.Trash.
     const split = SPLIT.includes(inp.command) ? splitCores(ownCpus(), siblingsOf, inp.cores) : null;

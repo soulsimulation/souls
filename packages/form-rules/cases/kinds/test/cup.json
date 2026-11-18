@@ -3,7 +3,7 @@
   "kind": "test:cup",
   "owner": "thing",
   "state": {
-    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 0, "max": 300, "audience": "public" }
+    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 0, "max": 300, "audience": {"rule": "everyone"} }
   },
   "points": {
     "handle": { "role": "grip", "at_mm": [50, 40, 0] }
