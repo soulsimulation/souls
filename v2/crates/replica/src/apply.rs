@@ -97,6 +97,29 @@ impl Replica {
         })
     }
 
+    /// A copy from a tree read back from a checkpoint (K5's `restore`) at `version`, the number of log entries it
+    /// holds (K18c, #3176). Each node's last change is taken as `version`: a reader asking what changed since an
+    /// older version is given every node, never too few.
+    pub fn restored(header: Header, tree: Tree, version: u64) -> Replica {
+        let mut changed_at = BTreeMap::new();
+        let mut by_version = BTreeSet::new();
+        let mut stack = vec![tree.root()];
+        while let Some(h) = stack.pop() {
+            if let Some(n) = tree.node(h) {
+                changed_at.insert(n.id(), version);
+                by_version.insert((version, n.id()));
+            }
+            stack.extend(tree.children(h).unwrap_or_default().iter().copied());
+        }
+        Replica {
+            tree,
+            header,
+            version,
+            changed_at,
+            by_version,
+        }
+    }
+
     pub fn header(&self) -> &Header {
         &self.header
     }

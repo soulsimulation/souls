@@ -51,10 +51,11 @@ pub const PARTS: [&str; 6] = [
     "log.sync",  // handed -> on the disk
     "world.out", // on the disk -> its answer handed to the gateway's socket (its writer)
 ];
-/// A tick's phases, in the loop's order (K18's tick, `crate::answers`; K18c #3176): the intents taken, due timers,
-/// the bodies (skills and the controller), committed acts and new moves, the tick's records, the frozen copy and the
-/// hand-off to the answers thread, the auditor's slice, and a checkpoint when one is due.
+/// A tick's phases, in the loop's order (K18's tick, `crate::answers`; K18c #3176): a checkpoint when one is due
+/// (between ticks, so first), the intents taken, due timers, the bodies (skills and the controller), committed acts
+/// and new moves, the tick's records, the frozen copy and the hand-off to the answers thread, the auditor's slice.
 pub const PHASES: [&str; 8] = [
+    "checkpoint",
     "take",
     "timers",
     "bodies",
@@ -62,7 +63,6 @@ pub const PHASES: [&str; 8] = [
     "record",
     "publish",
     "audit",
-    "checkpoint",
 ];
 /// How many phases a tick has.
 pub const NPHASES: usize = PHASES.len();

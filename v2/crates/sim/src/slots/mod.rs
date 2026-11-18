@@ -233,6 +233,63 @@ impl Slots {
         Ok(instance)
     }
 
+    /// The bodies in a slot, with the seat's thing and the stance: those whose sit has handed them over (seated, or
+    /// in the slot with the sit still finishing). What a restart seats again (K18c, #3176).
+    pub fn seated(&self) -> Vec<(Id, Id, Stance)> {
+        self.held
+            .iter()
+            .filter(|(_, h)| {
+                matches!(
+                    h.state,
+                    State::Seated(_) | State::Lowering { in_slot: true, .. }
+                )
+            })
+            .map(|(t, h)| (h.body, *t, h.stance))
+            .collect()
+    }
+
+    /// A restart (K18c, #3176): `body`, standing on the floor, is handed back into the seat of `thing` at `at`, held
+    /// there in `stance` by a driver with no timer, as a sit that finished leaves it. The hold is this table's again,
+    /// so a rise or another sit sees the seat taken. `seat-unknown`, `seat-taken` or `seat-already-held` as for a sit.
+    pub fn restore(
+        &mut self,
+        c: &mut Controller,
+        body: Id,
+        thing: Id,
+        stance: Stance,
+        at: Micros,
+    ) -> R<()> {
+        let Some(seat) = self.seats.get(&thing) else {
+            return refuse("seat-unknown", show(thing));
+        };
+        if let Some(h) = self.held.get(&thing) {
+            return refuse(
+                "seat-taken",
+                format!("{}: held by {}", show(thing), show(h.body)),
+            );
+        }
+        if self.by_body.contains_key(&body) {
+            return refuse("seat-already-held", show(body));
+        }
+        let frame = Frame {
+            node: thing,
+            slot: Some(seat.seat.slot),
+        };
+        let d = c.claim(body, &seated_shape())?;
+        c.seat(body, d, frame, at)?;
+        c.set(body, d, Part::Stance(stance))?;
+        self.held.insert(
+            thing,
+            Hold {
+                body,
+                stance,
+                state: State::Seated(Some(d)),
+            },
+        );
+        self.by_body.insert(body, thing);
+        Ok(())
+    }
+
     /// Starts `body` rising from its seat by move `mv` at `now`: the seated driver ends and the rise claims the legs,
     /// holding the stance until contact. `not-seated` when it is in no seat or still on its way down.
     #[allow(clippy::too_many_arguments)]
