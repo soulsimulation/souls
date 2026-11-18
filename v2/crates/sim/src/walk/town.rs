@@ -43,7 +43,7 @@ use replica::pose::{ControllerInput, Frame, Mode, Quat, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
@@ -62,6 +62,21 @@ struct Crossing {
     start: Vec3,
 }
 
+/// What finding the next corner cost (#3167): the calls, the searches and the straight-walk checks, counted always;
+/// their time in ns only when the town is given a [`Town::meter`] (a bench's; the engine reads no clock).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Spent {
+    /// `corner` calls, and their time.
+    pub corners: u64,
+    pub corner_ns: u64,
+    /// Straight-walk checks (`clear`), and their time.
+    pub clears: u64,
+    pub clear_ns: u64,
+    /// Route searches (`Map::route`), and their time.
+    pub searches: u64,
+    pub search_ns: u64,
+}
+
 /// The engine as the walk skill reads it.
 pub struct Town {
     pub tree: Tree,
@@ -75,6 +90,10 @@ pub struct Town {
     pub turns: Option<Turns>,
     /// The standing spots' tables, by owning node (N9).
     pub spots: Spots,
+    /// A monotonic ns reader for timing [`Spent`], given by a bench; `None` (the engine's own) times nothing.
+    pub meter: Option<fn() -> u64>,
+    /// What the next corners cost so far.
+    pub spent: Cell<Spent>,
     crossings: BTreeMap<Id, Crossing>,
 }
 
@@ -142,6 +161,8 @@ impl Town {
             doors,
             turns: Some(Turns::new()),
             spots: Spots::new(),
+            meter: None,
+            spent: Cell::new(Spent::default()),
             crossings: BTreeMap::new(),
         })
     }
@@ -163,6 +184,8 @@ impl Town {
             surfaces: &self.surfaces,
             buildings: &self.buildings,
             turns: self.turns.as_ref(),
+            meter: self.meter,
+            spent: &self.spent,
         }
     }
 }
@@ -174,6 +197,8 @@ pub struct View<'a> {
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
     turns: Option<&'a Turns>,
+    meter: Option<fn() -> u64>,
+    spent: &'a Cell<Spent>,
 }
 
 fn walk(v: [i64; 2]) -> ControllerInput {
@@ -405,8 +430,29 @@ impl World for Town {
 }
 
 impl View<'_> {
-    /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm).
+    fn now(&self) -> u64 {
+        self.meter.map_or(0, |m| m())
+    }
+
+    fn spend(&self, f: impl FnOnce(&mut Spent)) {
+        let mut s = self.spent.get();
+        f(&mut s);
+        self.spent.set(s);
+    }
+
+    /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm). Counted.
     fn clear(&self, body: &Body, to: [i64; 2]) -> Result<bool, Refusal> {
+        let t0 = self.now();
+        let r = self.straight(body, to);
+        let t1 = self.now();
+        self.spend(|s| {
+            s.clears += 1;
+            s.clear_ns += t1.saturating_sub(t0);
+        });
+        r
+    }
+
+    fn straight(&self, body: &Body, to: [i64; 2]) -> Result<bool, Refusal> {
         let node = node_of(body);
         let s = self
             .surfaces
@@ -421,6 +467,17 @@ impl View<'_> {
     /// Where `body` aims next on its way to `to` (on the node it stands on), x and z µm: `to` when a straight walk
     /// reaches it, else the next corner of the line there.
     pub fn corner(&self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
+        let t0 = self.now();
+        let r = self.next_corner(body, to);
+        let t1 = self.now();
+        self.spend(|s| {
+            s.corners += 1;
+            s.corner_ns += t1.saturating_sub(t0);
+        });
+        r
+    }
+
+    fn next_corner(&self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
         if self.clear(body, [to.x, to.z])? {
             return Ok([to.x, to.z]);
         }
@@ -433,7 +490,14 @@ impl View<'_> {
         ) else {
             return Err(refusal("off-ground", show(node)));
         };
-        let r = map.route(self.tree, from, goal, HANDS)?;
+        let t0 = self.now();
+        let r = map.route(self.tree, from, goal, HANDS);
+        let t1 = self.now();
+        self.spend(|s| {
+            s.searches += 1;
+            s.search_ns += t1.saturating_sub(t0);
+        });
+        let r = r?;
         // The first point of the line that is not where the body stands (the funnel may repeat a point).
         let c = r
             .first_line

@@ -17,3 +17,4 @@ path = "walkers/main.rs"
 replica = { path = "../../crates/replica" }
 sim = { path = "../../crates/sim" }
 import-eden = { path = "../import-eden" }
+skills = { path = "../../crates/skills" }
