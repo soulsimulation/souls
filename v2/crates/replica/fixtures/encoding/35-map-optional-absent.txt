@@ -1,0 +1,2 @@
+{1: 5, 3: 0} # a record whose optional field 2 is absent: omitted, not written as null
+a201050300

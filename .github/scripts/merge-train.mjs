@@ -7,7 +7,8 @@
 //        required checks are pending and could still land it non-strict; a red main CI is reported once on --notify-issue.
 //        During a release freeze (--freeze, the RELEASE_FREEZE repo variable, default $RELEASE_FREEZE) it picks nothing:
 //        pr is empty, frozen names the pinned sha, PRs already enqueued are taken back out of the queue (they keep
-//        merge:ready), and the reason goes to the run's summary
+//        merge:ready), and the reason goes to the run's summary. In queue mode a PR with any file outside ci-scope.mjs's
+//        LOW_RISK waits (skipped as mixed-cap, label kept) while MIXED_CAP such PRs are queued or set to auto-merge
 //   node .github/scripts/merge-train.mjs wait  --repo o/r --sha <sha> [--checks a,b] [--timeout-min 60] [--output f]
 //        polls check runs and commit statuses on <sha> until every required check concluded: result=pass|fail|timeout
 //   node .github/scripts/merge-train.mjs merge --repo o/r --pr <n> --sha <sha> [--queue true]
@@ -26,7 +27,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPolicy, tierFor } from '../../tools/proof/tier.mjs';
 import { APPROVED_LABEL, maintainerApproved } from '../../tools/proof/gate.mjs';
-import { JOBS } from './ci-scope.mjs';
+import { FULL_EVENTS, JOBS, lowRisk } from './ci-scope.mjs';
 import { coveredByQueue } from './ci-main.mjs';
 
 // The maintainer gate itself is tools/proof/gate.mjs, enforced by the required `proof-ok` check; the train uses the same
@@ -89,6 +90,14 @@ export function holdAction(s) {
 /** The queue let go of a PR that did not merge, that has not re-entered, and that its author still wants landed. */
 export const dropped = s => !s.merged && !s.isInMergeQueue && (s.labels?.nodes ?? []).some(l => l.name === READY);
 
+/**
+ * How many PRs with a file outside the low-risk paths (ci-scope.mjs `lowRisk`) may be in the queue or waiting to enter
+ * it through auto-merge at once. One more waits for room, keeping merge:ready; low-risk PRs enqueue up to the queue's
+ * own limit. A PR whose file list cannot be read counts as not low-risk. 8 since merge groups run no heavy leg (Gene,
+ * 18 Nov: ci-scope.mjs lightOnly), so a group of mixed PRs costs about what a low-risk one does.
+ */
+export const MIXED_CAP = 8;
+
 /** `gh pr merge` enqueues a PR whose checks are green and otherwise enables auto-merge, which enqueues it once they are. */
 export const enqueueArgs = ({ repo, pr, sha }) => ['pr', 'merge', String(pr), '--repo', repo, '--auto', '--squash', '--match-head-commit', sha];
 
@@ -136,11 +145,11 @@ export function awaitHead(state) {
 }
 
 /**
- * Main's CI over its recent ci.yml runs (push and workflow_dispatch on the default branch). Both are full scope
- * (ci-scope.mjs FULL_EVENTS), but older or misconfigured runs may not be, and a narrower green run says nothing
- * about an earlier failure: main is green only
- * when no run failed after the newest green full-scope run (`isFull`: a manual run, or one whose every qualify job
- * succeeded). A failed run re-run green counts as green (a re-run keeps its id). Cancelled and skipped runs say
+ * Main's CI over its recent ci.yml runs (push, schedule and workflow_dispatch on the default branch). The daily
+ * scheduled run and manual runs are full scope (ci-scope.mjs FULL_EVENTS); a push runs only the light legs its paths
+ * pick, and a narrower green run says nothing about an earlier failure: main is green only
+ * when no run failed after the newest green full-scope run (`isFull`: a scheduled or manual run, or one whose every
+ * qualify job succeeded). A failed run re-run green counts as green (a re-run keeps its id). Cancelled and skipped runs say
  * nothing. With no green full-scope run in the window main is `unproven` (strict): an older failure may be hidden.
  * Red returns `since`, the first failed run of the streak, which keys the one notice per red streak.
  */
@@ -156,10 +165,11 @@ export function mainCiState(runs = [], isFull = () => false) {
   return proven ? { conclusion: 'success', since: null } : { conclusion: 'unproven', since: 'unproven' };
 }
 
-/** A run checked everything: started by hand (ci.yml then scopes to full), every qualify job ran and succeeded, or the
- * merge queue's run at the same sha did (ci-main.mjs: the push ran `merge-group-covered` instead). */
+/** A run checked everything: the daily scheduled run or one started by hand (ci.yml then scopes to full, FULL_EVENTS),
+ * every qualify job ran and succeeded, or the
+ * merge queue's run at the same sha did (older runs only, ci-main.mjs: the push ran `merge-group-covered` instead). */
 export function fullScope(run, jobs) {
-  if (run.event === 'workflow_dispatch' || coveredByQueue(jobs)) return true;
+  if (FULL_EVENTS.includes(run.event) || coveredByQueue(jobs)) return true;
   const ok = new Set(jobs.filter(j => j.conclusion === 'success').map(j => j.name));
   return JOBS.every(j => ok.has(j.name));
 }
@@ -278,10 +288,24 @@ export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh,
   }
   const policy = loadPolicy();
   const skipped = [];
+  // Read once per pick: the mixed cap looks at every candidate's files and queue state, the pick at its own.
+  const filesRead = new Map(), states = new Map();
+  const filesOf = n => {
+    if (!filesRead.has(n)) {
+      let files = null; // unreadable: not low-risk, and not pickable this run
+      try { files = api.ghAll(`repos/${repo}/pulls/${n}/files?per_page=100`).flatMap(f => [f.filename, f.previous_filename]).filter(Boolean); }
+      catch (e) { console.error(`merge-train: could not read the files of #${n}: ${e.message}`); }
+      filesRead.set(n, files);
+    }
+    return filesRead.get(n);
+  };
+  const stateOf = n => { if (!states.has(n)) states.set(n, api.queueState(repo, n)); return states.get(n); };
+  let mixedQueued; // counted when the first mixed PR is about to enqueue
   for (const [i, n] of candidates.entries()) {
     const pr = api.gh(`repos/${repo}/pulls/${n}`);
     const labels = (pr.labels ?? []).map(l => l.name);
-    const files = api.ghAll(`repos/${repo}/pulls/${n}/files?per_page=100`).flatMap(f => [f.filename, f.previous_filename]).filter(Boolean);
+    const files = filesOf(n);
+    if (!files) { skipped.push({ pr: n, why: 'files-unreadable' }); continue; }
     const { tier } = tierFor(files, policy, labels);
     let approved = false;
     if (rank(tier) >= 3) {
@@ -297,13 +321,17 @@ export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh,
     }
     if (why) { skipped.push({ pr: n, tier, why }); continue; }
     if (queue) {
-      const qs = api.queueState(repo, n);
+      const qs = stateOf(n);
       if (queued(qs)) {
         // Auto-merge waits for green checks; one that failed never enqueues, so report it instead of skipping forever.
         const failed = !qs.isInMergeQueue ? summarizeChecks({ ...readChecks(api, repo, pr.head.sha), required: DEFAULT_CHECKS }).failed : [];
         if (failed.length) reportStuck({ repo, pr: n, sha: pr.head.sha, failed, notifyIssue, api });
         skipped.push({ pr: n, tier, why: 'queued', ...(failed.length ? { failed } : {}) });
         continue;
+      }
+      if (!lowRisk(files)) {
+        mixedQueued ??= candidates.filter(m => m !== n && queued(stateOf(m)) && !lowRisk(filesOf(m))).length;
+        if (mixedQueued >= MIXED_CAP) { skipped.push({ pr: n, tier, why: 'mixed-cap', mixed_queued: mixedQueued }); continue; }
       }
     }
     const mode = queue ? queueMode({ repo, pr, api }) : pickMode({ repo, pr, tier, files, defaultBranch, notifyIssue, api });
@@ -321,8 +349,8 @@ function pickMode({ repo, pr, tier, files, defaultBranch, notifyIssue, api }) {
   let ci; // unreadable main CI (token scope, API error) counts as not green: strict
   try {
     const runs = (api.gh(`repos/${repo}/actions/workflows/ci.yml/runs?branch=${encodeURIComponent(defaultBranch)}&status=completed&per_page=50`)?.workflow_runs ?? [])
-      .filter(r => ['push', 'workflow_dispatch'].includes(r.event));
-    ci = mainCiState(runs, r => fullScope(r, r.event === 'workflow_dispatch' ? [] : api.ghAll(`repos/${repo}/actions/runs/${r.id}/jobs?per_page=100`).flatMap(p => p.jobs ?? p)));
+      .filter(r => ['push', ...FULL_EVENTS].includes(r.event));
+    ci = mainCiState(runs, r => fullScope(r, FULL_EVENTS.includes(r.event) ? [] : api.ghAll(`repos/${repo}/actions/runs/${r.id}/jobs?per_page=100`).flatMap(p => p.jobs ?? p)));
   } catch { ci = { conclusion: 'unreadable', since: 'unreadable' }; }
   const readHead = () => summarizeChecks({ ...readChecks(api, repo, pr.head.sha), required: parseChecks(process.env.CHECKS) }).state;
   let headChecks = readHead();
