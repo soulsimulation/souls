@@ -48,7 +48,8 @@ export const ALLOWED = {
   replica: ['wasm-bindgen'],
   // skills: a dev-dependency, so the world host's tests step the built-in skills (K13a, #2676).
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld', 'skills'],
-  worldd: ['replica', 'sim'],
+  // O3 (#2732): the shipper writes pieces to the object store and moves the directory's mark.
+  worldd: ['replica', 'sim', 'directoryd'],
   gatewayd: [],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
   skills: ['replica'],

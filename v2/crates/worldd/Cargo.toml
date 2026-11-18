@@ -8,3 +8,5 @@ description = "The world process (Engine v2, #2635): its clock and watchdog (K7,
 [dependencies]
 replica = { path = "../replica" }
 sim = { path = "../sim" }
+# O3 (#2732): the object store and the directory's claim and mark, which the shipper writes through.
+directoryd = { path = "../directoryd" }
