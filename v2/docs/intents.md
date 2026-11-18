@@ -26,7 +26,9 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    back without one (`v2/docs/tranche/I-R-intents-and-replica.md`, "Could not resolve" 2). The sequence is per actor
    and never reused, so a reconnect never repeats an act. The basis is the version it was decided against (T3:
    lineage, zone, epoch, sequence). The expiry is in world time (T5), never the client's clock. The target is a node,
-   or a selector from a closed list (E2 fills it) that the engine binds at commit and records as its choice.
+   or a selector from a closed list that the engine binds at commit and records as its choice: the first, any free
+   slot of a kind in a node with its binding rule as a field (`replica::selector`, I5; a sit from the gateway takes it,
+   I5b), and E2 adds the rest.
    Resources are T9's claims (`{1: 1 all, 2 one or 3 named, 2: class or name}`). Parameters are the form's arguments;
    none may be a time or a condition, the one exception being a move's next beat (rule 9).
 4. **An intent's kind is its verb.** A form's verb (`namespace:form`) is a checked act. The engine's own verbs are

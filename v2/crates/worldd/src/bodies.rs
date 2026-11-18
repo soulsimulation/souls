@@ -21,6 +21,13 @@
 //!   a restart builds each where the log last had it standing ([`Bodies::add_body_at`]). A body in a seat is logged
 //!   only while it stands, so a restart stands it where it last stood.
 //!
+//! - **Sit anywhere** (I5b, #3178). A sit's target may be I5's selector (`replica::selector`: any free slot of a kind
+//!   in a room, by its rule) instead of a seat. It is resolved at commit, in B3's stable order, from the per-room
+//!   index of free slots (`sim::commit::bind::FreeIndex`), and bound by I5's `bind`: so one tick's burst of sits
+//!   fills every free seat, and the rest end `seat.none-free` by name. The move-started entry names the seat bound
+//!   and the candidate's rank ([`Chosen`]). A seat is in the index when it is added with its kind
+//!   ([`Bodies::add_seat_of`]); its room is its floor.
+//!
 //! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
 use std::collections::BTreeMap;
@@ -33,7 +40,9 @@ use replica::ids::{Id, Minter, Scope};
 use replica::intents::{Intent, Target as Aim};
 use replica::moves::{Effector, Move};
 use replica::pose::{Pose, Support, Vec3};
+use replica::selector::Selector;
 use replica::time::Micros;
+use sim::commit::bind::{Bound, FreeIndex, bind};
 use sim::controller::Stance;
 use sim::host::Runner;
 use sim::mover::Body as Moved;
@@ -64,7 +73,18 @@ pub enum Ask {
     Sit {
         thing: Id,
     },
+    /// Sit on the seat the selector binds at commit (I5b).
+    SitAny {
+        selector: Selector,
+    },
     Rise,
+}
+
+/// The seat a sit bound and the rank of the candidate that bound it (I5's `Bound::Slot`): a named seat is rank 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Chosen {
+    pub rank: usize,
+    pub seat: Id,
 }
 
 /// A move intent read: who moves, and what it asks.
@@ -107,7 +127,13 @@ pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
             };
             Ok(Ask::Walk { node, point })
         }),
-        "sit" => node.ok_or("move.no-target").map(|thing| Ask::Sit { thing }),
+        "sit" => match &intent.target {
+            Some(Aim::Node(thing)) => Ok(Ask::Sit { thing: *thing }),
+            Some(t @ Aim::Selector(..)) => Selector::read(t)
+                .map(|selector| Ask::SitAny { selector })
+                .map_err(|r| r.name),
+            None => Err("move.no-target"),
+        },
         "rise" => Ok(Ask::Rise),
         _ => return None,
     };
@@ -153,6 +179,8 @@ pub struct Bodies {
     pub runner: Runner,
     pub town: Town,
     pub slots: Slots,
+    /// The free seats of each room and kind, for a sit's selector at commit (I5b).
+    free: FreeIndex,
     moves: Moves,
     due: DueList,
     mint: Minter,
@@ -186,6 +214,7 @@ impl Bodies {
             runner: Runner::new(tick),
             town,
             slots: Slots::new(),
+            free: FreeIndex::new(),
             moves: Moves::new(),
             due: DueList::new(),
             mint: Minter::new(Scope([0xb4; 16])),
@@ -205,6 +234,14 @@ impl Bodies {
     /// Adds a seat.
     pub fn add_seat(&mut self, seat: SeatAt) -> R<()> {
         self.slots.add(seat)
+    }
+
+    /// Adds a seat of `kind`, which a sit's selector can bind: indexed under its floor (the room) and kind.
+    pub fn add_seat_of(&mut self, seat: SeatAt, kind: Name) -> R<()> {
+        let (thing, room, point) = (seat.thing, seat.floor, seat.point);
+        self.slots.add(seat)?;
+        self.free.add(thing, room, kind, point);
+        Ok(())
     }
 
     /// Where `body` is: the node of its frame (its floor, or the thing whose slot it sits in) and its position there.
@@ -292,8 +329,9 @@ impl Bodies {
         }
     }
 
-    /// Starts one tick's moves, each for its intent, at body time: refused ones come back with their reason by name.
-    pub fn start(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
+    /// Starts one tick's moves, each for its intent, at body time: refused ones come back with their reason by name,
+    /// and a sit with the seat it bound.
+    pub fn start(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<Option<Chosen>>)> {
         let now = self.runner.now;
         let mut out = Vec::new();
         let mut sits = Vec::new();
@@ -318,11 +356,15 @@ impl Bodies {
                     if r.is_ok() {
                         self.live.insert(a.body, (id, Live::Walk));
                     }
-                    out.push((id, r));
+                    out.push((id, r.map(|()| None)));
                 }
                 Ask::Sit { thing } => {
                     self.replace(a.body);
-                    sits.push((id, a.body, thing));
+                    sits.push((id, a.body, Ok(thing)));
+                }
+                Ask::SitAny { selector } => {
+                    self.replace(a.body);
+                    sits.push((id, a.body, Err(selector)));
                 }
                 Ask::Rise => {
                     self.replace(a.body);
@@ -338,40 +380,69 @@ impl Bodies {
                         &self.rise,
                         now,
                     );
-                    out.push((id, self.started(id, a.body, r)));
+                    out.push((id, self.started(id, a.body, r).map(|()| None)));
                 }
             }
         }
-        if !sits.is_empty() {
-            let bodies: Vec<Id> = sits.iter().map(|s| s.1).collect();
-            let things: Vec<Id> = sits.iter().map(|s| s.2).collect();
-            let geo = self.geo(&bodies, &things);
-            let requests: Vec<Request> = sits
-                .iter()
-                .map(|&(_, body, thing)| Request {
-                    body,
-                    thing,
-                    mv: &self.sit,
-                    stance: Stance::Sit,
-                })
-                .collect();
-            let done = self.slots.commit(
-                &mut self.runner.controller,
-                &mut self.due,
-                &mut self.mint,
-                &mut self.moves,
-                &geo,
-                &requests,
-                now,
-            );
-            // Taken in B3's stable order, and each matched back to its intent by its body.
-            for (body, r) in done {
-                if let Some(&(id, ..)) = sits.iter().find(|s| s.1 == body) {
-                    out.push((id, self.started(id, body, r)));
-                }
-            }
+        // One tick's sits are taken in B3's stable order (body, then seat), one at a time, so a selector resolved at
+        // commit sees the seats taken before it in the same tick.
+        sits.sort_by_key(|s| (s.1, s.2.as_ref().ok().copied()));
+        for (id, body, want) in sits {
+            let r = self.sit_one(body, want, now);
+            let r = match r {
+                Ok((chosen, n)) => self.started(id, body, Ok(n)).map(|()| Some(chosen)),
+                Err(e) => Err(e),
+            };
+            out.push((id, r));
         }
         out
+    }
+
+    /// Binds one sit's seat (a named one, or its selector's from the index) and takes it by B3's commit.
+    fn sit_one(
+        &mut self,
+        body: Id,
+        want: Result<Id, Selector>,
+        now: Micros,
+    ) -> R<(Chosen, Instance)> {
+        let chosen = match want {
+            Ok(seat) => Chosen { rank: 0, seat },
+            Err(selector) => {
+                let at = self.pose(body).map_or(Vec3::default(), |(_, p)| p);
+                let (slot, _) = self.free.resolve(&selector, at);
+                let slots = &self.slots;
+                match bind(&[slot], |t| slots.holder(t).is_none(), 0, true) {
+                    Bound::Slot { rank, thing } => Chosen { rank, seat: thing },
+                    Bound::Ended(name) => {
+                        let Selector::FreeSlot { node, .. } = selector;
+                        return Err(refusal(name, node));
+                    }
+                    Bound::Recheck { .. } => return Err(refusal("stale", body)),
+                }
+            }
+        };
+        let geo = self.geo(&[body], &[chosen.seat]);
+        let request = Request {
+            body,
+            thing: chosen.seat,
+            mv: &self.sit,
+            stance: Stance::Sit,
+        };
+        let done = self.slots.commit(
+            &mut self.runner.controller,
+            &mut self.due,
+            &mut self.mint,
+            &mut self.moves,
+            &geo,
+            &[request],
+            now,
+        );
+        let n = done
+            .into_iter()
+            .next()
+            .map_or_else(|| Err(refusal("seat-unknown", chosen.seat)), |(_, r)| r)?;
+        self.free.take(chosen.seat);
+        Ok((chosen, n))
     }
 
     fn started(&mut self, id: Id, body: Id, r: R<Instance>) -> R<()> {
@@ -389,10 +460,8 @@ impl Bodies {
             // host and the controller.
             let at = self.runner.now;
             while let Some(t) = self.due.fire(at + 1) {
-                let geo = self.geo(
-                    &[t.node],
-                    &self.slots.held_by(t.node).into_iter().collect::<Vec<_>>(),
-                );
+                let held = self.slots.held_by(t.node);
+                let geo = self.geo(&[t.node], &held.into_iter().collect::<Vec<_>>());
                 let fired = self.slots.fire(
                     &mut self.runner.controller,
                     &mut self.due,
@@ -402,6 +471,12 @@ impl Bodies {
                     &self.town.surfaces,
                     &t,
                 );
+                // A seat given back (a rise done, a sit cancelled) is free in the index again.
+                if let Some(seat) = held
+                    && self.slots.holder(seat).is_none()
+                {
+                    self.free.give_back(seat);
+                }
                 let Some(&(id, Live::Seat(n))) = self.live.get(&t.node) else {
                     continue;
                 };

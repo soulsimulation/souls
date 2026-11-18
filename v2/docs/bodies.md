@@ -133,6 +133,12 @@ by the intent, and is answered once, at its end: a receipt naming both when done
 (`claim-taken`, `resource-held`, ...). A new move ends a walk still going for an earlier intent as `claim-taken`. A
 sit or a rise past its act's deadline runs to its end, so a seat is never left half taken.
 
+A sit's target may be I5's selector instead of a seat (I5b #3178): any free seat of a kind in a room, by its rule. It
+is resolved at commit, in B3's stable order, from the per-room index of free seats (`sim::commit::bind::FreeIndex`,
+kept as seats are taken and given back) and bound by I5's `bind`, so one tick's burst fills every free seat and the
+rest are refused `seat.none-free`. The move-started entry names the seat bound (field 5) and the candidate's rank
+(field 6). A seat is in the index when it is added with its kind (`Bodies::add_seat_of`); its room is its floor.
+
 ## The code hatch, shape only
 
 10. **The hatch is one pure function named by the hash of its module** (SA-F9, #3000): `{1: module (its SHA-256
