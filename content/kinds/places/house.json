@@ -1,0 +1,259 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:house",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      9000,
+      8530,
+      8000
+    ]
+  },
+  "areas": {
+    "living": {
+      "at_mm": [
+        0,
+        100,
+        1520
+      ],
+      "radius_mm": 2260
+    },
+    "kitchen": {
+      "at_mm": [
+        0,
+        100,
+        -2320
+      ],
+      "radius_mm": 1460
+    },
+    "landing": {
+      "at_mm": [
+        0,
+        2900,
+        -400
+      ],
+      "radius_mm": 940
+    },
+    "bedroom": {
+      "at_mm": [
+        -1670,
+        2900,
+        2220
+      ],
+      "radius_mm": 1560
+    },
+    "bath": {
+      "at_mm": [
+        2670,
+        2900,
+        2220
+      ],
+      "radius_mm": 1560
+    },
+    "bedroom_2": {
+      "at_mm": [
+        0,
+        2900,
+        -2620
+      ],
+      "radius_mm": 1160
+    },
+    "back": {
+      "at_mm": [
+        0,
+        0,
+        -5500
+      ],
+      "radius_mm": 1500
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "go_round_back": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "back"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:house",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2800,
+            0
+          ],
+          "size": [
+            9000,
+            5600,
+            8000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            7067,
+            2050
+          ],
+          "size": [
+            9300,
+            2934,
+            4200
+          ],
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            7067,
+            -2050
+          ],
+          "size": [
+            9300,
+            2934,
+            4200
+          ],
+          "yaw": 180000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            706,
+            1150,
+            4020
+          ],
+          "size": [
+            1200,
+            2100,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2600,
+            1550,
+            4015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            2600,
+            1550,
+            4015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2600,
+            4350,
+            4015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            2600,
+            4350,
+            4015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#efe3cf",
+        "trim": "#5e412b",
+        "roof": "#8a3b2a",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "building",
+        "residential",
+        "furnished",
+        "home"
+      ]
+    }
+  },
+  "text": {
+    "card": "A family house: living room and kitchen, two bedrooms and a bath above.",
+    "building": "building",
+    "family_house": "family house",
+    "home": "home",
+    "dwelling": "dwelling"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "family_house",
+      "home",
+      "dwelling"
+    ]
+  }
+}

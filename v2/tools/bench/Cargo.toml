@@ -19,6 +19,11 @@ path = "replica-equal/main.rs"
 name = "frozen"
 path = "src/frozen.rs"
 
+[[bin]]
+name = "walkers"
+path = "walkers/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 sim = { path = "../../crates/sim" }
+import-eden = { path = "../import-eden" }

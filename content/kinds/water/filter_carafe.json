@@ -1,0 +1,50 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:filter_carafe",
+  "owner": "thing",
+  "state": {
+    "water": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [-90, 150, 0] },
+    "rim": { "role": "contact", "at_mm": [0, 250, 0] }
+  },
+  "geometry": { "bounds_mm": [260, 260, 180] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
+    "drain": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "water", "at_least": 1, "says": "already_empty" },
+        { "need": "hand", "empty": true, "says": "hands_and_table" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "rim" }],
+      "effects": [{ "change": "set", "field": "water", "to": 0, "event": "drained" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:filter_carafe",
+    "table": [
+      { "part": "fill", "field": "water", "do": "scale", "axis": "y", "range": [0, 1], "to": [0, 1000] }
+    ],
+    "shape": {"round":6,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,8],[80,8],[86,60],[80,180],[55,240],[0,248]],"segments":12,"tint":"shell","material":"glass"},{"kind":"cyl","at":[0,95,0],"r":76,"h":170,"segments":12,"tint":"water","material":"water","role":"fill","pivot":[0,10,0]},{"kind":"sweep","at":[0,0,0],"path":[[-60,210,0],[-105,200,0],[-110,120,0],[-75,70,0]],"r":11,"segments":6,"tint":"dark"}],"palette":{"shell":"#c7e3e7","water":"#3983b6","dark":"#2f2b29"},"tags":["camping","water","carafe","item","object"]}
+  },
+  "text": {
+    "card": "A portable carafe that holds one portion of filtered water: take it, drain it.",
+    "already_empty": "This same carafe is already empty; filter one portion first.",
+    "hands_and_table": "Empty your hands and put the selected carafe on a fixed work surface beside the filter.",
+    "water": "water",
+    "jug": "jug",
+    "bottle": "bottle"
+  },
+  "card": { "text": "card", "category": "water", "synonyms": ["jug", "bottle"] }
+}

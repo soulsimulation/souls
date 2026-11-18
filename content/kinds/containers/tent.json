@@ -35,13 +35,17 @@
     "sleep": {
       "admits": "body",
       "posture": "lie",
-      "most": 1,
+      "most": 2,
       "at_mm": [
         0,
         100,
         -300
-      ]
+      ],
+      "stand": "door"
     }
+  },
+  "links": {
+    "sleeper": { "n": 1, "from": "body", "most": 2, "audience": { "rule": "everyone" } }
   },
   "geometry": {
     "bounds_mm": [
@@ -110,7 +114,10 @@
           "event": "shut"
         }
       ]
-    }
+    },
+    "lie": {"who": "anyone", "starts": "act", "takes": {"place": {"type": "slot", "select": {"of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1}}}, "needs": [{"need": "state", "field": "open", "is": true}, {"need": "slot_free", "slot": {"arg": "place"}}], "steps": [{"step": "walk_to", "point": {"arg": "place"}}, {"step": "sit", "slot": {"arg": "place"}}], "effects": [{"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "lay_down"}, {"change": "link", "link": "sleeper", "from": "actor", "event": "lying_in"}]},
+    "sleep": {"who": "anyone", "starts": "act", "takes": {"place": {"type": "slot", "select": {"of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1}}}, "needs": [{"need": "state", "field": "open", "is": true}, {"need": "slot_free", "slot": {"arg": "place"}}], "steps": [{"step": "walk_to", "point": {"arg": "place"}}, {"step": "sit", "slot": {"arg": "place"}}], "effects": [{"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "fell_asleep"}, {"change": "link", "link": "sleeper", "from": "actor", "event": "lying_in"}]},
+    "get_up": {"who": {"link": "sleeper"}, "starts": "act", "needs": [{"need": "linked", "link": "sleeper"}], "steps": [{"step": "rise"}], "effects": [{"change": "unlink", "link": "sleeper", "from": "actor", "event": "got_up"}, {"change": "reparent", "what": "actor", "into": "here", "event": "stood_by"}]}
   },
   "motion": {
     "how": "fixed"
