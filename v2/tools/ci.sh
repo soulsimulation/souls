@@ -25,6 +25,8 @@ step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
+# The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
+step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 
 # The WASM build: one artifact (wasm-bindgen --target web) that Node loads with initSync and a page with init().
 # The command's version is the wasm-bindgen crate's in Cargo.lock; it is installed under target/, which CI caches.

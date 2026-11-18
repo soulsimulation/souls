@@ -4,6 +4,7 @@
 pub mod clock;
 pub mod ground;
 pub mod links;
+pub mod log;
 pub mod mover;
 pub mod routes;
 pub mod unstick;
