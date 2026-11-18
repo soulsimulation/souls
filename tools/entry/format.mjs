@@ -68,11 +68,14 @@ export const STAND_MARGIN_MM = 2000;
 export const POSTURES = Object.freeze(['sit', 'lie']);
 export const WHO = Object.freeze(['anyone', 'holder', 'world']);
 export const STARTS = Object.freeze(['act', 'timer']);
-export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'duration', 'count']);
+/** `placement`: one of the placement words (packages/form-rules/placements.json), chosen when the form is done. */
+export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'duration', 'count', 'placement']);
 /** A described target: one closed list with Engine v2 E2 (#2709): a candidate set, an anchor, an order and a rank. */
 export const SELECT = Object.freeze({of: ['things', 'free_slots'], in: ['this', 'here', 'parent'], anchor: ['me', 'this'], order: ['nearest', 'furthest']});
 /** The closed lists. Each grows only with the task that first needs a new member. */
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough']);
+/** `moves`: the thing argument moves the way the form moves it (`carry` or `push`), by its kind's section 18. */
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough', 'moves']);
+export const MOVED_BY = Object.freeze(['carry', 'push']);
 /** `settle`: a body takes a ground posture where it stands, with no slot (SA-G3, #2875). */
 export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait', 'settle']);
 /** `transfer` moves an amount between two int fields of one name (SA-F2b, #2844); `draw` is an outcome nobody chose,
@@ -743,6 +746,8 @@ function form(f, path, ctx, err) {
     else if (!(typeof v === 'string' && (v in ctx.points || v in ctx.slots || isObj(ctx.areas[v]) && 'at_mm' in ctx.areas[v]))) err(p, 'names a point, slot or placed area of this kind, or an argument');
   };
   const slot = (v, p) => { if (isArg(v)) arg(v, p, ['slot']); else if (!(v in ctx.slots)) err(p, 'names a slot of this kind, or an argument'); };
+  const thingArg = (v, p) => { if (!isArg(v)) err(p, 'an argument of type thing'); else arg(v, p, ['thing']); };
+  const subject = (v, p) => { if (isArg(v)) arg(v, p, ['thing']); else if (!SUBJECTS.includes(v)) err(p, `one of ${SUBJECTS.join(', ')}, or a thing argument`); };
   const fieldName = (v, p) => { if (!(typeof v === 'string' && v in ctx.state)) err(p, 'names a state field of this kind'); };
   const linkName = (v, p) => { if (!(typeof v === 'string' && v in ctx.links)) err(p, 'names a link type of this kind'); };
   const value = (fname, v, p) => {
@@ -800,7 +805,12 @@ function form(f, path, ctx, err) {
       else value(n.field, exact ? n.is : n.not, `${p}.${exact ? 'is' : 'not'}`);
     } else if (n.need === 'slot_free') { only(n, ['need', 'slot'], p, err); slot(n.slot, `${p}.slot`); }
     else if (n.need === 'within_reach') { only(n, ['need', 'point'], p, err); place(n.point, `${p}.point`); }
-    else if (n.need === 'held_by_actor') only(n, ['need'], p, err);
+    else if (n.need === 'held_by_actor') { only(n, ['need', 'thing'], p, err); if (n.thing !== undefined) thingArg(n.thing, `${p}.thing`); }
+    else if (n.need === 'moves') {
+      only(n, ['need', 'thing', 'by'], p, err);
+      thingArg(n.thing, `${p}.thing`);
+      if (!MOVED_BY.includes(n.by)) err(`${p}.by`, `how the form moves it, one of ${MOVED_BY.join(', ')}`);
+    }
     else if (n.need === 'hand') {
       only(n, ['need', 'free', 'empty', 'holds'], p, err);
       const which = ['free', 'empty', 'holds'].filter(k => k in n);
@@ -843,8 +853,8 @@ function form(f, path, ctx, err) {
     else if (e.change === 'set') { only(e, ['change', 'field', 'to', 'event'], p, err); fieldName(e.field, `${p}.field`); if (!('to' in e)) err(`${p}.to`, 'required'); else value(e.field, e.to, `${p}.to`); }
     else if (e.change === 'reparent') {
       only(e, ['change', 'what', 'into', 'event'], p, err);
-      if (!SUBJECTS.includes(e.what)) err(`${p}.what`, `one of ${SUBJECTS.join(', ')}`);
-      if (e.into !== 'actor_hand') slot(e.into, `${p}.into`);
+      subject(e.what, `${p}.what`);
+      if (e.into !== 'actor_hand' && e.into !== 'here') slot(e.into, `${p}.into`);
     } else if (e.change === 'link' || e.change === 'unlink') {
       only(e, ['change', 'link', 'from', 'event'], p, err);
       linkName(e.link, `${p}.link`);
@@ -853,7 +863,7 @@ function form(f, path, ctx, err) {
       only(e, ['change', 'kind', 'into', 'event'], p, err);
       if (typeof e.kind !== 'string' || !KIND.test(e.kind)) err(`${p}.kind`, 'a kind, "namespace:name"');
       if (e.into !== 'here' && e.into !== 'actor_hand') slot(e.into, `${p}.into`);
-    } else if (e.change === 'remove') { only(e, ['change', 'what', 'event'], p, err); if (!SUBJECTS.includes(e.what)) err(`${p}.what`, `one of ${SUBJECTS.join(', ')}`); }
+    } else if (e.change === 'remove') { only(e, ['change', 'what', 'event'], p, err); subject(e.what, `${p}.what`); }
     else if (e.change === 'transfer') {
       only(e, ['change', 'field', 'from', 'into', 'amount', 'event'], p, err);
       if (ctx.state[e.field]?.type !== 'int') err(`${p}.field`, 'names an int state field of this kind; both ends move that field');
@@ -954,9 +964,11 @@ export const FRONTS = Object.freeze(['z', 'none']);
 function placement(pl, path, arg, err) {
   if (!isObj(pl)) { err(path, 'an object: {"at", "anchor", "facing"}'); return; }
   only(pl, ['at', 'anchor', 'facing'], path, err);
+  const anchored = (v, p) => { if (!isArg(v)) err(p, 'an argument of type thing (named, or described by a selector)'); else arg(v, p, ['thing']); };
+  // A word given when the form is done: whether it needs the anchor is asked then, by place().
+  if (isArg(pl.at)) { arg(pl.at, `${path}.at`, ['placement']); if (pl.anchor !== undefined) anchored(pl.anchor, `${path}.anchor`); if (pl.facing !== undefined) err(`${path}.facing`, 'a word given when the form is done takes no facing'); return; }
   const w = PLACEMENTS.words[pl.at];
   if (!w) { err(`${path}.at`, `"${pl.at}" is not a placement word; one of ${PLACE_WORDS.join(', ')}`); return; }
-  const anchored = (v, p) => { if (!isArg(v)) err(p, 'an argument of type thing (named, or described by a selector)'); else arg(v, p, ['thing']); };
   if (w.anchor) { if (pl.anchor === undefined) err(`${path}.anchor`, `"${pl.at}" is by something: name its anchor`); else anchored(pl.anchor, `${path}.anchor`); }
   else if (pl.anchor !== undefined) err(`${path}.anchor`, `"${pl.at}" is by nothing; leave the anchor out`);
   if (pl.facing === undefined) return;
@@ -968,10 +980,11 @@ function placement(pl, path, arg, err) {
 }
 
 /** Whether a thing may be put down as a placement says, from plain data (SA-F11, #2883): the thing may be moved, the anchor
- *  is named, a front exists where the word needs one. `thing` and `anchor` are entries. Whether the spot is free and legal is
- *  the world's answer, never this one's. Returns the placement in full: the word, the anchor, how it will face, and whether
- *  it moves at all (a turn does not). */
-export function place(thing, pl, {anchor, facingAnchor} = {}) {
+ *  is named, a front exists where the word needs one. `thing` and `anchor` are entries; `node` and `anchorNode` are the ids of
+ *  the copies, and a thing is by itself only when they are one node: two chairs of one kind share an entry, not a node.
+ *  Whether the spot is free and legal is the world's answer, never this one's. Returns the placement in full: the word, the
+ *  anchor, how it will face, and whether it moves at all (a turn does not). */
+export function place(thing, pl, {anchor, facingAnchor, node, anchorNode} = {}) {
   const no = (code, reason) => ({ok: false, code, reason});
   const w = PLACEMENTS.words[pl?.at];
   if (!w) return no('unknown_word', `"${pl?.at}" is not a placement word; one of ${PLACE_WORDS.join(', ')}`);
@@ -980,7 +993,7 @@ export function place(thing, pl, {anchor, facingAnchor} = {}) {
   if (how === 'fixed') return no('fixed', `${thing.kind} is fixed: it is not put anywhere`);
   const hasFront = e => e?.geometry?.front !== 'none';
   if (w.anchor && !anchor) return no('no_anchor', `"${pl.at}" is by something: name its anchor`);
-  if (w.anchor && anchor === thing) return no('self', `${thing.kind} cannot be put ${pl.at} itself`);
+  if (w.anchor && node !== undefined && node === anchorNode) return no('self', `${thing.kind} cannot be put ${pl.at} itself`);
   if (w.front_of_anchor && !hasFront(anchor)) return no('no_front', `"${pl.at}" needs a front; ${anchor.kind} has none`);
   if (w.front_of_thing && !hasFront(thing)) return no('no_front', `"${pl.at}" turns a front; ${thing.kind} has none`);
   let facing = {kind: 'as_it_was'};
