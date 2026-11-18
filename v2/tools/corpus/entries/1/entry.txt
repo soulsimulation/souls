@@ -1,0 +1,11 @@
+# V18's recording corpus, entry 1 (V3, #2712): one archive object (segment.hex) and one history bundle
+# (bundle.hex), as hex text. Recorded from a scripted world (`cargo run -p archive -- corpus`), never
+# production. Kinds are pinned by hash in their names. Decoded by v2/tools/archive/tests/archive.rs.
+build: 12204f0a2c2f3c7b9e37e5350b5596621b9f577d8504f4f72796ca3db24fe1a19655
+schema: 12203b42be7ff1ce584936f5e3ae7b989d444eb16c66bdcaa214ee3b42776bca6b83
+kinds: souls:body@1220ee1ad75a34f067112ef6d2a095fe5bd3e121a75611a1a95ba85198efcb131cb2 souls:cup@1220edc856b3ff9da87e27ffb6a4a1a7266bb4ef737f93e481f79545dee2578a6bea souls:place@1220203a3092b03f8b4087e0f863c2615e99e3421c1f873d4362eed9edba891b5a9a souls:room@12205a3371e7f2f3b2cefd0e609ca83dde91f24bf87c4403b62ebb9282c20f158d23
+root: 82502a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a00
+root kind: souls:place@1220203a3092b03f8b4087e0f863c2615e99e3421c1f873d4362eed9edba891b5a9a
+records: 21
+state hash: 12208ffa2426b83a0983002c17ca15b3e53294ffb77e6a398ec731793788793b2651
+bundle sha256: e4fe6fc5339bc56c3bce8411e3ee03e1d535fb4bb9c7f2760c243dc9b10858f5
