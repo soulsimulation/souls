@@ -7,6 +7,25 @@ name = "bench"
 version = "0.0.0"
 dependencies = [
  "replica",
+ "sim",
+]
+
+[[package]]
+name = "birdseye"
+version = "0.0.0"
+dependencies = [
+ "import-eden",
+ "replica",
+ "sim",
+ "testworld",
+]
+
+[[package]]
+name = "body-script"
+version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
 ]
 
 [[package]]
@@ -20,6 +39,15 @@ name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
+name = "compare-reach"
+version = "0.0.0"
+dependencies = [
+ "import-eden",
+ "replica",
+ "sim",
+]
 
 [[package]]
 name = "gatewayd"
@@ -130,8 +158,20 @@ dependencies = [
  "i_triangle",
  "import-eden",
  "replica",
+ "skills",
  "testworld",
 ]
+
+[[package]]
+name = "skills"
+version = "0.0.0"
+dependencies = [
+ "replica",
+]
+
+[[package]]
+name = "stall-test"
+version = "0.0.0"
 
 [[package]]
 name = "syn"
@@ -212,3 +252,7 @@ dependencies = [
 [[package]]
 name = "worldd"
 version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
+]

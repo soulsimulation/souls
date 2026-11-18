@@ -1,0 +1,149 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The path light (core/bollard-light@1, 5 placed): switch-on and switch-off, anyone, within touch, as today; the switch plate is on its post.",
+ "cases": [
+  {
+   "name": "bollard_light_switch_on_then_switch_off_then_switch_on",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "l1"
+      ]
+     },
+     "l1": {
+      "kind": "eden:bollard_light"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       305
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_off"
+     },
+     "now_us": 0,
+     "receipt": "rbollard_light0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "fix": {
+       "form": "switch_on"
+      }
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_on"
+     },
+     "now_us": 1000000,
+     "receipt": "rbollard_light1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "on",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_on",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_off"
+     },
+     "now_us": 2000000,
+     "receipt": "rbollard_light2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "on",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_off",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_on"
+     },
+     "now_us": 4000000,
+     "receipt": "rbollard_light3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "on",
+        "n": 1,
+        "to": 1
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "l1": {
+     "kind": "eden:bollard_light",
+     "fields": {
+      "on": 1
+     }
+    }
+   }
+  }
+ ]
+}
