@@ -22,7 +22,7 @@
       ],
       "steps": [
         { "step": "walk_to", "point": "stand" },
-        { "step": "move", "move": "press", "at": "rope" }
+        { "step": "move", "move": "tug", "at": "rope" }
       ],
       "effects": [
         { "change": "set", "field": "ringing", "to": true, "event": "rang" },

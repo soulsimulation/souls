@@ -29,6 +29,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
@@ -230,6 +231,8 @@ struct Slot {
     moved: Moved,
     input: Input,
     logged: Option<Input>,
+    /// Whether the input may differ from the one logged: set by every change, so an unchanged body costs no compare.
+    touched: bool,
     track: Option<Track>,
 }
 
@@ -240,11 +243,14 @@ pub struct Controller {
     /// The last driver number given.
     drivers: Driver,
     log: Vec<Logged>,
+    /// Where each body not being carried stands, kept as the bodies move: "who is near" (N16).
+    near: Index,
 }
 
 impl Slot {
     /// The parts `held` covered go back to neutral: locomotion to standing still, each resource's move to none.
     fn neutral(&mut self, held: &[Name]) {
+        self.touched = true;
         let family = self.claims.family();
         let locomotion = family
             .resources
@@ -300,6 +306,7 @@ impl Controller {
             return refuse("body-duplicate", replica::world_model::show(moved.id));
         }
         let input = Input::neutral(moved.pose.orientation);
+        self.near.put_moved(&moved);
         self.bodies.insert(
             moved.id,
             Slot {
@@ -307,6 +314,7 @@ impl Controller {
                 moved,
                 input,
                 logged: None,
+                touched: true,
                 track: None,
             },
         );
@@ -387,13 +395,20 @@ impl Controller {
             return refuse("crossing-under-way", replica::world_model::show(t.link));
         }
         s.input.velocity = Vec3::ZERO;
+        s.touched = true;
         s.track = Some(track);
+        self.near.remove_body(body);
         Ok(())
     }
 
     /// The link `body` is being carried across, if any.
     pub fn carrying(&self, body: Id) -> Option<Id> {
         self.bodies.get(&body)?.track.as_ref().map(|t| t.link)
+    }
+
+    /// The spatial index of the bodies not being carried, as the mover last left them (N16).
+    pub fn near(&self) -> &Index {
+        &self.near
     }
 
     /// The bodies as the mover last left them, in id order.
@@ -404,6 +419,7 @@ impl Controller {
     /// Sets one part of `body`'s input, if `driver` holds its resources (`resource-not-held`, `resource-missing`).
     pub fn set(&mut self, body: Id, driver: Driver, part: Part) -> R<()> {
         let s = self.slot(body)?;
+        s.touched = true;
         match part {
             Part::Velocity(v, mode) => {
                 s.steers(driver)?;
@@ -446,7 +462,7 @@ impl Controller {
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {
         let mut out = Stepped::default();
         for (&id, s) in self.bodies.iter_mut() {
-            if s.logged.as_ref() != Some(&s.input) {
+            if s.touched && s.logged.as_ref() != Some(&s.input) {
                 match encode(&s.input.record(at, id)) {
                     Ok(bytes) => self.log.push(Logged {
                         at,
@@ -466,18 +482,24 @@ impl Controller {
                 }
                 s.logged = Some(s.input.clone());
             }
+            s.touched = false;
             s.moved.pose.orientation = s.input.facing;
             if let Some(t) = s.track.as_mut() {
                 match t.advance(&mut s.moved, surfaces, dt) {
                     Ok(true) => {
                         s.track = None;
                         s.input.velocity = Vec3::ZERO;
+                        // A changed input: logged at the next step (B2's `touched`).
+                        s.touched = true;
                     }
                     Ok(false) => {}
                     Err(r) => {
                         s.track = None;
                         out.refused.push((id, r));
                     }
+                }
+                if s.track.is_none() {
+                    self.near.put_moved(&s.moved);
                 }
                 continue;
             }
@@ -510,6 +532,7 @@ impl Controller {
                 Ok(None) => {}
                 Err(r) => out.refused.push((id, r)),
             }
+            self.near.put_moved(&s.moved);
         }
         out
     }

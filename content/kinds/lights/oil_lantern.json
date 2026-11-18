@@ -25,7 +25,8 @@
       "needs": [
         { "need": "state", "field": "lit", "is": false, "says": "already_lit" },
         { "need": "state", "field": "oil", "at_least": 1, "says": "empty" },
-        { "need": "hand", "free": true }
+        { "need": "hand", "free": true },
+        { "need": "not_in_hand", "says": "place_first" }
       ],
       "steps": [{ "step": "move", "move": "press", "at": "wick" }],
       "effects": [{ "change": "set", "field": "lit", "to": true, "event": "lit" }]
@@ -35,7 +36,8 @@
       "starts": "act",
       "needs": [
         { "need": "state", "field": "lit", "is": true, "says": "already_out" },
-        { "need": "hand", "free": true }
+        { "need": "hand", "free": true },
+        { "need": "not_in_hand", "says": "place_first" }
       ],
       "steps": [{ "step": "move", "move": "press", "at": "wick" }],
       "effects": [
@@ -61,6 +63,7 @@
     "already_lit": "The lantern is already lit.",
     "empty": "The lantern has no oil charge; refill it at an oil supply.",
     "already_out": "The lantern is already out.",
+    "place_first": "Place the lantern on a surface before working its wick.",
     "light": "light",
     "lamp": "lamp",
     "camp_lantern": "camp lantern",
