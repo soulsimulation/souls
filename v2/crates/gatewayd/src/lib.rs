@@ -17,8 +17,9 @@
 //! - gateway → client, the sign-in's outcome: `{4: name}`, one of `token.refused` (and the socket closes),
 //!   `stream.started`, `stream.resumed` or `stream.cannot-resume` (the client starts again; the stream continues).
 //! - gateway → client, a frame of the stream: `{1: version, 2: answer}` as the world sent it; the version is the
-//!   client's next cursor. An answer the gateway gives itself (`world.restarting`, a refusal before the world) is
-//!   `{2: answer}`: it has no version and is not kept for a resume.
+//!   client's next cursor. A refusal the gateway gives itself (`world.restarting`, `intent-not-granted`) is a frame
+//!   of the stream too, at the newest version the world sent, and kept for a resume; before the world has sent any
+//!   version, and for bytes that are not an intent, it is `{2: answer}`, with no version and not kept.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};

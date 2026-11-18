@@ -18,6 +18,7 @@ use replica::intent_decode::{LIMITS, decode as decode_intent};
 use replica::intents::{Answer, PROTOCOL, answer_hello};
 
 use crate::Gateway;
+use crate::resume::Cursor;
 use crate::times;
 use crate::token::{self, Grant, Token};
 use crate::world_link::{RESTARTING, Sent};
@@ -75,19 +76,35 @@ fn control(name: &str) -> Vec<u8> {
     encode(&Value::Map([(4, Value::Text(name))].into())).unwrap_or_default()
 }
 
-/// An answer the gateway gives itself: `{2: answer}`, with no version, not kept for a resume.
+/// An answer the gateway gives itself to bytes it could not read: `{2: answer}`, with no version, not kept.
 fn own_answer(answer: Answer) -> Vec<u8> {
     encode(&Value::Map([(2, answer.to_value())].into())).unwrap_or_default()
 }
 
-fn refused(actor: Actor, sequence: u64, reason: &str, now: Value) -> Vec<u8> {
-    own_answer(Answer::Refused {
+/// A refusal the gateway gives itself, at the newest version the world sent. Once the world has sent one, it is a
+/// frame of the stream, `{1: version, 2: answer}`, kept for a resume like the world's own refusals, so one lost on a
+/// drop is replayed; before any, it is `{2: answer}` and sent on this socket only.
+fn refuse(
+    gw: &Gateway,
+    grant: Grant,
+    actor: Actor,
+    sequence: u64,
+    reason: &str,
+) -> Option<Vec<u8>> {
+    let now = gw.link.now();
+    let answer = Answer::Refused {
         actor,
         sequence,
         reason: Name::new(reason).unwrap_or_else(|| unreachable!("a fixed name")),
-        now,
+        now: now.clone(),
         changed: Vec::new(),
-    })
+    };
+    let Some(at) = Cursor::from_value(&now) else {
+        return Some(own_answer(answer));
+    };
+    let frame = encode(&Value::Map([(1, now), (2, answer.to_value())].into())).unwrap_or_default();
+    gw.deliver(grant.key(), at, frame);
+    None
 }
 
 /// The next binary message, or `None` if the socket ends or sends anything else first.
@@ -196,7 +213,7 @@ async fn serve(
     gw.detach(grant, attached.session);
 }
 
-/// Reads an intent and hands it to the world; the gateway's own answer, if it gives one.
+/// Reads an intent and hands it to the world; the gateway's own answer to send now, if it gives one not kept.
 fn take_intent(
     gw: &Gateway,
     actor: Actor,
@@ -212,18 +229,19 @@ fn take_intent(
         }
     };
     if intent.actor != actor {
-        return Some(refused(
+        return refuse(
+            gw,
+            grant,
             intent.actor,
             intent.sequence,
             "intent-not-granted",
-            gw.link.now(),
-        ));
+        );
     }
     match gw
         .link
         .submit(grant.key(), intent.sequence, bytes, received)
     {
         Sent::Sent => None,
-        Sent::Restarting => Some(refused(actor, intent.sequence, RESTARTING, gw.link.now())),
+        Sent::Restarting => refuse(gw, grant, actor, intent.sequence, RESTARTING),
     }
 }

@@ -462,3 +462,32 @@ async fn accepted_and_refused_answers_resume_in_order_none_twice() {
     put(&mut ws, intent(soul(31), 7)).await;
     assert_eq!(frame_sequence(&soon(&mut ws).await), Some(7));
 }
+
+#[tokio::test]
+async fn the_gateways_own_refusal_lost_on_a_drop_is_replayed_once_on_resume() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(32));
+    let r = start("own-refusal", tokens).await;
+
+    let (mut ws, _) = connect(&r.url, t.reveal(), None).await;
+    put(&mut ws, intent(soul(32), 1)).await;
+    let cursor = frame_version(&soon(&mut ws).await).unwrap();
+    // An intent for an actor this token does not grant: the gateway refuses it itself, `intent-not-granted` (the
+    // same path as `world.restarting`). The socket drops before the refusal arrives.
+    put(&mut ws, intent(soul(99), 7)).await;
+    drop(ws);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let (mut ws, o) = connect_seen(&r.url, t.reveal(), Some(cursor.clone()), Some(1)).await;
+    assert_eq!(o, "stream.resumed");
+    let replayed = soon(&mut ws).await;
+    assert!(is_refusal(&replayed), "{replayed:?}");
+    assert_eq!(frame_sequence(&replayed), Some(7), "with its request id");
+    assert_eq!(
+        frame_version(&replayed),
+        Some(cursor),
+        "at the newest version"
+    );
+    put(&mut ws, intent(soul(32), 2)).await;
+    assert_eq!(frame_sequence(&soon(&mut ws).await), Some(2), "once");
+}
