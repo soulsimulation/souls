@@ -1,0 +1,8 @@
+[package]
+name = "stall-test"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Engine v2 K7 (#2647): the stall test's own restarter: a blocked tick, the watchdog, a new worldd within 2 s."
+
+[dependencies]

@@ -14,9 +14,13 @@
 //! - **6, slots** and **11, children:** what it admits, as T2 reads them (`v2/docs/world-model.md` rule 5).
 //! - **8, forms:** what can be done with it, `{1: name, 2: steps}`, each step a move by name and then its arguments.
 //!
+//! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12).
+//!
 //! Every section below 20 is in the hash, whether read here or not, so a section a later task adds (reactions,
 //! lifetime, a place's line) is read by that task and already renames the kind. A thing whose kind is missing or bad
 //! still loads, as "unknown kind", keeping its generic state; the store keeps why each refused kind was refused.
+
+pub mod sizes;
 
 use crate::encode::{Name, Value, encode};
 use crate::ids::{Hash, KindRefusal, KindSource, name_kinds};
