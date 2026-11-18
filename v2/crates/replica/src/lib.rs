@@ -6,10 +6,12 @@
 
 pub mod audience;
 pub mod bodies;
+pub mod durability;
 pub mod effects;
 pub mod encode;
 pub mod host;
 pub mod ids;
+pub mod intents;
 pub mod pose;
 pub mod time;
 pub mod tree;
@@ -17,12 +19,13 @@ pub mod views;
 pub mod world_model;
 pub mod zones;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
 use wasm_bindgen::prelude::wasm_bindgen;
 
 /// Hashes `input` (FNV-1a, 32 bit, over its little-endian bytes). v2/tools/wasm-load calls it natively, in Node and
 /// in a headless browser and checks that all three return the same value.
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+/// Not exported from the checker build (`checker`), which has no imports (T10, `v2/docs/intents.md` rule 13).
+#[cfg_attr(all(target_arch = "wasm32", not(feature = "checker")), wasm_bindgen)]
 pub fn load_probe(input: u32) -> u32 {
     input
         .to_le_bytes()
