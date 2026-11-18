@@ -3376,9 +3376,10 @@ function decide(input       )          {
       read.push([`${act.this}/field/${def.n}`, value]);
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
+      // another form's need on this field holds now (its own value, never an argument's choice)
       const holds = (m      , v         ) =>
-        (!has(m, 'is') || flag(def, v) === flag(def, m.is)) &&
-        (!has(m, 'not') || flag(def, v) !== flag(def, m.not)) &&
+        (!has(m, 'is') || isRef(m.is) || flag(def, v) === flag(def, m.is)) &&
+        (!has(m, 'not') || isRef(m.not) || flag(def, v) !== flag(def, m.not)) &&
         (!has(m, 'at_least') || (int(v) && v >= (m.at_least          ))) &&
         (!has(m, 'at_most') || (int(v) && v <= (m.at_most          )));
       const meetsWith = (v         , t                               ) =>
