@@ -204,8 +204,9 @@ Souls in `souls/` (god seats are not rebuilt this way). A Soul brought in by `im
 and `adopt` registers its world if the home hasn't, without trusting that site: the url came from a file. A folder with `.eden-agent.json` stays a legacy one-Soul folder, even inside a home. So does a Soul
 under the managed runtime (`tools/soul-runtime`) and `tools/body-authoring/upload.mjs`, which read that file directly.
 
-`eden.mjs` is served and copied as one file, so `home.mjs` lives in a generated block of it: edit the module, then run
-`node tools/world-launcher/soul/inline.mjs`.
+`eden.mjs` is served and copied as one file, so `home.mjs` lives in a generated block of it: edit the module. CI, the
+release and `eden-sync.yml` rebuild the block (`inline.mjs`); a PR does not carry it
+([the Soul client file](../testing.md#the-soul-client-file)).
 
 ## Memory
 

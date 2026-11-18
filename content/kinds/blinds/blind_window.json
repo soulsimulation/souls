@@ -1,0 +1,344 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:blind_window",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "cord": {
+      "role": "grip",
+      "at_mm": [
+        750,
+        1250,
+        150
+      ]
+    },
+    "inside": {
+      "role": "stand",
+      "at_mm": [
+        750,
+        0,
+        600
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      2400,
+      2600,
+      200
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "cord"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "tug",
+          "at": "cord"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "blind_raised"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "cord"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "tug",
+          "at": "cord"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "blind_lowered"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:blind_window",
+    "table": [
+      {
+        "part": "blind",
+        "field": "open",
+        "do": "scale",
+        "axis": "y",
+        "at": {
+          "true": 80,
+          "false": 1000
+        },
+        "over_us": 1100000
+      }
+    ],
+    "shape": {
+      "round": 5,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            -950,
+            1300,
+            0
+          ],
+          "size": [
+            500,
+            2600,
+            160
+          ],
+          "round": 5,
+          "tint": "plaster"
+        },
+        {
+          "kind": "box",
+          "at": [
+            950,
+            1300,
+            0
+          ],
+          "size": [
+            500,
+            2600,
+            160
+          ],
+          "round": 5,
+          "tint": "plaster"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            1400,
+            900,
+            160
+          ],
+          "round": 5,
+          "tint": "plaster"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2400,
+            0
+          ],
+          "size": [
+            1400,
+            400,
+            160
+          ],
+          "round": 5,
+          "tint": "plaster"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            915,
+            40
+          ],
+          "size": [
+            1480,
+            30,
+            260
+          ],
+          "round": 5,
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1550,
+            0
+          ],
+          "size": [
+            40,
+            1300,
+            50
+          ],
+          "round": 4,
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1550,
+            0
+          ],
+          "size": [
+            1400,
+            40,
+            50
+          ],
+          "round": 4,
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1550,
+            0
+          ],
+          "size": [
+            1400,
+            1300,
+            12
+          ],
+          "round": 0,
+          "tint": "glass"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            2260,
+            100
+          ],
+          "r": 35,
+          "h": 1460,
+          "segments": 10,
+          "tint": "blind",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1570,
+            100
+          ],
+          "size": [
+            1380,
+            1260,
+            8
+          ],
+          "round": 0,
+          "tint": "blind",
+          "role": "blind",
+          "pivot": [
+            0,
+            2230,
+            100
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            960,
+            100
+          ],
+          "size": [
+            1380,
+            30,
+            20
+          ],
+          "round": 6,
+          "tint": "rod",
+          "role": "blind",
+          "pivot": [
+            0,
+            2230,
+            100
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            750,
+            1775,
+            150
+          ],
+          "r": 4,
+          "h": 970,
+          "segments": 4,
+          "tint": "cord"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            750,
+            1250,
+            150
+          ],
+          "r": 18,
+          "h": 80,
+          "segments": 6,
+          "tint": "valve",
+          "r2": 12
+        }
+      ],
+      "palette": {
+        "plaster": "#d9d2c3",
+        "frame": "#f1ede4",
+        "glass": "#a9c7d6",
+        "blind": "#e6dcc6",
+        "cord": "#e8e2d2",
+        "valve": "#c9b98f",
+        "rod": "#5b4a3a"
+      },
+      "tags": [
+        "window",
+        "blind",
+        "home"
+      ]
+    }
+  },
+  "text": {
+    "card": "A roller blind inside a window: raise or lower it at the pull cord."
+  },
+  "card": {
+    "text": "card"
+  }
+}

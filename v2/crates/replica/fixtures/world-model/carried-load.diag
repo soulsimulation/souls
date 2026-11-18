@@ -1,0 +1,19 @@
+# A load carried by two bodies (Engine v2 T2, #2641). The sofa is a child of the carry activity's node, not of
+# either body; each carrier is linked to the activity. Nothing has two parents. Layout as in door.diag.
+{
+  1: [100, 101],
+  2: {},
+  3: [
+    {1: 1, 2: "souls:place"},
+    {1: 2, 2: "souls:body", 3: 1},
+    {1: 3, 2: "souls:body", 3: 1},
+    {1: 4, 2: "souls:carry", 3: 1},
+    {1: 5, 2: "souls:sofa", 3: 4}
+  ],
+  4: [
+    {1: 6, 2: "carries", 3: [2, 4], 4: 1, 5: "everyone"},          # owned by the activity's end
+    {1: 7, 2: "carries", 3: [3, 4], 4: 1, 5: "everyone"},
+    {1: 8, 2: "body-of", 3: [2, 100], 4: 0, 5: "everyone"},        # each body is linked to its Soul (v2/docs/ids.md, rule 7)
+    {1: 9, 2: "body-of", 3: [3, 101], 4: 0, 5: "everyone"}
+  ]
+}
