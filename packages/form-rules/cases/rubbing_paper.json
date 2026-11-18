@@ -1,0 +1,482 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:rubbing_paper (SA-X7, #2902; from #1830): four sticks of charcoal, each rubbed into one lasting print of a stone (rings) or a wood block (grain).",
+  "cases": [
+    {
+      "name": "rub_stone_every_need_met",
+      "act": {
+        "this": "r1",
+        "form": "rub_stone",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "r1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_stone"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper"
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "rub_stone_no_charcoal_left",
+      "act": {
+        "this": "r1",
+        "form": "rub_stone",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "r1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_stone"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper",
+            "fields": {
+              "charcoal": 0,
+              "rings": 2,
+              "grain": 2
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "rub_stone_paper_not_held",
+      "act": {
+        "this": "r1",
+        "form": "rub_stone",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1",
+              "r1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_stone"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper"
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 1
+      }
+    },
+    {
+      "name": "rub_stone_other_hand_full",
+      "act": {
+        "this": "r1",
+        "form": "rub_stone",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "r1",
+              "right": "x1"
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_stone"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper"
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "rub_stone_source_elsewhere",
+      "act": {
+        "this": "r1",
+        "form": "rub_stone",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "r1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_stone"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper"
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "yard": {
+            "loose": [
+              "s1"
+            ]
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "rub_wood_every_need_met",
+      "act": {
+        "this": "r1",
+        "form": "rub_wood",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "r1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_wood"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper"
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "rub_wood_no_charcoal_left",
+      "act": {
+        "this": "r1",
+        "form": "rub_wood",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "r1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_wood"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper",
+            "fields": {
+              "charcoal": 0,
+              "rings": 2,
+              "grain": 2
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "rub_wood_paper_not_held",
+      "act": {
+        "this": "r1",
+        "form": "rub_wood",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1",
+              "r1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_wood"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper"
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 1
+      }
+    },
+    {
+      "name": "rub_wood_other_hand_full",
+      "act": {
+        "this": "r1",
+        "form": "rub_wood",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "r1",
+              "right": "x1"
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_wood"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper"
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "rub_wood_source_elsewhere",
+      "act": {
+        "this": "r1",
+        "form": "rub_wood",
+        "args": {
+          "source": "s1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "r1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_wood"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper"
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "yard": {
+            "loose": [
+              "s1"
+            ]
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    }
+  ]
+}

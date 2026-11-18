@@ -1,0 +1,239 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:campfire (made by eden:fire_laying_site, #1648; the original admitted today's campfire and used its light and put-out). With a hand free a Soul lights it or puts it out. Lighting a burning fire names put_out; putting out a dead one names light.",
+ "cases": [
+  {
+   "name": "light_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:campfire"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "light_already_burning_names_put_out",
+   "act": {
+    "this": "c1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:campfire",
+      "fields": {
+       "lit": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lit",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "put_out"
+    },
+    "says": "already_lit"
+   }
+  },
+  {
+   "name": "light_hands_full",
+   "act": {
+    "this": "c1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:campfire"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "put_out_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:campfire",
+      "fields": {
+       "lit": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "put_out_already_out_names_light",
+   "act": {
+    "this": "c1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:campfire"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lit",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "light"
+    },
+    "says": "already_out"
+   }
+  },
+  {
+   "name": "put_out_hands_full",
+   "act": {
+    "this": "c1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:campfire",
+      "fields": {
+       "lit": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  }
+ ]
+}

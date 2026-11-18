@@ -2,6 +2,9 @@
 //! N1's facts file and its manifest beside it, then reads the file back and loads it through N1's loader (K2's tree,
 //! through commit), and prints the manifest, the load time and the file's SHA-256.
 
+// Times its own runs: the wall-clock rule (K7) binds the engine, not this tool.
+#![allow(clippy::disallowed_methods)]
+
 use import_eden::{count, load};
 use std::time::Instant;
 use testworld::{generate, manifest};

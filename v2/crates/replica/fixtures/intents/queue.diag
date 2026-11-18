@@ -1,0 +1,2 @@
+# Standing in a queue (rule 5): a body in line taking its turn for the sofa, naming the act taken at its head.
+{1: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 2: "souls:queue", 3: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8], 4: {1: "eden:sit"}, 5: 11, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0], 1, 42], 7: 300000000}
