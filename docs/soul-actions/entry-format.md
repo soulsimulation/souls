@@ -63,10 +63,14 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
 | 18 | `motion` | How a thing moves: `{"how"}`, one of `one_hand`, `two_hands`, `pushed_by_one`, `two_souls`, `wheeled`, `fixed` (below) |
 | 19 | `loose` | How long it lasts once nobody holds or owns it: `{"ever": true}` or `{"us": <microseconds>}` (below) |
-| 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
+| 20 | `looks` | How it looks: `model` (a look id), `table`, the looks table, and `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
+
+A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
+thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
+chain with a wake entry of its own; the world never waits for a time or a condition.
 
 Not defined yet, and refused with the name of the task that adds it: `reactions` (SA-F15, section 12).
 
@@ -233,8 +237,9 @@ A row of places names the slots in it with `row` and `place` (1 at the first end
 back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are data (`tools/entry/cases/slots.json`).
 
 `looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
-`tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
-`look.mjs` converts to metres only when it draws.
+`tags`, in whole millimetres (a polygon's points too), with an angle in whole millidegrees and a part's `scale` and
+`glow` in permille. The format has no floating-point number and `look.mjs` converts to metres and fractions only when it
+draws; a text, list or schedule field changes no part, so it is not drawn.
 
 **The code hatch** (SA-F9, [#2850](https://github.com/soulsimulation/souls/issues/2850); Engine v2 F8
 [#2823](https://github.com/soulsimulation/souls/issues/2823), T9 [#2663](https://github.com/soulsimulation/souls/issues/2663)).
@@ -283,11 +288,17 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   for `two_souls`; refused as `moves_by`, `motion_unsaid`, `needs_souls` or `no_free_hand`), `hand`
   (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
-  `transfer`). A range need also takes a `timed` field.
-  SA-F2 evaluates them. **Reach to a loose thing is the walk, taken as done**: entries store no position for a loose
-  thing (Engine v2 holds poses, and today's adapter walks first), so `within_reach` of a `thing` argument that the form
-  `walk_to`s is met when the thing is in the actor's place, and refused `out_of_reach` when it is elsewhere. A kettle's `fill` takes the nearest `eden:tap` and needs it within reach: the water comes from
-  a thing in the world, never from a refill the kettle does by itself.
+  `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
+  `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
+  `timed` field.
+  SA-F2 evaluates them. **Reach to another thing** is read in this order: (1) the walk, taken as done: entries store
+  no position for a loose thing (Engine v2 holds poses, and today's adapter walks first), so `within_reach` of a
+  `thing` argument that the form `walk_to`s is met when the thing is in the actor's place, and refused `out_of_reach`
+  when it is elsewhere; (2) else the measured pose: `"of": {"arg": ...}` names the thing whose point it is, placed by
+  that node's `at_mm` in the input; (3) else `unknown`. A kettle's `fill` takes the nearest `eden:tap` (a selector on a
+  kind) and moves toward it: the water comes from a thing in the world, never from a refill the kettle does by itself.
+  Its effect is a `transfer` of `water` (grams) out of the tap and into the kettle until it is full, so a need for water
+  on the switch names `fill` as its fix.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
@@ -298,7 +309,11 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   `thing` argument), `timer`, `transfer`, `draw`. The body's `pick_up` and `push` reparent a thing argument into a free
   hand (a push holds the thing while it moves), and its `put` sets a held one down `here` by a placement word and an
   anchor described by a selector; another body has no `motion`, so it is never picked up or pushed. `packages/form-rules/README.md` ("What a form does")
-  defines what each does.
+  defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
+  per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
+  boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
+  an `int` field may give `by` (signed, never 0) instead of `to`: it adds to the value, within the field's bounds, for a
+  count or an amount used up that nothing balances. A cup's `sip` lowers its `water` by 50 and raises its `sips` by 1.
 - **transfer** (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)): `{"change": "transfer", "field",
   "from", "into", "amount", "event"}`. `field` is an `int` field of this kind, and of the same name and unit at the other
   end; `from` and `into` are each `"this"` or a `thing` argument; `amount` is a whole number above zero, a `count`
@@ -312,24 +327,97 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
 
-## The looks table
+## An activity (proposed: `roles`)
 
-`looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
-the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`), `slide` (millimetres along an `axis`),
-`scale` (permille, one axis or all), `show` (1 or 0), `glow` (permille), `tint` (a colour) or `pick` (no part: which
-of several parts a choice shows). The amount comes from `at` (field value to amount, for a bool or enum) or from
-`range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
-`over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
-only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
-function that turns a table, a state and the time since it changed into each part's placement, in whole numbers; its
-cases are `packages/form-rules/cases/looks/`. Collision shapes never follow looks.
+A group activity (a lecture, a supper, later a handshake, a dance or a bout) is a node Souls enter (SA-G1a,
+[#2872](https://github.com/soulsimulation/souls/issues/2872); Engine v2 B5, [#2724](https://github.com/soulsimulation/souls/issues/2724)).
+Its kind is an ordinary entry plus a `roles` section, which the validator does not take yet: it is proposed on
+[#2842](https://github.com/soulsimulation/souls/issues/2842), and until then the examples are test kinds
+(`packages/form-rules/cases/kinds/test/lecture_activity.json`, `supper.json`).
 
 ```json
-"table": [
-  { "part": "fill", "field": "fullness", "do": "scale", "axis": "y", "range": [0, 1000], "to": [1, 1000] },
-  { "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 } }
-]
+"roles": {
+  "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
+  "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } }
+}
 ```
+
+- A **role** is one of the kind's link types; membership is that link to the body, and the link's `most` is how many
+  the role takes. `need` is `required` (the activity cannot start without it), `replaceable` (required, and another
+  may take it while it runs) or `optional`. Starting is Engine v2 B5's; leaving and ending are below.
+- **places** say where a member of the role may be, in a fixed order. `in: "this"`: the activity's own `slots`, in
+  the order listed, so a body becomes the activity's child. `in: "here"`: the slots of things in the same place as
+  the activity whose origin is within `within_mm` of the activity's, nearest first, then by node id, then in the
+  thing's slot order. Only a slot that admits a body counts, and, if `posture` is given, only one with that posture.
+  The first slot with room is the place. If no slot has room, the answer is `no_free_place`, naming the role.
+- **Entering is a form** of the kind. It links the role to the actor and moves the actor into a slot argument
+  (`reparent`), and the role's places fill that argument. Who may enter a role is that form's `who`.
+- The world moves no body. Each Soul walks and sits by its own steps; the form's effects only link and set the parent.
+  Anything that needs another Soul's yes is an offer with an expiry (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)).
+- **Leaving is a form** too: the one that unlinks one role from the actor, and moves the actor out of its place by
+  its own `reparent` (SA-G1b, [#2873](https://github.com/soulsimulation/souls/issues/2873)). The role's `need` is its
+  rule for leaving. A `required` role leaving ends the activity. A `replaceable` one re-opens its place: its link
+  and its slot are free for the next Soul. An `optional` one changes nothing. A one-off activity also ends when its
+  last member leaves.
+- **Ending** releases every member: each is unlinked from its role. A body seated in another thing's slot stays
+  seated. A body still in the activity's own slots is moved out to the place the activity is in, so removing the
+  activity removes no body. Then the activity is removed. The rules name the two events `released` and `ended`.
+  Nothing removes a member for being quiet.
+- **The "now" line** (proposed: a `now` section) names the parts of the activity's state that say what is happening
+  now. Souls read it as a fact and schedule themselves by it; the engine never waits on their behalf.
+
+  ```json
+  "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" }
+  ```
+
+  `floor` is the link type whose ends have the floor. `stage` is an enum field. `ends` is a timed field (SA-F5a)
+  counting down in microseconds; the activity ends at the first microsecond it reaches 0. A part the asker may not
+  see is left out and named as unseen.
+- **Unattended**, an activity is removed at that time by its own world form (`who: "world"`, `starts: "timer"`),
+  whose needs are the time (`ends` at most 0) and that no role is linked. The engine's timer runs it then. While
+  anyone is in it, the form is refused and nothing changes.
+  The example is `packages/form-rules/cases/kinds/test/talk.json`.
+
+- **A standing activity** (proposed: a `standing` section; SA-G2, [#2874](https://github.com/soulsimulation/souls/issues/2874))
+  outlasts a sitting: a course or a job. It names `members`, a link type for those who belong across days; `present`,
+  a link type (a role with places) for those at the sitting now; `enough`, how many present start a sitting; and
+  `stage`, an enum field with the values `sitting` and `idle`. The list is closed: `members`, `present`, `enough`,
+  `stage`, `sitting`, `idle`.
+
+  ```json
+  "standing": { "members": "member", "present": "present", "enough": 3, "stage": "phase", "sitting": "sitting", "idle": "idle" }
+  ```
+
+  Joining and parting are forms that link and unlink `members`, with no place. A standing activity does not end when
+  its last member parts, or when no one is present; it keeps its members, state and end date while empty. Whether a
+  sitting starts is checked when a member arrives (a role entered as above): once `enough` are present the rules set
+  the stage to `sitting` (event `sitting_began`), once. When the last one present rises the stage returns to `idle`
+  (event `sitting_ended`). Present is a subset of members: only a member may arrive (the form's `who`), and a member
+  who is present cannot part (`still_present`). At its end date (its `ends` field, as above) its world form removes it,
+  members or not: each member is unlinked first (event `released`) and no body moves. Nothing waits for a time: hours
+  are a schedule (SA-F16). The example is `packages/form-rules/cases/kinds/test/class.json`.
+
+- **Between two Souls** (proposed: a `pair` section; SA-G4, [#2876](https://github.com/soulsimulation/souls/issues/2876)):
+  give, hug, handshake, high five, dance, push the swing. Bodies touch only inside an activity both joined. A pair has
+  two `required` roles. The offer is a proposal for one Soul (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)):
+  its `invited` link names who may accept, a `proposer` link who may offer. The asker enters its role by its own act;
+  the invited Soul accepts by entering the other, while the countdown (`now.ends`) is above 0. At 0, with nobody
+  accepting, the world's timer form (`expires`) removes the offer: the asker is released (`released`) and the form's
+  event names the outcome. A give names the link to its thing (`gives`): the accepting form moves it into the
+  accepter's free hand in the same batch (`"what": {"link": "offered"}`), both sides or neither (E24,
+  [#2793](https://github.com/soulsimulation/souls/issues/2793)). `contact` states, in the activity's own frame, each
+  role's move, the point its effector touches in whole millimetres and the beat the contact lands on; a beat is
+  `beat_us` whole microseconds (B8, [#2740](https://github.com/soulsimulation/souls/issues/2740)). The list is closed:
+  `invited`, `accept`, `expires`, `gives`, `beat_us`, `contact`.
+
+  ```json
+  "pair": { "invited": "invited", "accept": "accept", "expires": "lapse", "beat_us": 500000,
+            "contact": [{ "role": "asker", "move": "press", "contact_mm": [-10, 1000, 0], "beat": 1 },
+                        { "role": "partner", "move": "press", "contact_mm": [10, 1000, 0], "beat": 1 }] }
+  ```
+
+  The examples are test kinds (`give`, `hug`, `handshake`, `high_five`, `dance`, `push_swing` in
+  `packages/form-rules/cases/kinds/test/`).
 
 ## A move
 
@@ -340,7 +428,16 @@ classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_o
 `effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
 `start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
 includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
-point and then to a second one.
+point and then to a second one. Five more hand moves share that shape (SA-D4b, [#2857](https://github.com/soulsimulation/souls/issues/2857)):
+`swing` (a hinged leaf pushed through its arc), `stroke` (a hand drawn along a line), `tug` (a handle drawn down) and
+`knock` and `lock` (one contact, like `press`, with their own timing). The middle phase of the first three is named
+`slide_us` and is the same straight path; an arc or a rotation is the viewer's to draw. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
+`held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
+contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
+the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free. `strike` and `pump` (SA-D5b, [#2859](https://github.com/soulsimulation/souls/issues/2859)) are the same shape with the effector at the tool's head (a hammer's face, a pump's nozzle): a window `strike_us` per blow or `pump_us` per stroke, `count` of them in the record, claiming the hand only. `craft` is hand work at a point in front
+of the body (carving, weaving, sewing, drilling, honing): slide-shaped, its `slide_us` is the working spell across a
+small span from `contact_mm` to `to_mm`, claiming the hands by class (`manipulator`). Each hand has its own record; the
+small repeated strokes inside the span are the viewer's to draw, and a longer spell is the step repeated.
 
 ```sh
 node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
@@ -352,6 +449,38 @@ node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/ent
 arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
 rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
 move the thing's frame into the world's: the caller passes world positions.
+
+## The looks table
+
+`looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
+the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`), `slide` (millimetres along an `axis`),
+`scale` (permille, one axis or all), `show` (1 or 0), `glow` (permille), `tint` (a colour) or `pick` (no part: which
+of several parts a choice shows). Three more kinds draw a thing's own moving picture from a field (SA-D2): `steam` (permille
+of a plume leaving the part, so a kettle steams only above the level its range states), `flame` (permille of a flame
+burning on the part, 0 is out) and `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting). The part
+is a role of the model (the closed list of roles of the shape language), not the thing's name. The amount comes from `at` (field value to amount, for a bool or enum) or from
+`range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
+`over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
+only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
+function that turns a table, a state and the time since it changed into each part's placement, in whole numbers; its
+cases are `packages/form-rules/cases/looks/`. Collision shapes never follow looks.
+
+A `sound` row says what is heard (SA-D7). `sound` is one of the page's own synthesised set (`sound-plan.ts`: water, bell, hum,
+chime, kettle and the rest) or `tune`; there are no audio files. `mode` is `loop` (default) or `once`. `reach_mm`, how far it
+carries, is required on every sound row. It is driven by a `field` (`at` or `range` + `to` give the loudness in permille, 0 is
+silent, so the sound stops when the field says so) or by a named `event` (with `level`, permille; played once from the record).
+A `tune` row names a tune by id (`tune`) or a mood tag (`mood`, which picks one from `content/tunes/tunes.json` by hashing the
+thing's id). A thing that carries sound to another place names the `link`. The function answers with what is heard
+(`sounds` on the part, or on `@self` when the row has no part): which sound, loud how, reaching how far, and the microseconds
+since the state began. A tune is notes, `[midi, start step, steps long]` over steps of `step_us`, repeating; which notes sound in
+a window of world time is `tuneNotes`, a pure function of time, so every viewer, live or in replay, is at the same point of it.
+
+```json
+"table": [
+  { "part": "fill", "field": "fullness", "do": "scale", "axis": "y", "range": [0, 1000], "to": [1, 1000] },
+  { "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 } }
+]
+```
 
 ## The hash, provisional
 

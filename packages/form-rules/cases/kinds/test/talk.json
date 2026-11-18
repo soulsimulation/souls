@@ -1,0 +1,106 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:talk",
+  "owner": "thing",
+  "state": {
+    "phase": { "n": 1, "type": "enum", "values": ["proposed", "started"], "default": "proposed", "audience": {"rule": "everyone"} },
+    "left_us": { "n": 2, "type": "timed", "unit": "us", "default": { "value": 3600000000, "per_s": -1000000, "set_us": 0 }, "min": 0, "audience": {"rule": "everyone"} }
+  },
+  "links": {
+    "speaker": { "n": 1, "from": "body", "most": 1, "audience": {"rule": "everyone"} },
+    "chair": { "n": 2, "from": "body", "most": 1, "audience": {"rule": "everyone"} },
+    "listener": { "n": 3, "from": "body", "most": 120, "audience": {"rule": "everyone"} }
+  },
+  "slots": {
+    "lectern": { "admits": "body", "most": 1, "at_mm": [0, 0, -2000] },
+    "chair": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [1500, 0, -2000] }
+  },
+  "roles": {
+    "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
+    "chair": { "need": "replaceable", "places": { "in": "this", "slots": ["chair"] } },
+    "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } }
+  },
+  "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" },
+  "forms": {
+    "take_the_lectern": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "place": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
+      "effects": [
+        { "change": "link", "link": "speaker", "from": "actor", "event": "took_the_lectern" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "stood_at_the_lectern" }
+      ]
+    },
+    "take_the_chair": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "place": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "place" } },
+        { "step": "sit", "slot": { "arg": "place" } }
+      ],
+      "effects": [
+        { "change": "link", "link": "chair", "from": "actor", "event": "took_the_chair" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "sat_down" }
+      ]
+    },
+    "attend": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "seat": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [
+        { "change": "link", "link": "listener", "from": "actor", "event": "joined_the_audience" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }
+      ]
+    },
+    "step_down": {
+      "who": { "link": "speaker" },
+      "starts": "act",
+      "steps": [],
+      "effects": [
+        { "change": "unlink", "link": "speaker", "from": "actor", "event": "stepped_down" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "left_the_lectern" }
+      ]
+    },
+    "leave_the_chair": {
+      "who": { "link": "chair" },
+      "starts": "act",
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "chair", "from": "actor", "event": "left_the_chair" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_up" }
+      ]
+    },
+    "leave": {
+      "who": { "link": "listener" },
+      "starts": "act",
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "listener", "from": "actor", "event": "left_the_audience" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_up" }
+      ]
+    },
+    "lapse": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        { "need": "state", "field": "left_us", "at_most": 0 },
+        { "need": "unlinked", "link": "speaker" },
+        { "need": "unlinked", "link": "chair" },
+        { "need": "unlinked", "link": "listener" }
+      ],
+      "steps": [],
+      "effects": [{ "change": "remove", "what": "this", "event": "lapsed" }]
+    }
+  },
+  "text": { "card": "A one-off talk as an activity: a speaker at the lectern, a chair beside it, listeners in the seats near it; it ends when its speaker leaves, when it empties, or unattended at its stated time." },
+  "card": { "text": "card" }
+}

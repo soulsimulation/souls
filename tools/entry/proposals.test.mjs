@@ -66,7 +66,7 @@ test('timed (SA-F5a): a value with a rate and the time it was set is accepted, w
 
 const kettle = () => {
   const k = load('content/kinds/kitchen/kettle.json');
-  k.state.water_g = {n: 3, type: 'int', unit: 'g', default: 0, min: 0, max: 1700, audience: everyone};
+  k.state.water_g = {n: 4, type: 'int', unit: 'g', default: 0, min: 0, max: 1700, audience: everyone};
   k.forms.top_up = {who: 'holder', starts: 'act', takes: {from: {type: 'thing'}}, needs: [{need: 'held_by_actor'}, {need: 'room'}], steps: [],
     effects: [{change: 'transfer', field: 'water_g', from: {arg: 'from'}, into: 'this', amount: 'room', event: 'topped_up'}]};
   return k;
