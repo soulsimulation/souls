@@ -22,7 +22,8 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 - `{verdict: "no", reason, need, detail, fix, read}`: the first unmet need, by its index in the form. `reason` is one
   of `REASONS`; `detail` says what is missing (the field, what was found and wanted; the slot; the point and move;
   the link and how many there are). `fix` is one act that would meet the need, taken only from data: a form of the
-  same thing that anyone may start and whose `set`, `link` or `unlink` effect meets it; the same form with another
+  same thing that anyone, or its holder, may start and whose `set`, `link` or `unlink` effect meets it, or whose
+  `transfer` into the thing would meet it at the field's `max` (out of it: at its `min`); the same form with another
   free slot; or a closed step (`walk_to` a point, `take`, `put`). Where the data offers none, `fix` is `null`.
 - `{verdict: "unknown", need, node, field | link, read}`: a need read a field or link outside the asker's audience
   and no need was definitely unmet. A definite "no" from another need wins over "unknown".
@@ -96,7 +97,7 @@ is left out, and a `set` without `to` clears the field to its default. `outsideP
 leaves the profile, with the profile's name for the refusal (`simple`, `null`, `float`, `text-not-name`, ...);
 `effects` refuses to write such a value and `apply` refuses to accept one.
 
-The entry's effects map to changes like this: `set` sets a field of the thing; `transfer` moves an amount of one
+The entry's effects map to changes like this: `set` sets a field of the thing (on a timed value, `rate`: the value at the state's `now_us` with the new rate, `{value, per_s, set_us}` written whole; with `by` instead of `to`, the int value plus `by`, refused as `out_of_range` outside the field's `min`, or 0, and `max`, and written as `to` alone, since nothing balances a sip); `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
 `"room"`), the least of what it asks and what the source has above its field's `min`, as two `set`s whose `by`s sum
 to zero; `reparent` moves the actor or the thing into a slot or the actor's first free hand (holding is a parent);
@@ -133,7 +134,7 @@ test kinds `test:dartboard` and `test:die`.
 ## An effect case
 
 A file in `cases/effects/` is `{"format": "souls-effect-cases/1", "about": ..., "cases": [...]}`. A case is a state
-and the acts done in it, in order, each with its `receipt`, an optional `actor` (another body in the same state) and
+and the acts done in it, in order, each with its `receipt`, an optional `actor` (another body in the same state), an optional `now_us` (the act's world time, when it differs from the state's) and
 what `effects` should return (`expect`, compared like a rule case's). `after` names nodes and what each should be
 once every act is applied (`null`: removed), compared whole. Every act that is done is also applied a second time
 with its receipt, which must change nothing.
