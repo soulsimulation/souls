@@ -70,3 +70,11 @@ step pose-goldens node --input-type=module -e '
   const got = r.pose_goldens(), want = readFileSync("crates/replica/fixtures/pose/goldens.txt", "utf8");
   console.log(`${got}pose-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
   if (got !== want) process.exit(1);'
+# The effects goldens (T6, #2645): the seven generic changes' bytes and state hashes, the same way (tests/effects.rs).
+step effects-goldens node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
+  const got = r.effects_goldens(), want = readFileSync("crates/replica/fixtures/effects/goldens.txt", "utf8");
+  console.log(`${got}effects-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
+  if (got !== want) process.exit(1);'

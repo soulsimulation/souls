@@ -41,7 +41,7 @@ hash tree (K5) and loading kinds (K3) are not here.
    keep theirs.
 10. **A hash's input is its purpose label, as one profile text item, and then the stored bytes.** The labels are
     `souls/kind/1`, `souls/kind-beside/1`, `souls/geometry/1`, `souls/state-public/1`, `souls/state-private/1`
-    and `souls/fixture/1`.
+    and `souls/fixture/1`, with `souls/header/1` and `souls/schema/1` for the log ([effects.md](effects.md)).
     Hashing something new, or the same thing differently, takes a new label.
 11. **Public and private state are hashed apart.** A node's public fields have one hash and each private audience's
     fields another. A hash of small private state can be guessed by trying values, so it is shown only to those
