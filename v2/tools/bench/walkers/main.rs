@@ -21,6 +21,10 @@
 //!   door openings written to memory. By phase: `orders` (new orders, less their routing), `plan` (routing, here and
 //!   in the ladder's reroutes), `corner`, `mover`, `cross`, `turns` (the [`World`] calls, each timed) and `skill` (the
 //!   rest of the crowd's and the ladder's tick). Not in it: the per-tick record, progress and the trace.
+//! - **By node** (N17's Step 0, #2813): the world calls' time (`plan`, `corner`, `mover`, `cross`) is also summed
+//!   per node the walker stands on, and the summary names the busiest node's share of all tick time and how many
+//!   walkers stand on each node at the end. Ticking nodes side by side cannot make a tick shorter than its busiest
+//!   node's part.
 //! - **Progress** (the bar's 30 s): under a live order, a walker progresses when it arrives, when its leg advances (a
 //!   link crossed, a turn gained), or when it stands 1 m nearer its leg's end than at its last progress.
 //!
@@ -128,6 +132,8 @@ const NAMES: [&str; 7] = [
 struct Timed {
     t: Town,
     ns: [u64; 5],
+    /// The world calls' time per node the walker stood on, ns (`turns` is the world's, not a node's).
+    by_node: BTreeMap<Id, u64>,
     faults: Vec<(&'static str, Id, String)>,
 }
 impl Timed {
@@ -137,13 +143,19 @@ impl Timed {
         self.ns[k] += t0.elapsed().as_nanos() as u64;
         r
     }
+    fn time_on<T>(&mut self, k: usize, node: Id, f: impl FnOnce(&mut Town) -> T) -> T {
+        let ns = self.ns[k];
+        let r = self.time(k, f);
+        *self.by_node.entry(node).or_default() += self.ns[k] - ns;
+        r
+    }
 }
 impl World for Timed {
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
-        self.time(PLAN, |t| t.plan(body, node, goal))
+        self.time_on(PLAN, node_of(body), |t| t.plan(body, node, goal))
     }
     fn corner(&mut self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
-        match self.time(CORNER, |t| t.corner(body, to)) {
+        match self.time_on(CORNER, node_of(body), |t| t.corner(body, to)) {
             Err(e) => {
                 self.faults
                     .push(("corner", body.id, format!("{}: {}", e.name, e.detail)));
@@ -160,7 +172,7 @@ impl World for Timed {
         at: Micros,
     ) -> Result<(), Refusal> {
         let before = *body;
-        if let Err(e) = self.time(MOVER, |t| t.step(body, v, dt, at)) {
+        if let Err(e) = self.time_on(MOVER, node_of(body), |t| t.step(body, v, dt, at)) {
             self.faults
                 .push(("mover", body.id, format!("{}: {}", e.name, e.detail)));
             *body = before;
@@ -177,7 +189,9 @@ impl World for Timed {
         at: Micros,
     ) -> Result<bool, Refusal> {
         let before = *body;
-        match self.time(CROSS, |t| t.cross(body, link, order, speed, dt, at)) {
+        match self.time_on(CROSS, node_of(body), |t| {
+            t.cross(body, link, order, speed, dt, at)
+        }) {
             Err(e) => {
                 self.faults
                     .push(("cross", body.id, format!("{}: {}", e.name, e.detail)));
@@ -342,6 +356,7 @@ fn main() {
     let mut w = Timed {
         t: town,
         ns: [0; 5],
+        by_node: BTreeMap::new(),
         faults: Vec::new(),
     };
     let ground = w.t.ground;
@@ -539,6 +554,7 @@ fn main() {
         };
     }
     w.ns = [0; 5];
+    w.by_node.clear();
     println!("walkers: {n} placed; {restarts} starts drawn again (no route out of them)");
     let index: BTreeMap<Id, usize> = (0..n).map(|k| (walker_id(k as u64), k)).collect();
 
@@ -652,8 +668,9 @@ fn main() {
     let mut fault_kinds: BTreeMap<String, u64> = BTreeMap::new();
     let mut faulted: std::collections::BTreeSet<Id> = std::collections::BTreeSet::new();
     while ticker.next_tick() < ticks && fault.is_none() {
-        let mut body = |_: i64, start: Micros| {
-            if fault.is_some() {
+        let mut body = |tk: i64, start: Micros| {
+            // A tick past the run's end is not run: a clock that fell behind would otherwise catch up for ever.
+            if fault.is_some() || tk >= ticks {
                 return;
             }
             let at = start + TICK;
@@ -946,6 +963,34 @@ fn main() {
         faulted.len(),
         fault_kinds
     );
+    {
+        let all = tick_us.iter().sum::<i64>().max(1) as u64 * 1000;
+        let calls = w.by_node.values().sum::<u64>().max(1);
+        let (busy, ns) = w
+            .by_node
+            .iter()
+            .max_by_key(|(id, ns)| (**ns, std::cmp::Reverse(**id)))
+            .map_or((ground, 0), |(id, ns)| (*id, *ns));
+        let mut on: BTreeMap<Id, usize> = BTreeMap::new();
+        for x in &crowd.walkers {
+            *on.entry(node_of(&x.body)).or_default() += 1;
+        }
+        let mut counts: Vec<usize> = on.values().copied().collect();
+        counts.sort_unstable_by(|a, b| b.cmp(a));
+        println!(
+            "walkers: by node: {} nodes; the busiest, {}, {} % of the world calls and {} % of tick time; walkers by node at the end, most first: {:?}{}",
+            w.by_node.len(),
+            if busy == ground {
+                "the open ground".to_owned()
+            } else {
+                format!("{busy:?}")
+            },
+            ns * 100 / calls,
+            ns * 100 / all,
+            &counts[..counts.len().min(8)],
+            if counts.len() > 8 { " ..." } else { "" }
+        );
+    }
     if arm == "event" {
         println!("walkers: crowd moments {moments}, reactions {reacted}");
     }
