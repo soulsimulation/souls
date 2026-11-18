@@ -316,6 +316,7 @@ fn rect(x0: i32, z0: i32, x1: i32, z1: i32, y: i32) -> Piece {
         outline: vec![vec![[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]]],
         vertices: vec![[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]],
         triangles: vec![[0, 2, 1], [0, 3, 2]],
+        ground: sim::gaits::Ground::Dry,
     }
 }
 

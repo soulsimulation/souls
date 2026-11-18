@@ -3,15 +3,17 @@
 //! `cargo test -p sim --release --test gaits -- --nocapture` runs the slope cases, each a 16 m square of terrain
 //! written as data, and prints the speed table (A1, two repeats). The speed table on Eden's own hills needs N1's
 //! exported facts file (`node v2/tools/import-eden/export/export.ts` from the repository root) and runs with
-//! `cargo test -p sim --release --test gaits -- --ignored --nocapture`. The water cases are N11b's (#3198).
+//! `cargo test -p sim --release --test gaits -- --ignored --nocapture`. The water cases are `tests/water.rs` (N11b, #3198).
 
 use import_eden::Import;
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Vec3, fixture};
-use sim::gaits::{GAITS, Gait, JOG, RUN, WALK};
+use sim::gaits::{Gait, JOG, RUN, WALK};
 use sim::ground::{HUMAN_RADIUS, OpenGround, SQUARE, STEEP};
 use sim::mover::{Body, Surface};
 
 const TICK: i64 = 50_000;
+/// The gaits on dry ground (wading and swimming are `tests/water.rs`, N11b).
+const DRY: [Gait; 3] = [WALK, JOG, RUN];
 
 /// Standard base64, for the terrain written in a test.
 fn b64(bytes: &[u8]) -> String {
@@ -328,7 +330,7 @@ fn a1_speed_table() {
     let mut table = Vec::new();
     for repeat in 1..=2 {
         let mut row = Vec::new();
-        for g in GAITS {
+        for g in DRY {
             for rise in slopes {
                 for (how, dir, at) in [
                     ("up", [1, 0], MID),
@@ -439,7 +441,7 @@ fn a1_eden_hills() {
                 }
                 let mut ok = true;
                 let mut rows = Vec::new();
-                for g in GAITS {
+                for g in DRY {
                     let Some(mut b) = place(&s, [x, z]) else {
                         continue 'sq;
                     };
