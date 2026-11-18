@@ -1,0 +1,482 @@
+//! Postures and seats (Engine v2 B3, #2682): a body sits, lies and rises by moves (B2's data) that hand it between the
+//! floor and a seat's slot through the controller, and a seat holds one body.
+//!
+//! - **A seat** is one slot of a thing, with its kind's data ([`replica::moves::Seat`]): the slot's height above the
+//!   floor from the kind's model geometry, and a stand point. A seat higher than the move's reach (the body's standing
+//!   reach) is refused `seat-out-of-reach`, by its height alone.
+//! - **Reserved at commit.** The requests of one tick are taken together ([`Slots::commit`]) and ordered by a stable
+//!   key, the body's id and then the seat's, never by arrival. The first takes the seat; every later one is refused
+//!   `seat-taken`, naming the holder. The hold is a field of this table, keyed by the seat's thing, so the holder is
+//!   one lookup and never a scan.
+//! - **Contact hands the body over.** At the sit's (or lie's) contact instant the body is handed from the floor into
+//!   the slot ([`Controller::seat`], T4's hand-off from mover to slot) with the stance the request named; at the rise's
+//!   contact it is handed back onto the floor at the seat's stand point ([`Controller::stand`]), standing. Postures
+//!   are the controller's stance input: stand, sit, lie.
+//! - **A seated body has no timer and no mover.** When the move is done, a driver with no timer ([`seated_shape`])
+//!   holds its legs and its stance, and the controller's tick never visits it.
+//! - **The engine releases the seat**, never the skill: when the holder rises (at the rise's contact), and when the
+//!   sit is cancelled before contact (a later claim on its legs, `claim-taken`). A body is never left stuck: when a
+//!   later claim cancels a sit after contact, or a rise before it, the body is handed back onto the floor at the stand
+//!   point under that claim's driver and the seat is released, since a tick never steps a body in a slot.
+//! - **Rising onto a taken spot.** The stand point may be taken: [`clear_spot`] finds the nearest clear point, and the
+//!   body walks there by the mover. It never appears there.
+//!
+//! Not here: choosing among seats (I5), queueing for one (B7), sitting where there is no seat (E3), sleep, a seat
+//! edited away under its sitter (G2), a thing with several seats, writing the hold into the tree (the writer's).
+
+use std::collections::BTreeMap;
+
+use replica::bodies::{Class, SkillShape, Want};
+use replica::effects::Refusal;
+use replica::encode::Name;
+use replica::ids::{Id, Minter};
+use replica::moves::{Move, Seat};
+use replica::pose::{Frame, HandOff, Quat, Vec3};
+use replica::time::Micros;
+use replica::world_model::show;
+
+use crate::controller::{Controller, Driver, Part, Stance};
+use crate::mover::Surface;
+use crate::moves::{Fired, Instance, Moves, Reach};
+use crate::timers::{DueList, Timer};
+
+type R<T> = Result<T, Refusal>;
+
+fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
+    Err(Refusal {
+        name,
+        detail: detail.into(),
+    })
+}
+
+/// A seat where it is: its thing, its kind's data, its slot's point and facing in the floor's frame (µm), and the
+/// floor's node, whose surface a body stands on to sit and is set back on.
+#[derive(Clone, Debug)]
+pub struct SeatAt {
+    pub thing: Id,
+    pub seat: Seat,
+    pub point: Vec3,
+    pub facing: Quat,
+    pub floor: Id,
+}
+
+impl SeatAt {
+    /// The stand point in the floor's frame, µm (its height is the floor's, found when the body is placed).
+    pub fn stand(&self) -> R<Vec3> {
+        let [x, z] = self.seat.stand;
+        let d = self
+            .facing
+            .rotate(Vec3::new(x, 0, z))
+            .map_err(|e| Refusal {
+                name: e.name(),
+                detail: "a stand point".into(),
+            })?;
+        Ok(Vec3::new(self.point.x + d.x, 0, self.point.z + d.z))
+    }
+}
+
+/// One request of a tick: `body` asks to take the seat of `thing` by move `mv`, to be held there in `stance`.
+#[derive(Clone, Debug)]
+pub struct Request<'a> {
+    pub body: Id,
+    pub thing: Id,
+    pub mv: &'a Move,
+    pub stance: Stance,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum State {
+    /// The sit or lie in progress; `in_slot` once its contact handed the body over.
+    Lowering {
+        instance: Instance,
+        in_slot: bool,
+    },
+    /// In the slot, its legs held by a driver with no timer (none when another claim took them).
+    Seated(Option<Driver>),
+    Rising(Instance),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Hold {
+    body: Id,
+    stance: Stance,
+    state: State,
+}
+
+/// The claim that holds a seated body's legs and stance: no timer, nothing cancels it; [`Slots::rise`] ends it.
+pub fn seated_shape() -> SkillShape {
+    SkillShape {
+        name: Name::new("souls:seated").unwrap_or_else(|| unreachable!("a literal name")),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: vec![],
+        cancelled_by: vec![],
+    }
+}
+
+/// Every seat, and who holds each.
+#[derive(Default)]
+pub struct Slots {
+    seats: BTreeMap<Id, SeatAt>,
+    held: BTreeMap<Id, Hold>,
+    by_body: BTreeMap<Id, Id>,
+}
+
+impl Slots {
+    pub fn new() -> Slots {
+        Slots::default()
+    }
+
+    /// Adds a seat (`seat-duplicate` when its thing has one).
+    pub fn add(&mut self, seat: SeatAt) -> R<()> {
+        if self.seats.contains_key(&seat.thing) {
+            return refuse("seat-duplicate", show(seat.thing));
+        }
+        self.seats.insert(seat.thing, seat);
+        Ok(())
+    }
+
+    pub fn seat(&self, thing: Id) -> Option<&SeatAt> {
+        self.seats.get(&thing)
+    }
+
+    /// Who holds the seat of `thing`: one lookup.
+    pub fn holder(&self, thing: Id) -> Option<Id> {
+        self.held.get(&thing).map(|h| h.body)
+    }
+
+    /// The seat `body` holds, if any.
+    pub fn held_by(&self, body: Id) -> Option<Id> {
+        self.by_body.get(&body).copied()
+    }
+
+    /// Seats held.
+    pub fn len(&self) -> usize {
+        self.held.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.held.is_empty()
+    }
+
+    /// Commits one tick's requests at `now`, in the stable order (body id, then seat), whatever order they came in.
+    /// Each is reserved and its move started, or refused by name: `seat-unknown`, `seat-taken` (naming the holder),
+    /// `seat-already-held` (the body holds another), `seat-out-of-reach`, or the move's own refusals (B2).
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit(
+        &mut self,
+        c: &mut Controller,
+        due: &mut DueList,
+        mint: &mut Minter,
+        moves: &mut Moves,
+        geo: &impl Reach,
+        requests: &[Request],
+        now: Micros,
+    ) -> Vec<(Id, R<Instance>)> {
+        let mut order: Vec<&Request> = requests.iter().collect();
+        order.sort_by_key(|r| (r.body, r.thing));
+        order
+            .into_iter()
+            .map(|r| (r.body, self.take(c, due, mint, moves, geo, r, now)))
+            .collect()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn take(
+        &mut self,
+        c: &mut Controller,
+        due: &mut DueList,
+        mint: &mut Minter,
+        moves: &mut Moves,
+        geo: &impl Reach,
+        r: &Request,
+        now: Micros,
+    ) -> R<Instance> {
+        let Some(at) = self.seats.get(&r.thing) else {
+            return refuse("seat-unknown", show(r.thing));
+        };
+        if let Some(h) = self.held.get(&r.thing) {
+            return refuse(
+                "seat-taken",
+                format!("{}: held by {}", show(r.thing), show(h.body)),
+            );
+        }
+        if let Some(t) = self.by_body.get(&r.body) {
+            return refuse(
+                "seat-already-held",
+                format!("{} holds {}", show(r.body), show(*t)),
+            );
+        }
+        if at.seat.height > r.mv.reach {
+            return refuse(
+                "seat-out-of-reach",
+                format!(
+                    "{}: {} µm above the floor, standing reach {} µm",
+                    show(r.thing),
+                    at.seat.height,
+                    r.mv.reach
+                ),
+            );
+        }
+        let instance = moves.start(c, due, mint, geo, r.body, r.mv, r.thing, now)?;
+        self.held.insert(
+            r.thing,
+            Hold {
+                body: r.body,
+                stance: r.stance,
+                state: State::Lowering {
+                    instance,
+                    in_slot: false,
+                },
+            },
+        );
+        self.by_body.insert(r.body, r.thing);
+        Ok(instance)
+    }
+
+    /// Starts `body` rising from its seat by move `mv` at `now`: the seated driver ends and the rise claims the legs,
+    /// holding the stance until contact. `not-seated` when it is in no seat or still on its way down.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rise(
+        &mut self,
+        c: &mut Controller,
+        due: &mut DueList,
+        mint: &mut Minter,
+        moves: &mut Moves,
+        geo: &impl Reach,
+        body: Id,
+        mv: &Move,
+        now: Micros,
+    ) -> R<Instance> {
+        let not_seated = || refuse("not-seated", show(body));
+        let Some(&thing) = self.by_body.get(&body) else {
+            return not_seated();
+        };
+        let Some(hold) = self.held.get(&thing).copied() else {
+            return not_seated();
+        };
+        let State::Seated(driver) = hold.state else {
+            return not_seated();
+        };
+        if let Some(d) = driver {
+            c.release(body, d)?;
+        }
+        match moves.start(c, due, mint, geo, body, mv, thing, now) {
+            Ok(n) => {
+                if let Some(d) = moves.driver(n) {
+                    c.set(body, d, Part::Stance(hold.stance))?;
+                }
+                self.set(thing, State::Rising(n));
+                Ok(n)
+            }
+            Err(r) => {
+                self.sit_still(c, thing);
+                Err(r)
+            }
+        }
+    }
+
+    fn set(&mut self, thing: Id, state: State) {
+        if let Some(h) = self.held.get_mut(&thing) {
+            h.state = state;
+        }
+    }
+
+    fn release(&mut self, thing: Id) {
+        if let Some(h) = self.held.remove(&thing) {
+            self.by_body.remove(&h.body);
+        }
+    }
+
+    /// The body stays in the slot with no move: a driver with no timer holds its legs and its stance, if it can.
+    fn sit_still(&mut self, c: &mut Controller, thing: Id) {
+        let Some(h) = self.held.get(&thing).copied() else {
+            return;
+        };
+        let d = c.claim(h.body, &seated_shape()).ok();
+        if let Some(d) = d {
+            let _ = c.set(h.body, d, Part::Stance(h.stance));
+        }
+        self.set(thing, State::Seated(d));
+    }
+
+    /// A body left in its slot while another driver holds its legs (a walk claimed them and cancelled the sit after
+    /// contact, or the rise before it) would be stuck: a tick never steps a body in a slot. So it is handed back onto
+    /// the floor at the stand point under that driver, standing, and the seat is released.
+    fn give_way(
+        &mut self,
+        c: &mut Controller,
+        at: &SeatAt,
+        floors: &BTreeMap<Id, Surface>,
+        thing: Id,
+        now: Micros,
+    ) -> Option<R<HandOff>> {
+        let h = self.held.get(&thing).copied()?;
+        if h.state != State::Seated(None) {
+            return None;
+        }
+        let claims = c.claims(h.body)?;
+        let leg = claims
+            .family()
+            .resources
+            .iter()
+            .find(|r| r.class == Class::Locomotion)?;
+        let d = claims.holder(&leg.name)?;
+        let handed = self.stand(c, at, floors, h.body, d, now);
+        if handed.is_ok() {
+            let _ = c.set(h.body, d, Part::Stance(Stance::Stand));
+            self.release(thing);
+        }
+        Some(handed)
+    }
+
+    /// Runs a due timer through [`Moves::fire`], then does what it means for a seat: at a sit's contact the body is
+    /// handed into the slot, at a rise's onto the floor at the stand point (its surface in `floors`) and the seat is
+    /// released; a sit done leaves it seated; a sit cancelled before contact releases the seat. Returns what the move
+    /// did and the hand-off made, or why it could not be (the rise is then cancelled and the body stays seated).
+    #[allow(clippy::too_many_arguments)]
+    pub fn fire(
+        &mut self,
+        c: &mut Controller,
+        due: &mut DueList,
+        mint: &mut Minter,
+        moves: &mut Moves,
+        geo: &impl Reach,
+        floors: &BTreeMap<Id, Surface>,
+        t: &Timer,
+    ) -> Option<(Fired, Option<R<HandOff>>)> {
+        let fired = moves.fire(c, due, mint, geo, t)?;
+        let Some(&thing) = self.by_body.get(&t.node) else {
+            return Some((fired, None));
+        };
+        let (hold, at) = (
+            self.held.get(&thing).copied()?,
+            self.seats.get(&thing)?.clone(),
+        );
+        let instance = match hold.state {
+            State::Lowering { instance, .. } | State::Rising(instance) => instance,
+            State::Seated(_) => return Some((fired, None)),
+        };
+        let mine = matches!(fired, Fired::Phase { instance: n, .. } if n == instance)
+            || moves.record(instance).is_none();
+        if !mine {
+            return Some((fired, None));
+        }
+        let (body, now) = (hold.body, t.due);
+        let handed = match (&fired, hold.state) {
+            (Fired::Phase { phase: 1, .. }, State::Lowering { .. }) => {
+                let frame = Frame {
+                    node: thing,
+                    slot: Some(at.seat.slot),
+                };
+                let d = moves.driver(instance).unwrap_or(0);
+                let h = c
+                    .seat(body, d, frame, now)
+                    .and_then(|h| c.set(body, d, Part::Stance(hold.stance)).map(|()| h));
+                if h.is_ok() {
+                    self.set(
+                        thing,
+                        State::Lowering {
+                            instance,
+                            in_slot: true,
+                        },
+                    );
+                }
+                Some(h)
+            }
+            (Fired::Phase { phase: 1, .. }, State::Rising(_)) => {
+                let d = moves.driver(instance).unwrap_or(0);
+                let h = self.stand(c, &at, floors, body, d, now);
+                match &h {
+                    Ok(_) => {
+                        let _ = c.set(body, d, Part::Stance(Stance::Stand));
+                        self.release(thing);
+                    }
+                    Err(_) => {
+                        moves.cancel(c, due, instance, now, lit("stand-point-off-floor"));
+                        self.sit_still(c, thing);
+                    }
+                }
+                Some(h)
+            }
+            (Fired::Done(_), State::Lowering { .. }) => {
+                self.sit_still(c, thing);
+                None
+            }
+            (Fired::Cancelled(_), State::Lowering { in_slot: false, .. }) => {
+                self.release(thing);
+                None
+            }
+            (Fired::Cancelled(_), _) => {
+                self.sit_still(c, thing);
+                self.give_way(c, &at, floors, thing, now)
+            }
+            _ => None,
+        };
+        Some((fired, handed))
+    }
+
+    fn stand(
+        &self,
+        c: &mut Controller,
+        at: &SeatAt,
+        floors: &BTreeMap<Id, Surface>,
+        body: Id,
+        driver: Driver,
+        now: Micros,
+    ) -> R<HandOff> {
+        let Some(floor) = floors.get(&at.floor) else {
+            return refuse("no-surface", show(at.floor));
+        };
+        let frame = Frame {
+            node: at.floor,
+            slot: None,
+        };
+        let placed = floor.place(body, frame, at.stand()?, at.facing)?;
+        c.stand(body, driver, placed, now)
+    }
+}
+
+fn lit(s: &'static str) -> Name {
+    Name::new(s).unwrap_or_else(|| unreachable!("a literal name"))
+}
+
+/// The nearest point to `from` (µm, x and z) on `floor` at least `apart` µm from every point of `taken`, searched on
+/// a grid of `step` µm out to `most` µm, nearest first (ties by x, then z): where a body that rose onto a taken stand
+/// point walks. None when no such point is that near.
+pub fn clear_spot(
+    floor: &Surface,
+    from: [i64; 2],
+    taken: &[[i64; 2]],
+    apart: i64,
+    step: i64,
+    most: i64,
+) -> Option<[i64; 2]> {
+    let n = most / step;
+    let mut grid: Vec<(i64, i64, i64)> = (-n..=n)
+        .flat_map(|i| (-n..=n).map(move |j| (i * step, j * step)))
+        .map(|(dx, dz)| (dx * dx + dz * dz, dx, dz))
+        .filter(|(d2, ..)| *d2 <= most * most)
+        .collect();
+    grid.sort_unstable();
+    let frame = Frame {
+        node: floor.node,
+        slot: None,
+    };
+    let clear = |p: [i64; 2]| {
+        taken.iter().all(|q| {
+            let (dx, dz) = (i128::from(p[0] - q[0]), i128::from(p[1] - q[1]));
+            dx * dx + dz * dz >= i128::from(apart) * i128::from(apart)
+        })
+    };
+    grid.into_iter()
+        .map(|(_, dx, dz)| [from[0] + dx, from[1] + dz])
+        .find(|&p| {
+            clear(p)
+                && floor
+                    .place(floor.node, frame, Vec3::new(p[0], 0, p[1]), Quat::IDENTITY)
+                    .is_ok()
+        })
+}
+
+#[cfg(test)]
+mod tests;

@@ -15,6 +15,7 @@ pub mod host;
 pub mod ids;
 pub mod intent_decode;
 pub mod intents;
+pub mod moves;
 pub mod pose;
 pub mod query;
 pub mod read;
