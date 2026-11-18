@@ -136,6 +136,9 @@ fn span(p: &Part) -> Option<(u64, u64)> {
 
 /// The publishing thread: for each tick handed over (and any queued behind it), a spare caught up, or a whole copy of
 /// the newest, then published.
+// The publishing thread times its own work (`busy_ns`, A2's publish cost) with the wall clock. That is a measurement
+// off the clock thread, not world time, so the wall-clock rule (K7, v2/clippy.toml) is allowed here by name.
+#[allow(clippy::disallowed_methods)]
 fn run(s: &Shared, ticks: &Receiver<Vec<Arc<Part>>>) {
     // Every part after the oldest version a spare or the newest copy stands at.
     let mut kept: VecDeque<Arc<Part>> = VecDeque::new();
