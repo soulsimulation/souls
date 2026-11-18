@@ -36,7 +36,7 @@
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;
-use crate::ground::{MARGIN, OpenGround, Piece, SQUARE, Scene};
+use crate::ground::{MARGIN, OpenGround, Piece, SQUARE};
 use crate::links::{Building, End, F_OPEN, Kind, Link, Open, ground_doors};
 use replica::effects::Refusal;
 use replica::encode::Value;
@@ -302,7 +302,7 @@ impl Map {
         };
         let mut ground_meets = Vec::new();
         // The open ground, square by square, and each piece's stretches along its square's edges.
-        let open = OpenGround::prepare(&Scene::of(tree, ground)?, radius)?;
+        let open = OpenGround::of(tree, ground, radius)?;
         let gv = version(ground);
         // Edge stretches by line: (true for x = c, c) → (lo, hi, square, piece).
         let mut lines: BTreeMap<(bool, i64), Vec<Stretch>> = BTreeMap::new();
@@ -712,14 +712,15 @@ impl Map {
             p[0].div_euclid(SQUARE) as i32,
             p[1].div_euclid(SQUARE) as i32,
         );
-        let list = self
-            .by_patch
-            .get(&(node, None))
-            .or_else(|| self.by_patch.get(&(node, Some(square))))?;
+        let (list, open) = match self.by_patch.get(&(node, None)) {
+            Some(l) => (l, false),
+            None => (self.by_patch.get(&(node, Some(square)))?, true),
+        };
         let y = mm(at.y);
+        // The open ground is one level, its plan at 0; a body on it stands at the terrain's height (N11a, #2735).
         list.iter()
             .filter(|&&q| {
-                self.pieces[q as usize]
+                open || self.pieces[q as usize]
                     .piece
                     .vertices
                     .first()
