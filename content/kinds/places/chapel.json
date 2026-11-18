@@ -1,0 +1,247 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:chapel",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      8000,
+      9000,
+      14000
+    ]
+  },
+  "areas": {
+    "nave": {
+      "at_mm": [
+        0,
+        100,
+        1300
+      ],
+      "radius_mm": 3780
+    },
+    "vestry": {
+      "at_mm": [
+        0,
+        100,
+        -5590
+      ],
+      "radius_mm": 1190
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "enter": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "nave"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:chapel",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2500,
+            0
+          ],
+          "size": [
+            8000,
+            5000,
+            14000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            2025,
+            7000,
+            0
+          ],
+          "size": [
+            14300,
+            4000,
+            4150
+          ],
+          "yaw": 90000,
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            -2025,
+            7000,
+            0
+          ],
+          "size": [
+            14300,
+            4000,
+            4150
+          ],
+          "yaw": 270000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1500,
+            7020
+          ],
+          "size": [
+            1600,
+            2800,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            4015,
+            2350,
+            4000
+          ],
+          "size": [
+            50,
+            2500,
+            900
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            4015,
+            2350,
+            0
+          ],
+          "size": [
+            50,
+            2500,
+            900
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            4015,
+            2350,
+            -4000
+          ],
+          "size": [
+            50,
+            2500,
+            900
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -4015,
+            2350,
+            4000
+          ],
+          "size": [
+            50,
+            2500,
+            900
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -4015,
+            2350,
+            0
+          ],
+          "size": [
+            50,
+            2500,
+            900
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -4015,
+            2350,
+            -4000
+          ],
+          "size": [
+            50,
+            2500,
+            900
+          ],
+          "tint": "glass"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#e9e4da",
+        "trim": "#8f877a",
+        "roof": "#4f5a60",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "chapel"
+      ]
+    }
+  },
+  "text": {
+    "card": "A small stone chapel: a tall nave with tall windows, a vestry at the back.",
+    "building": "building",
+    "church": "church",
+    "kirk": "kirk",
+    "place_of_worship": "place of worship"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "church",
+      "kirk",
+      "place_of_worship"
+    ]
+  }
+}
