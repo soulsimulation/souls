@@ -4,110 +4,64 @@
   "owner": "thing",
   "state": {},
   "points": {
-    "left_side": {
-      "role": "stand",
-      "at_mm": [
-        -600,
-        0,
-        0
-      ]
-    }
+    "left_side": {"role":"stand","at_mm":[-600,0,0],"yaw_mdeg":90000},
+    "handlebar": {"role":"grip","at_mm":[0,950,420]}
   },
   "slots": {
-    "saddle": {
-      "admits": "body",
-      "posture": "sit",
-      "most": 1,
-      "at_mm": [
-        0,
-        950,
-        0
-      ],
-      "stand": "left_side"
-    }
+    "saddle": {"admits":"body","posture":"sit","most":1,"at_mm":[0,850,-200],"stand":"left_side"},
+    "basket": {"admits":"thing","most":3,"at_mm":[0,900,620],"fits_mm":[380,160,300]}
   },
-  "geometry": {
-    "bounds_mm": [
-      550,
-      1100,
-      1800
-    ]
-  },
-  "vehicle": {
-    "drive": "saddle",
-    "steer": "steer",
-    "speed_mm_s": 5000,
-    "ground": "level"
-  },
+  "geometry": {"bounds_mm":[550,1100,1800]},
   "forms": {
     "ride": {
       "who": "anyone",
       "starts": "act",
-      "needs": [
-        {
-          "need": "slot_free",
-          "slot": "saddle"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "left_side"
-        },
-        {
-          "step": "sit",
-          "slot": "saddle"
-        }
-      ],
-      "effects": [
-        {
-          "change": "reparent",
-          "what": "actor",
-          "into": "saddle",
-          "event": "mounted"
-        }
-      ]
+      "needs": [{"need":"slot_free","slot":"saddle"}],
+      "steps": [{"step":"walk_to","point":"saddle"},{"step":"sit","slot":"saddle"}],
+      "effects": [{"change":"reparent","what":"actor","into":"saddle","event":"mounted"}]
     },
     "steer": {
       "who": "holder",
       "starts": "act",
       "takes": {
-        "toward": {
-          "type": "thing",
-          "select": {
-            "of": "things",
-            "in": "here",
-            "anchor": "me",
-            "order": "nearest",
-            "rank": 1
-          }
-        }
+        "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
       },
       "needs": [],
-      "steps": [
-        {
-          "step": "move",
-          "move": "steer",
-          "toward": {
-            "arg": "toward"
-          }
-        }
-      ],
+      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
       "effects": []
     }
   },
-  "motion": { "how": "wheeled" },
-  "loose": { "ever": true },
+  "vehicle": {"drive":"saddle","steer":"steer","speed_mm_s":5000,"ground":"level"},
+  "motion": {"how":"wheeled"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:bicycle",
+    "shape": {
+      "shapes": [
+        {"kind":"torus","at":[0,330,-520],"r":320,"r2":25,"segments":14,"tint":"tyre","yaw":90000,"role":"wheel"},
+        {"kind":"torus","at":[0,330,520],"r":320,"r2":25,"segments":14,"tint":"tyre","yaw":90000,"role":"wheel"},
+        {"kind":"cyl","at":[0,525,-335],"r":20,"h":538,"segments":5,"tint":"frame","pitch":43487},
+        {"kind":"cyl","at":[0,735,115],"r":20,"h":531,"segments":5,"tint":"frame","pitch":86746},
+        {"kind":"cyl","at":[0,540,165],"r":20,"h":601,"segments":5,"tint":"frame","pitch":45665},
+        {"kind":"cyl","at":[0,525,-100],"r":20,"h":403,"segments":5,"tint":"frame","pitch":14381,"yaw":180023},
+        {"kind":"cyl","at":[0,330,-285],"r":18,"h":470,"segments":5,"tint":"frame","pitch":90012},
+        {"kind":"cyl","at":[0,640,470],"r":20,"h":628,"segments":5,"tint":"frame","pitch":9167,"yaw":180023},
+        {"kind":"cyl","at":[0,950,420],"r":18,"h":500,"segments":5,"tint":"dark","roll":90000},
+        {"kind":"capsule","at":[0,800,-200],"r":50,"h":140,"segments":5,"tint":"dark","pitch":90000},
+        {"kind":"extrude","at":[0,800,620],"polygon":[[-140,-100],[140,-100],[140,100],[-140,100]],"h":160,"tint":"basket"}
+      ],
+      "round": 20,
+      "palette": {"tyre":"#262626","frame":"#3f7f86","dark":"#2b2b2b","basket":"#c9a77a"},
+      "tags": ["transport","vehicle","bicycle","bike"]
+    }
+  },
   "text": {
     "card": "A bicycle: sit on the saddle and steer it along level ground.",
     "getting_around": "transport",
-    "bike": "bike"
+    "bike": "bike",
+    "cycle": "cycle",
+    "howto_ride": "Get on the saddle, then steer toward where you are going."
   },
-  "card": {
-    "text": "card",
-    "category": "getting_around",
-    "synonyms": [
-      "bike"
-    ]
-  }
+  "card": {"text":"card","category":"getting_around","synonyms":["bike","cycle"]},
+  "howtos": {"ride":{"text":"howto_ride","steps":[{"form":"ride"},{"form":"steer"}]}}
 }

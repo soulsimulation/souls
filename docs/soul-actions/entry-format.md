@@ -147,9 +147,12 @@ stairs or ladders; `deep_water`: water deep enough to swim in). Its size is `geo
 Getting on and off is only while it stands still, and only where the rider could stand (`level`, `shallow`) or swim
 (`deep_water`): `dismount(entry, {moving, spot})` answers with the code `moving` or `no_footing` and a reason naming the
 spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/vehicle.json`.
-`ride` is for a boat that is not rowed, a sail: `seats` (body slots), `stops` (two or more `stand` points in the order
-of the trip), `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
-`speed_mm_s` and `ground`. A kind is a vehicle or a ride, not both. Sections 13 and 14 are meaning, so covered by the hash.
+`ride` is for a boat that is not rowed, a sail, and for a ride on a track (a big wheel, a carousel, a balloon, a cable car):
+`seats` (body slots), `stops` (two or more `stand` points in the order of the trip; a round trip names its one stop twice),
+`returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
+`speed_mm_s` and `ground`, which for a ride may also be `air` (a cable or a flight: a rider gets on and off only at its
+stops). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
+(SA-X33, [#2923](https://github.com/soulsimulation/souls/issues/2923)). Sections 13 and 14 are meaning, so covered by the hash.
 
 **Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a
 wardrobe, a fridge or a stall is known to hold, made real when someone reaches for it. A stock is
@@ -160,9 +163,11 @@ supplies (a book's title and first page); optional `refill`, `{every_us}`, one m
 (a timed value, SA-F5a). The take form is checked: it is a Soul's act that needs the count `at_least` 1 (an empty
 stock refuses) and a free hand, and its one `create` makes the kind into `actor_hand`; it never sets the count. The engine
 lowers the count by one in the same batch as the make (`takeStock` shows the batch: a `create` and a `set` with `by` -1), so
-nothing is made from nothing. Stock is free to take; buying, lending and debts are not here. A kind whose contents are
+nothing is made from nothing, and the check gate's `makes` rule counts the stock as what pays for it. Stock is free to
+take; buying, lending and debts are not here. A kind whose contents are
 closed lists `count` in `closed.fields` and shows its stock only once opened (`stockOf` answers `null` until then; a shelf
-or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Section 15 is meaning, so covered by the hash.
+or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Eden's own storage
+(`content/kinds/storage/`, SA-X26 [#2916](https://github.com/soulsimulation/souls/issues/2916)) names each stock's take form `take`. Section 15 is meaning, so covered by the hash.
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
@@ -219,7 +224,8 @@ list (`AUDIENCE_RULES` in `tools/entry/format.mjs`): `{"rule": "everyone"}`, `{"
 the Soul whose turn it is) and `{"rule": "creator"}` (the world's creator). A rule names a link type, never a Soul.
 A kind may add a `closed` section (9), `{"audience": rule, "fields": ["stock"]}`: the fields it names, and its
 children, take the container's own audience until it is opened (Engine v2 E22,
-[#2792](https://github.com/soulsimulation/souls/issues/2792)); those fields declare no audience of their own.
+[#2792](https://github.com/soulsimulation/souls/issues/2792)); those fields declare no audience of their own, and the
+rules (`@souls/form-rules`) read a need on one with the container's audience.
 Delivering to viewers is the new engine's view tier. Point and slot names share one namespace, so a form's argument of type
 `part` or `slot` can name "the top drawer" or "the left seat" and one form serves every part.
 

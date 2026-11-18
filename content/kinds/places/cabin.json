@@ -1,0 +1,209 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cabin",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      6000,
+      4830,
+      8000
+    ]
+  },
+  "areas": {
+    "cabin": {
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "radius_mm": 2280
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:cabin",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1300,
+            0
+          ],
+          "size": [
+            6000,
+            2600,
+            5000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            3714,
+            1300
+          ],
+          "size": [
+            6300,
+            2227,
+            2700
+          ],
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            3714,
+            -1300
+          ],
+          "size": [
+            6300,
+            2227,
+            2700
+          ],
+          "yaw": 180000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1150,
+            2520
+          ],
+          "size": [
+            1200,
+            2100,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -1800,
+            1550,
+            2515
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            1800,
+            1550,
+            2515
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            100,
+            3250
+          ],
+          "size": [
+            6000,
+            200,
+            1500
+          ],
+          "tint": "trim"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -2850,
+            1300,
+            3850
+          ],
+          "r": 90,
+          "h": 2600,
+          "segments": 8,
+          "tint": "trim"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            2850,
+            1300,
+            3850
+          ],
+          "r": 90,
+          "h": 2600,
+          "segments": 8,
+          "tint": "trim"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#8a5a3a",
+        "trim": "#e8dcc4",
+        "roof": "#4a4f42",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "building",
+        "residential",
+        "furnished",
+        "home"
+      ]
+    }
+  },
+  "text": {
+    "card": "A one-room log cabin with a porch, a bed and a hearth.",
+    "building": "building",
+    "log_cabin": "log cabin",
+    "hut": "hut",
+    "bothy": "bothy"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "log_cabin",
+      "hut",
+      "bothy"
+    ]
+  }
+}

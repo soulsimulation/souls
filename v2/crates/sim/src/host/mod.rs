@@ -17,8 +17,14 @@
 //! - **Draws** are SplitMix64 over a seed the caller gives and a count of draws in this tick, so a log replays them.
 //! - **Counted.** Every host call adds one to [`Staged::calls`], for F8's metering.
 //!
-//! Not here: moving N7's walk behind the interface (T9b #3120), handing intents back after a restart (K13b #3119),
-//! applying the staged entries (the tick loop).
+//! - **Crossing a link** (T9b #3120): `Host::cross` is staged as a request, and [`carry`] has the world's [`Links`]
+//!   turn it into the controller's [`Track`], which the controller carries the body along. A shut door is opened by
+//!   the world, not the walker: [`Links::track`] writes the opening and the body stands that tick.
+//! - **What the tree does not hold yet** (bodies in the controller, a link's turn state) is read through
+//!   [`Geometry::read`], before the tree.
+//!
+//! Not here: retiring N7's `Crowd` (T9c), handing intents back after a restart (K13b #3119), applying the staged
+//! entries (the tick loop).
 
 use std::cell::Cell;
 use std::collections::BTreeSet;
@@ -32,11 +38,29 @@ use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::End;
 
-use crate::controller::{Controller, Driver, Part};
+use crate::controller::{Controller, Driver, Part, Track};
+use crate::mover::Body as Moved;
 
 /// The N lane's answers to T9's closed list of geometry questions, asked for `body`.
 pub trait Geometry {
     fn ask(&self, body: Id, q: &Ask) -> Option<Answer>;
+    /// A node the world holds outside the tree for now (a body's pose in the controller, a link's turn state, T9b
+    /// A3), as of the tick's start; `None` reads the tree.
+    fn read(&self, _node: Id) -> Option<Seen> {
+        None
+    }
+}
+
+/// The world's side of a crossing: the track a body is carried along across `link` at `speed`, or `None` while it
+/// stands (a shut door being opened for it, written by the world with the body as the acting Soul).
+pub trait Links {
+    fn track(
+        &mut self,
+        body: &Moved,
+        link: Id,
+        speed: i64,
+        at: Micros,
+    ) -> Result<Option<Track>, Refusal>;
 }
 
 /// A running skill on a body.
@@ -70,6 +94,8 @@ pub struct Timer {
 pub struct Staged {
     /// Controller inputs with their run's driver, in body order; a run's last input in the tick wins.
     pub controls: Vec<(Id, Driver, ControllerInput)>,
+    /// Crossings asked for, with their run's driver: body, driver, link and speed (µm a second).
+    pub crossings: Vec<(Id, Driver, Id, i64)>,
     pub emits: Vec<Emit>,
     pub timers: Vec<Timer>,
     /// Timers cleared: body and timer.
@@ -130,6 +156,13 @@ impl<G: Geometry> WorldHost<'_, G> {
                     check(&mine, pose.frame.node)?;
                     mine.insert(*node);
                 }
+                // Moving the body into another frame is motion too: the controller carries it (T9b #3120).
+                Change::Reparent { node, .. } if *node == self.body => {
+                    return Err(Refusal {
+                        name: "reparent-outside-controller",
+                        detail: replica::world_model::show(*node),
+                    });
+                }
                 Change::Remove { node }
                 | Change::Reparent { node, .. }
                 | Change::Set { node, .. } => check(&mine, *node)?,
@@ -172,6 +205,9 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
 
     fn read(&self, node: Id) -> Option<Seen> {
         self.count();
+        if let Some(s) = self.geometry.read(node) {
+            return Some(s);
+        }
         let n = self.tree.node(self.tree.handle(node)?)?;
         Some(Seen {
             id: n.id(),
@@ -217,6 +253,13 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
             Some((b, d, last)) if *b == self.body && *d == self.driver => *last = input,
             _ => self.staged.controls.push((self.body, self.driver, input)),
         }
+    }
+
+    fn cross(&mut self, link: Id, speed: i64) {
+        self.count();
+        self.staged
+            .crossings
+            .push((self.body, self.driver, link, speed));
     }
 
     fn emit(&mut self, changes: Vec<Change>, meaning: Option<Event>) -> Result<(), Refusal> {
@@ -276,6 +319,43 @@ pub fn hand_on(staged: &Staged, controller: &mut Controller) -> Vec<(Id, Refusal
     let mut refused = Vec::new();
     for &(body, driver, input) in &staged.controls {
         if let Err(r) = controller.set(body, driver, Part::Velocity(input.velocity, input.mode)) {
+            refused.push((body, r));
+        }
+    }
+    refused
+}
+
+/// Hands a tick's staged crossings on: for each, the world's [`Links`] gives the track (or opens a shut door, and the
+/// body stands), and the controller carries the body along it under the run's driver. Refusals are returned with
+/// their bodies; a refused crossing changes nothing.
+pub fn carry(
+    staged: &Staged,
+    controller: &mut Controller,
+    links: &mut impl Links,
+    at: Micros,
+) -> Vec<(Id, Refusal)> {
+    let mut refused = Vec::new();
+    for &(body, driver, link, speed) in &staged.crossings {
+        let Some(b) = controller.body(body).copied() else {
+            refused.push((
+                body,
+                Refusal {
+                    name: "body-unknown",
+                    detail: replica::world_model::show(body),
+                },
+            ));
+            continue;
+        };
+        let r = match links.track(&b, link, speed, at) {
+            Ok(Some(t)) => controller.cross(body, driver, t),
+            Ok(None) => controller.set(
+                body,
+                driver,
+                Part::Velocity(Vec3::ZERO, replica::pose::Mode::Surface),
+            ),
+            Err(r) => Err(r),
+        };
+        if let Err(r) = r {
             refused.push((body, r));
         }
     }
