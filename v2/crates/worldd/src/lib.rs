@@ -4,5 +4,6 @@
 
 pub mod answers;
 pub mod checkers;
+pub mod start;
 pub mod view_out;
 pub mod views;
