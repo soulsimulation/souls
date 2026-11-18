@@ -54,6 +54,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "form-stop"
+version = "0.0.0"
+dependencies = [
+ "body-script",
+ "replica",
+ "sim",
+ "skills",
+]
+
+[[package]]
 name = "gatewayd"
 version = "0.0.0"
 

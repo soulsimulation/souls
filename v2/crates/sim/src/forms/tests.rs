@@ -448,9 +448,22 @@ impl Bench {
     }
 }
 
-/// The log's entries caused by `intent`.
-fn caused(log: &[Effect], intent: &Intent) -> Vec<u64> {
+/// The log's entries that are a form's effects (not a run's start or end, F3).
+fn effect_entries(log: &[Effect]) -> Vec<&Effect> {
     log.iter()
+        .filter(|e| {
+            e.events
+                .iter()
+                .flatten()
+                .any(|v| v.name.as_str() == "souls:effect")
+        })
+        .collect()
+}
+
+/// The log's effects caused by `intent`.
+fn caused(log: &[Effect], intent: &Intent) -> Vec<u64> {
+    effect_entries(log)
+        .into_iter()
         .filter(|e| e.envelope.cause == Cause::Intent(intent.id))
         .map(|e| e.envelope.sequence)
         .collect()
@@ -477,7 +490,7 @@ fn f2_a1_the_effect_lands_at_contact_or_when_the_last_step_ends() {
             panic!("{:?}", b.forms.ended)
         };
         assert_eq!(e.how.as_str(), "done");
-        let [effect] = log.as_slice() else {
+        let [effect] = effect_entries(&log)[..] else {
             panic!("one effect: {log:?}")
         };
         let Body::Changes(c) = &effect.body else {
@@ -520,7 +533,7 @@ fn f2_a3_a_resend_across_a_restart_gets_the_first_receipt() {
     let now = b.now;
     let mut b = Bench::new();
     let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
-    b.forms = Forms::recover(&log);
+    b.forms = Forms::recover(&log, now);
     b.now = now;
     let after = b.ask(body, node, &entry, &form, limits, it);
     println!("a resend before the restart: {before:?}; after it: {after:?}");
@@ -538,7 +551,7 @@ fn f2_a3_a_resend_across_a_restart_gets_the_first_receipt() {
     b.forms.forget(b.now);
     let r = b.ask(body, node, &entry, &form, limits, it);
     assert_eq!(r.map_err(|r| r.name), Err("intent-expired"));
-    assert_eq!(log.len(), 1);
+    assert_eq!(effect_entries(&log).len(), 1);
 }
 
 fn splitmix(x: &mut u64) -> u64 {
@@ -592,7 +605,7 @@ fn f2_a2_a3_ten_thousand_runs_with_resends_doubled_timers_and_kills_apply_each_e
                 let now = b.now;
                 b = Bench::new();
                 b.add(&entry, start, Vec3::ZERO);
-                b.forms = Forms::recover(&log);
+                b.forms = Forms::recover(&log, now);
                 b.now = now;
                 restarted = true;
             }
@@ -620,8 +633,8 @@ fn f2_a2_a3_ten_thousand_runs_with_resends_doubled_timers_and_kills_apply_each_e
         let last = b.ask(body, node, &entry, &form, limits, it);
         // Each effect is in the log exactly once, and every receipt is the first.
         for n in 0..effects {
-            let once = log
-                .iter()
+            let once = effect_entries(&log)
+                .into_iter()
                 .filter(|e| {
                     e.envelope.cause == Cause::Intent(it.id)
                         && e.events.as_ref().is_some_and(|v| {
@@ -642,7 +655,7 @@ fn f2_a2_a3_ten_thousand_runs_with_resends_doubled_timers_and_kills_apply_each_e
         for r in &receipts {
             assert_eq!(*r, first, "seed {seed}: a resend got another receipt");
         }
-        in_log += log.len() as u64;
+        in_log += effect_entries(&log).len() as u64;
     }
     println!(
         "{RUNS} runs: {in_log} effects in the logs, each once; {resends} resends, every receipt the first \
@@ -651,4 +664,29 @@ fn f2_a2_a3_ten_thousand_runs_with_resends_doubled_timers_and_kills_apply_each_e
     );
     assert_eq!(in_log, RUNS * effects);
     assert!(across > 0 && doubled > 0 && kills > 0 && lost > 0);
+}
+
+// --- F3: reserve, stop, and end cleanly (#2768) -------------------------------------------------------------------
+
+#[test]
+fn f3_a3_a_second_soul_asking_for_a_reserved_thing_is_refused_naming_the_holder_and_a_next_act() {
+    let (entry, form) = entries().remove(0);
+    let limits = Limits::default();
+    let mut b = Bench::new();
+    let (first, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    let (second, _) = b.add(&entry, Vec3::new(2_000_000, 0, 3_000_000), Vec3::ZERO);
+    b.start(first, node, &entry, &form, limits);
+    assert_eq!(b.forms.holder(node), Some(first));
+    let r = b
+        .ask(second, node, &entry, &form, limits, intent(second, 0))
+        .expect_err("refused");
+    println!("{}: {}", r.name, r.detail);
+    assert_eq!(r.name, "thing-reserved");
+    assert!(r.detail.contains(&replica::world_model::show(first)));
+    assert!(r.detail.contains("next: "));
+    // Once the holder's run ends, the thing is free.
+    b.run(60_000_000);
+    assert_eq!(b.forms.holder(node), None);
+    let again = b.ask(second, node, &entry, &form, limits, intent(second, 1));
+    assert!(matches!(again, Ok(Asked::Started(_))), "{again:?}");
 }
