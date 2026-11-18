@@ -41,6 +41,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:pinned_note",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,120,2],"size":[320,220,4],"tint":"paper"},{"kind":"box","at":[0,215,8],"size":[16,16,8],"tint":"pin"},{"kind":"box","at":[-20,150,5],"size":[220,8,1],"tint":"ink"},{"kind":"box","at":[-40,110,5],"size":[180,8,1],"tint":"ink"},{"kind":"box","at":[60,60,5],"size":[120,8,1],"tint":"ink"}],"palette":{"paper":"#fbf3c9","pin":"#c0392b","ink":"#2a2622"},"tags":["note","board","object"]}
