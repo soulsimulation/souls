@@ -10,6 +10,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "birdseye"
+version = "0.0.0"
+dependencies = [
+ "import-eden",
+ "replica",
+ "sim",
+ "testworld",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -20,6 +30,15 @@ name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
+name = "compare-reach"
+version = "0.0.0"
+dependencies = [
+ "import-eden",
+ "replica",
+ "sim",
+]
 
 [[package]]
 name = "gatewayd"
@@ -134,6 +153,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "stall-test"
+version = "0.0.0"
+
+[[package]]
 name = "syn"
 version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -212,3 +235,7 @@ dependencies = [
 [[package]]
 name = "worldd"
 version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
+]

@@ -1,0 +1,12 @@
+[package]
+name = "birdseye"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Engine v2 V14 (#2659): a scripted run of bodies in the tree, written as a throwaway trace for a bird's-eye view."
+
+[dependencies]
+replica = { path = "../../crates/replica" }
+sim = { path = "../../crates/sim" }
+import-eden = { path = "../import-eden" }
+testworld = { path = "../testworld" }
