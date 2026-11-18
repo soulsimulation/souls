@@ -1,6 +1,6 @@
 {
  "format": "souls-form-cases/1",
- "about": "eden:notebook_line (from #990, core-notebook-stand@1). A notebook on a lectern keeps up to eight signed lines (eden:notebook_stand's children), two per Soul (the writer link's most_per); the hand writes on the sloped page. Writing needs the line free and within reach; crossing out needs a line there, and only its writer crosses it out ('You have no line in this notebook; only its writer crosses a line out.'), which the unlink refuses for anyone else (the effect case). 'The notebook is full (8 lines)' is every line taken.",
+ "about": "eden:notebook_line (from #990, core-notebook-stand@1). A notebook on a lectern keeps up to eight signed lines (eden:notebook_stand's children), two per Soul (the writer link's most_per); the hand writes on the sloped page. Writing needs the line free and within reach; crossing out needs a line there, and only its writer crosses it out ('You have no line in this notebook; only its writer crosses a line out.'), which the unlink refuses for anyone else (the effect case). 'The notebook is full (8 lines)' is every line taken. Another Soul's line is refused by the need with the original's words.",
  "cases": [
   {
    "name": "write_every_need_met",
@@ -375,6 +375,72 @@
      "step": "walk_to",
      "point": "line"
     }
+   }
+  },
+  {
+   "name": "cross_out_someone_elses",
+   "act": {
+    "this": "t1",
+    "form": "cross_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:notebook_line",
+      "links": {
+       "writer": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 0,
+    "detail": {
+     "link": "writer",
+     "count": 1
+    },
+    "fix": null,
+    "says": "not_your_line"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
    }
   }
  ]

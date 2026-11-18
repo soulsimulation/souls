@@ -66,7 +66,7 @@ impl Clock for Real {
 /// Watches the heartbeat on its own thread: no tick ended for [`LIMIT_MS`] ends the process by name.
 pub fn watch(beat: Arc<Heartbeat>, mut real: Real, limit_ms: i64) {
     std::thread::spawn(move || {
-        loop {
+        for k in 1u64.. {
             std::thread::sleep(Duration::from_millis(10));
             let (tick, at) = beat.read();
             let quiet = (real.now() - at) / 1000;
@@ -74,6 +74,10 @@ pub fn watch(beat: Arc<Heartbeat>, mut real: Real, limit_ms: i64) {
                 println!("watchdog: tick-stalled: no tick for {quiet} ms after tick {tick}");
                 eprintln!("worldd: tick-stalled: no tick for {quiet} ms after tick {tick}");
                 std::process::exit(EXIT_TICK_STALLED);
+            }
+            // Within the limit: alive, told to the service manager twice a second (O1, #2730).
+            if k % 50 == 0 {
+                crate::alive();
             }
         }
     });
@@ -144,6 +148,7 @@ pub fn run(args: &[String]) -> i32 {
     );
     let beat = Arc::new(Heartbeat::new(now));
     watch(beat.clone(), real, limit);
+    crate::ready();
     let mut failed = None;
     loop {
         let mut tick = |n: i64, start: Micros| {
