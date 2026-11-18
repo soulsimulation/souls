@@ -9,8 +9,8 @@
 //        [--origin https://soul.game] [--cli .local/release-probe] [--out .local/ship/<label>-eyes] [--find-min 45]
 //
 // Handover (ship/handover.mjs): it waits for the run's release/ship "waiting-for-eyes" status on that sha, refuses a run
-// whose head is not --sha, starts the probe (expecting we-<sha12>, or the live build for a no-switch run), posts
-// release/eyes "ready", waits for release/ship "released", lets the probe watch 60 s more, runs the checks and posts
+// whose head is not --sha (a pinned-sha release: whose title does not name it), starts the probe (expecting
+// we-<sha12>, or the live build for a no-switch run), posts release/eyes "ready", waits for release/ship "released", lets the probe watch 60 s more, runs the checks and posts
 // release/eyes pass or fail. Any failure, interrupt or crash posts fail, never pass; the run then fails and does not publish.
 //
 // --gpu hardware (release.yml eyes=gpu-runner, on a souls-timed runner): every check uses Playwright's Chromium with the first
@@ -87,7 +87,9 @@ while (!checksOnly) {
   if (cand && latestFor(statuses, CONTEXT.ship, cand.run)?.word === 'waiting-for-eyes') {
     const [id, attempt] = cand.run.split('.');
     const info = JSON.parse(await gh(['api', `repos/${repo}/actions/runs/${id}`]));
-    if (info.head_sha !== sha || !/\.github\/workflows\/release\.yml$/.test(info.path ?? '')) {
+    // a pinned-sha release runs at main's head and names the sha it ships in its title (release.yml run-name)
+    const ships = info.head_sha === sha || String(info.display_title ?? '').split(/\s+/).includes(sha);
+    if (!ships || !/\.github\/workflows\/release\.yml$/.test(info.path ?? '')) {
       say(`REFUSED: run ${id} is ${info.path} at ${String(info.head_sha).slice(0, 12)}, not release.yml shipping ${sha.slice(0, 12)}`); process.exit(2);
     }
     if (info.status !== 'completed' && (attempt === undefined || String(info.run_attempt) === attempt)) { run = cand.run; mode = cand.mode; break; }

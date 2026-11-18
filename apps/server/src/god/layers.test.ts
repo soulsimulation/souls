@@ -90,3 +90,15 @@ test('DEFER: without LAYERS=1 the god cannot set prices, money or relationships,
     assert.match(L.refusal(m.get('house')!.id, ben)!.reason, /Ana's and private/, 'ownership still refuses');
   } finally { if (was !== undefined) process.env.LAYERS = was; }
 });
+
+test('#2597 A4: the day key is kept per tick and clock, and is the clock\'s date at every tick and after the clock changes', () => {
+  const m = new WorldModel({ constants: { extent: 400, ground: 'land' }, seed: 'layers-day' });
+  const engine = { world: { tick: 0, entities: {} as Record<string, unknown> } };
+  let living: { origin: number; dayTicks: number } | null = { origin: 0, dayTicks: 72000 }, reads = 0;
+  const L = new GodLayers({ model: m, engine, living: () => { reads++; return living; }, engineAct: () => ({ accepted: true }) as never, log: () => {} });
+  for (const tick of [0, 1, 50_000, 71_999, 72_000, 72_000, 144_001]) { engine.world.tick = tick; assert.equal(L.dayKey(), L.clock()!.day, `tick ${tick}`); }
+  engine.world.tick = 71_999; L.dayKey(); const before = reads; for (let i = 0; i < 100; i++) L.dayKey();
+  assert.equal(reads - before, 100, 'one living() read per call, no clock read');   // (clock() would read living() again)
+  living = { origin: 71_999, dayTicks: 72000 }; assert.equal(L.dayKey(), L.clock()!.day, 'a new clock origin in the same tick');
+  living = null; assert.equal(L.dayKey(), '', 'no clock');
+});
