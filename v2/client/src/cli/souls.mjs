@@ -9,25 +9,33 @@
 //   souls.mjs act <verb> [<verb>...]          a ranked list: the first is the act, the rest its fallbacks
 //   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened, or at the timeout
 //   souls.mjs stop                            ends the daemon
+//   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
+//   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
 //   any of them [--soul <id>]                 which Soul, when the home has more than one
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
 
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
+import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 
 export const OPS = ['status', 'look', 'find', 'act', 'wait', 'stop'];
+/** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
+export const LOCAL = ['digest', 'consolidate'];
 
 /** The daemon request the arguments make, or a refusal by name. */
 export function requestOf(argv) {
   const args = [...argv], opts = {};
-  for (const name of ['--soul', '--limit']) {
+  for (const name of ['--soul', '--limit', '--since']) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
   }
   const [op = 'status', ...rest] = args;
+  if (LOCAL.includes(op)) return { local: op, soul: opts.soul, since: opts.since ?? null, refs: rest.includes('--refs'), force: rest.includes('--force') };
   if (!OPS.includes(op)) return { refused: 'unknown-command', detail: `one of ${OPS.join(', ')}` };
   const req = { op };
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
@@ -36,17 +44,29 @@ export function requestOf(argv) {
   return { req, soul: opts.soul };
 }
 
+/** A local command: the Soul named, else the home's only Soul with a memory folder. */
+async function local({ local: op, soul: named, since, refs, force }, home) {
+  const souls = existsSync(join(home, 'souls')) ? readdirSync(join(home, 'souls')).filter((s) => existsSync(join(soulDirOf(home, s), 'memory'))) : [];
+  const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
+  if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a memory'}`), { code: 'which-soul' });
+  if (op === 'digest') return { ok: true, soul, ...digestOf(soulDirOf(home, soul), { since, refs }) };
+  return { ok: true, soul, ...(await consolidateIn(home, soulDirOf(home, soul), { force })) };
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
-  const { req, soul: named, refused, detail } = requestOf(process.argv.slice(2));
+  const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
   try {
     if (refused) throw Object.assign(new Error(detail), { code: refused });
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
-    const souls = soulsWithTokens(home);
-    const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
-    if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
-    const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;
-    out(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
+    if (asked.local) out(await local(asked, home));
+    else {
+      const souls = soulsWithTokens(home);
+      const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
+      if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
+      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;
+      out(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
+    }
   } catch (e) {
     out({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) });
     process.exitCode = 1;

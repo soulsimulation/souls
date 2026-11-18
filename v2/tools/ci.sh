@@ -101,6 +101,8 @@ step client-sync node --test client/src/sync/
 step client-daemon bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/daemon/'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
 step client-command node --test client/src/brief/ client/src/find/ client/src/cli/
+# A Soul's memory (R14, #2754): a 30-day home opened unchanged, an hour of named events, digest, consolidate, aliases.
+step client-memory node --test client/src/memory/
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
