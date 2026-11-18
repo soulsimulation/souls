@@ -17,7 +17,7 @@ use archive::script::{self, TICK};
 use archive::{Archiver, R, Shared, seek};
 use directoryd::directory::store::{Memory, Store};
 use replica::encode::encode;
-use replica::history::events::{Counts, HourIndex, Span, counts_key, hour_key};
+use replica::history::events::{Counts, EventIndex, Span, counts_key, events_key};
 use replica::history::{Bundle, DayIndex, day_of};
 
 /// The reference link until the coordinator names one (the issue's default), declared before the run.
@@ -215,17 +215,21 @@ pub fn run(hours: i64) -> R<()> {
 
     // The index sizes: the day's, and a modelled year's.
     let day = day_of(0);
-    let hours_bytes: usize = (0..24)
-        .map(|h| size(&*store, &format!("{PREFIX}{}", hour_key(day, h))))
-        .sum::<R<usize>>()?;
-    let rows: usize = (0..24)
+    // The day's object, and its hours' that have their own.
+    let keys = std::iter::once(None).chain((0..24).map(Some));
+    let objects: Vec<Vec<u8>> = keys
         .filter_map(|h| {
             store
-                .get(&format!("{PREFIX}{}", hour_key(day, h)))
+                .get(&format!("{PREFIX}{}", events_key(day, h)))
                 .ok()
                 .flatten()
         })
-        .map(|o| HourIndex::read(&o.bytes).map(|i| i.rows.len()))
+        .map(|o| o.bytes)
+        .collect();
+    let hours_bytes: usize = objects.iter().map(Vec::len).sum();
+    let rows: usize = objects
+        .iter()
+        .map(|o| EventIndex::read(o).map(|i| i.rows.len()))
         .sum::<R<usize>>()?;
     let counts_day = size(&*store, &format!("{PREFIX}{}", counts_key(Span::Day(day))))?;
     let counts_year = size(&*store, &format!("{PREFIX}{}", counts_key(Span::Year(0))))?;
@@ -238,9 +242,9 @@ pub fn run(hours: i64) -> R<()> {
     )?;
     let per_row = hours_bytes as f64 / rows.max(1) as f64;
     println!(
-        "index, one day: event index {hours_bytes} bytes in {} hours ({rows} events, {per_row:.1} bytes each); \
+        "index, one day: event index {hours_bytes} bytes in {} object(s) ({rows} events, {per_row:.1} bytes each); \
          ten-minute counts {counts_day} bytes ({} rows); bundles' day index {day_index} bytes",
-        24,
+        objects.len(),
         check.counts.len()
     );
     println!(

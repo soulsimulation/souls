@@ -20,7 +20,8 @@ a store path inside a value is a byte string, since text in v2 is always a name.
 | `archive/head` | The **head**: `{1: format, 2: root id, 3: root kind, 4: newest manifest}` | When a new day's first object is written |
 | `bundles/<day>/<start µs>` | A **bundle**: `{1: format, 2: header hash, 3: start µs, 4: length µs, 5: snapshot, 6: view}` | Once, create-only, when its window closes |
 | `bundles/<day>/index` | A **day index**: `{1: format, 2: day, 3: [[start µs, key, SHA-256], ...]}` | When the day closes, and at shutdown |
-| `history/everyone/events/<day>/<hour>` | An **hour of the event index** (V4): `{1: format, 2: day, 3: hour, 4: [kind, ...], 5: [[at µs, kind number, node, actor], ...]}` | When a later hour's event arrives, and at shutdown |
+| `history/everyone/events/<day>` | A **day of the event index** (V4): `{1: format, 2: day, 4: [kind, ...], 5: [[at µs, kind number, node, actor], ...], 6: [split hour, ...]}`, the rows of its hours that have no object of their own | When a later day's event arrives, and at shutdown |
+| `history/everyone/events/<day>/<hour>` | An **hour of the event index** (V4), an hour of 1,000 events or more: as a day's, with `3: hour` | When a later hour's event arrives, and at shutdown |
 | `history/everyone/counts/day/<day>` | A **day's counts** (V4): `{1: format, 2: 1, 3: day, 4: [kind, ...], 5: [[ten-minute slot, kind number, count], ...]}` | When a later day's event arrives, and at shutdown |
 | `history/everyone/counts/year/<year>` | A **year's counts** (V4), 365 world days: as a day's, `2: 2`, a slot a day | With each day's counts |
 
@@ -62,15 +63,35 @@ a store path inside a value is a byte string, since text in v2 is always a name.
    day with none sends it to the day before, back to a year), checks it by the SHA-256 the index names, and applies
    the bundle's records up to `t` on its snapshot. Two requests, nothing kept between seeks. The state is the
    history level's: motion samples less than a second apart are thinned (rule 5).
-9. **The event index** is a view, keyed by audience; only the public audience's (`everyone`) is built. One object
-   per world hour: each public named event (T6) as `[time, kind, node, actor]`, the kind being the event's name and
-   the actor `[1, Soul]`, `[2, creator]` (a principal id, never an account id) or `[3]` the world. No fields, so
-   no text reference and no words. An effect for another audience, or whose node or actor is redacted, gives no row.
+9. **The event index** is a view, keyed by audience; only the public audience's (`everyone`) is built. Each public
+   named event (T6) is a row `[time, kind, node, actor]`, the kind being the event's name and the actor `[1, Soul]`,
+   `[2, creator]` (a principal id, never an account id) or `[3]` the world. No fields, so no text reference and no
+   words. An effect for another audience, or whose node or actor is redacted, gives no row. It is split by hour: an
+   hour of 1,000 events or more is an object of its own, and a day's object holds the rest and names those hours, so
+   a quiet world writes one object a day for it and a busy one an object an hour.
 10. **The coarse levels** count those events by kind: per ten minutes for a day (144 slots) and per day for a year of
     365 world days. A day's timeline is drawn from its counts; scrubbing reads them while the handle moves and seeks
     on release (V9).
 11. **All of it is made again** from the archive (`rebuild_views`), equal by SHA-256 to what the archiver stored.
-12. **Measured** by `cargo run -p archive --release -- seek` (`seek_bench.rs`): RESULTS
+12. **Measured** by `cargo run -p archive --release -- seek` (`seek_bench.rs`), a world of 1,000 bodies and 9,000
+    things recorded for a world day into W8's in-memory store: in the first minute of each hour every body moves
+    (the busiest load: 1,000 samples a world second at the history level), the rest of the hour ten bodies step each
+    ten seconds, and a Soul speaks each minute. The reference link, declared before the run: 20 Mbit/s, 50 ms a round
+    trip, two round trips to open the connection and one a request, no cache; bytes on the wire are the stored bytes
+    deflated, as V1's compression in transit carries them; the apply is timed natively on a laptop.
+
+    | 100 seeks, cold | Ready to draw p50 / p95 / max | Bytes a seek on the wire, mean / p95 (stored p95) | Apply p95 |
+    |---|---|---|---|
+    | Random moments of the day | 0.359 / 0.363 / 1.039 s | 218,762 / 211,024 (3,038,917) | 0.079 s |
+    | Random moments of its busy minutes | 1.016 / 1.180 / 1.241 s | 991,004 / 989,738 (13,818,701) | 0.592 s |
+
+    Step 0 at the busy load: a one-minute bundle is 13,198,180 bytes stored (snapshot 2,887,769 of 11,101 public
+    nodes; view 10,310,411, 60,000 records), 148,575 + 909,423 on the wire. Index sizes for that day: the event index
+    73,127 bytes in one object (1,439 events, 51 bytes each), the ten-minute counts 719 bytes, the bundles' day
+    index 136,517 bytes. A day's timeline reads 719 bytes, or 73,846 with every event as a marker. A modelled year at
+    this load: event index 26.7 MB, day counts 0.26 MB, year counts at most 10 kB, bundles' day indexes 49.8 MB. At
+    the target's 5,000 acts a minute, each a named event: 366 MB of event index a day (15 MB an hour), 133.6 GB a year;
+    a day's counts stay at 144 slots a kind, so the timeline does not grow with the acts.
 13. **Why one minute, not five with ten-second ranges:** at the busiest load the view grows 172 kB a world second
     (10.3 MB a one-minute bundle, uncompressed) and the snapshot is 2.9 MB; a seek into a five-minute bundle through
     ranges reads on average 150 s of view, over 25 MB. One-minute bundles cost 34,560 more writes a busy month
@@ -91,12 +112,13 @@ flush, so both overstate.
 
 | World | Counted | A month | O3 | Writes a month | Cost |
 |---|---|---|---|---|---|
-| Busy | an hour: 19 objects, 19 manifests, 1 head, 12 bundles, 1 index = 52 | 37,440 | 259,200 | 296,640 | $1.335 |
-| Quiet | a day: 2 objects, 2 manifests, 2 heads, 25 bundles, 2 indexes = 33 | 990 | 750 (25 a day) | 1,740 | $0.0078 |
+| Busy | an hour: 19 objects, 19 manifests, 1 head, 60 bundles, 1 index, 3 event index and counts = 103 | 74,160 | 259,200 | 333,360 | $1.500 |
+| Quiet | a day: 2 objects, 2 manifests, 2 heads, 25 bundles, 2 indexes, 6 event index and counts = 39 | 1,170 | 750 (25 a day) | 1,920 | $0.0086 |
 | Still | 0 | 0 | 0 | 0 | $0 |
 
-What a busy hour writes: objects (one per 64 MiB of records), a manifest rewrite per object, twelve bundles, a day
-index at the day's close, and a head per day.
+What a busy hour writes: objects (one per 64 MiB of records), a manifest rewrite per object, sixty one-minute bundles
+(twelve five-minute ones until V4), a day index at the day's close, a head per day, and V4's event index and counts
+(an object a day, or an hour once an hour has 1,000 events, and the day's and the year's counts).
 
 ## Running it against a store
 

@@ -11,7 +11,7 @@ use archive::{Archiver, fetch, rebuild_views, seek, words};
 use directoryd::directory::store::{Memory, Store};
 use replica::effects::{Actor, Header, Part, State, read_id};
 use replica::encode::{Value, decode};
-use replica::history::events::{Counts, HourIndex, Span, counts_key};
+use replica::history::events::{Counts, EventIndex, Span, counts_key, events_key};
 use replica::history::public_snapshot;
 use replica::ids::sha256;
 use replica::views::Redactions;
@@ -21,6 +21,11 @@ const PREFIX: &str = "worlds/test/";
 /// A small world over two world days (as V3's test): ticks a second apart for twelve minutes, then a few the next
 /// day; five bodies step each tick and one speaks each seven seconds. Returns the store, the header and the log.
 fn recorded() -> (Memory, Header, Vec<Vec<u8>>, State) {
+    recorded_with(7, 30)
+}
+
+/// As [`recorded`], with a Soul speaking each `say` seconds and `next` seconds of ticks the next day.
+fn recorded_with(say: u64, next: u64) -> (Memory, Header, Vec<Vec<u8>>, State) {
     let store = Memory::default();
     let queue = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
     let q = queue.clone();
@@ -31,8 +36,8 @@ fn recorded() -> (Memory, Header, Vec<Vec<u8>>, State) {
     );
     let root = w.tree.node(w.tree.root()).expect("root").id();
     let kind = w.tree.node(w.tree.root()).expect("root").kind().clone();
-    for t in (0..720u64).chain(86_400..86_430) {
-        script::tick(&mut w, t * 20, 5, 7 * 20);
+    for t in (0..720u64).chain(86_400..86_400 + next) {
+        script::tick(&mut w, t * 20, 5, say * 20);
     }
     let mut a = Archiver::open(&store, PREFIX, &w.header, root, kind.clone()).expect("opens");
     a.packer.set_target(20_000);
@@ -115,7 +120,15 @@ fn a3_the_event_index_holds_time_kind_node_and_actor_only() {
         let Value::Map(m) = decode(&bytes).expect("cbor").value else {
             panic!("{k} is a map")
         };
-        assert_eq!(m.keys().copied().collect::<Vec<_>>(), vec![1, 2, 3, 4, 5]);
+        // Format, day, hour (an hour's object), kinds, rows, split hours (a day's): no other field.
+        assert!(m.keys().all(|k| (1..=6).contains(k)), "{k}: {:?}", m.keys());
+        assert!(
+            [2, 3, 6]
+                .iter()
+                .filter_map(|f| m.get(f))
+                .all(|v| matches!(v, Value::Uint(_) | Value::Array(_))),
+            "{k}"
+        );
         let Some(Value::Array(rs)) = m.get(&5) else {
             panic!("rows")
         };
@@ -149,7 +162,7 @@ fn a3_the_event_index_holds_time_kind_node_and_actor_only() {
             Vec::<String>::new(),
             "{k}"
         );
-        let ix = HourIndex::read(&bytes).expect("an hour's index");
+        let ix = EventIndex::read(&bytes).expect("an event index");
         assert!(
             ix.rows
                 .iter()
@@ -173,26 +186,38 @@ fn a3_the_event_index_holds_time_kind_node_and_actor_only() {
 
 #[test]
 fn a4_the_index_and_coarse_levels_made_again_equal_the_stored_ones() {
-    let (store, _, _, _) = recorded();
-    let f = fetch(&store, PREFIX).expect("fetched");
-    let again = rebuild_views(&f).expect("made again");
-    let stored: Vec<String> = store
-        .keys()
-        .into_iter()
-        .filter(|k| k.starts_with(&format!("{PREFIX}history/")))
-        .collect();
-    let made: Vec<String> = again.keys().map(|k| format!("{PREFIX}{k}")).collect();
-    assert_eq!(stored, made);
-    assert_eq!(
-        made.len(),
-        2 + 2 + 1,
-        "two hours, two days' counts, a year's"
-    );
-    for (k, v) in &again {
-        let s = store
-            .get(&format!("{PREFIX}{k}"))
-            .expect("get")
-            .expect("there");
-        assert_eq!(sha256(&s.bytes), sha256(v), "{k}");
+    // The first world's events fit in each day's object; the second's next day has an hour of 1,100 events, which
+    // takes an object of its own.
+    for (say, next, objects) in [(7, 30, 2 + 2 + 1), (1, 1_100, 3 + 2 + 1)] {
+        let (store, _, _, _) = recorded_with(say, next);
+        let f = fetch(&store, PREFIX).expect("fetched");
+        let again = rebuild_views(&f).expect("made again");
+        let stored: Vec<String> = store
+            .keys()
+            .into_iter()
+            .filter(|k| k.starts_with(&format!("{PREFIX}history/")))
+            .collect();
+        let made: Vec<String> = again.keys().map(|k| format!("{PREFIX}{k}")).collect();
+        assert_eq!(stored, made);
+        assert_eq!(
+            made.len(),
+            objects,
+            "events by day (and hour), counts by day, a year's"
+        );
+        for (k, v) in &again {
+            let s = store
+                .get(&format!("{PREFIX}{k}"))
+                .expect("get")
+                .expect("there");
+            assert_eq!(sha256(&s.bytes), sha256(v), "{k}");
+        }
+        let day1 = EventIndex::read(&again[&events_key(1, None)]).expect("day 1");
+        if next > 1_000 {
+            assert_eq!((day1.split.as_slice(), day1.rows.len()), (&[0][..], 0));
+            let h = EventIndex::read(&again[&events_key(1, Some(0))]).expect("hour 0");
+            assert_eq!(h.rows.len(), 1_100);
+        } else {
+            assert_eq!((day1.split.len(), day1.rows.len()), (0, 5));
+        }
     }
 }

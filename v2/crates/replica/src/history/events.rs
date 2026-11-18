@@ -2,12 +2,14 @@
 //! history. Both are views (T7), made from T6's named events, so both are keyed by audience; only the public
 //! audience's are built here (T8). The layout is in `v2/docs/archive.md`.
 //!
-//! 1. **An hour's index** lists the public named events of one world hour, one row each: time, kind (the event's name),
-//!    node and actor (a Soul, a creator or the world, as T6's envelope names it). Nothing else: no fields, so no text
-//!    reference and no words, and no account id (a creator is named by a principal id, T8). An effect whose audience
-//!    is not everyone gives no row, and neither does one whose node or actor is on the redaction list.
-//!    `{1: format, 2: day, 3: hour, 4: [kind, ...], 5: [[at µs, kind number, node, actor], ...]}`, the kinds listed
-//!    once, in order of first use.
+//! 1. **The event index** lists public named events, one row each: time, kind (the event's name), node and actor (a
+//!    Soul, a creator or the world, as T6's envelope names it). Nothing else: no fields, so no text reference and no
+//!    words, and no account id (a creator is named by a principal id, T8). An effect whose audience is not everyone
+//!    gives no row, and neither does one whose node or actor is on the redaction list. It is split by world hour: an
+//!    hour of [`SPLIT`] events or more is an object of its own, and a day's object holds the rest of its rows and
+//!    names those hours, so a quiet world writes one object a day. `{1: format, 2: day, 3: hour (an hour's object),
+//!    4: [kind, ...], 5: [[at µs, kind number, node, actor], ...], 6: [split hour, ...] (a day's, when any)}`, the
+//!    kinds listed once, in order of first use.
 //! 2. **Coarse levels** count those events by kind: per ten minutes for a day, and per day for a year (365 world
 //!    days). `{1: format, 2: span (1 a day, 2 a year), 3: day or year, 4: [kind, ...], 5: [[slot, kind number,
 //!    count], ...]}`, rows in order of slot, then kind number. A day's timeline is drawn from its counts alone.
@@ -169,15 +171,20 @@ fn map_of(bytes: &[u8], what: &str) -> R<BTreeMap<u64, Value>> {
     }
 }
 
-/// One world hour of the public event index (rule 1).
+/// An hour with at least this many public events has an object of its own (rule 1); fewer go in its day's object.
+pub const SPLIT: usize = 1_000;
+
+/// An object of the public event index (rule 1): an hour's (`hour` set), or a day's, which holds the rows of the
+/// day's hours that have no object of their own and names those that do (`split`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HourIndex {
+pub struct EventIndex {
     pub day: i64,
-    pub hour: i64,
+    pub hour: Option<i64>,
+    pub split: Vec<i64>,
     pub rows: Vec<Row>,
 }
 
-impl HourIndex {
+impl EventIndex {
     /// The day and hour `at` falls in.
     pub fn of(at: i64) -> (i64, i64) {
         let day = day_of(at);
@@ -198,25 +205,28 @@ impl HourIndex {
                 ])
             })
             .collect();
-        enc(&Value::Map(BTreeMap::from([
+        let mut m = BTreeMap::from([
             (1, Value::Uint(FORMAT)),
             (2, int(self.day)),
-            (3, int(self.hour)),
             (4, kinds.value()),
             (5, Value::Array(rows)),
-        ])))
+        ]);
+        m.extend(self.hour.map(|h| (3, int(h))));
+        if !self.split.is_empty() {
+            m.insert(
+                6,
+                Value::Array(self.split.iter().map(|h| int(*h)).collect()),
+            );
+        }
+        enc(&Value::Map(m))
     }
 
-    /// Reads an hour's index; a row of anything but time, kind, node and actor is refused.
-    pub fn read(bytes: &[u8]) -> R<HourIndex> {
-        let m = map_of(bytes, "an hour's index")?;
+    /// Reads an object of the index; a row of anything but time, kind, node and actor is refused.
+    pub fn read(bytes: &[u8]) -> R<EventIndex> {
+        let m = map_of(bytes, "an event index")?;
         let kinds = Kinds::read(m.get(&4))?;
-        let (Some(day), Some(hour), Some(Value::Array(rows))) = (m.get(&2), m.get(&3), m.get(&5))
-        else {
-            return refuse(
-                "history-bad",
-                "an hour's index is {2: day, 3: hour, 5: rows}",
-            );
+        let (Some(day), Some(Value::Array(rows))) = (m.get(&2), m.get(&5)) else {
+            return refuse("history-bad", "an event index is {2: day, 5: rows}");
         };
         let rows = rows
             .iter()
@@ -230,9 +240,15 @@ impl HourIndex {
                 _ => refuse("history-bad", "a row is [at, kind, node, actor]"),
             })
             .collect::<R<_>>()?;
-        Ok(HourIndex {
+        let split = match m.get(&6) {
+            Some(Value::Array(h)) => h.iter().map(read_int).collect::<R<_>>()?,
+            None => Vec::new(),
+            _ => return refuse("history-bad", "a day's split hours"),
+        };
+        Ok(EventIndex {
             day: read_int(day)?,
-            hour: read_int(hour)?,
+            hour: m.get(&3).map(read_int).transpose()?,
+            split,
             rows,
         })
     }
@@ -341,8 +357,11 @@ impl Counts {
 }
 
 /// The store keys of the public views here, under a world's prefix.
-pub fn hour_key(day: i64, hour: i64) -> String {
-    format!("history/{PUBLIC}/events/{day:08}/{hour:02}")
+pub fn events_key(day: i64, hour: Option<i64>) -> String {
+    match hour {
+        Some(h) => format!("history/{PUBLIC}/events/{day:08}/{h:02}"),
+        None => format!("history/{PUBLIC}/events/{day:08}"),
+    }
 }
 
 pub fn counts_key(span: Span) -> String {
@@ -352,14 +371,16 @@ pub fn counts_key(span: Span) -> String {
     }
 }
 
-/// Builds the event index and the coarse levels from effects in log order (rules 1 and 2), giving each view's key and
-/// bytes as it closes: an hour when a later hour's event arrives, a day's counts and the year's when a later day's
-/// does. [`Indexer::finish`] gives what is open.
+/// Builds the event index and the coarse levels from effects in log order (rules 1 and 2), giving each object's key and
+/// bytes as it closes: an hour of [`SPLIT`] events or more when a later hour's event arrives; the day's object, its
+/// counts and the year's when a later day's does. [`Indexer::finish`] gives what is open. A quiet world so writes
+/// three objects a day.
 #[derive(Default)]
 pub struct Indexer {
     redactions: Redactions,
-    hour: Option<HourIndex>,
-    day: Option<Counts>,
+    hour: Option<EventIndex>,
+    day: Option<EventIndex>,
+    counts: Option<Counts>,
     year: Option<Counts>,
 }
 
@@ -374,16 +395,20 @@ impl Indexer {
     pub fn feed(&mut self, e: &Effect) -> R<Vec<(String, Vec<u8>)>> {
         let mut out = Vec::new();
         for r in rows(e, &self.redactions) {
-            let (day, hour) = HourIndex::of(r.at);
+            let (day, hour) = EventIndex::of(r.at);
             if self
                 .hour
                 .as_ref()
-                .is_some_and(|h| (h.day, h.hour) != (day, hour))
+                .is_some_and(|h| (h.day, h.hour) != (day, Some(hour)))
             {
                 out.extend(self.close_hour()?);
             }
-            if self.day.as_ref().is_some_and(|c| c.span != Span::day(r.at)) {
-                out.extend(self.close_days()?);
+            if self
+                .counts
+                .as_ref()
+                .is_some_and(|c| c.span != Span::day(r.at))
+            {
+                out.extend(self.close_day()?);
             }
             if self
                 .year
@@ -393,14 +418,14 @@ impl Indexer {
                 self.year = None;
             }
             self.hour
-                .get_or_insert_with(|| HourIndex {
+                .get_or_insert_with(|| EventIndex {
                     day,
-                    hour,
-                    rows: Vec::new(),
+                    hour: Some(hour),
+                    ..EventIndex::default()
                 })
                 .rows
                 .push(r.clone());
-            self.day
+            self.counts
                 .get_or_insert_with(|| Counts::new(Span::day(r.at)))
                 .add(&r);
             self.year
@@ -410,18 +435,32 @@ impl Indexer {
         Ok(out)
     }
 
+    /// Closes the open hour: an object of its own when it holds [`SPLIT`] events or more, else its rows join its
+    /// day's object.
     fn close_hour(&mut self) -> R<Option<(String, Vec<u8>)>> {
-        self.hour
-            .take()
-            .map(|h| Ok((hour_key(h.day, h.hour), h.to_bytes()?)))
-            .transpose()
+        let Some(h) = self.hour.take() else {
+            return Ok(None);
+        };
+        let d = self.day.get_or_insert_with(|| EventIndex {
+            day: h.day,
+            ..EventIndex::default()
+        });
+        if h.rows.len() < SPLIT {
+            d.rows.extend(h.rows);
+            return Ok(None);
+        }
+        d.split.extend(h.hour);
+        Ok(Some((events_key(h.day, h.hour), h.to_bytes()?)))
     }
 
-    /// The open day's counts, closed, and the year's as they stand.
-    fn close_days(&mut self) -> R<Vec<(String, Vec<u8>)>> {
-        let mut out = Vec::new();
+    /// Closes the open day: its hour, its object, its counts, and the year's counts as they stand.
+    fn close_day(&mut self) -> R<Vec<(String, Vec<u8>)>> {
+        let mut out: Vec<_> = self.close_hour()?.into_iter().collect();
         if let Some(d) = self.day.take() {
-            out.push((counts_key(d.span), d.to_bytes()?));
+            out.push((events_key(d.day, None), d.to_bytes()?));
+        }
+        if let Some(c) = self.counts.take() {
+            out.push((counts_key(c.span), c.to_bytes()?));
         }
         if let Some(y) = &self.year {
             out.push((counts_key(y.span), y.to_bytes()?));
@@ -431,8 +470,6 @@ impl Indexer {
 
     /// Everything open, as it stands (at shutdown).
     pub fn finish(&mut self) -> R<Vec<(String, Vec<u8>)>> {
-        let mut out: Vec<_> = self.close_hour()?.into_iter().collect();
-        out.extend(self.close_days()?);
-        Ok(out)
+        self.close_day()
     }
 }
