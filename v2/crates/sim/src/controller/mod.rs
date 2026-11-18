@@ -28,9 +28,14 @@
 //! - **A dry run** ([`Controller::probe`]): what one step would do to a copy of a body, moving nothing. The world's
 //!   geometry answers use it (is a straight walk clear?), so the mover has no caller but this module.
 //!
-//! Not here: moves themselves and cancel rules (B2), gateway intents (lane I), drawing (lane V), the transfer
-//! records of a crossing (N6's `mover::cross`), and N7's `Crowd`, which keeps its own bodies until T9c retires it
-//! (it steps them through [`Controller::probe`] and [`Track::advance`]).
+//! - **The world's own carry** ([`Controller::carry`], T9c #3127): the world carries a body by its own rule, with no
+//!   driver: N10's walk-out to the nearest legal point, at the body's speed, collision off. It is a [`Track`] with no
+//!   link, stepped like a crossing.
+//! - **Standing still is not stepped.** A body with no velocity asked, none of its own and no track is left as it is:
+//!   the mover would leave it so.
+//!
+//! Not here: moves themselves and cancel rules (B2), gateway intents (lane I), drawing (lane V), and the transfer
+//! records of a crossing (N6's `mover::cross`).
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -209,10 +214,12 @@ pub struct Stepped {
     pub said: Vec<(Id, Line, Micros)>,
 }
 
-/// A carry across a link by its move (T9b #3120): a line to follow at a speed, then standing on a node's surface.
+/// A carry across a link by its move (T9b #3120), or by the world's own rule (N10's walk-out): a line to follow at a
+/// speed, then standing on a node's surface.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Track {
-    pub link: Id,
+    /// The link crossed; none for the world's own carry.
+    pub link: Option<Id>,
     /// The points left to follow, µm, in the frame of the node the body stands on when it begins.
     pub line: Vec<Vec3>,
     /// µm a second.
@@ -230,7 +237,7 @@ fn dist2(a: Vec3, b: Vec3) -> i128 {
 
 impl Track {
     /// One tick along the line, at most speed times `dt`: `true` once the body stands on `to`'s surface.
-    pub fn advance(
+    fn advance(
         &mut self,
         body: &mut Moved,
         surfaces: &BTreeMap<Id, Surface>,
@@ -297,7 +304,8 @@ pub struct Controller {
     /// The last driver number given.
     drivers: Driver,
     log: Vec<Logged>,
-    /// Where each body not being carried stands, kept as the bodies move: "who is near" (N16).
+    /// Where each body not being carried across a link stands, kept as the bodies move: "who is near" (N16). A body
+    /// the world carries by its own rule (N10's walk-out) stays on its node, and in the index.
     near: Index,
 }
 
@@ -393,6 +401,14 @@ impl Controller {
         Controller::default()
     }
 
+    /// No bodies yet, kept in `near` (N16: `Index::fixed()` turns splitting off).
+    pub fn with_index(near: Index) -> Controller {
+        Controller {
+            near,
+            ..Controller::default()
+        }
+    }
+
     /// Adds a body of `family`, standing as the mover placed it, with the neutral input facing as it faces.
     pub fn add(&mut self, family: Family, moved: Moved) -> R<()> {
         if self.bodies.contains_key(&moved.id) {
@@ -483,24 +499,38 @@ impl Controller {
     /// Carries `body` along `track` from the next step, if `driver` holds its locomotion; its velocity input goes to
     /// still. `crossing-under-way` when it is already carried.
     pub fn cross(&mut self, body: Id, driver: Driver, track: Track) -> R<()> {
+        self.slot(body)?.steers(driver)?;
+        self.carry(body, track)
+    }
+
+    /// The world carries `body` along `track` from the next step by its own rule, with no driver (N10's walk-out);
+    /// its velocity input goes to still. `crossing-under-way` when it is already carried.
+    pub fn carry(&mut self, body: Id, track: Track) -> R<()> {
         let s = self.slot(body)?;
-        s.steers(driver)?;
-        if let Some(t) = &s.track {
-            return refuse("crossing-under-way", replica::world_model::show(t.link));
+        if s.track.is_some() {
+            return refuse("crossing-under-way", replica::world_model::show(body));
         }
         s.input.velocity = Vec3::ZERO;
         s.touched = true;
+        let across = track.link.is_some();
         s.track = Some(track);
-        self.near.remove_body(body);
+        if across {
+            self.near.remove_body(body);
+        }
         Ok(())
     }
 
     /// The link `body` is being carried across, if any.
     pub fn carrying(&self, body: Id) -> Option<Id> {
-        self.bodies.get(&body)?.track.as_ref().map(|t| t.link)
+        self.bodies.get(&body)?.track.as_ref().and_then(|t| t.link)
     }
 
-    /// The spatial index of the bodies not being carried, as the mover last left them (N16).
+    /// Whether `body` is being carried, across a link or by the world's own rule.
+    pub fn carried(&self, body: Id) -> bool {
+        self.bodies.get(&body).is_some_and(|s| s.track.is_some())
+    }
+
+    /// The spatial index of the bodies not being carried across a link, as the mover last left them (N16).
     pub fn near(&self) -> &Index {
         &self.near
     }
@@ -626,9 +656,13 @@ impl Controller {
                         out.refused.push((id, r));
                     }
                 }
-                if s.track.is_none() {
+                if s.track.as_ref().is_none_or(|t| t.link.is_none()) {
                     self.near.put_moved(&s.moved);
                 }
+                continue;
+            }
+            // Standing still with no velocity asked: the mover would leave it as it is.
+            if s.input.velocity == Vec3::ZERO && s.moved.linear == Vec3::ZERO {
                 continue;
             }
             let Support::Surface { surface, .. } = s.moved.pose.support else {
