@@ -45,12 +45,14 @@
 //! the shortest, not the quickest), walking a shore link (the walk skill crosses tree links and steps only). Ground
 //! cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
+pub mod way;
+
 use crate::gaits::Ground;
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;
 use crate::ground::{MARGIN, OpenGround, Piece, SQUARE};
-use crate::links::{Building, End, F_OPEN, Kind, Link, Open, ground_doors, shore_id};
+use crate::links::{Building, End, F_OPEN, Kind, Link, Open, floor_joins, ground_doors, shore_id};
 use replica::effects::Refusal;
 use replica::encode::Value;
 use replica::ids::Id;
@@ -425,6 +427,7 @@ impl Map {
                 meets: &ground_meets,
                 on: &on,
                 doors: &gdoors,
+                terrain: open.terrain(),
             };
             let b = match Building::read_sized(tree, id, Some(open), radius) {
                 Ok(b) => b,
@@ -456,16 +459,28 @@ impl Map {
             meets: &ground_meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
         let gates = Building::of_ground(tree, open, &known)?;
         buildings.push((gates, HashMap::new()));
-        for (b, base) in &buildings {
+        // Steps from one thing's floor onto another's (#3227), and every floor's first piece and piece count.
+        for (i, l) in floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>()) {
+            buildings[i].0.links.push(l);
+        }
+        let all: HashMap<Id, (u32, u32)> = buildings
+            .iter()
+            .flat_map(|(b, base)| {
+                base.iter()
+                    .map(|(f, &q)| (*f, (q, b.floors[f].1.pieces.len() as u32)))
+            })
+            .collect();
+        for (b, _) in &buildings {
             for l in &b.links {
                 let mut ends = [Vec::new(), Vec::new()];
                 // A blocked link's ends are portals too, so a search that comes to it can name it.
                 for (k, e) in l.ends.iter().enumerate() {
                     if let Some(e) = e {
-                        ends[k] = m.end_portals(l, e, k as u8, base, b);
+                        ends[k] = m.end_portals(l, e, k as u8, &all);
                     }
                 }
                 let run: i64 = l
@@ -655,8 +670,7 @@ impl Map {
         l: &Link,
         e: &End,
         k: u8,
-        base: &HashMap<Id, u32>,
-        b: &Building,
+        base: &HashMap<Id, (u32, u32)>,
     ) -> Vec<u32> {
         let li = self.links.len() as u32;
         let (a, b2, mid) = ([mm(e.a.x), mm(e.a.z)], [mm(e.b.x), mm(e.b.z)], e.middle());
@@ -669,16 +683,16 @@ impl Map {
                 .is_some_and(|v| i64::from(v[1]) == y)
         };
         // The piece among `qs` the segment's middle lies on, within the grid's rounding.
+        // The open ground is one level, its plan at 0, and an end on it stands on its terrain (#3227): any height.
         let on = |m: &Map, qs: &mut dyn Iterator<Item = u32>, mid: [i64; 2]| {
-            qs.filter(|&q| at_y(m, q))
+            qs.filter(|&q| m.pieces[q as usize].at.square.is_some() || at_y(m, q))
                 .map(|q| (m.off_piece(q, mid), q))
                 .min()
                 .filter(|&(d, _)| d <= MEET_OFF)
                 .map(|(_, q)| q)
         };
         let mut out = Vec::new();
-        if let Some(&first) = base.get(&e.floor) {
-            let n = b.floors[&e.floor].1.pieces.len() as u32;
+        if let Some(&(first, n)) = base.get(&e.floor) {
             let q = if matches!(l.kind, Kind::Doorway | Kind::Step) {
                 on(self, &mut (first..first + n), [mm(mid.x), mm(mid.z)])
             } else {

@@ -15,6 +15,12 @@
 //!   kept table also waits for the sync of the tick that took it.
 //! - **Checker threads** (`checkers`), as I3 left them.
 //!
+//! **A move** (a walk, a sit or a rise, I4b #3156) is taken the same way, but goes to the world's bodies
+//! ([`crate::bodies`]) instead of the checkers. At the next tick it starts, or is refused by name, and writes an entry
+//! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
+//! how) and is answered: a receipt naming both entries when done, else a refusal naming how it ended
+//! (`claim-taken`, `resource-held`, `out-of-reach`, ...). One answer, at its end: I7's accept-then-resolve is not here.
+//!
 //! **A restart** replays the log: each record's entries are applied to the world as built, the receipts index and
 //! each actor's last sequence and kept answers are rebuilt from it, and new intent ids follow the last one minted.
 //! A repeat after a restart gets the answer it had; an intent that was open at the kill was never logged nor
@@ -34,21 +40,24 @@
 // worldd's real clock: the tick loop and world time read the machine's clocks until K7's ticker drives them.
 #![allow(clippy::disallowed_methods)]
 
+use crate::bodies::{self, Asked, Bodies};
 use crate::checkers::{self, Act, Candidate, Rules};
 use crate::measures::{self, Measures, Stamps};
 use replica::apply::Replica;
-use replica::effects::{Actor, Cause, Effect, Part, Refusal};
+use replica::effects::{Actor, Body, Cause, Effect, Envelope, Event as Named, Part, Refusal};
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Id, Scope, Version};
-use replica::intents::{Answer, Intent, Target};
+use replica::intents::{Answer, INTENT_MOST, Intent, Target};
 use replica::time::Micros;
+use replica::world_model::Audience;
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
 use sim::frozen::Publisher;
 use sim::log::{Log, Storage};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
@@ -56,6 +65,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 type R<T> = Result<T, Refusal>;
+
+/// Makes the world's bodies on the thread that steps them (a skill is not sent between threads).
+pub type MakeBodies = Box<dyn FnOnce() -> R<Bodies> + Send>;
 
 /// Where an answer frame goes: the connection the intent came on.
 pub type Reply = Sender<Vec<u8>>;
@@ -120,6 +132,9 @@ pub struct Config {
     pub health: Option<PathBuf>,
     /// World time (the machine's clock, [`now`]; a test gives a fixed one so two runs log the same bytes).
     pub now: fn() -> Micros,
+    /// Makes the world's bodies, on the clock thread, for move intents (I4b, #3156); without them a move is refused
+    /// `intent.not-a-form-on-a-node`.
+    pub bodies: Option<MakeBodies>,
 }
 
 impl Config {
@@ -134,6 +149,7 @@ impl Config {
             measures: true,
             health: None,
             now,
+            bodies: None,
         }
     }
 }
@@ -213,7 +229,20 @@ struct Clock {
     measures: Option<Arc<Measures>>,
     effects: Vec<Effect>,
     parts: Vec<Arc<Part>>,
+    bodies: Option<Bodies>,
+    /// Move intents taken since the last tick, committed at the next (I4b).
+    moving: Vec<(Id, Asked)>,
 }
+
+/// What an intent becomes: a form's act for the checkers, or a move for the bodies.
+enum Taken {
+    Form(Act),
+    Move(Asked),
+}
+
+/// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
+pub const MOVE_STARTED: &str = "souls:move-started";
+pub const MOVE_ENDED: &str = "souls:move-ended";
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| Name::new("act.refused").expect("a name"))
@@ -236,14 +265,19 @@ fn has_words(v: &Value) -> bool {
     }
 }
 
+/// The body an intent drives: the Soul's own, or the one a creator names.
+fn body_of(intent: &Intent) -> Result<Id, &'static str> {
+    match (intent.actor, intent.body) {
+        (Actor::Soul(s), _) => Ok(s),
+        (Actor::Creator(_), Some(b)) => Ok(b),
+        _ => Err("intent.no-body"),
+    }
+}
+
 /// The act the checkers take for an intent: its verb's form on its target, then each fallback's, in rank order.
-/// Only a form's act on a node is checked so far; moves and orders are B7's and I7's.
+/// A walk, a sit or a rise goes to the bodies instead ([`crate::bodies`], I4b); orders are B7's.
 fn act_of(intent: &Intent, id: u64, cause: Cause) -> Result<Act, &'static str> {
-    let body = match (intent.actor, intent.body) {
-        (Actor::Soul(s), _) => s,
-        (Actor::Creator(_), Some(b)) => b,
-        _ => return Err("intent.no-body"),
-    };
+    let body = body_of(intent)?;
     let candidate =
         |verb: &Name, target: &Option<Target>| match (verb.as_str().split_once(':'), target) {
             (Some((ns, form)), Some(Target::Node(this))) if ns != "souls" => Ok(Candidate {
@@ -394,16 +428,29 @@ impl Clock {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
             return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
         };
-        let act = match act_of(&intent, self.next_intent, Cause::Intent(id)) {
-            Ok(a) => a,
+        // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
+        let moved = match self.bodies {
+            Some(_) => body_of(&intent).ok().and_then(|b| bodies::read(&intent, b)),
+            None => None,
+        };
+        let taken = match moved {
+            Some(m) => m.map(Taken::Move),
+            None => act_of(&intent, self.next_intent, Cause::Intent(id)).map(Taken::Form),
+        };
+        let taken = match taken {
+            Ok(t) => t,
             Err(reason) => {
                 let a = self.refusal(actor, sequence, reason);
                 return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
             }
         };
+        let body = match &taken {
+            Taken::Form(a) => a.body,
+            Taken::Move(m) => m.body,
+        };
         self.next_intent += 1;
         self.deadlines.open(
-            act.body,
+            body,
             id,
             intent.expiry.min(now.saturating_add(self.deadline)),
         );
@@ -414,7 +461,7 @@ impl Clock {
                 actor,
                 key,
                 sequence,
-                body: act.body,
+                body,
                 expiry: intent.expiry,
                 intent: value,
                 waiters: vec![reply],
@@ -424,7 +471,122 @@ impl Clock {
         if let Some(m) = &self.measures {
             m.to_check(id.counter(), stamps.0[1]);
         }
-        let _ = self.acts.send(act);
+        match taken {
+            Taken::Form(act) => {
+                let _ = self.acts.send(act);
+            }
+            Taken::Move(m) => self.moving.push((id, m)),
+        }
+    }
+
+    /// Writes the entry of open move `id`: event `event` with `{1: body, 2: how (once it ended; its name's bytes, since
+    /// an event's text is a namespaced name), 3: [x, y, z] µm,
+    /// 4: the node of its frame}`, where the body stands or sits. Its cause is the intent, so the receipt finds it.
+    fn note(&mut self, id: Id, event: &str, how: Option<&str>, at: Micros) {
+        let Some(o) = self.open.get(&id) else { return };
+        let mut fields = BTreeMap::from([(1, o.body.to_value())]);
+        if let Some(h) = how {
+            fields.insert(2, Value::Bytes(h.as_bytes().to_vec()));
+        }
+        if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
+            let i = |n: i64| {
+                u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
+            };
+            fields.insert(3, Value::Array(vec![i(p.x), i(p.y), i(p.z)]));
+            fields.insert(4, node.to_value());
+        }
+        let effect = Effect {
+            envelope: Envelope {
+                sequence: self.replica.version(),
+                at,
+                cause: Cause::Intent(id),
+                actor: o.actor,
+                audience: Audience::Everyone,
+                node: self.replica.header().zone,
+            },
+            body: Body::Changes(Vec::new()),
+            events: Some(vec![Named {
+                name: name(event),
+                fields,
+                changes: Vec::new(),
+                rest: BTreeMap::new(),
+            }]),
+            rest: BTreeMap::new(),
+        };
+        let v = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(self.replica.header().hash().to_bytes())),
+            (2, Value::Array(vec![effect.to_value()])),
+        ]));
+        let part = encode(&v)
+            .map_err(|e| Refusal {
+                name: "encoding",
+                detail: e.to_string(),
+            })
+            .and_then(|b| Part::read(&b))
+            .and_then(|p| self.replica.apply(&p).map(|()| p));
+        match part {
+            Ok(p) => {
+                self.receipts.index(&p.effects);
+                self.effects.extend(p.effects.iter().cloned());
+                self.parts.push(Arc::new(p));
+            }
+            Err(r) => eprintln!("worldd: a move's entry was not written: {r}"),
+        }
+    }
+
+    /// The tick's moves (I4b): those taken since the last tick start, the bodies step to `now`, and each move that
+    /// ended is answered: a receipt naming its entries when done, else its reason by name.
+    fn moves(&mut self, now: Micros) {
+        let Some(mut b) = self.bodies.take() else {
+            return;
+        };
+        let mut asks = Vec::new();
+        for (id, m) in std::mem::take(&mut self.moving) {
+            let Some(o) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            if expired(o.expiry, now) {
+                self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+            } else {
+                asks.push((id, m));
+            }
+        }
+        let started = b.start(asks);
+        self.bodies = Some(b);
+        for (id, r) in started {
+            match r {
+                Ok(()) => self.note(id, MOVE_STARTED, None, now),
+                Err(r) => self.settle(id, Err(r.name.to_owned()), now),
+            }
+        }
+        let Some(b) = self.bodies.as_mut() else {
+            return;
+        };
+        for (id, how) in b.step(now) {
+            self.settle(id, how, now);
+        }
+    }
+
+    /// Ends open move `id` as it ended: its entry, then its answer.
+    fn settle(&mut self, id: Id, how: Result<(), String>, now: Micros) {
+        let Some(o) = self.open.get(&id) else { return };
+        let (actor, sequence) = (o.actor, o.sequence);
+        match how {
+            Ok(()) => {
+                self.note(id, MOVE_ENDED, Some("done"), now);
+                self.end(id, |c| Answer::Receipt {
+                    actor,
+                    sequence,
+                    intent: id,
+                    entries: c.receipts.entries(id).to_vec(),
+                });
+            }
+            Err(reason) => {
+                self.note(id, MOVE_ENDED, Some(&reason), now);
+                self.end(id, |c| c.refusal(actor, sequence, &reason));
+            }
+        }
     }
 
     /// A check came back: kept for the next tick.
@@ -477,7 +639,11 @@ impl Clock {
             }
         }
         let committed = started.map(|_| measures::steady_us());
+        self.moves(now);
         while let Some(id) = self.deadlines.due(now) {
+            if let Some(b) = self.bodies.as_mut() {
+                b.cancel(id);
+            }
             if let Some(o) = self.open.get(&id) {
                 let (actor, sequence) = (o.actor, o.sequence);
                 self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
@@ -600,6 +766,8 @@ pub fn start<S: Storage + 'static>(
         name: "id-counter",
         detail: "the zone".into(),
     })?;
+    let mut cfg = cfg;
+    let make = cfg.bodies.take();
     let publisher = Arc::new(Publisher::new(&world));
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let (events, rx) = channel();
@@ -624,7 +792,9 @@ pub fn start<S: Storage + 'static>(
         .name("answers".into())
         .spawn(move || answer_loop(log, ticks, m))
         .map_err(io)?;
-    let mut c = Clock {
+    let clock_measures = measures.clone();
+    // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
+    let build = move || Clock {
         replica: world,
         publisher,
         acts,
@@ -645,7 +815,9 @@ pub fn start<S: Storage + 'static>(
         rows: Vec::new(),
         effects: Vec::new(),
         parts: Vec::new(),
-        measures: measures.clone(),
+        measures: clock_measures,
+        bodies: None,
+        moving: Vec::new(),
     };
     let tick = cfg.tick;
     let now = cfg.now;
@@ -653,6 +825,16 @@ pub fn start<S: Storage + 'static>(
         .name("clock".into())
         .spawn(move || {
             mark_clock_thread();
+            let mut c = build();
+            if let Some(make) = make {
+                match make() {
+                    Ok(mut b) => {
+                        b.begin(now());
+                        c.bodies = Some(b);
+                    }
+                    Err(e) => eprintln!("worldd: the bodies did not start, moves are refused: {e}"),
+                }
+            }
             let mut next = Instant::now() + tick;
             loop {
                 // A tick is due before any more events are taken, so a busy queue never starves it.
@@ -688,6 +870,40 @@ pub fn start<S: Storage + 'static>(
         measures,
         clock: Some(clock),
     })
+}
+
+/// Serves one connection of the gateway's local socket (I1's framing: a 4-byte big-endian length, then that many
+/// bytes): each intent read goes to `world`, each answer goes back on the same connection, in the order sent.
+pub fn serve(world: Door, mut stream: UnixStream) {
+    let Ok(mut out) = stream.try_clone() else {
+        return;
+    };
+    let (reply, answers) = channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        for frame in answers {
+            let len = u32::try_from(frame.len()).unwrap_or(u32::MAX).to_be_bytes();
+            if out.write_all(&len).is_err() || out.write_all(&frame).is_err() {
+                return;
+            }
+        }
+    });
+    loop {
+        let mut len = [0u8; 4];
+        if stream.read_exact(&mut len).is_err() {
+            return;
+        }
+        let len = u32::from_be_bytes(len) as usize;
+        if len > INTENT_MOST as usize {
+            return;
+        }
+        let mut bytes = vec![0u8; len];
+        if stream.read_exact(&mut bytes).is_err() {
+            return;
+        }
+        if !world.arrive(bytes, reply.clone()) {
+            return;
+        }
+    }
 }
 
 fn io(e: std::io::Error) -> Refusal {
