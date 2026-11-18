@@ -24,7 +24,8 @@ env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
 jobs:
   gitleaks:
-    runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
+    # Hosted, not CI_LIGHT_RUNNER: on a self-hosted runner the installer's download check, docker and go can all be missing.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       GITLEAKS_VERSION: 8.30.1
