@@ -3,7 +3,7 @@ name = "worldd"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "The world process (Engine v2, #2635): its clock and watchdog (K7, #2647); checkers (I3, #2686)."
+description = "The world process (Engine v2, #2635): its clock and watchdog (K7, #2647). Checkers: I3, #2686. Moves from the gateway: I4b, #3156."
 
 [dependencies]
 replica = { path = "../replica" }
@@ -11,7 +11,11 @@ rustix = { version = "1", default-features = false, features = ["time", "std"] }
 sim = { path = "../sim" }
 # O3 (#2732): the object store and the directory's claim and mark, which the shipper writes through.
 directoryd = { path = "../directoryd" }
+# The built-in walk, run behind the host for a move intent (I4b, #3156).
+skills = { path = "../skills" }
 
 [dev-dependencies]
-# E1's Eden measures (tests/index.rs) load Eden 2026's imported tree (N1, #2649).
+# E1's Eden measures (tests/index.rs) load Eden 2026's imported tree (N1, #2649); N2's test world, where a scripted
+# client walks, sits and rises (I4b, #3156).
 import-eden = { path = "../../tools/import-eden" }
+testworld = { path = "../../tools/testworld" }

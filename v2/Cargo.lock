@@ -1301,6 +1301,8 @@ dependencies = [
  "replica",
  "rustix",
  "sim",
+ "skills",
+ "testworld",
 ]
 
 [[package]]
