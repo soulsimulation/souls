@@ -6,6 +6,7 @@ pub mod ground;
 pub mod links;
 pub mod mover;
 pub mod routes;
+pub mod spots;
 pub mod unstick;
 pub mod walk;
 
