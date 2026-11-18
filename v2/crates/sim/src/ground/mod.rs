@@ -29,8 +29,9 @@
 //!   it is on, its height and the width left for the centre at the doorway's middle. A shut door is the link's state
 //!   (N4, #2652), never an obstacle.
 //! - **Height.** Every vertex is `[x, y, z]` in whole millimetres in the node's frame (T4, #2644: never a 2D point on a
-//!   floor). A floor's vertices carry its surface's height. The open ground's carry 0: the tree holds no terrain yet
-//!   (N1, #2649, imports the waters' outlines and levels, not the 1 m heights), so slopes and steep cells wait for N11 (#2735).
+//!   floor). A floor's vertices carry its surface's height. The open ground's carry 0 still: the tree holds the 1 m
+//!   heights and classes (N1b, #3197; `scene::Terrain` reads them), but the cut does not use them until N11 (#2735)
+//!   brings slopes and steep cells.
 //! - **Where it lives.** Here in `sim`, native only. An agent's client never loads the ground: where a described spot
 //!   is a point, the server binds the legal standing spot (E2, #2709).
 //!
