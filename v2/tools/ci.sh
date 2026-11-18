@@ -32,6 +32,8 @@ step tests cargo test --workspace --locked
 # The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md).
 # The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
 step origin-headers node --test tools/origin/origin.test.mjs
+# The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
+step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 
