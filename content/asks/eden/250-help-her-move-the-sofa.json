@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":250,"group":"with-others","words":"help her move the sofa","obvious":2,"things":{"her":"eden:humanoid","sofa":"eden:sofa"},"chain":[{"this":"me","form":"push","push":"sofa","souls":2,"args":{"thing":"sofa"}}]}

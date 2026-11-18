@@ -1,0 +1,21 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:wall_switch",
+  "owner": "thing",
+  "state": {
+    "on": { "n": 1, "type": "bool", "default": false, "audience": {"rule": "everyone"} }
+  },
+  "links": {
+    "works": { "n": 1, "from": "thing", "most": 8, "audience": {"rule": "everyone"} }
+  },
+  "geometry": { "bounds_mm": [80, 120, 30] },
+  "forms": {
+    "switch_on": { "who": "anyone", "starts": "act", "needs": [], "steps": [], "effects": [{ "change": "set", "field": "on", "to": true, "event": "switched_on" }] },
+    "switch_off": { "who": "anyone", "starts": "act", "needs": [], "steps": [], "effects": [{ "change": "set", "field": "on", "to": false, "event": "switched_off" }] }
+  },
+  "reactions": {
+    "lamps_follow": { "when": { "on": "changed", "field": "on" }, "do": [{ "change": "set", "field": "lit", "to": { "trigger": "value" }, "target": { "link": "works" }, "event": "lamp_switched" }] }
+  },
+  "text": { "card": "A test wall switch for reactions: every lamp it works is lit while it is on." },
+  "card": { "text": "card" }
+}
