@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":239,"group":"with-others","words":"have a picnic with them","obvious":3,"things":{"blanket":"eden:picnic_blanket","bread":"eden:bread_loaf_pack"},"chain":[{"this":"blanket","form":"spread"},{"this":"me","form":"sit_down","args":{"spot":"blanket"}},{"this":"bread","form":"eat"}]}

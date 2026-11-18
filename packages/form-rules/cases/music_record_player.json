@@ -1,0 +1,285 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:record_player (from core-record-player@1, #431, and @2, #1615). Anyone puts on the record they pick at the tonearm: the original's one 'put on a record' with a record argument is six forms here, one per sleeve (Morning Waltz, Harbour Lights, Low Tide, Night Train, and @2's Paper Lanterns and Open Window), because a set takes its value from an argument only on the format-gaps chain. Putting a record on needs nothing: it starts the player, or changes the record while one plays. Stopping, at the power knob, needs a record playing (the original refused 'stop' while off by its when-rule).",
+ "cases": [
+  {
+   "name": "put_on_waltz_from_silence",
+   "act": {
+    "this": "p1",
+    "form": "put_on_waltz"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:record_player"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "put_on_harbour_lights_from_silence",
+   "act": {
+    "this": "p1",
+    "form": "put_on_harbour_lights"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:record_player"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "put_on_low_tide_from_silence",
+   "act": {
+    "this": "p1",
+    "form": "put_on_low_tide"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:record_player"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "put_on_night_train_from_silence",
+   "act": {
+    "this": "p1",
+    "form": "put_on_night_train"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:record_player"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "put_on_paper_lanterns_from_silence",
+   "act": {
+    "this": "p1",
+    "form": "put_on_paper_lanterns"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:record_player"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "put_on_open_window_from_silence",
+   "act": {
+    "this": "p1",
+    "form": "put_on_open_window"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:record_player"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "put_on_paper_lanterns_over_another_record",
+   "act": {
+    "this": "p1",
+    "form": "put_on_paper_lanterns"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:record_player",
+      "fields": {
+       "playing": "night_train"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "stop_every_need_met",
+   "act": {
+    "this": "p1",
+    "form": "stop"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:record_player",
+      "fields": {
+       "playing": "low_tide"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "stop_when_silent_names_a_record",
+   "act": {
+    "this": "p1",
+    "form": "stop"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:record_player"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "playing",
+     "found": "off",
+     "wanted": {
+      "not": "off"
+     }
+    },
+    "fix": {
+     "form": "put_on_harbour_lights"
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,104 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sleeping_mat",
+  "owner": "thing",
+  "state": { "rolled": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "links": { "sleeper": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } } },
+  "points": { "side": { "role": "stand", "at_mm": [710, 0, 0], "yaw_mdeg": 270000 } },
+  "slots": { "mat": { "admits": "body", "posture": "lie", "most": 1, "at_mm": [0, 80, 0], "stand": "side" } },
+  "geometry": { "bounds_mm": [820, 150, 2000] },
+  "forms": {
+    "lie": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "state", "field": "rolled", "is": false }, { "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }, { "step": "sit", "slot": { "arg": "place" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "lay_down" },
+        { "change": "link", "link": "sleeper", "from": "actor", "event": "lying_in" }
+      ]
+    },
+    "sleep": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "state", "field": "rolled", "is": false }, { "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }, { "step": "sit", "slot": { "arg": "place" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "fell_asleep" },
+        { "change": "link", "link": "sleeper", "from": "actor", "event": "lying_in" }
+      ]
+    },
+    "get_up": {
+      "who": { "link": "sleeper" },
+      "starts": "act",
+      "needs": [{ "need": "linked", "link": "sleeper" }],
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "sleeper", "from": "actor", "event": "got_up" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_by" }
+      ]
+    },
+    "roll_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "unlinked", "link": "sleeper" }, { "need": "state", "field": "rolled", "is": false }],
+      "steps": [{ "step": "walk_to", "point": "side" }],
+      "effects": [{ "change": "set", "field": "rolled", "to": true, "event": "rolled_up" }]
+    },
+    "unroll": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "rolled", "is": true }],
+      "steps": [{ "step": "walk_to", "point": "side" }],
+      "effects": [{ "change": "set", "field": "rolled", "to": false, "event": "unrolled" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:sleeping_mat",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [0, 35, 0],
+          "size": [820, 70, 2000],
+          "tint": "mat",
+          "round": 20,
+          "role": "body",
+          "pivot": [0, 35, 0]
+        },
+        {
+          "kind": "box",
+          "at": [0, 100, -780],
+          "size": [580, 100, 300],
+          "tint": "pillow",
+          "round": 30,
+          "role": "lid",
+          "pivot": [0, 100, -780]
+        }
+      ],
+      "palette": { "mat": "#607c78", "pillow": "#eee4d0" },
+      "tags": ["bed", "mat", "sleep", "eden"]
+    },
+    "table": [
+      { "part": "body", "field": "rolled", "do": "scale", "axis": "z", "at": { "true": 150, "false": 1000 } },
+      { "part": "body", "field": "rolled", "do": "scale", "axis": "y", "at": { "true": 2500, "false": 1000 } },
+      { "part": "lid", "field": "rolled", "do": "show", "at": { "true": 0, "false": 1 } }
+    ]
+  },
+  "text": { "card": "A sleeping mat and pillow to lie and sleep on; it rolls up to carry.", "bed": "bed", "mat": "mat" },
+  "card": { "text": "card", "category": "bed", "synonyms": ["mat"] }
+}

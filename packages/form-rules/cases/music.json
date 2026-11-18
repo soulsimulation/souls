@@ -1,0 +1,1796 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "SA-X31, Eden's music kinds (#2921). An instrument played in place (a piano, a keyboard, a music stand, a drum kit, a guitar stool) or a microphone is taken up by one Soul at a time (its player or singer link) while it is silent, at a tune by mood (play, play_happy, play_sad; sing, ...), and only that Soul stops it; a drum kit and a guitar stool also need their seat free. A guitar or a bass is played while held with the other hand free, and a stand gives its instrument into a free hand and takes it back into its cradle. A speaker is switched on and off at its switch with a free hand. Each case is one need unmet, or none.",
+  "cases": [
+    {
+      "name": "piano_play_every_need_met",
+      "act": {"this":"p1","form":"play"},
+      "state": {"actor":"b1","nodes":{"p1":{"kind":"eden:piano"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "piano_play_already_playing",
+      "act": {"this":"p1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"p1":{"kind":"eden:piano","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "piano_play_someone_else_holds_it",
+      "act": {"this":"p1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {"kind":"eden:piano","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "piano_play_happy_every_need_met",
+      "act": {"this":"p1","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"p1":{"kind":"eden:piano"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "piano_play_happy_already_playing",
+      "act": {"this":"p1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"p1":{"kind":"eden:piano","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "piano_play_happy_someone_else_holds_it",
+      "act": {"this":"p1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {"kind":"eden:piano","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "piano_play_sad_every_need_met",
+      "act": {"this":"p1","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"p1":{"kind":"eden:piano"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "piano_play_sad_already_playing",
+      "act": {"this":"p1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"p1":{"kind":"eden:piano","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "piano_play_sad_someone_else_holds_it",
+      "act": {"this":"p1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {"kind":"eden:piano","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "piano_stop_every_need_met",
+      "act": {"this":"p1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {"kind":"eden:piano","fields":{"music":"sad"},"links":{"player":["b1"]}},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "piano_stop_when_silent_names_play",
+      "act": {"this":"p1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"p1":{"kind":"eden:piano","links":{"player":["b1"]}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"play"}
+      }
+    },
+    {
+      "name": "keyboard_play_every_need_met",
+      "act": {"this":"k1","form":"play"},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:keyboard_stand"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "keyboard_play_already_playing",
+      "act": {"this":"k1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"k1":{"kind":"eden:keyboard_stand","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "keyboard_play_someone_else_holds_it",
+      "act": {"this":"k1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": {"kind":"eden:keyboard_stand","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "keyboard_play_happy_every_need_met",
+      "act": {"this":"k1","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:keyboard_stand"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "keyboard_play_happy_already_playing",
+      "act": {"this":"k1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"k1":{"kind":"eden:keyboard_stand","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "keyboard_play_happy_someone_else_holds_it",
+      "act": {"this":"k1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": {"kind":"eden:keyboard_stand","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "keyboard_play_sad_every_need_met",
+      "act": {"this":"k1","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:keyboard_stand"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "keyboard_play_sad_already_playing",
+      "act": {"this":"k1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"k1":{"kind":"eden:keyboard_stand","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "keyboard_play_sad_someone_else_holds_it",
+      "act": {"this":"k1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": {"kind":"eden:keyboard_stand","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "keyboard_stop_every_need_met",
+      "act": {"this":"k1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": {"kind":"eden:keyboard_stand","fields":{"music":"sad"},"links":{"player":["b1"]}},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "keyboard_stop_when_silent_names_play",
+      "act": {"this":"k1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"k1":{"kind":"eden:keyboard_stand","links":{"player":["b1"]}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"play"}
+      }
+    },
+    {
+      "name": "violin_play_every_need_met",
+      "act": {"this":"v1","form":"play"},
+      "state": {"actor":"b1","nodes":{"v1":{"kind":"eden:music_stand_violin"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "violin_play_already_playing",
+      "act": {"this":"v1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"v1":{"kind":"eden:music_stand_violin","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "violin_play_someone_else_holds_it",
+      "act": {"this":"v1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {"kind":"eden:music_stand_violin","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "violin_play_happy_every_need_met",
+      "act": {"this":"v1","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"v1":{"kind":"eden:music_stand_violin"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "violin_play_happy_already_playing",
+      "act": {"this":"v1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"v1":{"kind":"eden:music_stand_violin","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "violin_play_happy_someone_else_holds_it",
+      "act": {"this":"v1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {"kind":"eden:music_stand_violin","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "violin_play_sad_every_need_met",
+      "act": {"this":"v1","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"v1":{"kind":"eden:music_stand_violin"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "violin_play_sad_already_playing",
+      "act": {"this":"v1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"v1":{"kind":"eden:music_stand_violin","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "violin_play_sad_someone_else_holds_it",
+      "act": {"this":"v1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {"kind":"eden:music_stand_violin","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "violin_stop_every_need_met",
+      "act": {"this":"v1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {"kind":"eden:music_stand_violin","fields":{"music":"sad"},"links":{"player":["b1"]}},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "violin_stop_when_silent_names_play",
+      "act": {"this":"v1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"v1":{"kind":"eden:music_stand_violin","links":{"player":["b1"]}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"play"}
+      }
+    },
+    {
+      "name": "cello_play_every_need_met",
+      "act": {"this":"c1","form":"play"},
+      "state": {"actor":"b1","nodes":{"c1":{"kind":"eden:music_stand_cello"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cello_play_already_playing",
+      "act": {"this":"c1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"c1":{"kind":"eden:music_stand_cello","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "cello_play_someone_else_holds_it",
+      "act": {"this":"c1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind":"eden:music_stand_cello","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "cello_play_happy_every_need_met",
+      "act": {"this":"c1","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"c1":{"kind":"eden:music_stand_cello"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cello_play_happy_already_playing",
+      "act": {"this":"c1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"c1":{"kind":"eden:music_stand_cello","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "cello_play_happy_someone_else_holds_it",
+      "act": {"this":"c1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind":"eden:music_stand_cello","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "cello_play_sad_every_need_met",
+      "act": {"this":"c1","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"c1":{"kind":"eden:music_stand_cello"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cello_play_sad_already_playing",
+      "act": {"this":"c1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"c1":{"kind":"eden:music_stand_cello","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "cello_play_sad_someone_else_holds_it",
+      "act": {"this":"c1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind":"eden:music_stand_cello","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "cello_stop_every_need_met",
+      "act": {"this":"c1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind":"eden:music_stand_cello","fields":{"music":"sad"},"links":{"player":["b1"]}},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cello_stop_when_silent_names_play",
+      "act": {"this":"c1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"c1":{"kind":"eden:music_stand_cello","links":{"player":["b1"]}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"play"}
+      }
+    },
+    {
+      "name": "viola_play_every_need_met",
+      "act": {"this":"a1","form":"play"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:music_stand_viola"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "viola_play_already_playing",
+      "act": {"this":"a1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"a1":{"kind":"eden:music_stand_viola","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "viola_play_someone_else_holds_it",
+      "act": {"this":"a1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "a1": {"kind":"eden:music_stand_viola","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "viola_play_happy_every_need_met",
+      "act": {"this":"a1","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:music_stand_viola"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "viola_play_happy_already_playing",
+      "act": {"this":"a1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"a1":{"kind":"eden:music_stand_viola","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "viola_play_happy_someone_else_holds_it",
+      "act": {"this":"a1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "a1": {"kind":"eden:music_stand_viola","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "viola_play_sad_every_need_met",
+      "act": {"this":"a1","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:music_stand_viola"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "viola_play_sad_already_playing",
+      "act": {"this":"a1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"a1":{"kind":"eden:music_stand_viola","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "viola_play_sad_someone_else_holds_it",
+      "act": {"this":"a1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "a1": {"kind":"eden:music_stand_viola","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "viola_stop_every_need_met",
+      "act": {"this":"a1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "a1": {"kind":"eden:music_stand_viola","fields":{"music":"sad"},"links":{"player":["b1"]}},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "viola_stop_when_silent_names_play",
+      "act": {"this":"a1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"a1":{"kind":"eden:music_stand_viola","links":{"player":["b1"]}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"play"}
+      }
+    },
+    {
+      "name": "drums_play_every_need_met",
+      "act": {"this":"d1","form":"play"},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:drum_kit"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "drums_play_already_playing",
+      "act": {"this":"d1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"d1":{"kind":"eden:drum_kit","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "drums_play_someone_else_holds_it",
+      "act": {"this":"d1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {"kind":"eden:drum_kit","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "drums_play_seat_taken",
+      "act": {"this":"d1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {"kind":"eden:drum_kit","slots":{"stool":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":2,"detail":{"node":"d1","slot":"stool"},"fix":null}
+    },
+    {
+      "name": "drums_play_happy_every_need_met",
+      "act": {"this":"d1","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:drum_kit"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "drums_play_happy_already_playing",
+      "act": {"this":"d1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"d1":{"kind":"eden:drum_kit","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "drums_play_happy_someone_else_holds_it",
+      "act": {"this":"d1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {"kind":"eden:drum_kit","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "drums_play_happy_seat_taken",
+      "act": {"this":"d1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {"kind":"eden:drum_kit","slots":{"stool":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":2,"detail":{"node":"d1","slot":"stool"},"fix":null}
+    },
+    {
+      "name": "drums_play_sad_every_need_met",
+      "act": {"this":"d1","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:drum_kit"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "drums_play_sad_already_playing",
+      "act": {"this":"d1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"d1":{"kind":"eden:drum_kit","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "drums_play_sad_someone_else_holds_it",
+      "act": {"this":"d1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {"kind":"eden:drum_kit","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "drums_play_sad_seat_taken",
+      "act": {"this":"d1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {"kind":"eden:drum_kit","slots":{"stool":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":2,"detail":{"node":"d1","slot":"stool"},"fix":null}
+    },
+    {
+      "name": "drums_stop_every_need_met",
+      "act": {"this":"d1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {"kind":"eden:drum_kit","fields":{"music":"sad"},"links":{"player":["b1"]}},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "drums_stop_when_silent_names_play",
+      "act": {"this":"d1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"d1":{"kind":"eden:drum_kit","links":{"player":["b1"]}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"play"}
+      }
+    },
+    {
+      "name": "stool_play_every_need_met",
+      "act": {"this":"s1","form":"play"},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:guitar_stool"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "stool_play_already_playing",
+      "act": {"this":"s1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"s1":{"kind":"eden:guitar_stool","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "stool_play_someone_else_holds_it",
+      "act": {"this":"s1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {"kind":"eden:guitar_stool","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "stool_play_seat_taken",
+      "act": {"this":"s1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {"kind":"eden:guitar_stool","slots":{"seat":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":2,"detail":{"node":"s1","slot":"seat"},"fix":null}
+    },
+    {
+      "name": "stool_play_happy_every_need_met",
+      "act": {"this":"s1","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:guitar_stool"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "stool_play_happy_already_playing",
+      "act": {"this":"s1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"s1":{"kind":"eden:guitar_stool","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "stool_play_happy_someone_else_holds_it",
+      "act": {"this":"s1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {"kind":"eden:guitar_stool","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "stool_play_happy_seat_taken",
+      "act": {"this":"s1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {"kind":"eden:guitar_stool","slots":{"seat":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":2,"detail":{"node":"s1","slot":"seat"},"fix":null}
+    },
+    {
+      "name": "stool_play_sad_every_need_met",
+      "act": {"this":"s1","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:guitar_stool"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "stool_play_sad_already_playing",
+      "act": {"this":"s1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"s1":{"kind":"eden:guitar_stool","fields":{"music":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "stool_play_sad_someone_else_holds_it",
+      "act": {"this":"s1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {"kind":"eden:guitar_stool","links":{"player":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "stool_play_sad_seat_taken",
+      "act": {"this":"s1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {"kind":"eden:guitar_stool","slots":{"seat":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":2,"detail":{"node":"s1","slot":"seat"},"fix":null}
+    },
+    {
+      "name": "stool_stop_every_need_met",
+      "act": {"this":"s1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {"kind":"eden:guitar_stool","fields":{"music":"sad"},"links":{"player":["b1"]}},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "stool_stop_when_silent_names_play",
+      "act": {"this":"s1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"s1":{"kind":"eden:guitar_stool","links":{"player":["b1"]}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"music","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"play"}
+      }
+    },
+    {
+      "name": "mic_sing_every_need_met",
+      "act": {"this":"m1","form":"sing"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:microphone"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "mic_sing_already_singing",
+      "act": {"this":"m1","form":"sing"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"m1":{"kind":"eden:microphone","fields":{"voice":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"voice","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "mic_sing_someone_else_holds_it",
+      "act": {"this":"m1","form":"sing"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {"kind":"eden:microphone","links":{"singer":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"singer","count":1},"fix":null}
+    },
+    {
+      "name": "mic_sing_happy_every_need_met",
+      "act": {"this":"m1","form":"sing_happy"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:microphone"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "mic_sing_happy_already_singing",
+      "act": {"this":"m1","form":"sing_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"m1":{"kind":"eden:microphone","fields":{"voice":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"voice","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "mic_sing_happy_someone_else_holds_it",
+      "act": {"this":"m1","form":"sing_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {"kind":"eden:microphone","links":{"singer":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"singer","count":1},"fix":null}
+    },
+    {
+      "name": "mic_sing_sad_every_need_met",
+      "act": {"this":"m1","form":"sing_sad"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:microphone"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "mic_sing_sad_already_singing",
+      "act": {"this":"m1","form":"sing_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"m1":{"kind":"eden:microphone","fields":{"voice":"calm"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"voice","found":"calm","wanted":{"is":"silent"}},
+        "fix": null
+      }
+    },
+    {
+      "name": "mic_sing_sad_someone_else_holds_it",
+      "act": {"this":"m1","form":"sing_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {"kind":"eden:microphone","links":{"singer":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"singer","count":1},"fix":null}
+    },
+    {
+      "name": "mic_stop_singing_every_need_met",
+      "act": {"this":"m1","form":"stop_singing"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {"kind":"eden:microphone","fields":{"voice":"sad"},"links":{"singer":["b1"]}},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "mic_stop_singing_when_silent_names_sing",
+      "act": {"this":"m1","form":"stop_singing"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"m1":{"kind":"eden:microphone","links":{"singer":["b1"]}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"voice","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"sing"}
+      }
+    },
+    {
+      "name": "speaker_play_music_every_need_met",
+      "act": {"this":"sp1","form":"play_music"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sp1": {"kind":"eden:speaker","fields":{"playing":false}},
+          "b1": {"hands":{"left":null,"right":null},"effector_mm":[0,1250,150]}
+        },
+        "moves": {"press":{"reach_mm":600}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "speaker_play_music_already_on",
+      "act": {"this":"sp1","form":"play_music"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sp1": {"kind":"eden:speaker","fields":{"playing":true}},
+          "b1": {"hands":{"left":null,"right":null},"effector_mm":[0,1250,150]}
+        },
+        "moves": {"press":{"reach_mm":600}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"playing","found":true,"wanted":{"is":false}},
+        "fix": {"form":"stop_music"}
+      }
+    },
+    {
+      "name": "speaker_play_music_both_hands_full",
+      "act": {"this":"sp1","form":"play_music"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sp1": {"kind":"eden:speaker","fields":{"playing":false}},
+          "b1": {"hands":{"left":"x1","right":"x2"},"effector_mm":[0,1250,150]},
+          "x1": {"kind":"eden:guitar"},
+          "x2": {"kind":"eden:guitar"}
+        },
+        "moves": {"press":{"reach_mm":600}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "speaker_play_music_switch_out_of_reach",
+      "act": {"this":"sp1","form":"play_music"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sp1": {"kind":"eden:speaker","fields":{"playing":false}},
+          "b1": {"hands":{"left":null,"right":null},"effector_mm":[0,1250,3000]}
+        },
+        "moves": {"press":{"reach_mm":600}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2,
+        "detail": {"point":"switch","move":"press"},
+        "fix": {"step":"walk_to","point":"switch"}
+      }
+    },
+    {
+      "name": "speaker_stop_music_every_need_met",
+      "act": {"this":"sp1","form":"stop_music"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sp1": {"kind":"eden:speaker","fields":{"playing":true}},
+          "b1": {"hands":{"left":null,"right":null},"effector_mm":[0,1250,150]}
+        },
+        "moves": {"press":{"reach_mm":600}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "speaker_stop_music_already_off",
+      "act": {"this":"sp1","form":"stop_music"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sp1": {"kind":"eden:speaker","fields":{"playing":false}},
+          "b1": {"hands":{"left":null,"right":null},"effector_mm":[0,1250,150]}
+        },
+        "moves": {"press":{"reach_mm":600}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"playing","found":false,"wanted":{"is":true}},
+        "fix": {"form":"play_music"}
+      }
+    },
+    {
+      "name": "speaker_stop_music_both_hands_full",
+      "act": {"this":"sp1","form":"stop_music"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sp1": {"kind":"eden:speaker","fields":{"playing":true}},
+          "b1": {"hands":{"left":"x1","right":"x2"},"effector_mm":[0,1250,150]},
+          "x1": {"kind":"eden:guitar"},
+          "x2": {"kind":"eden:guitar"}
+        },
+        "moves": {"press":{"reach_mm":600}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "speaker_stop_music_switch_out_of_reach",
+      "act": {"this":"sp1","form":"stop_music"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sp1": {"kind":"eden:speaker","fields":{"playing":true}},
+          "b1": {"hands":{"left":null,"right":null},"effector_mm":[0,1250,3000]}
+        },
+        "moves": {"press":{"reach_mm":600}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2,
+        "detail": {"point":"switch","move":"press"},
+        "fix": {"step":"walk_to","point":"switch"}
+      }
+    },
+    {
+      "name": "guitar_play_every_need_met",
+      "act": {"this":"g1","form":"play"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":null,"right":"g1"}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "guitar_play_not_held_names_its_stand",
+      "act": {"this":"g1","form":"play"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{},"fix":{"step":"take","thing":"g1"}}
+    },
+    {
+      "name": "guitar_play_other_hand_full",
+      "act": {"this":"g1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":"x1","right":"g1"}},"x1":{"kind":"eden:guitar"}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "guitar_play_already_playing",
+      "act": {"this":"g1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g1":{"kind":"eden:guitar","fields":{"music":"happy"}},"b1":{"hands":{"left":null,"right":"g1"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {"field":"music","found":"happy","wanted":{"is":"silent"}},
+        "fix": {"form":"stop"}
+      }
+    },
+    {
+      "name": "guitar_play_happy_every_need_met",
+      "act": {"this":"g1","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":null,"right":"g1"}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "guitar_play_happy_not_held_names_its_stand",
+      "act": {"this":"g1","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{},"fix":{"step":"take","thing":"g1"}}
+    },
+    {
+      "name": "guitar_play_happy_other_hand_full",
+      "act": {"this":"g1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":"x1","right":"g1"}},"x1":{"kind":"eden:guitar"}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "guitar_play_happy_already_playing",
+      "act": {"this":"g1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g1":{"kind":"eden:guitar","fields":{"music":"happy"}},"b1":{"hands":{"left":null,"right":"g1"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {"field":"music","found":"happy","wanted":{"is":"silent"}},
+        "fix": {"form":"stop"}
+      }
+    },
+    {
+      "name": "guitar_play_sad_every_need_met",
+      "act": {"this":"g1","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":null,"right":"g1"}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "guitar_play_sad_not_held_names_its_stand",
+      "act": {"this":"g1","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{},"fix":{"step":"take","thing":"g1"}}
+    },
+    {
+      "name": "guitar_play_sad_other_hand_full",
+      "act": {"this":"g1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":"x1","right":"g1"}},"x1":{"kind":"eden:guitar"}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "guitar_play_sad_already_playing",
+      "act": {"this":"g1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g1":{"kind":"eden:guitar","fields":{"music":"happy"}},"b1":{"hands":{"left":null,"right":"g1"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {"field":"music","found":"happy","wanted":{"is":"silent"}},
+        "fix": {"form":"stop"}
+      }
+    },
+    {
+      "name": "guitar_stop_every_need_met",
+      "act": {"this":"g1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g1":{"kind":"eden:guitar","fields":{"music":"sad"}},"b1":{"hands":{"left":null,"right":"g1"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "guitar_stop_not_held",
+      "act": {"this":"g1","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g1":{"kind":"eden:guitar","fields":{"music":"sad"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{},"fix":{"step":"take","thing":"g1"}}
+    },
+    {
+      "name": "guitar_stop_when_silent",
+      "act": {"this":"g1","form":"stop"},
+      "state": {"actor":"b1","nodes":{"g1":{"kind":"eden:guitar"},"b1":{"hands":{"left":null,"right":"g1"}}}},
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {"field":"music","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"play"}
+      }
+    },
+    {
+      "name": "bass_play_every_need_met",
+      "act": {"this":"g2","form":"play"},
+      "state": {"actor":"b1","nodes":{"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":null,"right":"g2"}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "bass_play_not_held_names_its_stand",
+      "act": {"this":"g2","form":"play"},
+      "state": {"actor":"b1","nodes":{"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{},"fix":{"step":"take","thing":"g2"}}
+    },
+    {
+      "name": "bass_play_other_hand_full",
+      "act": {"this":"g2","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":"x1","right":"g2"}},"x1":{"kind":"eden:guitar"}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "bass_play_already_playing",
+      "act": {"this":"g2","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g2":{"kind":"eden:bass_guitar","fields":{"music":"happy"}},"b1":{"hands":{"left":null,"right":"g2"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {"field":"music","found":"happy","wanted":{"is":"silent"}},
+        "fix": {"form":"stop"}
+      }
+    },
+    {
+      "name": "bass_play_happy_every_need_met",
+      "act": {"this":"g2","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":null,"right":"g2"}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "bass_play_happy_not_held_names_its_stand",
+      "act": {"this":"g2","form":"play_happy"},
+      "state": {"actor":"b1","nodes":{"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{},"fix":{"step":"take","thing":"g2"}}
+    },
+    {
+      "name": "bass_play_happy_other_hand_full",
+      "act": {"this":"g2","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":"x1","right":"g2"}},"x1":{"kind":"eden:guitar"}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "bass_play_happy_already_playing",
+      "act": {"this":"g2","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g2":{"kind":"eden:bass_guitar","fields":{"music":"happy"}},"b1":{"hands":{"left":null,"right":"g2"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {"field":"music","found":"happy","wanted":{"is":"silent"}},
+        "fix": {"form":"stop"}
+      }
+    },
+    {
+      "name": "bass_play_sad_every_need_met",
+      "act": {"this":"g2","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":null,"right":"g2"}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "bass_play_sad_not_held_names_its_stand",
+      "act": {"this":"g2","form":"play_sad"},
+      "state": {"actor":"b1","nodes":{"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{},"fix":{"step":"take","thing":"g2"}}
+    },
+    {
+      "name": "bass_play_sad_other_hand_full",
+      "act": {"this":"g2","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":"x1","right":"g2"}},"x1":{"kind":"eden:guitar"}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "bass_play_sad_already_playing",
+      "act": {"this":"g2","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g2":{"kind":"eden:bass_guitar","fields":{"music":"happy"}},"b1":{"hands":{"left":null,"right":"g2"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {"field":"music","found":"happy","wanted":{"is":"silent"}},
+        "fix": {"form":"stop"}
+      }
+    },
+    {
+      "name": "bass_stop_every_need_met",
+      "act": {"this":"g2","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g2":{"kind":"eden:bass_guitar","fields":{"music":"sad"}},"b1":{"hands":{"left":null,"right":"g2"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "bass_stop_not_held",
+      "act": {"this":"g2","form":"stop"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"g2":{"kind":"eden:bass_guitar","fields":{"music":"sad"}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{},"fix":{"step":"take","thing":"g2"}}
+    },
+    {
+      "name": "bass_stop_when_silent",
+      "act": {"this":"g2","form":"stop"},
+      "state": {"actor":"b1","nodes":{"g2":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":null,"right":"g2"}}}},
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {"field":"music","found":"silent","wanted":{"not":"silent"}},
+        "fix": {"form":"play"}
+      }
+    },
+    {
+      "name": "guitar_stand_take_every_need_met",
+      "act": {"this":"gs1","form":"take","args":{"guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "gs1": {"kind":"eden:guitar_stand","slots":{"cradle":["i1"]}},
+          "i1": {"kind":"eden:guitar"},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "guitar_stand_take_both_hands_full",
+      "act": {"this":"gs1","form":"take","args":{"guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "gs1": {"kind":"eden:guitar_stand","slots":{"cradle":["i1"]}},
+          "i1": {"kind":"eden:guitar"},
+          "b1": {"hands":{"left":"x1","right":"x2"}},
+          "x1": {"kind":"eden:guitar"},
+          "x2": {"kind":"eden:guitar"}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "guitar_stand_put_back_every_need_met",
+      "act": {"this":"gs1","form":"put_back","args":{"guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {"gs1":{"kind":"eden:guitar_stand"},"i1":{"kind":"eden:guitar"},"b1":{"hands":{"left":null,"right":"i1"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "guitar_stand_put_back_not_held_names_take",
+      "act": {"this":"gs1","form":"put_back","args":{"guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "gs1": {"kind":"eden:guitar_stand"},
+          "i1": {"kind":"eden:guitar"},
+          "room": {"loose":["i1","b1"]},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{"thing":"i1"},"fix":{"step":"take","thing":"i1"}}
+    },
+    {
+      "name": "guitar_stand_put_back_cradle_full",
+      "act": {"this":"gs1","form":"put_back","args":{"guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "gs1": {"kind":"eden:guitar_stand","slots":{"cradle":["i2"]}},
+          "i1": {"kind":"eden:guitar"},
+          "i2": {"kind":"eden:guitar"},
+          "b1": {"hands":{"left":null,"right":"i1"}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":1,"detail":{"node":"gs1","slot":"cradle"},"fix":null}
+    },
+    {
+      "name": "bass_stand_take_every_need_met",
+      "act": {"this":"bs1","form":"take","args":{"bass_guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "bs1": {"kind":"eden:bass_stand","slots":{"cradle":["i1"]}},
+          "i1": {"kind":"eden:bass_guitar"},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "bass_stand_take_both_hands_full",
+      "act": {"this":"bs1","form":"take","args":{"bass_guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "bs1": {"kind":"eden:bass_stand","slots":{"cradle":["i1"]}},
+          "i1": {"kind":"eden:bass_guitar"},
+          "b1": {"hands":{"left":"x1","right":"x2"}},
+          "x1": {"kind":"eden:guitar"},
+          "x2": {"kind":"eden:guitar"}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "bass_stand_put_back_every_need_met",
+      "act": {"this":"bs1","form":"put_back","args":{"bass_guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {"bs1":{"kind":"eden:bass_stand"},"i1":{"kind":"eden:bass_guitar"},"b1":{"hands":{"left":null,"right":"i1"}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "bass_stand_put_back_not_held_names_take",
+      "act": {"this":"bs1","form":"put_back","args":{"bass_guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "bs1": {"kind":"eden:bass_stand"},
+          "i1": {"kind":"eden:bass_guitar"},
+          "room": {"loose":["i1","b1"]},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_held","need":0,"detail":{"thing":"i1"},"fix":{"step":"take","thing":"i1"}}
+    },
+    {
+      "name": "bass_stand_put_back_cradle_full",
+      "act": {"this":"bs1","form":"put_back","args":{"bass_guitar":"i1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "bs1": {"kind":"eden:bass_stand","slots":{"cradle":["i2"]}},
+          "i1": {"kind":"eden:bass_guitar"},
+          "i2": {"kind":"eden:bass_guitar"},
+          "b1": {"hands":{"left":null,"right":"i1"}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":1,"detail":{"node":"bs1","slot":"cradle"},"fix":null}
+    }
+  ]
+}

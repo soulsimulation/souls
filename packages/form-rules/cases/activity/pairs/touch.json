@@ -1,0 +1,119 @@
+{
+  "format": "souls-activity-steps/1",
+  "about": "The touching pairs: a hug, a handshake, a high five, a dance and a push on the swing. Each offer is a proposal for one Soul (its invited link) made by one Soul (its proposer link). The asker enters its place by its own act; the invited Soul accepts by entering the other place by its own act, in time; a Soul the offer is not for can do neither. A bystander is never touched. Either may leave, which ends the pair: the other is released and stepped out of the activity's own place; a rider on the swing stays seated.",
+  "cases": [
+    {
+      "name": "a_hug_offered_and_accepted",
+      "activity": "h1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["h1", "b1", "b2", "b3"] },
+          "h1": { "kind": "test:hug", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 30000000, "per_s": -1000000, "set_us": 1000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 2000000, "expect": { "verdict": "yes", "role": "asker", "place": { "node": "h1", "slot": "asker" } } },
+        { "do": "accept", "actor": "b3", "form": "accept", "receipt": "a0", "now_us": 3000000, "expect": { "verdict": "no", "reason": "not_permitted", "detail": { "link": "invited", "ends": ["b2"] } } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a1", "now_us": 3000000, "expect": { "verdict": "yes", "role": "partner", "place": { "node": "h1", "slot": "partner" } } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "stage": "joined", "ends_us": 31000000 } } },
+        { "do": "world", "actor": "w", "form": "lapse", "receipt": "w1", "now_us": 31000000, "expect": { "verdict": "no", "need": 1 } },
+        { "do": "leave", "actor": "b2", "form": "step_away", "receipt": "x1", "expect": { "verdict": "yes", "role": "partner", "ended": 1 } }
+      ],
+      "after": {
+        "b1": { "hands": { "left": null, "right": null } },
+        "b2": { "hands": { "left": null, "right": null } },
+        "b3": { "hands": { "left": null, "right": null } }
+      },
+      "gone": ["h1"]
+    },
+    {
+      "name": "a_handshake_offered_and_accepted",
+      "activity": "s1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["s1", "b1", "b2"] },
+          "s1": { "kind": "test:handshake", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 30000000, "per_s": -1000000, "set_us": 1000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": "cup1" } },
+          "cup1": { "kind": "test:book" }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 2000000, "expect": { "verdict": "yes", "role": "asker" } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a1", "now_us": 3000000, "expect": { "verdict": "yes", "role": "partner", "place": { "node": "s1", "slot": "partner" } } },
+        { "do": "leave", "actor": "b1", "form": "let_go", "receipt": "x1", "expect": { "verdict": "yes", "role": "asker", "ended": 1 } }
+      ],
+      "after": {
+        "b2": { "hands": { "left": null, "right": "cup1" } }
+      },
+      "gone": ["s1"]
+    },
+    {
+      "name": "a_high_five_offered_and_accepted",
+      "activity": "f1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["f1", "b1", "b2"] },
+          "f1": { "kind": "test:high_five", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 10000000, "per_s": -1000000, "set_us": 1000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 2000000, "expect": { "verdict": "yes", "role": "asker" } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a1", "now_us": 10999999, "expect": { "verdict": "yes", "role": "partner" } }
+      ],
+      "after": {
+        "f1": { "kind": "test:high_five", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 10000000, "per_s": -1000000, "set_us": 1000000 }, "phase": "joined" }, "links": { "invited": ["b2"], "proposer": ["b1"], "asker": ["b1"], "partner": ["b2"] }, "slots": { "asker": ["b1"], "partner": ["b2"] } }
+      }
+    },
+    {
+      "name": "a_dance_offered_and_accepted",
+      "activity": "d1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["d1", "b1", "b2"] },
+          "d1": { "kind": "test:dance", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 60000000, "per_s": -1000000, "set_us": 1000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 2000000, "expect": { "verdict": "yes", "role": "lead", "place": { "node": "d1", "slot": "lead" } } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a1", "now_us": 3000000, "expect": { "verdict": "yes", "role": "partner", "place": { "node": "d1", "slot": "partner" } } },
+        { "do": "leave", "actor": "b2", "form": "step_away", "receipt": "x1", "expect": { "verdict": "yes", "role": "partner", "ended": 1 } }
+      ],
+      "gone": ["d1"]
+    },
+    {
+      "name": "a_push_on_the_swing_asked_and_accepted_the_rider_stays_seated",
+      "activity": "p1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["w1", "p1", "b1", "b2"] },
+          "w1": { "kind": "test:swing", "at_mm": [0, 0, 0] },
+          "p1": { "kind": "test:push_swing", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 60000000, "per_s": -1000000, "set_us": 1000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 2000000, "expect": { "verdict": "yes", "role": "rider", "place": { "node": "w1", "slot": "seat" } } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a1", "now_us": 3000000, "expect": { "verdict": "yes", "role": "pusher", "place": { "node": "p1", "slot": "pusher" } } },
+        { "do": "leave", "actor": "b2", "form": "step_away", "receipt": "x1", "expect": { "verdict": "yes", "role": "pusher", "ended": 1 } }
+      ],
+      "after": {
+        "w1": { "kind": "test:swing", "at_mm": [0, 0, 0], "slots": { "seat": ["b1"] } }
+      },
+      "gone": ["p1"]
+    }
+  ]
+}

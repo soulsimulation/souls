@@ -1,0 +1,17 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:round_carpet",
+  "owner": "thing",
+  "geometry": {"bounds_mm":[3168,50,3217]},
+  "areas": {"top":{"allows":{"sit":"on","lie":"on"}}},
+  "motion": {"how":"two_hands"},
+  "loose": {"ever":true},
+  "looks": {"model":"look:round_carpet"},
+  "text": {
+    "card": "A round woven carpet: sit or lie on it, or carry it elsewhere.",
+    "floor": "floor",
+    "rug": "rug",
+    "carpet": "carpet"
+  },
+  "card": {"text":"card","category":"floor","synonyms":["rug","carpet"]}
+}

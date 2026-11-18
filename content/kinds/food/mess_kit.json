@@ -1,0 +1,72 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:mess_kit",
+  "owner": "thing",
+  "state": {
+    "dirt": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [130, 40, 0]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [260, 65, 260]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:mess_kit",
+    "shape": {"round":0,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,0],[70,0],[130,65],[120,65],[65,12],[0,12]],"segments":10,"tint":"enamel"},{"kind":"box","at":[0,17,0],"size":[120,8,100],"tint":"mud","when":"@dirt>=1"},{"kind":"box","at":[50,29,15],"size":[70,10,60],"tint":"mud","when":"@dirt>=1"},{"kind":"box","at":[-40,28,-20],"size":[60,8,50],"tint":"mud","when":"@dirt>=1"}],"palette":{"enamel":"#e9e1c8","mud":"#65452d"},"tags":["camping","item","bowl","object"]}
+  },
+  "text": {
+    "card": "An enamel camp bowl, muddy: wash it clean at a camp wash bench.",
+    "camp": "camp",
+    "bowl": "bowl",
+    "dish": "dish"
+  },
+  "card": {
+    "text": "card",
+    "category": "camp",
+    "synonyms": [
+      "bowl",
+      "dish"
+    ]
+  }
+}
