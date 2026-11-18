@@ -110,6 +110,17 @@ impl Replica {
         self.version
     }
 
+    /// A whole copy for readers on other threads ([`Tree::frozen`]; K8, #2671).
+    pub fn frozen(&self) -> Replica {
+        Replica {
+            tree: self.tree.frozen(),
+            header: self.header.clone(),
+            version: self.version,
+            changed_at: self.changed_at.clone(),
+            by_version: self.by_version.clone(),
+        }
+    }
+
     /// Applies one part's stored bytes, whole or not at all.
     pub fn apply_bytes(&mut self, bytes: &[u8]) -> R<()> {
         let part = Part::read(bytes)?;
