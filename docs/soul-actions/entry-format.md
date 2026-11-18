@@ -163,9 +163,11 @@ supplies (a book's title and first page); optional `refill`, `{every_us}`, one m
 (a timed value, SA-F5a). The take form is checked: it is a Soul's act that needs the count `at_least` 1 (an empty
 stock refuses) and a free hand, and its one `create` makes the kind into `actor_hand`; it never sets the count. The engine
 lowers the count by one in the same batch as the make (`takeStock` shows the batch: a `create` and a `set` with `by` -1), so
-nothing is made from nothing. Stock is free to take; buying, lending and debts are not here. A kind whose contents are
+nothing is made from nothing, and the check gate's `makes` rule counts the stock as what pays for it. Stock is free to
+take; buying, lending and debts are not here. A kind whose contents are
 closed lists `count` in `closed.fields` and shows its stock only once opened (`stockOf` answers `null` until then; a shelf
-or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Section 15 is meaning, so covered by the hash.
+or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Eden's own storage
+(`content/kinds/storage/`, SA-X26 [#2916](https://github.com/soulsimulation/souls/issues/2916)) names each stock's take form `take`. Section 15 is meaning, so covered by the hash.
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
@@ -220,7 +222,8 @@ list (`AUDIENCE_RULES` in `tools/entry/format.mjs`): `{"rule": "everyone"}`, `{"
 the Soul whose turn it is) and `{"rule": "creator"}` (the world's creator). A rule names a link type, never a Soul.
 A kind may add a `closed` section (9), `{"audience": rule, "fields": ["stock"]}`: the fields it names, and its
 children, take the container's own audience until it is opened (Engine v2 E22,
-[#2792](https://github.com/soulsimulation/souls/issues/2792)); those fields declare no audience of their own.
+[#2792](https://github.com/soulsimulation/souls/issues/2792)); those fields declare no audience of their own, and the
+rules (`@souls/form-rules`) read a need on one with the container's audience.
 Delivering to viewers is the new engine's view tier. Point and slot names share one namespace, so a form's argument of type
 `part` or `slot` can name "the top drawer" or "the left seat" and one form serves every part.
 
