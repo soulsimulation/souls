@@ -95,8 +95,9 @@ export const SOUL_LINK = 'soul';
 export const SUBJECTS = Object.freeze(['actor', 'this']);
 /** A vehicle (SA-F14, #2884) declares what Engine v2 needs to let a Soul drive it, never how it moves: a drive seat, a speed,
  *  its size (the bounds) and the kind of ground it may cross. Ground is whole kinds: `level` (no doors, stairs or ladders)
- *  or `deep_water` (deep enough to swim in). A ride is a set trip between stops that nobody steers (a sail). */
-export const VEHICLE_GROUNDS = Object.freeze(['level', 'deep_water']);
+ *  or `deep_water` (deep enough to swim in), and for a ride `air` (above the ground, on a cable or a balloon's flight: a rider
+ *  gets on and off only at its stops). A ride is a set trip between stops that nobody steers (a sail). */
+export const VEHICLE_GROUNDS = Object.freeze(['level', 'deep_water', 'air']);
 /** Where a rider may step off: ground to stand on, water to swim in, or somewhere neither holds. */
 export const SPOTS = Object.freeze(['level', 'shallow', 'deep_water', 'door', 'stairs', 'ladder', 'blocked']);
 export const SPOTS_STAND = Object.freeze(['level', 'shallow']);
@@ -493,6 +494,7 @@ export function allowsBase(entry, form) {
 function speed(v, path, err) {
   if (!(isInt(v.speed_mm_s) && v.speed_mm_s > 0)) err(`${path}.speed_mm_s`, 'its speed in whole millimetres per second, above zero');
   if (!VEHICLE_GROUNDS.includes(v.ground)) err(`${path}.ground`, `the ground it may cross, one of ${VEHICLE_GROUNDS.join(', ')}`);
+  else if (path === 'vehicle' && v.ground === 'air') err(`${path}.ground`, 'air is for a ride on a track (a cable, a flight); nobody steers through it');
 }
 
 /** A vehicle: a thing a Soul sits in or on and steers. Whoever holds the drive seat steers; the engine owns the motion. */

@@ -1,1 +1,1 @@
-{"format":"souls-ask/1","n":200,"group":"getting-around","words":"go up in the balloon","obvious":2,"things":{"balloon":"eden:balloon"},"chain":[{"this":"balloon","form":"ride"}]}
+{"format":"souls-ask/1","n":200,"group":"getting-around","words":"go up in the balloon","obvious":2,"things":{"balloon":"eden:balloon"},"chain":[{"this":"balloon","form":"ride","args":{"seat":"rider_1"}}]}
