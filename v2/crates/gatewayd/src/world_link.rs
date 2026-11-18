@@ -20,6 +20,7 @@ use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 
 use crate::Gateway;
+use crate::receipts::Outcome;
 use crate::resume::Cursor;
 use crate::times;
 
@@ -172,8 +173,9 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             }
             let at = times::stamp();
             match read_answer(&frame) {
-                Some((key, sequence, version, cursor)) => {
+                Some((key, sequence, version, cursor, outcome)) => {
                     if let Some((received, handed)) = gw.link.answered(&key, sequence, &version) {
+                        gw.record(&key, outcome);
                         let frame = times::read_from_world(frame, received, handed, at);
                         gw.deliver(key, cursor, frame);
                     }
@@ -186,8 +188,8 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
     }
 }
 
-/// An answer frame's actor (as bytes), sequence, version and cursor.
-fn read_answer(frame: &[u8]) -> Option<(Vec<u8>, u64, Value, Cursor)> {
+/// An answer frame's actor (as bytes), sequence, version, cursor and outcome (a refusal is kind 2 or 5).
+fn read_answer(frame: &[u8]) -> Option<(Vec<u8>, u64, Value, Cursor, Outcome)> {
     let Value::Map(m) = decode(frame).ok()?.value else {
         return None;
     };
@@ -200,5 +202,9 @@ fn read_answer(frame: &[u8]) -> Option<(Vec<u8>, u64, Value, Cursor)> {
     let Value::Uint(sequence) = answer.get(&2)? else {
         return None;
     };
-    Some((key, *sequence, version, cursor))
+    let outcome = match answer.get(&3) {
+        Some(Value::Uint(2 | 5)) => Outcome::Refusal,
+        _ => Outcome::Receipt,
+    };
+    Some((key, *sequence, version, cursor, outcome))
 }
