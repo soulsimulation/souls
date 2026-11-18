@@ -1,6 +1,6 @@
-# Application checks on isolated runners, scoped to what a change touches. Pushes to main and manual runs are full scope
-# (every qualify job and the local smoke): the merge train lands T0-T2 PRs without re-testing them only while main's
-# latest full-scope run is green (.github/scripts/merge-train.mjs, mainCiState).
+# Application checks on isolated runners, scoped to what a change touches. The daily scheduled run on main and manual
+# runs are full scope (every qualify job and the local smoke): the merge train lands T0-T2 PRs without re-testing them
+# only while main's latest full-scope run is green (.github/scripts/merge-train.mjs, mainCiState).
 # The job matrix is the release gate's CPU contract split for GitHub runners; `scope` picks jobs with the same path
 # map as `tools/test-harness/release-gate.mjs --scope auto` (.github/scripts/ci-scope.mjs). Branch protection requires
 # the single `ci-ok` check. The full Modal gate still qualifies releases (release.yml); CI is the per-PR check.
@@ -12,9 +12,11 @@
 # queues behind a run in progress, cancels nothing, and does no heavy work if the head's newest run passed, so its ci-ok
 # repeats that result. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still runs a PR's path-scoped CI by hand, but its
 # checks don't count for the queue.
-# A push to main of a commit whose merge_group run passed every qualify job (the queue fast-forwards main to it) does no
-# heavy work: `merge-group-covered` runs instead, and readers of main's CI take that job as full scope
-# (.github/scripts/ci-main.mjs, docs/testing.md#ci-window, CI on main). Any other push to main runs everything.
+# Pull request, merge_group and push runs never run the qualify legs ci-scope.mjs marks `heavy: true` (lightOnly): the
+# full battery runs once a day on main (schedule, 06:23 UTC), on a manual run, and before a release in the remote gate,
+# not per change (Gene, 18 Nov: startup mode). A push to main runs the light set its paths pick, like a merge group. Push
+# runs share one concurrency group, `ci-main`, where a newer push cancels an older one still running; the daily run has
+# its own group, `ci-daily`, and is never cancelled (docs/testing.md#ci-window).
 name: ci
 on:
   pull_request:
@@ -22,6 +24,8 @@ on:
   merge_group:
   push:
     branches: [main]
+  schedule:
+    - cron: '23 6 * * *'
   workflow_dispatch:
     inputs:
       pr:
@@ -31,14 +35,16 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.event.pull_request.number || inputs.pr || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' }}
+  group: ${{ github.event_name == 'push' && 'ci-main' || github.event_name == 'schedule' && 'ci-daily' || format('ci-{0}', github.event.pull_request.number || inputs.pr || github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled') }}
 env:
   # Where tools/assets pull keeps its content-addressed download cache (restored by actions/cache below).
   SIM_ASSETS_CACHE: ${{ github.workspace }}/../.sim-assets-cache
 jobs:
+  # scope, repo and ci-ok (and the required security, fragment and merge_group proof jobs) run on
+  # CI_LIGHT_RUNNER when set (a label, or a JSON label list), else GitHub-hosted. Unset it to go back to hosted runners.
   scope:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -50,29 +56,22 @@ jobs:
       smoke: ${{ steps.scope.outputs.smoke }}
       deferred: ${{ steps.scope.outputs.deferred }}
       window: ${{ steps.scope.outputs.window }}
-      covered: ${{ steps.queued.outputs.covered || 'false' }}
-      covered-run: ${{ steps.queued.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
       # A requested run queues behind any run already in its concurrency group; if that one passed at this head, the
-      # heavy work is done (never re-run a passing check on the same tree).
+      # heavy work is done (never re-run a passing check on the same tree). A requested run reads only requested runs:
+      # a pull_request run's pass covers no heavy leg (ci-scope.mjs lightOnly).
       - id: green
         name: Already green at this head
         if: github.event.action == 'labeled' || (github.event_name == 'workflow_dispatch' && inputs.pr != '')
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: echo "green=$(node .github/scripts/ci-scope.mjs green --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --self "$GITHUB_RUN_ID")" >> "$GITHUB_OUTPUT"
-      # A push to main the merge queue already tested in full at this sha (ci-main.mjs) has no heavy work left.
-      - id: queued
-        name: Tested in full by the merge queue
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node .github/scripts/ci-main.mjs --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
+          EVENTS: ${{ github.event_name == 'workflow_dispatch' && 'workflow_dispatch' || '' }}
+        run: echo "green=$(node .github/scripts/ci-scope.mjs green --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --self "$GITHUB_RUN_ID" --events "$EVENTS")" >> "$GITHUB_OUTPUT"
       - id: scope
         name: Pick jobs from changed paths
         env:
@@ -81,13 +80,13 @@ jobs:
           EVENT: ${{ inputs.pr && 'request' || github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft || false }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          GREEN: ${{ steps.green.outputs.green || steps.queued.outputs.covered || false }}
-        # A push to main and a manual run check everything (FULL_EVENTS); the merge train reads those runs.
+          GREEN: ${{ steps.green.outputs.green || false }}
+        # The daily run and a manual run check everything (FULL_EVENTS); the merge train reads those runs.
         run: node .github/scripts/ci-scope.mjs --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --draft "$DRAFT" --labels "$LABELS" --green-at-head "$GREEN"
 
   # Fast, dependency-free checks of the repo's own tooling; always runs.
   repo:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -127,12 +126,14 @@ jobs:
     needs: scope
     if: needs.scope.outputs.any == 'true'
     # A job the matrix marks heavy (ci-scope.mjs: the server shards and the long legs) runs on the repository variable
-    # CI_HEAVY_RUNNER when it is set; every other job, and every job while it is unset, runs on ubuntu-latest, so a run
+    # CI_HEAVY_RUNNER when it is set; a `light` one on CI_LIGHT_RUNNER when that is set; every other job, and every job
+    # while they are unset, runs on ubuntu-latest, so a run
     # uses both pools at once. The value is one runner label (`souls-ci`) or a JSON array (`["self-hosted","souls-ci"]`).
     # `native` is never heavy: its camera perf budget is wall time, and a shared host under load misses it (#1162).
-    runs-on: ${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || matrix.light && vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
-    timeout-minutes: ${{ matrix.kind == 'server' && 45 || 60 }}
+    # launcher passes in 20-27 min on hosted runners; 40 fails a hung test file in time to keep the merge queue moving.
+    timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || 60 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
@@ -149,6 +150,11 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - if: matrix.kind != 'v2'
         run: pnpm install --frozen-lockfile
+      # PRs do not carry a rebuilt eden.mjs (docs/testing.md#the-soul-client-file): every job tests the client built from
+      # this head's modules (soul/*.mjs, packages/form-rules/src/rules.ts), and a failure to inline fails the job
+      - name: Build eden.mjs from its modules
+        if: matrix.kind != 'v2'
+        run: node tools/world-launcher/soul/inline.mjs
       # Engine v2 (K15, #2637): the toolchain v2/rust-toolchain.toml pins, and a cargo cache keyed on it and the lockfile.
       - name: Install the pinned Rust toolchain
         if: matrix.kind == 'v2'
@@ -253,6 +259,11 @@ jobs:
             soul-tools)
               # #1111: not a gate step; picked by ci-scope.mjs from its own paths
               node --test --test-concurrency=4 tools/soul-runtime/*.test.mjs tools/soul-trace/*.test.mjs
+              # the entry format and its gates (check, look, prove); picked by tools/entry, content and packages/form-rules
+              node --test --test-concurrency=4 tools/entry/*.test.mjs
+              # form-rules' own tests and the launcher test that reads content/kinds: a change confined to the low-risk
+              # paths (ci-scope.mjs LOW_RISK) runs this job and no packages or launcher job
+              node --test --test-concurrency=4 packages/form-rules/src/*.test.ts tools/world-launcher/soul/card-search.test.mjs
               ;;
             v2)
               # Engine v2 (K15, #2637): not a gate step; picked by ci-scope.mjs from its own paths
@@ -346,23 +357,13 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # A push to main that the merge queue's run at this sha covered (ci-main.mjs): the merge train's fullScope and the
-  # release gate's ciEvidence find this job by name and take the merge_group run as main's full-scope result.
-  merge-group-covered:
-    needs: scope
-    if: needs.scope.outputs.covered == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - env:
-          RUN: ${{ needs.scope.outputs.covered-run }}
-        run: echo "Every qualify job passed in merge_group run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN at $GITHUB_SHA; nothing heavy re-runs."
-
   # The one required check: passes when every selected job passed (or none was needed). A deferred run (CI window
-  # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing.
+  # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing. On a pull_request, in the merge
+  # queue and on a push the `heavy: true` legs are never selected (the daily run and the release gate run them), so
+  # there it covers the jobs that ran.
   ci-ok:
-    runs-on: ubuntu-latest
-    needs: [scope, repo, qualify, smoke, merge-group-covered]
+    runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
+    needs: [scope, repo, qualify, smoke]
     if: always()
     steps:
       - name: Full CI deferred
@@ -379,12 +380,9 @@ jobs:
           ANY: ${{ needs.scope.outputs.any }}
           SMOKE: ${{ needs.smoke.result }}
           SMOKE_SELECTED: ${{ needs.scope.outputs.smoke }}
-          COVERED: ${{ needs.merge-group-covered.result }}
-          COVERED_SELECTED: ${{ needs.scope.outputs.covered }}
         run: |
-          echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED covered=$COVERED covered_selected=$COVERED_SELECTED"
+          echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED"
           test "$SCOPE" = success
           test "$REPO" = success
           if [ "$ANY" = true ]; then test "$QUALIFY" = success; else test "$QUALIFY" = skipped; fi
           if [ "$SMOKE_SELECTED" = true ]; then test "$SMOKE" = success; else test "$SMOKE" = skipped; fi
-          if [ "$COVERED_SELECTED" = true ]; then test "$COVERED" = success; else test "$COVERED" = skipped; fi
