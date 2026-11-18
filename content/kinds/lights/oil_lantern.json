@@ -1,0 +1,73 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:oil_lantern",
+  "owner": "thing",
+  "state": {
+    "oil": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
+    "lit": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 300, 0] },
+    "wick": { "role": "contact", "at_mm": [0, 151, 30] }
+  },
+  "geometry": { "bounds_mm": [200, 320, 200] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
+    "light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": false, "says": "already_lit" },
+        { "need": "state", "field": "oil", "at_least": 1, "says": "empty" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "wick" }],
+      "effects": [{ "change": "set", "field": "lit", "to": true, "event": "lit" }]
+    },
+    "put_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": true, "says": "already_out" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "wick" }],
+      "effects": [
+        { "change": "set", "field": "lit", "to": false, "event": "put_out" },
+        { "change": "set", "field": "oil", "by": -1, "event": "charge_spent" }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:oil_lantern",
+    "table": [
+      { "part": "fill", "field": "oil", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "flame", "field": "lit", "do": "show", "at": { "true": 1, "false": 0 } },
+      { "part": "flame", "field": "lit", "do": "flame", "at": { "true": 1000, "false": 0 } },
+      { "part": "light", "field": "lit", "do": "glow", "at": { "true": 900, "false": 0 } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,35,0],"r":90,"h":70,"segments":8,"tint":"metal"},{"kind":"box","at":[0,50,89],"size":[65,35,10],"tint":"oil","role":"fill"},{"kind":"box","at":[-74,170,0],"size":[15,200,25],"tint":"metal"},{"kind":"box","at":[74,170,0],"size":[15,200,25],"tint":"metal"},{"kind":"cyl","at":[0,170,0],"r":65,"h":190,"segments":10,"tint":"glass","material":"glass"},{"kind":"cyl","at":[0,140,0],"r":20,"h":20,"segments":8,"tint":"metal","role":"light"},{"kind":"cone","at":[0,175,0],"r":18,"h":50,"segments":6,"tint":"flame","role":"flame","pivot":[0,151,0]},{"kind":"cyl","at":[0,280,0],"r":80,"h":20,"segments":8,"tint":"metal"},{"kind":"torus","at":[0,300,0],"r":45,"r2":5,"segments":8,"tint":"metal","pitch":90000}],"palette":{"metal":"#4b4f4c","oil":"#c8a03c","glass":"#f4e7c3","flame":"#ffae42"},"tags":["camping","lighting","lantern","item","object"]}
+  },
+  "text": {
+    "card": "A portable oil lantern holding one charge: light it, put it out, refill it.",
+    "already_lit": "The lantern is already lit.",
+    "empty": "The lantern has no oil charge; refill it at an oil supply.",
+    "already_out": "The lantern is already out.",
+    "light": "light",
+    "lamp": "lamp",
+    "camp_lantern": "camp lantern",
+    "howto_light": "Refill it at an oil supply, then light it; putting it out spends the charge."
+  },
+  "card": { "text": "card", "category": "light", "synonyms": ["lamp", "camp_lantern"] },
+  "howtos": {
+    "light": { "text": "howto_light", "steps": [{ "form": "light" }, { "form": "put_out" }] }
+  }
+}

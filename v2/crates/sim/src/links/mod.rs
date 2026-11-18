@@ -361,6 +361,16 @@ impl Building {
 
     /// As [`Building::read`], with the open ground it stands on: each doorway to the open ground gets its end there.
     pub fn read_on(tree: &Tree, thing: Id, open: Option<Open>) -> Result<Building, String> {
+        Building::read_sized(tree, thing, open, HUMAN_RADIUS)
+    }
+
+    /// As [`Building::read_on`], for a body of `radius` mm (B12: one cut per size class).
+    pub fn read_sized(
+        tree: &Tree,
+        thing: Id,
+        open: Option<Open>,
+        radius: i64,
+    ) -> Result<Building, String> {
         let th = tree.handle(thing).ok_or("no such thing")?;
         let mut floors = BTreeMap::new();
         let mut doors: BTreeMap<Id, Id> = BTreeMap::new();
@@ -379,7 +389,7 @@ impl Building {
                 for d in &scene.doorways {
                     widths.insert(d.link, d.width);
                 }
-                if let Ok(patch) = cut_floor(&scene, HUMAN_RADIUS, Turn::NONE) {
+                if let Ok(patch) = cut_floor(&scene, radius, Turn::NONE) {
                     floors.insert(n.id(), (level, patch));
                 }
             } else if let Some(l) = n.fields().get(&F_OPEN_DOOR_LINK) {
@@ -540,7 +550,7 @@ impl Building {
                 let lo = patch(nodes[0]).map(|p| apron(p, line[0], unit(line[1], line[0])));
                 let hi =
                     patch(nodes[1]).map(|p| apron(p, line[k - 1], unit(line[k - 2], line[k - 1])));
-                let half = (width / 2 - (HUMAN_RADIUS + MARGIN) * 1000).max(0);
+                let half = (width / 2 - (radius + MARGIN) * 1000).max(0);
                 let end = |f: Id, at: Vec3, d: [i64; 2]| End {
                     floor: f,
                     a: Vec3::new(

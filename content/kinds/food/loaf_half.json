@@ -1,0 +1,103 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:loaf_half",
+  "owner": "thing",
+  "state": {
+    "bites": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 70, 0]
+    },
+    "bite": {
+      "role": "contact",
+      "at_mm": [85, 70, 0]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [170, 140, 200]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "bite": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "bites",
+          "at_least": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "bite"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "bites",
+          "by": -1,
+          "event": "bitten"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:loaf_half",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,3,0],"size":[45,6,25],"tint":"crumb"},{"kind":"box","at":[0,70,-50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=1"},{"kind":"box","at":[0,70,50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=2"}],"palette":{"crust":"#be843e","crumb":"#d9b970"},"tags":["camping","item","food","bread","object"]}
+  },
+  "text": {
+    "card": "A half of a loaf: take it and eat it in two bites.",
+    "food": "food",
+    "bread": "bread"
+  },
+  "card": {
+    "text": "card",
+    "category": "food",
+    "synonyms": [
+      "bread"
+    ]
+  }
+}

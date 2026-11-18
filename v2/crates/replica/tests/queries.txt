@@ -1,0 +1,24 @@
+# The replica's queries (Engine v2 R1, #2684, v2/crates/replica/src/query.rs), one case a line:
+# `<name>: <query> => <answer>` in diagnostic notation, or `=> refused <name>`. The world is T6's base fixture and
+# then its link fixture (fixtures/effects/0-base.diag, 5-link.diag): under the root ee/0 a room ee/1 holds a body
+# ee/2 (with the cup ee/4 in its slot 2), a key ee/6 and a crate ee/7; Soul dd/100's body-of link ee/3, owns ee/5
+# (the cup) and owns ee/9 (the key, for audience ee/20). Version 3: three entries applied. The native test
+# (tests/replica.rs) and the WASM build in Node (tools/bench/replica-equal/node.mjs) both answer every case.
+node cup: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]} => {1: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 2: "souls:cup@1220edc856b3ff9da87e27ffb6a4a1a7266bb4ef737f93e481f79545dee2578a6bea", 3: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2], 4: 2, 5: {1: 1}, 6: {1: 0}, 7: {2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 2}}, 9: [[[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5], "souls:owns", [h'dddddddddddddddddddddddddddddddd', 100], {1: 1}]], 10: 2}
+node missing: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 99]} => refused node-missing
+children of the room: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1]} => [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7]]
+children of the room, plain kind: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: "souls:key"} => [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6]]
+children of the room, full kind: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: "souls:crate@122090fbc4c3f786f2765b16b6014480381b4618c4ff6a429d4873ef92cf68440426"} => [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7]]
+children of a leaf: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]} => []
+children missing: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 99]} => refused node-missing
+links at the Soul, not a node here: {1: 3, 2: [h'dddddddddddddddddddddddddddddddd', 100]} => [[[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 3], "souls:body-of", [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2], [h'dddddddddddddddddddddddddddddddd', 100]], 0, {1: 1}], [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5], "souls:owns", [[h'dddddddddddddddddddddddddddddddd', 100], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 1, {1: 1}], [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 9], "souls:owns", [[h'dddddddddddddddddddddddddddddddd', 100], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6]], 1, {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 20]}]]
+links at the key, the other end: {1: 3, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6]} => [[[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 9], "souls:owns", [[h'dddddddddddddddddddddddddddddddd', 100], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6]], 1, {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 20]}]]
+links at the body, the first end: {1: 3, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2]} => [[[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 3], "souls:body-of", [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2], [h'dddddddddddddddddddddddddddddddd', 100]], 0, {1: 1}]]
+path from the cup: {1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]} => [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0]]
+path from the root: {1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0]} => [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0]]
+path missing: {1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 99]} => refused node-missing
+changed since 0: {1: 5, 2: 0} => [[[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0], 2], [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 2], [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2], 2], [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 2], [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7], 2], [[h'dddddddddddddddddddddddddddddddd', 100], 3], [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6], 3]]
+changed since 2: {1: 5, 2: 2} => [[[h'dddddddddddddddddddddddddddddddd', 100], 3], [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6], 3]]
+changed since 3: {1: 5, 2: 3} => []
+hash of the cup (souls/state-public/1 over its node value; a regression value): {1: 6, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]} => h'122049f06f536cba21a85cc6c882fc5a245d46dca1dc913336559a00b68570ea579e'
+hash missing: {1: 6, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 99]} => refused node-missing
