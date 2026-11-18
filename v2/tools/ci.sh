@@ -110,6 +110,9 @@ step rules-equal node --input-type=module -e '
   const got = r.rules_run(readFileSync("target/tmp/rules/run.json", "utf8")), want = readFileSync("target/tmp/rules/native.txt", "utf8");
   console.log(`rules-equal: ${want.split("\n").length - 1} cases, WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} native`);
   if (got !== want) process.exit(1);'
+# The code hatch (F8, #2823): the world's 1,000 chess-move cases (crates/sim/tests/hatch.rs, in the tests step) through
+# the same WASM build in Node, the daemon's runtime, and in a headless browser, each giving the world's table exactly.
+step hatch-three-hosts bash -c 'node --test client/src/hatch/ && node web/src/hatch/hatch.browser.mjs'
 # The form rules' drift report (R2, #2685): the live packages/form-rules cases against this library, whose required
 # test reads a pinned snapshot. Only the daily full run on main (schedule) or V2_FULL=1, never per change; it prints
 # each disagreement and never fails the job.

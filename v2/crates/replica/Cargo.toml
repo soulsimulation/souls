@@ -14,5 +14,11 @@ vectors = []
 # The checker build a client loads by hash (T10, #2664): no wasm-bindgen exports, so the module has no imports.
 checker = []
 
+[dependencies]
+# The code hatch's one interpreter (F8, #2823): a form's pure function runs in it, metered by its own fuel count, the
+# same natively and in the WASM build. 0.31 is the last stack-machine line: 2.0.1 tripled replica's WASM file (F8's
+# limit is twice), 0.31.2 adds 0.85 times it.
+wasmi = { version = "=0.31.2", default-features = false, features = ["std"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen.workspace = true
