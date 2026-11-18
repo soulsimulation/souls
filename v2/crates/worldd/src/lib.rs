@@ -3,4 +3,5 @@
 #![forbid(unsafe_code)]
 
 pub mod checkers;
+pub mod view_out;
 pub mod views;

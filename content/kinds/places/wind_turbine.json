@@ -1,0 +1,206 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wind_turbine",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      8861,
+      19200,
+      2360
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:wind_turbine",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            30,
+            0
+          ],
+          "polygon": [
+            [
+              -670,
+              -670
+            ],
+            [
+              670,
+              -670
+            ],
+            [
+              670,
+              670
+            ],
+            [
+              -670,
+              670
+            ]
+          ],
+          "h": 240,
+          "tint": "base"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            300,
+            0
+          ],
+          "profile": [
+            [
+              320,
+              0
+            ],
+            [
+              160,
+              13900
+            ],
+            [
+              0,
+              13900
+            ]
+          ],
+          "segments": 8,
+          "tint": "mast"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            14200,
+            -50
+          ],
+          "r": 360,
+          "h": 1500,
+          "segments": 8,
+          "tint": "body",
+          "pitch": 90000
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            14200,
+            -800
+          ],
+          "r": 360,
+          "segments": 8,
+          "tint": "body"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            14200,
+            950
+          ],
+          "r": 320,
+          "h": 500,
+          "segments": 8,
+          "tint": "body",
+          "pitch": 90000,
+          "role": "blade",
+          "pivot": [
+            0,
+            14200,
+            900
+          ]
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            16700,
+            1000
+          ],
+          "r": 200,
+          "h": 5000,
+          "segments": 4,
+          "tint": "blade",
+          "role": "blade",
+          "pivot": [
+            0,
+            14200,
+            900
+          ]
+        },
+        {
+          "kind": "cone",
+          "at": [
+            -2165,
+            12950,
+            1000
+          ],
+          "r": 200,
+          "h": 5000,
+          "segments": 4,
+          "tint": "blade",
+          "pitch": 119977,
+          "yaw": -90012,
+          "role": "blade",
+          "pivot": [
+            0,
+            14200,
+            900
+          ]
+        },
+        {
+          "kind": "cone",
+          "at": [
+            2165,
+            12950,
+            1000
+          ],
+          "r": 200,
+          "h": 5000,
+          "segments": 4,
+          "tint": "blade",
+          "pitch": 119977,
+          "yaw": 90012,
+          "role": "blade",
+          "pivot": [
+            0,
+            14200,
+            900
+          ]
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "base": "#a9a49a",
+        "mast": "#f4f2ec",
+        "body": "#f2ead8",
+        "blade": "#f4f2ec"
+      },
+      "tags": [
+        "utility",
+        "power",
+        "turbine"
+      ]
+    }
+  },
+  "text": {
+    "card": "A small wind turbine: a 14 m mast and three blades that turn in the wind.",
+    "utility": "utility",
+    "turbine": "turbine",
+    "wind_generator": "wind generator",
+    "wind_power": "wind power"
+  },
+  "card": {
+    "text": "card",
+    "category": "utility",
+    "synonyms": [
+      "turbine",
+      "wind_generator",
+      "wind_power"
+    ]
+  }
+}
