@@ -135,13 +135,23 @@ impl Replica {
 
     /// Applies a part whole or not at all, then marks each node its entries changed with the version after that entry.
     pub fn apply(&mut self, part: &Part) -> R<()> {
-        self.apply_touched(part).map(drop)
+        self.apply_touched(part, &[]).map(drop)
+    }
+
+    /// Applies a part of a view that declares the sequences it skipped ([`Tree::apply_gaps`]): a gap it did not
+    /// declare is still `sequence-gap`. The version stands after the part's last entry.
+    pub fn apply_gaps(&mut self, part: &Part, gaps: &[(u64, u64)]) -> R<()> {
+        self.apply_touched(part, gaps).map(drop)
     }
 
     /// [`Replica::apply`], giving back the nodes the part changed, in id order.
-    fn apply_touched(&mut self, part: &Part) -> R<Vec<Id>> {
+    fn apply_touched(&mut self, part: &Part, gaps: &[(u64, u64)]) -> R<Vec<Id>> {
         let touched: Vec<Vec<Id>> = part.effects.iter().map(|e| self.touched(e)).collect();
-        self.tree.apply(&self.header, part)?;
+        if gaps.is_empty() {
+            self.tree.apply(&self.header, part)?;
+        } else {
+            self.tree.apply_gaps(&self.header, part, gaps)?;
+        }
         let mut all = Vec::new();
         for (e, ids) in part.effects.iter().zip(touched) {
             let v = e.envelope.sequence + 1;
@@ -177,7 +187,7 @@ impl Replica {
             }
             let (bytes, tail) = tail.split_at(len);
             rest = tail;
-            let touched = match Part::read(bytes).and_then(|p| self.apply_touched(&p)) {
+            let touched = match Part::read(bytes).and_then(|p| self.apply_touched(&p, &[])) {
                 Ok(t) => t,
                 Err(r) => {
                     refused = Some(r.name);

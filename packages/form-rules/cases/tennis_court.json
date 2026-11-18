@@ -1,0 +1,122 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:tennis_court. Up to four players (the required role), one or two a side, each at a place on a baseline; they leave again.",
+  "cases": [
+    {
+      "name": "play_at_a_free_place",
+      "act": {
+        "this": "t1",
+        "form": "play",
+        "args": {
+          "place": "side_a_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tennis_court"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "play_at_a_taken_place_offers_another",
+      "act": {
+        "this": "t1",
+        "form": "play",
+        "args": {
+          "place": "side_a_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tennis_court",
+            "slots": {
+              "side_a_1": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "fix": {
+          "form": "play",
+          "args": {
+            "place": "side_a_2"
+          }
+        }
+      }
+    },
+    {
+      "name": "leave",
+      "act": {
+        "this": "t1",
+        "form": "leave"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tennis_court",
+            "slots": {
+              "side_a_1": [
+                "b1"
+              ]
+            },
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}

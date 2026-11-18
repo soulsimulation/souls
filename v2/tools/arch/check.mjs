@@ -46,7 +46,7 @@ export const problem = (rule, where, what) => `${rule}: ${where}: ${what} [${RUL
 /** The dependencies each crate under v2/crates may have (normal, dev and build alike). A crate not listed fails. */
 export const ALLOWED = {
   replica: ['wasm-bindgen'],
-  // skills: a dev-dependency, so the world host's tests step the built-in skills (K13a, #2676).
+  // skills: the world wakes the form runner and steps the walk it starts (F1, #2766; K13a, #2676).
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld', 'skills'],
   // skills: the world runs the built-in walk for a move intent; the test world in its tests (I4b, #3156).
   worldd: ['replica', 'sim', 'skills', 'import-eden', 'testworld'],
@@ -54,6 +54,11 @@ export const ALLOWED = {
   gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util'],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
   skills: ['replica'],
+  // W8 (#2729): the object store's SigV4 signature (ring) and HTTP (ureq); sim's tick loop in a test (dev only).
+  // W1 (#2704): RS256 checks and random ids (ring), the one-file account store (rusqlite), JWKS (serde_json, ureq).
+  directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim'],
+  // O1 (#2730): the launcher reads a world's pin from its directory record.
+  supervisor: ['replica', 'directoryd'],
 };
 
 const rsFiles = dir => readdirSync(dir, { recursive: true }).filter(f => /\.rs$/.test(f)).map(f => join(dir, f));

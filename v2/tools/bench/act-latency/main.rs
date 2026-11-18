@@ -30,7 +30,7 @@ use replica::ids::{Id, Scope, Version};
 use replica::intents::{Fallback, Intent, Target};
 use sim::log::recover;
 use worldd::answers::now;
-use worldd::checkers::lamps;
+use worldd::checkers::toggles;
 
 const LINEAGE: [u8; 16] = [0x44; 16];
 const BODIES: usize = 200;
@@ -252,7 +252,7 @@ fn latency_run(
 }
 
 fn latency(dir: &Path, seconds: u64) {
-    let pairs = lamps::World::build(1, BODIES, 0).pairs;
+    let pairs = toggles::World::build(1, BODIES, 0).pairs;
     println!(
         "act latency: 100 acts a second for {seconds} s, arrival at the world process to answer, 50 ms ticks"
     );
@@ -273,7 +273,7 @@ struct Pending {
 
 fn kills(dir: &Path, acts: u64, kills: u64, seed: u64) {
     let _ = std::fs::remove_file(dir.join("world.log"));
-    let pairs = lamps::World::build(1, BODIES, 0).pairs;
+    let pairs = toggles::World::build(1, BODIES, 0).pairs;
     let mut rng = Rng(seed);
     let mut at: Vec<u64> = (0..kills).map(|_| 1 + rng.below(acts - 1)).collect();
     at.sort_unstable();

@@ -1,0 +1,520 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:pavement_chalk (SA-X7, #2902; from #1739): eight sticks of each colour, up to eight strokes, an erase that makes room and gives no chalk back.",
+  "cases": [
+    {
+      "name": "draw_red_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "draw_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "draw_red_colour_spent",
+      "act": {
+        "this": "p1",
+        "form": "draw_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk",
+            "fields": {
+              "red": 0
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "draw_red_patch_full",
+      "act": {
+        "this": "p1",
+        "form": "draw_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk",
+            "fields": {
+              "strokes": 8
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "fix": {
+          "form": "erase"
+        }
+      }
+    },
+    {
+      "name": "draw_red_hands_full",
+      "act": {
+        "this": "p1",
+        "form": "draw_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "draw_blue_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "draw_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "draw_blue_colour_spent",
+      "act": {
+        "this": "p1",
+        "form": "draw_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk",
+            "fields": {
+              "blue": 0
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "draw_blue_patch_full",
+      "act": {
+        "this": "p1",
+        "form": "draw_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk",
+            "fields": {
+              "strokes": 8
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "fix": {
+          "form": "erase"
+        }
+      }
+    },
+    {
+      "name": "draw_blue_hands_full",
+      "act": {
+        "this": "p1",
+        "form": "draw_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "draw_yellow_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "draw_yellow"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "draw_yellow_colour_spent",
+      "act": {
+        "this": "p1",
+        "form": "draw_yellow"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk",
+            "fields": {
+              "yellow": 0
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "draw_yellow_patch_full",
+      "act": {
+        "this": "p1",
+        "form": "draw_yellow"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk",
+            "fields": {
+              "strokes": 8
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "fix": {
+          "form": "erase"
+        }
+      }
+    },
+    {
+      "name": "draw_yellow_hands_full",
+      "act": {
+        "this": "p1",
+        "form": "draw_yellow"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "erase_a_stroke",
+      "act": {
+        "this": "p1",
+        "form": "erase"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk",
+            "fields": {
+              "strokes": 3
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_nothing_drawn",
+      "act": {
+        "this": "p1",
+        "form": "erase"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "erase_hands_full",
+      "act": {
+        "this": "p1",
+        "form": "erase"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "p1": {
+            "kind": "eden:pavement_chalk",
+            "fields": {
+              "strokes": 3
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    }
+  ]
+}

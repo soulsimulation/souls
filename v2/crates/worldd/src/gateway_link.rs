@@ -4,8 +4,8 @@
 //!
 //! Each intent goes to the world (`worldd::answers`, I4 #2687): checked, committed at the next tick, logged, and
 //! answered after that tick's sync. A repeat gets the answer it had, across restarts too, since the world rebuilds
-//! its sequences from the log. The world here is I3's lamps world (`checkers::lamps`), `--rooms` rooms of `--bodies`
-//! bodies, each with a lamp; its log is `--log` (default: the socket's path and `.log`).
+//! its sequences from the log. The world here is I3's toggles world (`checkers::toggles`), `--rooms` rooms of `--bodies`
+//! bodies, each with a toggle; its log is `--log` (default: the socket's path and `.log`).
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
 //! [--arrivals <file>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the
@@ -19,7 +19,7 @@ use replica::encode::from_hex;
 use replica::ids::Scope;
 use sim::log::FileStore;
 use worldd::answers::{self, Config};
-use worldd::checkers::lamps;
+use worldd::checkers::toggles;
 
 /// `worldd gateway-link ...`: listens for the gateway until killed.
 pub fn run(args: &[String]) -> i32 {
@@ -58,8 +58,8 @@ pub fn run(args: &[String]) -> i32 {
     }
     let world = FileStore::open(&log).and_then(|store| {
         answers::start(
-            lamps::World::build(rooms, bodies, 0).replica,
-            lamps::rules(),
+            toggles::World::build(rooms, bodies, 0).replica,
+            toggles::rules(),
             store,
             cfg,
         )

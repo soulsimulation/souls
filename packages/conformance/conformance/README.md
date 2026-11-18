@@ -62,6 +62,7 @@ relax budgets, samples or gap checks to make a sweep pass.
 | `deck-20261106.json` | `core-rack-beam@4` (step-ledge joist seats), `core-deck-joist@1` and `core-plywood-sheet@2` (bearing connectors, a floor) (#694); pins nothing |
 | `stairs-20261106.json` | `core-rack-beam@5` (ledge seats take a stair hook), `core-deck-stair@1` and `core-deck-stair-tread@1` (stair hook, tread seats) (#695); pins nothing |
 | `books-20261105.json` | `core-lectern@2` and `core-notebook-stand@1` (#428): `core-lectern@1`'s geometry, so its draw overruns |
+| `switchable-lamps-20261117.json` | `core-house@4` and `core-church@4` (#2953): their @3 with the floor lamps they furnish on `core/floor-lamp@2`; re-pins the house's triangle overruns |
 
 Known findings are documented, not fixed: published revisions are immutable so existing worlds keep their geometry.
 Repair a range or budget in a new revision and pin what remains.

@@ -1,0 +1,3165 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:drilling_panel and eden:camp_drill_press (from #1860). A panel has nine cells, 1 at the back left to 9 at the front right; a press's cutter has four uses and no refill. Boring a cell (four seconds, a hand free, at the press) leaves a permanent hole and moves one cutter use from the press into the panel, where it stands for the hole's wooden core kept in the rail; a panel holds at most four. Refused: a bored cell ('That cell already has a retained hole/core; choose an unbored cell.'), a spent cutter ('This cutter has exhausted its four coarse boring uses; use another charged press. No refill is offered.'), a full panel ('This panel already retains four holes/cores; choose another unfilled panel.'), full hands ('Put down held objects ...'). The original's cell argument is nine forms (a set whose field comes from an argument is a later format). Handed back: the panel resting on that press, both hands empty, and the press's record of the last panel and worker.",
+ "cases": [
+  {
+   "name": "bore_cell_1_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_1",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bore_cell_1_cell_already_bored",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_1",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 1,
+       "cell_1": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cell_1",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_1_cutter_exhausted",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_1",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "fields": {
+       "cutter_uses": 0
+      },
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "field": "cutter_uses",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_1_panel_holds_four_holes",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_1",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 4,
+       "cell_2": true,
+       "cell_3": true,
+       "cell_4": true,
+       "cell_5": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "field": "cutter_uses",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_1_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_1",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 3,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_1_press_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_1",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "shed": {
+      "loose": [
+       "p1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "detail": {
+     "thing": "p1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "p1"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_2_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_2",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bore_cell_2_cell_already_bored",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_2",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 1,
+       "cell_2": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cell_2",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_2_cutter_exhausted",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_2",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "fields": {
+       "cutter_uses": 0
+      },
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "field": "cutter_uses",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_2_panel_holds_four_holes",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_2",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 4,
+       "cell_1": true,
+       "cell_3": true,
+       "cell_4": true,
+       "cell_5": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "field": "cutter_uses",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_2_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_2",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 3,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_2_press_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_2",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "shed": {
+      "loose": [
+       "p1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "detail": {
+     "thing": "p1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "p1"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_3_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_3",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bore_cell_3_cell_already_bored",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_3",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 1,
+       "cell_3": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cell_3",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_3_cutter_exhausted",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_3",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "fields": {
+       "cutter_uses": 0
+      },
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "field": "cutter_uses",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_3_panel_holds_four_holes",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_3",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 4,
+       "cell_1": true,
+       "cell_2": true,
+       "cell_4": true,
+       "cell_5": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "field": "cutter_uses",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_3_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_3",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 3,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_3_press_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_3",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "shed": {
+      "loose": [
+       "p1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "detail": {
+     "thing": "p1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "p1"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_4_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_4",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bore_cell_4_cell_already_bored",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_4",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 1,
+       "cell_4": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cell_4",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_4_cutter_exhausted",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_4",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "fields": {
+       "cutter_uses": 0
+      },
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "field": "cutter_uses",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_4_panel_holds_four_holes",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_4",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 4,
+       "cell_1": true,
+       "cell_2": true,
+       "cell_3": true,
+       "cell_5": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "field": "cutter_uses",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_4_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_4",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 3,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_4_press_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_4",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "shed": {
+      "loose": [
+       "p1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "detail": {
+     "thing": "p1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "p1"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_5_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_5",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bore_cell_5_cell_already_bored",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_5",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 1,
+       "cell_5": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cell_5",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_5_cutter_exhausted",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_5",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "fields": {
+       "cutter_uses": 0
+      },
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "field": "cutter_uses",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_5_panel_holds_four_holes",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_5",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 4,
+       "cell_1": true,
+       "cell_2": true,
+       "cell_3": true,
+       "cell_4": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "field": "cutter_uses",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_5_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_5",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 3,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_5_press_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_5",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "shed": {
+      "loose": [
+       "p1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "detail": {
+     "thing": "p1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "p1"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_6_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_6",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bore_cell_6_cell_already_bored",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_6",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 1,
+       "cell_6": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cell_6",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_6_cutter_exhausted",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_6",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "fields": {
+       "cutter_uses": 0
+      },
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "field": "cutter_uses",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_6_panel_holds_four_holes",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_6",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 4,
+       "cell_1": true,
+       "cell_2": true,
+       "cell_3": true,
+       "cell_4": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "field": "cutter_uses",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_6_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_6",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 3,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_6_press_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_6",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "shed": {
+      "loose": [
+       "p1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "detail": {
+     "thing": "p1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "p1"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_7_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_7",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bore_cell_7_cell_already_bored",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_7",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 1,
+       "cell_7": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cell_7",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_7_cutter_exhausted",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_7",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "fields": {
+       "cutter_uses": 0
+      },
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "field": "cutter_uses",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_7_panel_holds_four_holes",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_7",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 4,
+       "cell_1": true,
+       "cell_2": true,
+       "cell_3": true,
+       "cell_4": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "field": "cutter_uses",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_7_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_7",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 3,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_7_press_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_7",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "shed": {
+      "loose": [
+       "p1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "detail": {
+     "thing": "p1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "p1"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_8_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_8",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bore_cell_8_cell_already_bored",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_8",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 1,
+       "cell_8": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cell_8",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_8_cutter_exhausted",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_8",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "fields": {
+       "cutter_uses": 0
+      },
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "field": "cutter_uses",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_8_panel_holds_four_holes",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_8",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 4,
+       "cell_1": true,
+       "cell_2": true,
+       "cell_3": true,
+       "cell_4": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "field": "cutter_uses",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_8_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_8",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 3,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_8_press_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_8",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "shed": {
+      "loose": [
+       "p1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "detail": {
+     "thing": "p1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "p1"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_9_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_9",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bore_cell_9_cell_already_bored",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_9",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 1,
+       "cell_9": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cell_9",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_9_cutter_exhausted",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_9",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "fields": {
+       "cutter_uses": 0
+      },
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "field": "cutter_uses",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_9_panel_holds_four_holes",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_9",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel",
+      "fields": {
+       "cutter_uses": 4,
+       "cell_1": true,
+       "cell_2": true,
+       "cell_3": true,
+       "cell_4": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "field": "cutter_uses",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bore_cell_9_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_9",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press",
+      "slots": {
+       "bed": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 3,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bore_cell_9_press_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "bore_cell_9",
+    "args": {
+     "press": "p1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drilling_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_drill_press"
+     },
+     "shed": {
+      "loose": [
+       "p1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "detail": {
+     "thing": "p1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "p1"
+    }
+   }
+  }
+ ]
+}

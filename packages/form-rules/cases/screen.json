@@ -1,0 +1,138 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:screen (SA-X34, #2924): a classroom screen: switch it on to show its picture, off again.",
+  "cases": [
+    {
+      "name": "screen_switch_off_on",
+      "act": {
+        "this": "t1",
+        "form": "switch_off"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:screen"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "screen_switch_off_off",
+      "act": {
+        "this": "t1",
+        "form": "switch_off"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:screen",
+            "fields": {
+              "on": false
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "switch_on"
+        }
+      }
+    },
+    {
+      "name": "screen_switch_on_off",
+      "act": {
+        "this": "t1",
+        "form": "switch_on"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:screen",
+            "fields": {
+              "on": false
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "screen_switch_on_on",
+      "act": {
+        "this": "t1",
+        "form": "switch_on"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:screen"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "switch_off"
+        }
+      }
+    }
+  ]
+}

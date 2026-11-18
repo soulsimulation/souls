@@ -1,0 +1,37 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:dumbbell_rack",
+  "owner": "thing",
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 600], "yaw_mdeg": 180000 },
+    "weights": { "role": "grip", "at_mm": [0, 400, 0] }
+  },
+  "geometry": { "bounds_mm": [1000, 600, 400] },
+  "forms": {
+    "lift_weights": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "press", "at": "weights" },
+        { "step": "wait", "us": 30000000 }
+      ],
+      "effects": []
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:dumbbell_rack",
+    "shape": {"shapes":[{"kind":"box","at":[0,300,0],"size":[1000,50,350],"color":"#5d646b"},{"kind":"box","at":[0,150,0],"size":[900,300,50],"color":"#5d646b"},{"kind":"cyl","at":[-300,400,0],"r":60,"h":250,"color":"#222222","roll":90000,"collide":false},{"kind":"cyl","at":[0,400,0],"r":70,"h":250,"color":"#222222","roll":90000,"collide":false},{"kind":"cyl","at":[300,400,0],"r":80,"h":250,"color":"#222222","roll":90000,"collide":false}],"tags":["eden","gym","sport","dumbbells"]}
+  },
+  "text": {
+    "card": "A low rack of dumbbells by the outdoor gym: lift a pair of weights.",
+    "gym": "gym",
+    "dumbbells": "dumbbells",
+    "weights": "weights",
+    "workout": "workout"
+  },
+  "card": { "text": "card", "category": "gym", "synonyms": ["dumbbells", "weights", "workout"] }
+}

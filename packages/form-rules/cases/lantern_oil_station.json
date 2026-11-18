@@ -1,0 +1,205 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:lantern_oil_station (from #1700). Three measured oil charges (oil, a count, 0 to 3) and a tray for one eden:oil_lantern. With empty hands a Soul refills the lantern on the tray for ten seconds: a transfer of one charge, so a lantern that already holds its one charge refuses with no_room. The original's words: 'No measured oil charges remain.', 'Put down what you are holding before refilling.', 'The lantern already has a full session charge.' Nothing restocks the supply.",
+ "cases": [
+  {
+   "name": "refill_every_need_met",
+   "act": {
+    "this": "s1",
+    "form": "refill",
+    "args": {
+     "lantern": "l1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:lantern_oil_station",
+      "slots": {
+       "out": [
+        "l1"
+       ]
+      }
+     },
+     "l1": {
+      "kind": "eden:oil_lantern"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "refill_no_oil_left",
+   "act": {
+    "this": "s1",
+    "form": "refill",
+    "args": {
+     "lantern": "l1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:lantern_oil_station",
+      "fields": {
+       "oil": 0
+      },
+      "slots": {
+       "out": [
+        "l1"
+       ]
+      }
+     },
+     "l1": {
+      "kind": "eden:oil_lantern"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "oil",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "no_oil"
+   }
+  },
+  {
+   "name": "refill_holding_something",
+   "act": {
+    "this": "s1",
+    "form": "refill",
+    "args": {
+     "lantern": "l1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:lantern_oil_station",
+      "slots": {
+       "out": [
+        "l1"
+       ]
+      }
+     },
+     "l1": {
+      "kind": "eden:oil_lantern"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "refill_lantern_already_charged",
+   "act": {
+    "this": "s1",
+    "form": "refill",
+    "args": {
+     "lantern": "l1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:lantern_oil_station",
+      "slots": {
+       "out": [
+        "l1"
+       ]
+      }
+     },
+     "l1": {
+      "kind": "eden:oil_lantern",
+      "fields": {
+       "oil": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "l1",
+     "field": "oil",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "already_charged"
+   }
+  }
+ ]
+}
