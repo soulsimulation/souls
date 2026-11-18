@@ -152,9 +152,18 @@ install_all() {
   [ -d "$from" ] || die "--from <bundle> is a folder (bash install.sh bundle makes one)"
   args=$(directory_args)
   from=$(cd "$from" && pwd)
-  ensure_user
-  ensure_dir "$ETC" 750 root "$ACCOUNT" "tree $ETC"
+  # The record's folder first, then the user recorded before it is made, so a run that stops anywhere leaves nothing
+  # unrecorded. The folder's group is the user's, so it is root's until the user exists.
+  local group=root
+  if has_user; then group=$ACCOUNT; fi
+  ensure_dir "$ETC" 750 root "$group" "tree $ETC"
   record "user $ACCOUNT"
+  ensure_user
+  if [ "$MODE" = apply ] || [ -d "$R$ETC" ]; then
+    ensure_dir "$ETC" 750 root "$ACCOUNT"
+  else
+    act "perms $ETC 750 root:$ACCOUNT" true
+  fi
   ensure_dir "$LIB" 755 root root "tree $LIB"
   for p in "${PROGRAMS[@]}"; do ensure_file "$from/bin/$p" "$LIB/$p" 755 root root; done
   ensure_tree "$from/origin" "$LIB/origin"
@@ -182,32 +191,55 @@ machine() {
   command -v node > /dev/null || echo "install: warning: no node on PATH; souls-origin needs it" >&2
 }
 
+# Refuses unless every unit of the install is inactive or failed (not running, starting, stopping or reloading) and
+# none is enabled, its instances included.
+units_quiet() {
+  local busy enabled
+  # (souls.slice is left out here: a slice stays active after its last unit stops, and runs nothing itself)
+  busy=$(systemctl list-units --all --no-legend --plain 'worldd@*' 'souls-*' 2> /dev/null |
+    awk '$3 != "inactive" && $3 != "failed" {print $1 " (" $3 ")"}')
+  enabled=$({
+    systemctl list-unit-files --no-legend --plain 'worldd@*' 'souls-*' 'souls.slice' 2> /dev/null |
+      awk '$2 ~ /^(enabled|linked|alias)/ {print $1}'
+    find /etc/systemd/system /run/systemd/system -path '*.wants/*' \( -name 'worldd@*' -o -name 'souls-*' \) 2> /dev/null |
+      sed 's|.*/||'
+  } | sort -u)
+  [ -z "$busy" ] || die "not stopped, stop them first; nothing changed: $(echo "$busy" | tr '\n' ' ')"
+  [ -z "$enabled" ] || die "enabled, disable them first; nothing changed: $(echo "$enabled" | tr '\n' ' ')"
+}
+
+# Removes what the record lists. A data folder that holds files is kept, and with it what it needs to be used again:
+# the user and group that own it, /etc/souls (the record, secrets.env, directory.args, gateway-*.env), so a later
+# apply takes them back as its own. Removing the data is a production delete, the owner's to do by hand.
 uninstall() {
-  local active item
-  active=$(systemctl list-units --state=active --no-legend --plain 'worldd@*' 'souls-*' 2> /dev/null | awk '{print $1}')
-  [ -z "$active" ] || die "still running, stop them first; nothing changed: $(echo "$active" | tr '\n' ' ')"
+  local item keep=0
+  units_quiet
   [ -f "$STATE" ] || {
     echo "nothing installed (no $STATE)"
     exit 0
   }
+  if recorded "tree $DATA" && [ -n "$(find "$DATA" -type f -print -quit 2> /dev/null)" ]; then keep=1; fi
   for item in "${OWNED[@]}"; do
     recorded "$item" || continue
     case $item in
+      tree\ "$DATA" | tree\ "$ETC" | user\ *) if [ "$keep" = 1 ]; then continue; fi ;;
+    esac
+    case $item in
       file\ *) act "remove ${item#file }" rm -f "${item#file }" ;;
-      tree\ "$DATA")
-        if [ -z "$(find "$DATA" -type f -print -quit)" ]; then
-          act "remove $DATA" rm -rf "$DATA"
-        else
-          echo "kept $DATA: it holds data (remove it by hand once nothing needs it)"
-        fi
-        ;;
       tree\ "$ETC") ;; # last: it holds the record
       tree\ *) act "remove ${item#tree }" rm -rf "${item#tree }" ;;
-      user\ *) has_user && act "user $ACCOUNT removed" userdel "$ACCOUNT" ;;
+      user\ *) if has_user; then act "user $ACCOUNT removed" userdel "$ACCOUNT"; fi ;;
     esac
+    if [ "$keep" = 1 ]; then
+      act "unrecord $item" bash -c 'grep -vxF "$1" "$2" > "$2.new"; mv "$2.new" "$2"' _ "$item" "$STATE"
+    fi
   done
-  if getent group "$ACCOUNT" > /dev/null && recorded "user $ACCOUNT"; then act "group $ACCOUNT removed" groupdel "$ACCOUNT"; fi
-  act "remove $ETC" rm -rf "$ETC"
+  if [ "$keep" = 1 ]; then
+    echo "kept $DATA: it holds data; kept the user $ACCOUNT and $ETC with it (apply takes them back)"
+  else
+    if recorded "user $ACCOUNT" && getent group "$ACCOUNT" > /dev/null; then act "group $ACCOUNT removed" groupdel "$ACCOUNT"; fi
+    act "remove $ETC" rm -rf "$ETC"
+  fi
   act "systemctl daemon-reload" systemctl daemon-reload
 }
 

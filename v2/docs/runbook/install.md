@@ -19,7 +19,11 @@ sends to these programs once the owner places its site file. Routing between the
 
 The view tier runs inside each world's process (`worldd`), so it has no unit of its own. Every program runs as
 `souls` in `souls.slice`, whose `MemoryMax` is 3 GB; inside it a world may use 2 GB (O1), a gateway 512 MB, the
-directory and the origin 256 MB each. Units read the secrets file as root before they drop to `souls`. The directory
+directory and the origin 256 MB each. The processor and the disk are shared, never capped: the slice's `CPUWeight`
+and `IOWeight` are 20 against the default 100, so when both systems are busy the new one gets a fifth of what today's
+gets, and all of it when today's is idle; neither system's world time is throttled. `TasksMax` is 4,096. Every unit
+runs with `NoNewPrivileges`, `ProtectSystem=strict` (writing only under `/var/lib/souls`), `ProtectHome` and
+`PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory
 and the origin listen on loopback only (ports 7310 and 7320); each world's gateway gets its port from its own
 `/etc/souls/gateway-<world>.env`, written when the world is placed (X5).
 
@@ -39,9 +43,14 @@ slice that is at most 29 GB of 30.6 GB, 9.3 GB at today's use. Yes.
 - Run again, it changes nothing: each file is written only when its bytes, mode or owner differ; `plan` then prints
   `plan: nothing to change`.
 - `uninstall` removes only what the record lists: the units, the drop-in, `/usr/local/lib/souls`, `/etc/souls`
-  (the arguments and secrets with it), the user, and `/var/lib/souls` when it holds no file. A data folder that holds
-  files is kept and named; removing it is a production delete, which needs the owner's yes. It refuses while any
-  `worldd@` or `souls-*` unit is running. Per-world drop-ins that later tasks write are theirs to remove.
+  (the arguments and secrets with it), the user, and `/var/lib/souls`. When `/var/lib/souls` holds any file it keeps
+  that folder and what it needs to be used again: the user and group that own it, and `/etc/souls` with the record,
+  `secrets.env`, `directory.args` and any `gateway-*.env`; a later `apply` takes them back. Removing the data is a
+  production delete, which needs the owner's yes. It refuses, changing nothing, unless every `worldd@` and `souls-*`
+  unit is inactive or failed (not running, starting, stopping or reloading) and none is enabled, at boot or for this
+  boot only. Per-world drop-ins that later tasks write are theirs to remove.
+- A run that stops part-way leaves nothing unrecorded: the record's folder is made first, and the user is recorded
+  before it is made, so the next run takes up where it stopped.
 
 ## Running it
 
