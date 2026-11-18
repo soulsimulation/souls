@@ -1,0 +1,53 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:candle",
+  "owner": "thing",
+  "state": {
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "wick": { "role": "contact", "at_mm": [0, 186, 0] },
+    "loop": { "role": "grip", "at_mm": [80, 30, 0] }
+  },
+  "geometry": { "bounds_mm": [180, 230, 140] },
+  "forms": {
+    "light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": false },
+        { "need": "within_reach", "point": "wick" }
+      ],
+      "steps": [{ "step": "move", "move": "touch", "at": "wick" }],
+      "effects": [{ "change": "set", "field": "lit", "to": true, "event": "lit" }]
+    },
+    "put_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": true },
+        { "need": "within_reach", "point": "wick" }
+      ],
+      "steps": [{ "step": "move", "move": "touch", "at": "wick" }],
+      "effects": [{ "change": "set", "field": "lit", "to": false, "event": "put_out" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:candle",
+    "table": [
+      { "part": "flame", "field": "lit", "do": "show", "at": { "true": 1, "false": 0 } },
+      { "part": "flame", "field": "lit", "do": "flame", "at": { "true": 1000, "false": 0 } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,8,0],"r":70,"h":16,"segments":10,"tint":"brass"},{"kind":"cyl","at":[0,35,0],"r":25,"h":40,"segments":8,"r2":30,"tint":"brass"},{"kind":"torus","at":[80,30,0],"r":22,"r2":6,"segments":6,"tint":"brass"},{"kind":"cyl","at":[0,115,0],"r":17,"h":120,"segments":8,"tint":"wax"},{"kind":"cyl","at":[0,180,0],"r":2,"h":12,"segments":4,"tint":"wick"},{"kind":"cone","at":[0,205,0],"r":11,"h":40,"segments":6,"tint":"flame","glow":1000,"role":"flame","pivot":[0,185,0]}],"palette":{"brass":"#b8913f","wax":"#f2ead8","wick":"#2b2623","flame":"#ffb347"},"tags":["furniture","lighting","candle","object"]}
+  },
+  "text": {
+    "card": "A wax candle in a brass chamberstick: light it, or put it out.",
+    "light": "light",
+    "candlestick": "candlestick",
+    "taper": "taper",
+    "chamberstick": "chamberstick"
+  },
+  "card": { "text": "card", "category": "light", "synonyms": ["candlestick", "taper", "chamberstick"] }
+}

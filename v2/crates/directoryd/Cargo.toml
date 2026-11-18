@@ -1,0 +1,17 @@
+[package]
+name = "directoryd"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "The directory (Engine v2, #2635): where a world runs, when it wakes, where a Soul is (W8, #2729)."
+
+[dependencies]
+replica = { path = "../replica" }
+# The object store's request signature (AWS SigV4: SHA-256 and HMAC) and the in-memory store's ETags.
+ring = "0.17"
+# The object store over HTTP(S).
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+# A4: a world's tick loop (sim's Ticker on a fake clock) keeps ticking while the store is out of reach.
+sim = { path = "../sim" }

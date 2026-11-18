@@ -1,0 +1,92 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:card_table (SA-X16, #2911): four places to sit, a player link per Soul at the table, and the pack on the table as a count everyone sees. The seat argument is given resolved.",
+  "cases": [
+    {
+      "name": "sit_in_at_a_free_place",
+      "act": {"this": "t1", "form": "sit_in", "args": {"seat": "south"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {"kind": "eden:card_table", "links": {"player": ["b2"]}, "slots": {"north": ["b2"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}},
+          "b4": {"hands": {"left": null, "right": null}, "links": {"soul": ["s4"]}},
+          "b5": {"hands": {"left": null, "right": null}, "links": {"soul": ["s5"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["t1/slot/south", 0]]}
+    },
+    {
+      "name": "sit_in_at_a_taken_place_fixed_by_a_free_one",
+      "act": {"this": "t1", "form": "sit_in", "args": {"seat": "north"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {"kind": "eden:card_table", "links": {"player": ["b2"]}, "slots": {"north": ["b2"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}},
+          "b4": {"hands": {"left": null, "right": null}, "links": {"soul": ["s4"]}},
+          "b5": {"hands": {"left": null, "right": null}, "links": {"soul": ["s5"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "detail": {"node": "t1", "slot": "north"},
+        "fix": {"form": "sit_in", "args": {"seat": "east"}},
+        "read": [["t1/slot/north", 1], ["t1/slot/east", 0]]
+      }
+    },
+    {
+      "name": "sit_in_at_a_full_table",
+      "act": {"this": "t1", "form": "sit_in", "args": {"seat": "west"}},
+      "state": {
+        "actor": "b5",
+        "nodes": {
+          "t1": {
+            "kind": "eden:card_table",
+            "links": {"player": ["b1", "b2", "b3", "b4"]},
+            "slots": {"north": ["b1"], "east": ["b2"], "south": ["b3"], "west": ["b4"]}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}},
+          "b4": {"hands": {"left": null, "right": null}, "links": {"soul": ["s4"]}},
+          "b5": {"hands": {"left": null, "right": null}, "links": {"soul": ["s5"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "detail": {"node": "t1", "slot": "west"},
+        "fix": null,
+        "read": [["t1/slot/west", 1]]
+      }
+    },
+    {
+      "name": "leave_the_table",
+      "act": {"this": "t1", "form": "leave"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {"kind": "eden:card_table", "links": {"player": ["b1"]}, "slots": {"north": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}},
+          "b4": {"hands": {"left": null, "right": null}, "links": {"soul": ["s4"]}},
+          "b5": {"hands": {"left": null, "right": null}, "links": {"soul": ["s5"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": []}
+    }
+  ]
+}

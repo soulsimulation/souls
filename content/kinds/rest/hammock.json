@@ -1,0 +1,140 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hammock",
+  "owner": "thing",
+  "state": { "swaying": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "links": { "sleeper": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } } },
+  "points": { "side": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 } },
+  "slots": { "sling": { "admits": "body", "posture": "lie", "most": 1, "at_mm": [0, 800, 0], "stand": "side" } },
+  "geometry": { "bounds_mm": [3340, 1800, 800] },
+  "forms": {
+    "lie": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }, { "step": "sit", "slot": { "arg": "place" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "lay_down" },
+        { "change": "link", "link": "sleeper", "from": "actor", "event": "lying_in" }
+      ]
+    },
+    "sleep": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }, { "step": "sit", "slot": { "arg": "place" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "fell_asleep" },
+        { "change": "link", "link": "sleeper", "from": "actor", "event": "lying_in" }
+      ]
+    },
+    "get_up": {
+      "who": { "link": "sleeper" },
+      "starts": "act",
+      "needs": [{ "need": "linked", "link": "sleeper" }],
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "sleeper", "from": "actor", "event": "got_up" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_by" }
+      ]
+    },
+    "swing": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "swaying", "is": false }],
+      "steps": [],
+      "effects": [
+        { "change": "set", "field": "swaying", "to": true, "event": "swung" },
+        { "change": "timer", "form": "settle", "after_us": 8000000, "event": "swing_slowing" }
+      ]
+    },
+    "settle": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "swaying", "to": false, "event": "came_to_rest" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:hammock",
+    "shape": {
+      "shapes": [
+        { "kind": "cyl", "at": [-1600, 900, 0], "r": 70, "h": 1800, "segments": 6, "tint": "wood" },
+        { "kind": "cyl", "at": [1600, 900, 0], "r": 70, "h": 1800, "segments": 6, "tint": "wood" },
+        {
+          "kind": "cyl",
+          "at": [-1300, 1175, 0],
+          "r": 12,
+          "h": 885,
+          "segments": 3,
+          "tint": "rope",
+          "pitch": 137281,
+          "yaw": 90012
+        },
+        {
+          "kind": "cyl",
+          "at": [1300, 1175, 0],
+          "r": 12,
+          "h": 885,
+          "segments": 3,
+          "tint": "rope",
+          "pitch": 137281,
+          "yaw": -90012
+        },
+        {
+          "kind": "sphere",
+          "at": [0, 850, 0],
+          "r": 1000,
+          "segments": 8,
+          "tint": "cloth",
+          "scale": [1000, 220, 400],
+          "role": "body",
+          "pivot": [0, 850, 0]
+        },
+        {
+          "kind": "sphere",
+          "at": [0, 860, 0],
+          "r": 950,
+          "segments": 8,
+          "tint": "stripe",
+          "scale": [1000, 200, 280],
+          "role": "body",
+          "pivot": [0, 860, 0]
+        }
+      ],
+      "palette": { "wood": "#7a5a3c", "rope": "#d8c49a", "cloth": "#c8553d", "stripe": "#f2ead8" },
+      "tags": ["furniture", "bed"]
+    },
+    "table": [
+      {
+        "part": "body",
+        "field": "swaying",
+        "do": "rotate",
+        "axis": "x",
+        "at": { "true": 24000, "false": 0 },
+        "over_us": 1000000
+      }
+    ]
+  },
+  "text": {
+    "card": "A canvas hammock slung between two posts; one lies or sleeps in it and it sways.",
+    "bed": "bed",
+    "swing": "swing"
+  },
+  "card": { "text": "card", "category": "bed", "synonyms": ["swing"] }
+}

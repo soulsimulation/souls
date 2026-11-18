@@ -1,0 +1,77 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:bunk (SA-X24): two berths to lie or sleep in, and get up from.",
+  "cases": [
+    {
+      "name": "bunk_sleep_get_up_lie",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:bunk" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sleep", "args": { "berth": "lower" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "lower" } },
+              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" }
+            ],
+            "events": [
+              { "event": "eden:fell_asleep", "node": "t1", "changes": [0] },
+              { "event": "eden:lying_in", "node": "t1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sleep", "args": { "berth": "lower" } },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 0,
+            "fix": { "form": "sleep", "args": { "berth": "upper" } }
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "get_up" },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "unlink", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" },
+              { "change": "reparent", "node": "b1", "to": { "node": "room" } }
+            ],
+            "events": [
+              { "event": "eden:got_up", "node": "t1", "changes": [0] },
+              { "event": "eden:stood_by", "node": "t1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "lie", "args": { "berth": "lower" } },
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "lower" } },
+              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" }
+            ],
+            "events": [
+              { "event": "eden:lay_down", "node": "t1", "changes": [0] },
+              { "event": "eden:lying_in", "node": "t1", "changes": [1] }
+            ]
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:bunk", "slots": { "lower": ["b1"] }, "links": { "sleeper": ["b1"] } } }
+    }
+  ]
+}

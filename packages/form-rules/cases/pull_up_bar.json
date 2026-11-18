@@ -1,0 +1,75 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:pull_up_bar. Anyone with a hand free does pull-ups at the bar; the apparatus does not change (the body moves, Engine v2's body look). Refused with both hands full.",
+  "cases": [
+    {
+      "name": "pull_up_hands_free",
+      "act": {
+        "this": "t1",
+        "form": "pull_up"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:pull_up_bar"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pull_up_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "pull_up"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:pull_up_bar"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:toy_blocks"
+          },
+          "x2": {
+            "kind": "eden:toy_blocks"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}
