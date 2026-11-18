@@ -1,36 +1,35 @@
 //! Engine v2 T9b (#3120): N7's walk through the host. The walk skill (`skills::route`) touches the world only through
-//! `Host`; the world answers through K13a's host (`sim::host`), and the controller is the body's one mover: it steps
-//! the walk's inputs and carries the body across each link. On N2's test world, the walker of N7's A3 walks from the
-//! south room of the ground floor to the north-east room upstairs, through three shut doors (one narrow, taken in
-//! turns) and the stair; and two walkers head-on on the open ground pass apart, kept apart by `Ask::Near`.
+//! `Host`; the world answers through K13a's host (`sim::host`, run by its `Runner`, T9c #3127), and the controller is
+//! the body's one mover: it steps the walk's inputs and carries the body across each link. On N2's test world, the
+//! walker of N7's A3 walks from the south room of the ground floor to the north-east room upstairs, through three shut
+//! doors (one narrow, taken in turns) and the stair; and two walkers head-on on the open ground pass apart, kept apart
+//! by `Ask::Near`.
+
+mod common;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use import_eden::Import;
-use replica::bodies::{Class, Family, Resource};
-use replica::effects::{Actor, Cause, Change, Header, Refusal, schema_hash};
-use replica::encode::{Name, Value, encode};
-use replica::host::Skill as _;
-use replica::host::{Answer, Ask, F_CROSSING, F_WAITING, Seen};
-use replica::ids::{Hash, Id, Minter, Purpose, Scope};
+use replica::effects::{Actor, Cause, Change, Refusal};
+use replica::encode::{Name, Value};
+use replica::host::{Answer, Ask, F_WAITING};
+use replica::ids::{Id, Minter, Scope};
 use replica::pose::{Frame, Quat, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{parse_kinds, parse_world, show};
-use sim::controller::Controller;
-use sim::host::{Geometry, Run, carry, hand_on, step};
-use sim::links::{DOOR_OPENED, Doors};
+use sim::host::{Geometry, Run, Runner, step};
+use sim::links::DOOR_OPENED;
 use sim::mover::Body;
+use sim::walk::node_of;
 use sim::walk::town::Town;
-use sim::walk::{Mark, World, node_of};
-use skills::route::{Leg, Route};
+use skills::route::Leg;
 
 const SPEED: i64 = 1_400_000;
 const TICK: Micros = 50_000;
 
 fn id(n: u64) -> Id {
-    Id::new(Scope([7; 16]), n).unwrap()
+    common::id(n)
 }
 
 fn name(t: &str) -> Name {
@@ -38,46 +37,10 @@ fn name(t: &str) -> Name {
 }
 
 fn town() -> (Town, BTreeMap<String, Id>) {
-    let w = testworld::generate(1, 0).expect("the test world");
-    let Import {
-        tree, rules, nodes, ..
-    } = import_eden::load(&w.text).expect("the test world loads");
-    let root = nodes["world"];
-    let v = Value::Map(BTreeMap::from([
-        (
-            1,
-            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/walk-host-test/1").to_bytes()),
-        ),
-        (2, Value::Bytes(schema_hash().to_bytes())),
-        (3, Value::Bytes(root.scope().0.to_vec())),
-        (4, root.to_value()),
-        (5, Value::Uint(0)),
-        (6, Value::Array(Vec::new())),
-        (7, Value::Array(Vec::new())),
-    ]));
-    let header = Header::read(&encode(&v).unwrap()).unwrap();
-    let next = tree.to_state().next;
-    let ground = nodes["ground"];
-    let t = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
-    (t, nodes)
+    common::town(b"souls/walk-host-test/1")
 }
 
-fn humanoid() -> Family {
-    let r = |n: &str, class| Resource {
-        name: name(n),
-        class,
-        slot: None,
-    };
-    Family {
-        name: name("souls:humanoid"),
-        resources: vec![
-            r("souls:leg-left", Class::Locomotion),
-            r("souls:leg-right", Class::Locomotion),
-        ],
-    }
-}
-
-/// An empty tree for the host's own reads: the walk reads bodies and links, which the world answers (A3).
+/// An empty tree, for a skill stepped with no world.
 fn empty() -> Tree {
     let kinds = parse_kinds(include_str!(
         "../../replica/fixtures/world-model/kinds.diag"
@@ -91,47 +54,10 @@ fn empty() -> Tree {
     Tree::load(&draft).unwrap().0
 }
 
-/// The world as the host asks it: the town's answers, every body as the controller holds it at the tick's start, the
-/// fields a body's own entries set (its waiting mark), and a link's turn state.
-struct Here<'a> {
-    town: &'a RefCell<Town>,
-    bodies: &'a Controller,
-    fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
-}
-
-impl Geometry for Here<'_> {
-    fn ask(&self, body: Id, q: &Ask) -> Option<Answer> {
-        self.town.borrow_mut().answer(self.bodies, body, q)
-    }
-    fn read(&self, node: Id) -> Option<Seen> {
-        let Some(b) = self.bodies.body(node) else {
-            return self.town.borrow().read_link(node);
-        };
-        let mut fields = self.fields.get(&node).cloned().unwrap_or_default();
-        if let Some(l) = self.bodies.carrying(node) {
-            fields.insert(F_CROSSING, l.to_value());
-        }
-        Some(Seen {
-            id: node,
-            kind: name("souls:body"),
-            parent: Some(node_of(b)),
-            position: b.pose.position,
-            fields,
-        })
-    }
-}
-
 /// A world of walkers run a tick at a time through the host.
 struct Walk {
-    town: RefCell<Town>,
-    controller: Controller,
-    fields: BTreeMap<Id, BTreeMap<u64, Value>>,
-    runs: Vec<Run>,
-    now: Micros,
-    tree: Tree,
-    minter: Minter,
-    /// When each walker's run ended, and how.
-    ended: BTreeMap<Id, (Micros, String)>,
+    town: Town,
+    runner: Runner,
     /// The fewest µm between two walkers on one node, over the run.
     nearest: i64,
     /// Every waiting mark a walker set on its own body: who, and the value.
@@ -141,14 +67,8 @@ struct Walk {
 impl Walk {
     fn new(town: Town) -> Walk {
         Walk {
-            town: RefCell::new(town),
-            controller: Controller::new(),
-            fields: BTreeMap::new(),
-            runs: Vec::new(),
-            now: 0,
-            tree: empty(),
-            minter: Minter::new(Scope([0x9b; 16])),
-            ended: BTreeMap::new(),
+            town,
+            runner: Runner::new(TICK),
             nearest: i64::MAX,
             marked: Vec::new(),
         }
@@ -156,106 +76,38 @@ impl Walk {
 
     /// A walker standing at `at` on `node`, walking to `goal` on `to`: its legs planned by the world for the intent.
     fn add(&mut self, who: Id, node: Id, at: Vec3, to: Id, goal: Vec3) -> Vec<Leg> {
-        let mut t = self.town.borrow_mut();
-        let body: Body = t.surfaces[&node]
+        let body: Body = self.town.surfaces[&node]
             .place(who, Frame { node, slot: None }, at, Quat::IDENTITY)
             .unwrap();
-        let legs: Vec<Leg> = World::plan(&mut *t, &body, to, goal)
+        common::walk(&mut self.runner, &mut self.town, body, SPEED, to, goal)
             .unwrap()
             .into_iter()
             .map(|l| Leg {
                 to: l.to,
                 link: l.link,
             })
-            .collect();
-        self.controller.add(humanoid(), body).unwrap();
-        let skill = Route::new(legs.clone(), SPEED, TICK);
-        let driver = self.controller.claim(who, &skill.shape()).unwrap();
-        self.runs.push(Run {
-            body: who,
-            driver,
-            skill: Box::new(skill),
-        });
-        legs
+            .collect()
     }
 
     fn tick(&mut self) {
-        let at = self.now + TICK;
-        // The owners of the links taken in turns read the walkers' marks as of the last tick (N8, A3).
-        let marks: Vec<Mark> = self
-            .controller
-            .bodies()
-            .map(|b| Mark {
-                who: b.id,
-                node: node_of(b),
-                at: b.pose.position,
-                waiting: self
-                    .fields
-                    .get(&b.id)
-                    .and_then(|f| match f.get(&F_WAITING) {
-                        Some(Value::Array(a)) if a.len() == 2 => Some((
-                            replica::effects::read_id(&a[0]).unwrap(),
-                            match a[1] {
-                                Value::Uint(u) => u as i64,
-                                _ => 0,
-                            },
-                        )),
-                        _ => None,
-                    }),
-                crossing: self.controller.carrying(b.id),
-                staying: false,
-                // The walk through the host asks no standing spot (N9).
-                spot: None,
-            })
+        let was: BTreeMap<Id, Option<Value>> = self
+            .runner
+            .fields
+            .iter()
+            .map(|(k, f)| (*k, f.get(&F_WAITING).cloned()))
             .collect();
-        self.town.get_mut().turns(&marks, at).unwrap();
-        let staged = {
-            let here = Here {
-                town: &self.town,
-                bodies: &self.controller,
-                fields: &self.fields,
-            };
-            step(
-                &self.tree,
-                &here,
-                self.now,
-                1,
-                &mut self.minter,
-                &mut self.runs,
-            )
-        };
-        let refused = hand_on(&staged, &mut self.controller);
-        assert!(refused.is_empty(), "inputs refused: {refused:?}");
-        let refused = carry(&staged, &mut self.controller, self.town.get_mut(), at);
-        assert!(refused.is_empty(), "crossings refused: {refused:?}");
-        // The tick's end: each walker's own entries (its mark) apply.
-        for e in &staged.emits {
-            for c in &e.changes {
-                if let Change::Set {
-                    node, field, to, ..
-                } = c
-                {
-                    if *field == F_WAITING {
-                        self.marked.push((*node, to.clone()));
-                    }
-                    self.fields
-                        .entry(*node)
-                        .or_default()
-                        .insert(*field, to.clone());
-                }
+        self.runner
+            .tick(&mut self.town)
+            .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
+        // Each waiting mark a walker's own entry set.
+        for (who, f) in &self.runner.fields {
+            if let Some(now) = f.get(&F_WAITING)
+                && was.get(who).and_then(|v| v.as_ref()) != Some(now)
+            {
+                self.marked.push((*who, now.clone()));
             }
         }
-        for (who, p) in &staged.ended {
-            self.ended.insert(*who, (self.now, format!("{p:?}")));
-        }
-        let stepped = self.controller.step(&self.town.borrow().surfaces, TICK, at);
-        assert!(
-            stepped.refused.is_empty(),
-            "steps refused: {:?}",
-            stepped.refused
-        );
-        self.now = at;
-        let bodies: Vec<&Body> = self.controller.bodies().collect();
+        let bodies: Vec<&Body> = self.runner.controller.bodies().collect();
         for (i, a) in bodies.iter().enumerate() {
             for b in &bodies[i + 1..] {
                 if node_of(a) == node_of(b) {
@@ -270,11 +122,20 @@ impl Walk {
 
     fn run(&mut self, ticks: u64) {
         for _ in 0..ticks {
-            if self.runs.is_empty() {
+            if self.runner.runs.is_empty() {
                 break;
             }
             self.tick();
         }
+    }
+
+    /// When each walker's run ended, and how.
+    fn ended(&self) -> BTreeMap<Id, (Micros, String)> {
+        self.runner
+            .ended
+            .iter()
+            .map(|(k, (at, p))| (*k, (*at, format!("{p:?}"))))
+            .collect()
     }
 }
 
@@ -304,8 +165,8 @@ fn a2_the_walk_skill_through_the_host_crosses_three_shut_doors_and_the_stair() {
         );
     }
     w.run(4_000);
-    let (at, how) = w.ended.get(&me).cloned().expect("the walk ends");
-    let b = *w.controller.body(me).unwrap();
+    let (at, how) = w.ended().get(&me).cloned().expect("the walk ends");
+    let b = *w.runner.controller.body(me).unwrap();
     let p = b.pose.position;
     println!(
         "ended {how} at {} ms ({} ticks), at ({}, {}, {}) mm on {}",
@@ -318,7 +179,7 @@ fn a2_the_walk_skill_through_the_host_crosses_three_shut_doors_and_the_stair() {
     );
     assert_eq!(how, "Done");
     assert_eq!(node_of(&b), f1, "upstairs");
-    let t = w.town.borrow();
+    let t = &w.town;
     let mut opened = Vec::new();
     for e in &t.doors.stream {
         let ev = &e.events.as_ref().unwrap()[0];
@@ -409,9 +270,10 @@ fn a1_two_walkers_head_on_pass_apart_through_ask_near() {
     w.add(a, ground, west, ground, east);
     w.add(b, ground, east, ground, west);
     w.run(400);
-    println!("ended: {:?}; nearest {} mm", w.ended, w.nearest / 1000);
-    assert_eq!(w.ended.len(), 2, "both arrive");
-    assert!(w.ended.values().all(|(_, h)| h == "Done"));
+    let ended = w.ended();
+    println!("ended: {ended:?}; nearest {} mm", w.nearest / 1000);
+    assert_eq!(ended.len(), 2, "both arrive");
+    assert!(ended.values().all(|(_, h)| h == "Done"));
     assert!(
         w.nearest >= 420_000,
         "they pass apart: nearest {} µm",
