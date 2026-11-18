@@ -8,7 +8,7 @@ import { mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ROOT, globToRegExp, loadManifest, run, select } from './pull.mjs';
+import { ROOT, fetchVerified, globToRegExp, loadManifest, run, select } from './pull.mjs';
 
 const git = (args, input) => execFileSync('git', args, { cwd: ROOT, input, maxBuffer: 1 << 26 }).toString();
 const MEDIA = /\.(glb|gltf|bin|drc|ktx2|basis|hdr|exr|fbx|obj|blend|usdz|png|jpe?g|webp|avif|gif|bmp|tiff?|heic|psd|mp3|ogg|oga|wav|flac|m4a|aac|opus|mp4|m4v|webm|mov|mkv|db|sqlite\d?|zip|tar|tgz|gz|7z|pdf)$/i;
@@ -67,7 +67,7 @@ test('pull downloads, verifies, caches, links and is idempotent; a wrong body fa
     await writeFile(join(dir, 'manifest.json'), JSON.stringify(manifest));
     const calls = [];
     const fetcher = async url => { calls.push(url); return url.endsWith('/a.glb') ? new Response(good) : url.endsWith('/bad.glb') ? new Response(bad) : new Response('no', { status: 404 }); };
-    const opts = { manifest: join(dir, 'manifest.json'), dest: join(dir, 'tree'), cache: join(dir, 'cache'), fetcher, quiet: true };
+    const opts = { manifest: join(dir, 'manifest.json'), dest: join(dir, 'tree'), cache: join(dir, 'cache'), fetcher, quiet: true, log: () => {} };
     // b.glb shares a.glb's sha256, so whichever runs second is served from the cache: run them one at a time.
     const first = await run({ ...opts, concurrency: 1 });
     assert.deepEqual(first.failed.map(f => f.path), ['w/c.png']);
@@ -84,4 +84,48 @@ test('pull downloads, verifies, caches, links and is idempotent; a wrong body fa
     assert.match(fresh.failed[0].error, /want 10 bytes/);
     await assert.rejects(readFile(join(dir, 'tree2/w/b.glb')));
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('pull retries transient failures with backoff and reports every failed path and why, even quiet', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'souls-assets-test-'));
+  try {
+    const body = Buffer.from('media bytes'), sha256 = createHash('sha256').update(body).digest('hex');
+    const names = ['flaky', 'reset', 'stall', 'slow503', 'gone', 'wrong'];
+    const manifest = { version: 1, files: names.map(n => ({ path: `m/${n}.glb`, sha256, bytes: body.length, url: `https://cdn.test/${n}`, set: 'runtime' })) };
+    await writeFile(join(dir, 'manifest.json'), JSON.stringify(manifest));
+    const calls = {};
+    // A body that sends a few bytes and then nothing, until the request's signal aborts it.
+    const stalled = signal => new Response(new ReadableStream({ start(c) { c.enqueue(body.subarray(0, 3)); signal.addEventListener('abort', () => c.error(signal.reason)); } }));
+    const fetcher = async (url, { signal }) => {
+      const n = url.split('/').pop(), k = (calls[n] = (calls[n] || 0) + 1);
+      if (n === 'flaky') return k < 3 ? new Response('busy', { status: 503 }) : new Response(body);
+      if (n === 'reset') { if (k < 2) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }); return new Response(body); }
+      if (n === 'stall') return stalled(signal);
+      if (n === 'slow503') return new Response('busy', { status: 503 });
+      if (n === 'gone') return new Response('no', { status: 404 });
+      return new Response('other bytes');
+    };
+    const lines = [];
+    const r = await run({ manifest: join(dir, 'manifest.json'), dest: join(dir, 'tree'), cache: join(dir, 'cache'), fetcher, quiet: true,
+      tries: 3, stallMs: 50, backoffMs: 1, log: m => lines.push(m) });
+    assert.equal(await readFile(join(dir, 'tree/m/flaky.glb'), 'utf8'), 'media bytes');
+    assert.equal(await readFile(join(dir, 'tree/m/reset.glb'), 'utf8'), 'media bytes');
+    assert.deepEqual(calls, { flaky: 3, reset: 2, stall: 3, slow503: 3, gone: 1, wrong: 1 });
+    const why = Object.fromEntries(r.failed.map(f => [f.path, f.error]));
+    assert.deepEqual(Object.keys(why).sort(), ['m/gone.glb', 'm/slow503.glb', 'm/stall.glb', 'm/wrong.glb']);
+    assert.equal(why['m/stall.glb'], 'timeout: stalled, no data for 0.05 s after 3 of 11 bytes (after 3 tries)');
+    assert.equal(why['m/slow503.glb'], 'HTTP 503 (after 3 tries)');
+    assert.equal(why['m/gone.glb'], 'HTTP 404 (not published?)');
+    assert.match(why['m/wrong.glb'], /^hash mismatch: got 11 bytes/);
+    for (const [path, error] of Object.entries(why)) assert.ok(lines.includes(`assets: FAILED ${path}: ${error} (https://cdn.test/${path.slice(2, -4)})`), path);
+    assert.ok(lines.includes('assets: retrying m/reset.glb (try 2 of 3): network: ECONNRESET'));
+    assert.ok(lines.includes('assets: retrying m/flaky.glb (try 3 of 3): HTTP 503'));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('a request with no response at all times out instead of hanging', async () => {
+  const f = { sha256: '0'.repeat(64), bytes: 1 };
+  const hang = (_url, { signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+  await assert.rejects(fetchVerified('https://cdn.test/x', f, null, { fetcher: hang, tries: 2, stallMs: 30, backoffMs: 1 }),
+    { message: 'timeout: no response in 0.03 s (after 2 tries)' });
 });

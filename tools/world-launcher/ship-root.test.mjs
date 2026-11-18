@@ -130,6 +130,15 @@ test('a commit that is not on origin/main is refused', () => {
   assert.equal(s.calls(), '');
 });
 
+test('a pinned sha behind origin/main ships: main kept moving after the gated commit (release.yml -f sha)', () => {
+  const s = setup(); writeFileSync(join(s.repo, 'b'), '1'); git(s.repo, 'add', 'b'); git(s.repo, 'commit', '-qm', 'merged after the pin');
+  git(s.repo, 'push', '-q', 'origin', 'main'); git(s.repo, 'checkout', '-q', '--detach', s.sha);
+  assert.notEqual(git(s.repo, 'rev-parse', 'origin/main'), s.sha);
+  const r = s.run([...s.base, '--dry-run']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stdout, /PREFLIGHT WOULD STOP/);
+});
+
 test('there is no host option, and --sha must be the full commit', () => {
   const s = setup();
   assert.equal(s.run([...s.base, '--host', 'x']).status, 2);

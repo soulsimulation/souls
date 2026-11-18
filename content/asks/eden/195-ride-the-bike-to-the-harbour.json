@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":195,"group":"getting-around","words":"ride the bike to the harbour","obvious":2,"things":{"bicycle":"eden:bicycle","pier":"eden:pier"},"chain":[{"this":"bicycle","form":"ride"},{"this":"bicycle","form":"steer","args":{"toward":"pier"}}]}
