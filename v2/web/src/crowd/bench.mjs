@@ -7,15 +7,17 @@
 //
 //   node v2/web/src/crowd/bench.mjs [--bodies <dir of the body files>] [--tiers desktop,phone] [--repeats 2]
 //        [--warm 10] [--measure 60] [--profile 10] [--n 1000] [--walking 400] [--port 5179] [--out dir]
+//        [--kind <the importer's <name>.json>] [--area 2.5]   (B13, #2744: one authored body kind in place of the
+//        three people; ground per body, m²)
 //
 // The body files (character-wire.ts's mesh and clips files) are copied into v2/web/.local/bodies (ignored) and the page
 // is served by `vite` from v2/web. Frame times are requestAnimationFrame deltas; draws are counted by wrapping WebGL
 // before the page loads. Hardware GL on macOS (ANGLE Metal); the renderer string is recorded. A laptop's GPU is not a
 // phone's: the phone preset is the phone's screen, touch and pixel ratio on the same machine.
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadavg } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const WEB = resolve(import.meta.dirname, '../..');
@@ -102,7 +104,7 @@ async function arm({ browser, url, tier, VIEWPORTS, o, profileTo, topCosts }) {
 }
 
 function report(res) {
-  const L = [`# Crowd bench (#2715): ${res.n} bodies, ${res.walking} walking`, '',
+  const L = [`# Crowd bench (#2715): ${res.n} bodies, ${res.walking} walking${res.kind ? `, all of the kind ${res.kind}` : ''}`, '',
     `Renderer: ${res.gl}. Laptop load (1 min) at each arm's start is in the table. Each arm: ${res.warm} s warm-up, ${res.measure} s measured. Frame times are requestAnimationFrame deltas (ms); draws are WebGL draw calls per frame (shadow pass included); work is the page's own time per frame (moving the walkers, filling the crowd's buffers, three's render call); busy is the main thread's share not idle in a ${res.profile} s CPU profile after the window.`, '',
     '| tier | rep | frame p50 | frame p95 | fps | >33 ms | draws | crowd draws | in view | levels 0/1/2 | work p50 / p95 ms | busy | heap MB | long tasks | load 1m |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
   for (const r of res.rows) {
@@ -122,14 +124,22 @@ function report(res) {
 
 async function main() {
   const a = args(process.argv.slice(2));
-  const o = { warm: Number(a.warm ?? 10), measure: Number(a.measure ?? 60), profile: Number(a.profile ?? 10), repeats: Number(a.repeats ?? 2), n: Number(a.n ?? 1000), walking: Number(a.walking ?? 400) };
+  const o = { warm: Number(a.warm ?? 10), measure: Number(a.measure ?? 60), profile: Number(a.profile ?? 10), repeats: Number(a.repeats ?? 2), n: Number(a.n ?? 1000), walking: Number(a.walking ?? 400), area: Number(a.area ?? 2.5) };
   const tiers = String(a.tiers ?? 'desktop,phone').split(',');
   const port = Number(a.port ?? 5179);
   const out = resolve(a.out ?? join(REPO, '.local/crowd-bench', new Date().toISOString().replace(/[:.]/g, '-')));
   mkdirSync(out, { recursive: true });
   const bodies = join(WEB, '.local/bodies');
   mkdirSync(bodies, { recursive: true });
-  for (const f of FILES) if (!existsSync(join(bodies, f))) {
+  let kind = '';
+  if (a.kind) {
+    const entry = resolve(a.kind), k = JSON.parse(readFileSync(entry, 'utf8'));
+    mkdirSync(join(bodies, 'kinds/models'), { recursive: true });
+    for (const f of [k.full, k.simple]) copyFileSync(join(dirname(entry), f), join(bodies, 'kinds', f));
+    copyFileSync(entry, join(bodies, 'kinds', basename(entry)));
+    kind = `&kind=kinds/${basename(entry)}`;
+  }
+  for (const f of a.kind ? [] : FILES) if (!existsSync(join(bodies, f))) {
     if (!a.bodies) throw new Error(`no ${f} in v2/web/.local/bodies: pass --bodies <the directory holding the body files>`);
     copyFileSync(join(resolve(a.bodies), f), join(bodies, f));
   }
@@ -146,8 +156,8 @@ async function main() {
     const gl = await probe.evaluate(() => { const g = document.createElement('canvas').getContext('webgl2'); const x = g.getExtension('WEBGL_debug_renderer_info'); return g.getParameter(x.UNMASKED_RENDERER_WEBGL); });
     await probe.close();
     log(`renderer ${gl}`);
-    const url = `http://127.0.0.1:${port}/src/crowd/bench.html?bodies=/.local/bodies/&n=${o.n}&walking=${o.walking}`;
-    const res = { ...o, gl, rows: [] };
+    const url = `http://127.0.0.1:${port}/src/crowd/bench.html?bodies=/.local/bodies/&n=${o.n}&walking=${o.walking}${kind}&area=${o.area}`;
+    const res = { ...o, kind: a.kind ? basename(a.kind) : null, gl, rows: [] };
     for (let rep = 1; rep <= o.repeats; rep++) for (const tier of tiers) {
       log(`${tier} rep ${rep}`);
       const row = await arm({ browser, url, tier, VIEWPORTS, o, topCosts, profileTo: rep === 1 && o.profile > 0 ? join(out, `${tier}.cpuprofile`) : null }).catch((e) => ({ tier, error: String(e?.message ?? e).slice(0, 200) }));

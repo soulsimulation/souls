@@ -22,6 +22,10 @@
 //! - **Versions.** A route carries the node, square and version of each patch it crosses, so a later reader can tell
 //!   a route cut on a patch since rebuilt (G3, #2760). The tree keeps no per-node version yet, so the map is given
 //!   one per node, as N3's cache is.
+//! - **Replacing a building** (#3276). After an edit inside a building, [`Map::replace`] takes off the pieces of its
+//!   floors and the portals of its links (on the open ground's pieces too) and puts on the building as read again;
+//!   nothing else is cut or read. Piece and portal numbers are never reused, so a map replaced in place numbers its
+//!   pieces differently from one built whole, and its routes are otherwise the same.
 //! - **No route.** A named refusal, `no-route`, naming the link that failed and why: the first link this body
 //!   cannot use on the route a body with every ability would take, or, when there is none either, of the links the
 //!   search came to and could not use, the one whose far end is nearest the goal.
@@ -33,11 +37,13 @@
 //!
 //! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), routes across water (N11). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
+pub mod way;
+
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;
 use crate::ground::{MARGIN, OpenGround, Piece, SQUARE};
-use crate::links::{Building, End, F_OPEN, Kind, Link, Open, ground_doors};
+use crate::links::{Building, End, F_OPEN, Kind, Link, Open, floor_joins, ground_doors};
 use replica::effects::Refusal;
 use replica::encode::Value;
 use replica::ids::Id;
@@ -135,6 +141,16 @@ struct LinkRec {
     ends: [Vec<u32>; 2],
     /// Crossing it, mm.
     cost: u32,
+    /// Replaced with its building ([`Map::replace`]): no portals, never read.
+    gone: bool,
+}
+
+/// What of the map a building put there: its floors, its links, and its ends that lie on no piece.
+#[derive(Default)]
+struct Owned {
+    floors: Vec<Id>,
+    links: Vec<u32>,
+    elsewhere: usize,
 }
 
 /// A link of the map as a reader sees it.
@@ -202,6 +218,8 @@ pub struct Map {
     portals: Vec<Portal>,
     links: Vec<LinkRec>,
     by_patch: HashMap<PatchKey, Vec<u32>>,
+    /// Each building read, by its thing: what it put on the map.
+    owned: HashMap<Id, Owned>,
     /// Buildings whose links could not be read, with why.
     pub unread: Vec<(Id, String)>,
     /// Doorway ends (or, on the open ground, an end's part in one square) that lie on no piece (left out).
@@ -294,6 +312,7 @@ impl Map {
             portals: Vec::new(),
             links: Vec::new(),
             by_patch: HashMap::new(),
+            owned: HashMap::new(),
             unread: Vec::new(),
             meets_elsewhere: 0,
             seen: Vec::new(),
@@ -390,6 +409,7 @@ impl Map {
                 meets: &ground_meets,
                 on: &on,
                 doors: &gdoors,
+                terrain: open.terrain(),
             };
             let b = match Building::read_sized(tree, id, Some(open), radius) {
                 Ok(b) => b,
@@ -398,19 +418,8 @@ impl Map {
                     continue;
                 }
             };
-            m.frames.push(place);
-            let frame = (m.frames.len() - 1) as u32;
             known.extend(b.links.iter().map(|l| l.id));
-            let mut base: HashMap<Id, u32> = HashMap::new();
-            for (&floor, (_, patch)) in &b.floors {
-                base.insert(floor, m.pieces.len() as u32);
-                let at = PatchAt {
-                    node: floor,
-                    square: None,
-                    version: version(floor),
-                };
-                m.add_patch(at, frame, patch.pieces.clone());
-            }
+            let base = m.add_floors(&b, place, version);
             buildings.push((b, base));
         }
         // The open ground's own links (gates in walls and fences), then every link's ends as portals.
@@ -421,48 +430,147 @@ impl Map {
             meets: &ground_meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
         let gates = Building::of_ground(tree, open, &known)?;
+        let gates_at = gates.thing;
         buildings.push((gates, HashMap::new()));
-        for (b, base) in &buildings {
-            for l in &b.links {
-                let mut ends = [Vec::new(), Vec::new()];
-                // A blocked link's ends are portals too, so a search that comes to it can name it.
-                for (k, e) in l.ends.iter().enumerate() {
-                    if let Some(e) = e {
-                        ends[k] = m.end_portals(l, e, k as u8, base, b);
-                    }
-                }
-                let run: i64 = l
-                    .line
-                    .windows(2)
-                    .map(|w| len3([w[0].x, w[0].y, w[0].z], [w[1].x, w[1].y, w[1].z]))
-                    .sum::<i64>()
-                    / 1000;
-                // Walked through narrower than the body with its clearance: that is why, whatever else stops it. A
-                // ladder is climbed facing it, so its width is not the body's.
-                let narrow = l.kind != Kind::Ladder && too_narrow(l.width, radius);
-                let blocked = narrow.then_some("link-too-narrow").or(l.blocked).or(
-                    if ends.iter().any(Vec::is_empty) {
-                        Some("link-end-off-ground")
-                    } else {
-                        None
-                    },
-                );
-                m.links.push(LinkRec {
-                    id: l.id,
-                    kind: l.kind,
-                    door: l.door,
-                    blocked,
-                    width: l.width,
-                    ends,
-                    cost: run as u32,
-                });
-            }
+        // Steps from one thing's floor onto another's (#3227), and every floor's first piece and piece count.
+        for (i, l) in floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>()) {
+            buildings[i].0.links.push(l);
         }
+        let all: HashMap<Id, (u32, u32)> = buildings
+            .iter()
+            .flat_map(|(_, base)| base.clone())
+            .collect();
+        for (b, _) in &buildings {
+            m.add_links(b, &all);
+        }
+        // The open ground's gates are the ground's, replaced only with it.
+        m.owned.remove(&gates_at);
         m.seen = vec![(0, 0, NONE, NONE); m.portals.len() + 1];
         m.closed = vec![0; m.portals.len() + 1];
         Ok(m)
+    }
+
+    /// Replaces building `b`'s floors and links with those it was read with again after an edit (G3, #3276): the
+    /// pieces of its old floors and the portals of its old links leave the map (the open ground's pieces keep only
+    /// their other portals), and its floors and links as read now are put on, `version` giving each floor's version.
+    /// Nothing else is read or cut again. A building first read here is put on the same way.
+    pub fn replace(&mut self, b: &Building, version: &dyn Fn(Id) -> u64) {
+        if let Some(old) = self.owned.remove(&b.thing) {
+            for f in &old.floors {
+                for q in self.by_patch.remove(&(*f, None)).unwrap_or_default() {
+                    let rec = &mut self.pieces[q as usize];
+                    let portals = std::mem::take(&mut rec.portals);
+                    rec.piece = Piece {
+                        outline: Vec::new(),
+                        vertices: Vec::new(),
+                        triangles: Vec::new(),
+                    };
+                    rec.adj = None;
+                    rec.dist = HashMap::new();
+                    for p in portals {
+                        self.drop_portal(p);
+                    }
+                }
+            }
+            for l in old.links {
+                let rec = &mut self.links[l as usize];
+                rec.gone = true;
+                rec.blocked = Some("link-gone");
+                let ends = std::mem::take(&mut rec.ends);
+                for p in ends.into_iter().flatten() {
+                    self.drop_portal(p);
+                }
+            }
+            self.meets_elsewhere -= old.elsewhere;
+        }
+        self.unread.retain(|(id, _)| *id != b.thing);
+        let base = self.add_floors(b, b.place, version);
+        self.add_links(b, &base);
+        self.seen.resize(self.portals.len() + 1, (0, 0, NONE, NONE));
+        self.closed.resize(self.portals.len() + 1, 0);
+    }
+
+    /// Takes portal `p` off the pieces it lies on; its index is never used again.
+    fn drop_portal(&mut self, p: u32) {
+        let pieces = std::mem::replace(&mut self.portals[p as usize].pieces, [NONE, NONE]);
+        self.portals[p as usize].link = NONE;
+        for q in pieces {
+            if q != NONE {
+                self.pieces[q as usize].portals.retain(|&r| r != p);
+            }
+        }
+    }
+
+    /// Puts building `b`'s floors on the map in its frame `place`: each floor's first piece and piece count.
+    fn add_floors(
+        &mut self,
+        b: &Building,
+        place: Xform,
+        version: &dyn Fn(Id) -> u64,
+    ) -> HashMap<Id, (u32, u32)> {
+        self.frames.push(place);
+        let frame = (self.frames.len() - 1) as u32;
+        let mut base: HashMap<Id, (u32, u32)> = HashMap::new();
+        for (&floor, (_, patch)) in &b.floors {
+            base.insert(floor, (self.pieces.len() as u32, patch.pieces.len() as u32));
+            let at = PatchAt {
+                node: floor,
+                square: None,
+                version: version(floor),
+            };
+            self.add_patch(at, frame, patch.pieces.clone());
+        }
+        let owned = self.owned.entry(b.thing).or_default();
+        owned.floors = b.floors.keys().copied().collect();
+        base
+    }
+
+    /// Puts building `b`'s links on the map, their ends as portals (`base`: each floor's first piece and piece count,
+    /// of every building a link of `b` may reach).
+    fn add_links(&mut self, b: &Building, base: &HashMap<Id, (u32, u32)>) {
+        let (first, elsewhere) = (self.links.len() as u32, self.meets_elsewhere);
+        let radius = self.size.radius_mm();
+        for l in &b.links {
+            let mut ends = [Vec::new(), Vec::new()];
+            // A blocked link's ends are portals too, so a search that comes to it can name it.
+            for (k, e) in l.ends.iter().enumerate() {
+                if let Some(e) = e {
+                    ends[k] = self.end_portals(l, e, k as u8, base);
+                }
+            }
+            let run: i64 = l
+                .line
+                .windows(2)
+                .map(|w| len3([w[0].x, w[0].y, w[0].z], [w[1].x, w[1].y, w[1].z]))
+                .sum::<i64>()
+                / 1000;
+            // Walked through narrower than the body with its clearance: that is why, whatever else stops it. A
+            // ladder is climbed facing it, so its width is not the body's.
+            let narrow = l.kind != Kind::Ladder && too_narrow(l.width, radius);
+            let blocked = narrow.then_some("link-too-narrow").or(l.blocked).or(
+                if ends.iter().any(Vec::is_empty) {
+                    Some("link-end-off-ground")
+                } else {
+                    None
+                },
+            );
+            self.links.push(LinkRec {
+                id: l.id,
+                kind: l.kind,
+                door: l.door,
+                blocked,
+                width: l.width,
+                ends,
+                cost: run as u32,
+                gone: false,
+            });
+        }
+        let owned = self.owned.entry(b.thing).or_default();
+        owned.links = (first..self.links.len() as u32).collect();
+        owned.elsewhere = self.meets_elsewhere - elsewhere;
     }
 
     fn add_patch(&mut self, at: PatchAt, frame: u32, pieces: Vec<Piece>) {
@@ -488,8 +596,7 @@ impl Map {
         l: &Link,
         e: &End,
         k: u8,
-        base: &HashMap<Id, u32>,
-        b: &Building,
+        base: &HashMap<Id, (u32, u32)>,
     ) -> Vec<u32> {
         let li = self.links.len() as u32;
         let (a, b2, mid) = ([mm(e.a.x), mm(e.a.z)], [mm(e.b.x), mm(e.b.z)], e.middle());
@@ -502,16 +609,16 @@ impl Map {
                 .is_some_and(|v| i64::from(v[1]) == y)
         };
         // The piece among `qs` the segment's middle lies on, within the grid's rounding.
+        // The open ground is one level, its plan at 0, and an end on it stands on its terrain (#3227): any height.
         let on = |m: &Map, qs: &mut dyn Iterator<Item = u32>, mid: [i64; 2]| {
-            qs.filter(|&q| at_y(m, q))
+            qs.filter(|&q| m.pieces[q as usize].at.square.is_some() || at_y(m, q))
                 .map(|q| (m.off_piece(q, mid), q))
                 .min()
                 .filter(|&(d, _)| d <= MEET_OFF)
                 .map(|(_, q)| q)
         };
         let mut out = Vec::new();
-        if let Some(&first) = base.get(&e.floor) {
-            let n = b.floors[&e.floor].1.pieces.len() as u32;
+        if let Some(&(first, n)) = base.get(&e.floor) {
             let q = if matches!(l.kind, Kind::Doorway | Kind::Step) {
                 on(self, &mut (first..first + n), [mm(mid.x), mm(mid.z)])
             } else {
@@ -637,6 +744,7 @@ impl Map {
     pub fn links(&self) -> Vec<LinkInfo> {
         self.links
             .iter()
+            .filter(|l| !l.gone)
             .map(|l| LinkInfo {
                 id: l.id,
                 kind: l.kind,
@@ -752,8 +860,7 @@ impl Map {
     }
 
     fn vert(&self, q: u32, k: u32) -> [i64; 2] {
-        let v = self.pieces[q as usize].piece.vertices[k as usize];
-        [i64::from(v[0]), i64::from(v[2])]
+        vert(&self.pieces[q as usize].piece, k)
     }
 
     /// The triangle of piece `q` holding `p` (edges included), counter-clockwise.
@@ -776,41 +883,16 @@ impl Map {
     /// The triangle of piece `q` nearest `p`, the squared distance to it (0 inside), and its point nearest `p` (`p`
     /// itself inside).
     fn gap(&self, q: u32, p: [i64; 2]) -> (u32, i64, [i64; 2]) {
-        let pc = &self.pieces[q as usize].piece;
-        let seg = |a: [i64; 2], b: [i64; 2]| {
-            let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
-            let l2 = (ex * ex + ez * ez).max(1);
-            let t = ((p[0] - a[0]) * ex + (p[1] - a[1]) * ez).clamp(0, l2);
-            let at = [a[0] + ex * t / l2, a[1] + ez * t / l2];
-            (sq(at[0] - p[0]) + sq(at[1] - p[1]), at)
-        };
-        (0..pc.triangles.len() as u32)
-            .map(|t| {
-                let [a, b, c] = self.tri(q, t);
-                if cross(a, b, p) >= 0 && cross(b, c, p) >= 0 && cross(c, a, p) >= 0 {
-                    (0, t, p)
-                } else {
-                    let (d, at) = seg(a, b).min(seg(b, c)).min(seg(c, a));
-                    (d, t, at)
-                }
-            })
-            .min()
-            .map_or((0, i64::MAX, p), |(d, t, at)| (t, d, at))
+        gap(&self.pieces[q as usize].piece, p)
     }
 
     /// Triangle `t` of piece `q`, its corners counter-clockwise.
     fn tri(&self, q: u32, t: u32) -> [[i64; 2]; 3] {
-        let [i, j, k] = self.tri_idx(q, t);
-        [self.vert(q, i), self.vert(q, j), self.vert(q, k)]
+        tri(&self.pieces[q as usize].piece, t)
     }
 
     fn tri_idx(&self, q: u32, t: u32) -> [u32; 3] {
-        let [i, j, k] = self.pieces[q as usize].piece.triangles[t as usize];
-        if cross(self.vert(q, i), self.vert(q, j), self.vert(q, k)) < 0 {
-            [i, k, j]
-        } else {
-            [i, j, k]
-        }
+        tri_idx(&self.pieces[q as usize].piece, t)
     }
 
     fn adjacency(&mut self, q: u32) {
@@ -1194,6 +1276,56 @@ impl Map {
             searched,
         })
     }
+}
+
+fn vert(pc: &Piece, k: u32) -> [i64; 2] {
+    let v = pc.vertices[k as usize];
+    [i64::from(v[0]), i64::from(v[2])]
+}
+
+/// Triangle `t` of `pc`, its corners' indices counter-clockwise.
+fn tri_idx(pc: &Piece, t: u32) -> [u32; 3] {
+    let [i, j, k] = pc.triangles[t as usize];
+    if cross(vert(pc, i), vert(pc, j), vert(pc, k)) < 0 {
+        [i, k, j]
+    } else {
+        [i, j, k]
+    }
+}
+
+fn tri(pc: &Piece, t: u32) -> [[i64; 2]; 3] {
+    let [i, j, k] = tri_idx(pc, t);
+    [vert(pc, i), vert(pc, j), vert(pc, k)]
+}
+
+/// The triangle of `pc` nearest `p`, the squared distance to it (0 inside), and its point nearest `p` (`p` itself
+/// inside).
+fn gap(pc: &Piece, p: [i64; 2]) -> (u32, i64, [i64; 2]) {
+    let seg = |a: [i64; 2], b: [i64; 2]| {
+        let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
+        let l2 = (ex * ex + ez * ez).max(1);
+        let t = ((p[0] - a[0]) * ex + (p[1] - a[1]) * ez).clamp(0, l2);
+        let at = [a[0] + ex * t / l2, a[1] + ez * t / l2];
+        (sq(at[0] - p[0]) + sq(at[1] - p[1]), at)
+    };
+    (0..pc.triangles.len() as u32)
+        .map(|t| {
+            let [a, b, c] = tri(pc, t);
+            if cross(a, b, p) >= 0 && cross(b, c, p) >= 0 && cross(c, a, p) >= 0 {
+                (0, t, p)
+            } else {
+                let (d, at) = seg(a, b).min(seg(b, c)).min(seg(c, a));
+                (d, t, at)
+            }
+        })
+        .min()
+        .map_or((0, i64::MAX, p), |(d, t, at)| (t, d, at))
+}
+
+/// Whether `p` (mm, the ground's frame) lies on one of `pieces` (a square's), within the grid's rounding: as
+/// [`Map::on_square`], for a reader without the map (a building read again off the clock thread, G3).
+pub fn on_pieces(pieces: &[Piece], p: [i64; 2]) -> bool {
+    pieces.iter().any(|pc| gap(pc, p).1.isqrt() <= MEET_OFF)
 }
 
 /// String pulling through a channel of (left, right) portals, the first and last each a point.
