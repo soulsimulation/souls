@@ -111,6 +111,7 @@ impl Town {
                     meets: &meets,
                     on: &on,
                     doors: &gdoors,
+                    terrain: open.terrain(),
                 };
                 if let Ok(b) = Building::read_on(&tree, id, Some(open)) {
                     for (&floor, (_, patch)) in &b.floors {
@@ -133,6 +134,7 @@ impl Town {
             meets: &meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
         buildings.push(Building::of_ground(&tree, open, &known)?);
         Ok(Town {

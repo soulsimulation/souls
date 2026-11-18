@@ -43,7 +43,7 @@
 
 pub mod turns;
 
-use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Xform};
+use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Terrain, Xform};
 use crate::ground::{HUMAN_RADIUS, MARGIN, Meet, Patch, SQUARE, Scene, Turn, cut_floor};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Header, Part, Refusal, Rest,
@@ -195,6 +195,20 @@ pub struct Open<'a> {
     /// The doors standing on the open ground, by the doorway each stands in ([`ground_doors`]): a building's outer
     /// door may be a thing of the ground, not of the building.
     pub doors: &'a BTreeMap<Id, Id>,
+    /// The open ground's terrain (N1b), if any: an end on the open ground stands at its height (#3227), as a body
+    /// there does (N11a's mover), though N3's pieces of it are a plan at 0.
+    pub terrain: Option<&'a Terrain>,
+}
+
+/// An end on the open ground lifted onto its terrain `t`: each of its points at the open ground's height there under
+/// something at `y` (µm, the ground's frame; [`Terrain::ground`]).
+fn lift(e: End, t: Option<&Terrain>, y: i64) -> End {
+    let up = |p: Vec3| Vec3::new(p.x, Terrain::ground(t, p.x, p.z, y), p.z);
+    End {
+        a: up(e.a),
+        b: up(e.b),
+        ..e
+    }
 }
 
 /// The doors that stand on the open ground `ground` (its children), by the doorway link each stands in.
@@ -480,7 +494,11 @@ impl Building {
                         .filter_map(|sm| own_part(o.on, sm))
                         .collect();
                     if let Some(e) = joined(&gm.iter().collect::<Vec<_>>(), o.ground) {
-                        ends[k] = Some(e);
+                        // At the height of the open ground beside the floor's end, in the ground's frame.
+                        let y = ends[1 - k]
+                            .and_then(|f| o.place.point(f.middle()).ok())
+                            .map_or(0, |p| p.y);
+                        ends[k] = Some(lift(e, o.terrain, y));
                         width_left = gm.iter().map(|m| m.width_left).fold(width_left, i64::min);
                         through = true;
                     }
@@ -650,13 +668,14 @@ impl Building {
                 by_link.entry(sm.1.link).or_default().push(sm);
             }
         }
-        let widths: BTreeMap<Id, i64> = if by_link.is_empty() {
+        // Each gate's width, and its height (in the ground's frame: its ends stand on the ground there).
+        let widths: BTreeMap<Id, (i64, i64)> = if by_link.is_empty() {
             BTreeMap::new()
         } else {
             Scene::of(tree, open.ground)?
                 .doorways
                 .iter()
-                .map(|d| (d.link, d.width))
+                .map(|d| (d.link, (d.width, d.y)))
                 .collect()
         };
         let mut links = Vec::new();
@@ -669,7 +688,9 @@ impl Building {
                     .filter(|sm| sm.1.side == s)
                     .filter_map(|sm| own_part(open.on, sm))
                     .collect();
+                let y = widths.get(&id).map_or(0, |w| w.1);
                 joined(&of.iter().collect::<Vec<_>>(), open.ground)
+                    .map(|e| lift(e, open.terrain, y))
             };
             let ends = [side(-1), side(1)];
             let both = |sq: (i32, i32)| {
@@ -699,7 +720,7 @@ impl Building {
                 kind: Kind::of(ty.as_str()).unwrap_or(Kind::Doorway),
                 nodes,
                 owner,
-                width: widths.get(&id).copied().unwrap_or(0),
+                width: widths.get(&id).map_or(0, |w| w.0),
                 ends,
                 line,
                 door: open.doors.get(&id).copied(),

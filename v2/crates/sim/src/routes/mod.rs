@@ -389,6 +389,7 @@ impl Map {
                 meets: &ground_meets,
                 on: &on,
                 doors: &gdoors,
+                terrain: open.terrain(),
             };
             let b = match Building::read_sized(tree, id, Some(open), radius) {
                 Ok(b) => b,
@@ -420,6 +421,7 @@ impl Map {
             meets: &ground_meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
         let gates = Building::of_ground(tree, open, &known)?;
         buildings.push((gates, HashMap::new()));
@@ -501,8 +503,9 @@ impl Map {
                 .is_some_and(|v| i64::from(v[1]) == y)
         };
         // The piece among `qs` the segment's middle lies on, within the grid's rounding.
+        // The open ground is one level, its plan at 0, and an end on it stands on its terrain (#3227): any height.
         let on = |m: &Map, qs: &mut dyn Iterator<Item = u32>, mid: [i64; 2]| {
-            qs.filter(|&q| at_y(m, q))
+            qs.filter(|&q| m.pieces[q as usize].at.square.is_some() || at_y(m, q))
                 .map(|q| (m.off_piece(q, mid), q))
                 .min()
                 .filter(|&(d, _)| d <= MEET_OFF)
