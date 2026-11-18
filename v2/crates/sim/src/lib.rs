@@ -1,6 +1,8 @@
 //! The world: tree, clock, controllers, movers, log. Native only (Engine v2, #2635). Empty so far (K1, #2638).
 #![forbid(unsafe_code)]
 
+pub mod frozen;
+
 #[cfg(test)]
 mod tests {
     #[test]

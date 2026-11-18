@@ -9,6 +9,7 @@ pub mod hash;
 pub mod ids;
 pub mod pose;
 pub mod query;
+pub mod read;
 pub mod time;
 pub mod tree;
 #[cfg(target_arch = "wasm32")]
