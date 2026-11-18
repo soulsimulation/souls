@@ -1,0 +1,11 @@
+{
+  "format": "souls-who-cases/1",
+  "about": "Who may use eden:hall_board (SA-X17, #2878): anyone may present when nobody does; only the presenter, b1 (Soul s1), shows a page, clears the board or stops presenting. b2 is a listener in the seats, b3 a stranger.",
+  "cases": [
+    {"name":"hall_board_present_anyone","act":{"this":"w1","form":"present"},"state":{"actor":"b3","nodes":{"w1":{"kind":"eden:hall_board"},"b3":{"hands":{},"links":{"soul":["s3"]}}}},"asker":{"sees":["public"]},"expect":{"verdict":"yes","who":"anyone"}},
+    {"name":"hall_board_show_page_presenter","act":{"this":"w1","form":"show_page","args":{"page":"p_tides_1"}},"state":{"actor":"b1","nodes":{"w1":{"kind":"eden:hall_board","links":{"presenter":["b1"]}},"b1":{"hands":{},"links":{"soul":["s1"]}},"b2":{"hands":{},"links":{"soul":["s2"]}}}},"asker":{"sees":["public"]},"expect":{"verdict":"yes","who":{"link":"presenter"},"read":[["b1/soul","s1"],["w1/link/1/ends",["b1"]]]}},
+    {"name":"hall_board_show_page_listener","act":{"this":"w1","form":"show_page","args":{"page":"p_tides_1"}},"state":{"actor":"b2","nodes":{"w1":{"kind":"eden:hall_board","links":{"presenter":["b1"]}},"b1":{"hands":{},"links":{"soul":["s1"]}},"b2":{"hands":{},"links":{"soul":["s2"]}}}},"asker":{"sees":["public"]},"expect":{"verdict":"no","reason":"not_permitted","who":{"link":"presenter"},"detail":{"link":"presenter","ends":["b1"]}}},
+    {"name":"hall_board_clear_stranger","act":{"this":"w1","form":"clear"},"state":{"actor":"b3","nodes":{"w1":{"kind":"eden:hall_board","fields":{"page":{"text":"p_tides_1"}},"links":{"presenter":["b1"]}},"b1":{"hands":{},"links":{"soul":["s1"]}},"b3":{"hands":{},"links":{"soul":["s3"]}}}},"asker":{"sees":["public"]},"expect":{"verdict":"no","reason":"not_permitted","who":{"link":"presenter"},"detail":{"link":"presenter","ends":["b1"]}}},
+    {"name":"hall_board_stop_presenting_listener","act":{"this":"w1","form":"stop_presenting"},"state":{"actor":"b2","nodes":{"w1":{"kind":"eden:hall_board","links":{"presenter":["b1"]}},"b1":{"hands":{},"links":{"soul":["s1"]}},"b2":{"hands":{},"links":{"soul":["s2"]}}}},"asker":{"sees":["public"]},"expect":{"verdict":"no","reason":"not_permitted","who":{"link":"presenter"},"detail":{"link":"presenter","ends":["b1"]}}}
+  ]
+}
