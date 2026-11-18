@@ -25,11 +25,17 @@
 //! intent carrying words is refused `intent.text-not-stored` and logged without its intent: none of their bytes
 //! reach the log (`a5_` test).
 //!
-//! World time is the machine's clock in microseconds until the tick loop runs on K7's ticker.
+//! **Measures** (O4, #2694, `crate::measures`): each act carries its stamps from the socket to its answer, each
+//! tick times its phases, and every queue its oldest item; the answers thread adds the block to each answer frame as
+//! it leaves, after the tick's record is on the disk, so the logged answer never holds it. `health.json` is written
+//! by its own thread. [`Config::measures`] off takes no stamps and adds no block.
+//!
+//! World time is the machine's clock in microseconds until the tick loop runs on K7's ticker ([`Config::now`]).
 // worldd's real clock: the tick loop and world time read the machine's clocks until K7's ticker drives them.
 #![allow(clippy::disallowed_methods)]
 
 use crate::checkers::{self, Act, Candidate, Rules};
+use crate::measures::{self, Measures, Stamps};
 use replica::apply::Replica;
 use replica::effects::{Actor, Cause, Effect, Part, Refusal};
 use replica::encode::{Name, Value, decode, encode};
@@ -43,6 +49,7 @@ use sim::log::{Log, Storage};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread::{self, JoinHandle};
@@ -63,9 +70,39 @@ pub enum Event {
     Arrival {
         bytes: Vec<u8>,
         reply: Reply,
+        /// Its stamps so far and its key in the arrivals queue (default when measures are off): see [`Door`].
+        stamps: Stamps,
+        key: u64,
     },
     Checked(Box<(Act, Checks)>),
+    /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
+    Stall(Duration),
     Stop,
+}
+
+/// Where intents enter the world: stamps each as it is read, when measures are on.
+#[derive(Clone)]
+pub struct Door {
+    pub events: Sender<Event>,
+    pub measures: Option<Arc<Measures>>,
+}
+
+impl Door {
+    /// Hands an intent's bytes to the clock thread; false once the world has stopped.
+    pub fn arrive(&self, bytes: Vec<u8>, reply: Reply) -> bool {
+        let (stamps, key) = self
+            .measures
+            .as_ref()
+            .map_or((Stamps::default(), 0), |m| m.arrive());
+        self.events
+            .send(Event::Arrival {
+                bytes,
+                reply,
+                stamps,
+                key,
+            })
+            .is_ok()
+    }
 }
 
 pub struct Config {
@@ -77,6 +114,12 @@ pub struct Config {
     pub checkers: usize,
     /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench).
     pub arrivals: Option<File>,
+    /// Stamps, the answers' block, tick phases and queue ages (O4). Off takes no stamps and adds no block.
+    pub measures: bool,
+    /// Where `health.json` is written every two seconds, when measures are on.
+    pub health: Option<PathBuf>,
+    /// World time (the machine's clock, [`now`]; a test gives a fixed one so two runs log the same bytes).
+    pub now: fn() -> Micros,
 }
 
 impl Config {
@@ -88,6 +131,9 @@ impl Config {
             deadline: 10_000_000,
             checkers: 2,
             arrivals: None,
+            measures: true,
+            health: None,
+            now,
         }
     }
 }
@@ -95,10 +141,18 @@ impl Config {
 /// The running world: send it [`Event`]s; [`World::stop`] ends it once the answers already due are sent.
 pub struct World {
     pub events: Sender<Event>,
+    pub measures: Option<Arc<Measures>>,
     clock: Option<JoinHandle<()>>,
 }
 
 impl World {
+    pub fn door(&self) -> Door {
+        Door {
+            events: self.events.clone(),
+            measures: self.measures.clone(),
+        }
+    }
+
     pub fn stop(mut self) {
         let _ = self.events.send(Event::Stop);
         if let Some(c) = self.clock.take() {
@@ -122,12 +176,19 @@ struct Open {
     expiry: Micros,
     intent: Value,
     waiters: Vec<Reply>,
+    stamps: Stamps,
 }
 
-/// One tick's record and the answers it releases once it is on the disk.
+/// An answer to send once its tick is on the disk: to whom, its frame as logged, and its stamps.
+type Out = (Vec<Reply>, Vec<u8>, Stamps);
+
+/// One tick's record and the answers it releases once it is on the disk, with the tick's start and when it was
+/// handed to the log (when measures are on).
 struct Tick {
     record: Option<Vec<u8>>,
-    replies: Vec<(Vec<Reply>, Vec<u8>)>,
+    replies: Vec<Out>,
+    started: Option<u64>,
+    handed: Option<u64>,
 }
 
 struct Clock {
@@ -147,8 +208,9 @@ struct Clock {
     deadline: Micros,
     arrivals: Option<File>,
     checked: Vec<(Act, Checks)>,
-    replies: Vec<(Vec<Reply>, Vec<u8>)>,
+    replies: Vec<Out>,
     rows: Vec<Value>,
+    measures: Option<Arc<Measures>>,
     effects: Vec<Effect>,
     parts: Vec<Arc<Part>>,
 }
@@ -240,7 +302,7 @@ impl Clock {
         id: Option<Id>,
         intent: Option<Value>,
         answer: &Answer,
-        waiters: Vec<Reply>,
+        (waiters, stamps): (Vec<Reply>, Stamps),
     ) {
         let frame = self.frame(answer);
         self.sequences.answered(&key, sequence, frame.clone());
@@ -256,7 +318,7 @@ impl Clock {
             row.insert(5, i);
         }
         self.rows.push(Value::Map(row));
-        self.replies.push((waiters, frame));
+        self.replies.push((waiters, frame, stamps));
     }
 
     /// Ends open act `id` with `answer`.
@@ -266,18 +328,34 @@ impl Clock {
         };
         self.in_flight.remove(&(o.key.clone(), o.sequence));
         self.deadlines.close(o.body, id);
+        if let Some(m) = &self.measures {
+            if o.stamps.0[2].is_none() {
+                m.ended_unchecked(id.counter());
+            }
+            m.left_tick(id.counter());
+        }
         let a = answer(self);
-        self.answered(o.key, o.sequence, Some(id), Some(o.intent), &a, o.waiters);
+        self.answered(
+            o.key,
+            o.sequence,
+            Some(id),
+            Some(o.intent),
+            &a,
+            (o.waiters, o.stamps),
+        );
     }
 
-    fn arrival(&mut self, bytes: &[u8], reply: Reply, now: Micros) {
+    fn arrival(&mut self, bytes: &[u8], reply: Reply, mut stamps: Stamps, key: u64, now: Micros) {
+        if let Some(m) = &self.measures {
+            m.taken(key, &mut stamps);
+        }
         let intent = match Intent::read(bytes) {
             Ok(i) => i,
             Err(r) => {
                 let f = self.frame(&Answer::Unread {
                     reason: name(r.name),
                 });
-                self.replies.push((vec![reply], f));
+                self.replies.push((vec![reply], f, stamps));
                 return;
             }
         };
@@ -291,10 +369,10 @@ impl Clock {
             return;
         }
         match self.sequences.seen(&key, sequence) {
-            Seen::Kept(f) => return self.replies.push((vec![reply], f)),
+            Seen::Kept(f) => return self.replies.push((vec![reply], f, stamps)),
             Seen::Stale => {
                 let f = self.frame(&self.refusal(actor, sequence, "intent.stale-seq"));
-                return self.replies.push((vec![reply], f));
+                return self.replies.push((vec![reply], f, stamps));
             }
             Seen::Fresh => {}
         }
@@ -306,21 +384,21 @@ impl Clock {
         let value = intent.to_value();
         if has_words(&value) {
             let a = self.refusal(actor, sequence, "intent.text-not-stored");
-            return self.answered(key, sequence, None, None, &a, vec![reply]);
+            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
         }
         if expired(intent.expiry, now) {
             let a = self.refusal(actor, sequence, "intent.expired");
-            return self.answered(key, sequence, None, Some(value), &a, vec![reply]);
+            return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
         }
         let Some(id) = Id::new(self.lineage, self.next_intent) else {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
-            return self.answered(key, sequence, None, Some(value), &a, vec![reply]);
+            return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
         };
         let act = match act_of(&intent, self.next_intent, Cause::Intent(id)) {
             Ok(a) => a,
             Err(reason) => {
                 let a = self.refusal(actor, sequence, reason);
-                return self.answered(key, sequence, None, Some(value), &a, vec![reply]);
+                return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
             }
         };
         self.next_intent += 1;
@@ -340,12 +418,26 @@ impl Clock {
                 expiry: intent.expiry,
                 intent: value,
                 waiters: vec![reply],
+                stamps,
             },
         );
+        if let Some(m) = &self.measures {
+            m.to_check(id.counter(), stamps.0[1]);
+        }
         let _ = self.acts.send(act);
     }
 
+    /// A check came back: kept for the next tick.
+    fn checks_back(&mut self, act: Act, checks: Checks) {
+        if let Some(m) = &self.measures {
+            let open = Id::new(self.lineage, act.id).and_then(|id| self.open.get_mut(&id));
+            m.checked(act.id, open.map(|o| &mut o.stamps));
+        }
+        self.checked.push((act, checks));
+    }
+
     fn tick(&mut self, now: Micros) {
+        let started = self.measures.as_ref().map(|_| measures::steady_us());
         for (mut act, checks) in std::mem::take(&mut self.checked) {
             let Some(id) = Id::new(self.lineage, act.id) else {
                 continue;
@@ -372,6 +464,10 @@ impl Clock {
                     });
                 }
                 Outcome::Recheck { version } => {
+                    if let Some(m) = &self.measures {
+                        m.left_tick(act.id);
+                        m.to_check(act.id, None);
+                    }
                     act.recheck = Some(version);
                     let _ = self.acts.send(act);
                 }
@@ -380,12 +476,14 @@ impl Clock {
                 }
             }
         }
+        let committed = started.map(|_| measures::steady_us());
         while let Some(id) = self.deadlines.due(now) {
             if let Some(o) = self.open.get(&id) {
                 let (actor, sequence) = (o.actor, o.sequence);
                 self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
             }
         }
+        let deadlines = started.map(|_| measures::steady_us());
         let record = (!self.rows.is_empty() || !self.effects.is_empty()).then(|| {
             let v = Value::Map(BTreeMap::from([
                 (1, Value::Bytes(self.replica.header().hash().to_bytes())),
@@ -397,30 +495,70 @@ impl Clock {
             ]));
             encode(&v).unwrap_or_default()
         });
+        let recorded = started.map(|_| measures::steady_us());
         if !self.parts.is_empty() {
             self.publisher.publish(std::mem::take(&mut self.parts));
         }
+        let handed = started.map(|_| measures::steady_us());
+        if let (Some(m), Some(t0), Some(t1), Some(t2), Some(t3), Some(t4)) = (
+            &self.measures,
+            started,
+            committed,
+            deadlines,
+            recorded,
+            handed,
+        ) {
+            let us = |a: u64, b: u64| b.saturating_sub(a);
+            m.tick([us(t0, t1), us(t1, t2), us(t2, t3), us(t3, t4)]);
+        }
         let replies = std::mem::take(&mut self.replies);
         if record.is_some() || !replies.is_empty() {
-            let _ = self.answers.send(Tick { record, replies });
+            let _ = self.answers.send(Tick {
+                record,
+                replies,
+                started,
+                handed,
+            });
         }
     }
 }
 
 /// The answers thread: each tick's record appended and on the disk before its answers leave. A log that fails
 /// stops it for good: nothing is answered that is not on the disk.
-fn answer_loop<S: Storage + 'static>(mut log: Log<S>, ticks: Receiver<Tick>) {
-    for t in ticks {
+fn answer_loop<S: Storage + 'static>(
+    mut log: Log<S>,
+    ticks: Receiver<Tick>,
+    measures: Option<Arc<Measures>>,
+) {
+    for (n, t) in ticks.into_iter().enumerate() {
+        let n = n as u64;
+        if let Some(m) = &measures {
+            m.queues[measures::LOG].enter(n, t.handed.unwrap_or_else(measures::steady_us));
+        }
         if let Some(record) = t.record
             && let Err(e) = log.append(record).and_then(|n| log.wait_durable(n + 1))
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
         }
-        for (waiters, frame) in t.replies {
+        let synced = measures.as_ref().map(|_| measures::steady_us());
+        for (waiters, frame, mut stamps) in t.replies {
+            let frame = match &measures {
+                Some(m) => {
+                    stamps.0[3] = t.started;
+                    stamps.0[4] = t.handed;
+                    stamps.0[5] = synced;
+                    stamps.0[6] = Some(measures::steady_us());
+                    measures::with_block(frame, &m.answered(&stamps))
+                }
+                None => frame,
+            };
             for w in waiters {
                 let _ = w.send(frame.clone());
             }
+        }
+        if let Some(m) = &measures {
+            m.queues[measures::LOG].leave(n);
         }
     }
 }
@@ -476,10 +614,15 @@ pub fn start<S: Storage + 'static>(
             }
         })
         .map_err(io)?;
+    let measures = cfg.measures.then(|| Arc::new(Measures::default()));
+    if let (Some(m), Some(path)) = (&measures, cfg.health) {
+        measures::write_health(Arc::clone(m), path, measures::EVERY);
+    }
     let (answers, ticks) = channel();
+    let m = measures.clone();
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks))
+        .spawn(move || answer_loop(log, ticks, m))
         .map_err(io)?;
     let mut c = Clock {
         replica: world,
@@ -502,8 +645,10 @@ pub fn start<S: Storage + 'static>(
         rows: Vec::new(),
         effects: Vec::new(),
         parts: Vec::new(),
+        measures: measures.clone(),
     };
     let tick = cfg.tick;
+    let now = cfg.now;
     let clock = thread::Builder::new()
         .name("clock".into())
         .spawn(move || {
@@ -518,8 +663,17 @@ pub fn start<S: Storage + 'static>(
                     continue;
                 }
                 match rx.recv_timeout(next - at) {
-                    Ok(Event::Arrival { bytes, reply }) => c.arrival(&bytes, reply, now()),
-                    Ok(Event::Checked(k)) => c.checked.push(*k),
+                    Ok(Event::Arrival {
+                        bytes,
+                        reply,
+                        stamps,
+                        key,
+                    }) => c.arrival(&bytes, reply, stamps, key, now()),
+                    Ok(Event::Checked(k)) => {
+                        let (act, checks) = *k;
+                        c.checks_back(act, checks);
+                    }
+                    Ok(Event::Stall(d)) => thread::sleep(d),
                     Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => break,
                     Err(RecvTimeoutError::Timeout) => {}
                 }
@@ -531,6 +685,7 @@ pub fn start<S: Storage + 'static>(
         .map_err(io)?;
     Ok(World {
         events,
+        measures,
         clock: Some(clock),
     })
 }
@@ -641,7 +796,7 @@ mod tests {
     fn send(w: &World, i: &Intent) -> Receiver<Vec<u8>> {
         let (reply, rx) = channel();
         let bytes = encode(&i.to_value()).unwrap();
-        w.events.send(Event::Arrival { bytes, reply }).unwrap();
+        assert!(w.door().arrive(bytes, reply));
         rx
     }
 
@@ -671,6 +826,18 @@ mod tests {
             Some(Value::Uint(k)) => (*k, a.get(&4).cloned().unwrap(), entries),
             other => panic!("a kind: {other:?}"),
         }
+    }
+
+    /// A frame without its times (O4's field 3): the answer as logged.
+    fn bare(frame: &[u8]) -> Vec<u8> {
+        let Value::Map(mut m) = decode(frame).unwrap().value else {
+            panic!("a frame")
+        };
+        assert!(
+            m.remove(&replica::intents::ANSWER_TIMES).is_some(),
+            "a frame with its times"
+        );
+        encode(&Value::Map(m)).unwrap()
     }
 
     fn reason(frame: &[u8]) -> String {
@@ -724,7 +891,11 @@ mod tests {
         let first = answer(&send(&w, &toggle(body, thing, 1, later)));
         assert_eq!(read(&first).0, 1);
         let again = answer(&send(&w, &toggle(body, thing, 1, later)));
-        assert_eq!(again, first, "the kept answer");
+        assert_eq!(
+            bare(&again),
+            bare(&first),
+            "the kept answer (its times are its own)"
+        );
         let gone = answer(&send(&w, &toggle(body, thing, 2, 1)));
         assert_eq!(reason(&gone), "intent.expired");
         let next = answer(&send(&w, &toggle(body, thing, 3, later)));
@@ -740,7 +911,7 @@ mod tests {
         // A restart replays the log: the repeat gets the same answer, and a new intent a new id.
         let (w, _) = world(Held::new(store.bytes()), 2, 10_000_000);
         let again = answer(&send(&w, &toggle(body, thing, 20, later)));
-        assert_eq!(again, kept, "kept across a restart");
+        assert_eq!(bare(&again), bare(&kept), "kept across a restart");
         let (k, id, _) = read(&answer(&send(&w, &toggle(body, thing, 21, later))));
         assert_eq!(k, 1);
         assert_ne!(id, read(&kept).1, "an id is never minted twice");
@@ -774,5 +945,151 @@ mod tests {
         assert_eq!(reason(&answer(&rx)), "act.timed-out");
         assert!(started.elapsed() >= Duration::from_millis(100));
         w.stop();
+    }
+
+    // --- O4 (#2694): measures. A1 and A3 are the `measures` bench. ---------------------------------------------
+
+    /// A fixed world time, so two runs log the same bytes.
+    fn fixed() -> Micros {
+        1_000_000_000_000
+    }
+
+    /// The log of `acts` acts sent one at a time, each after the last's answer, with measures on or off.
+    fn seeded_log(measures: bool, acts: u64) -> Vec<u8> {
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 4, 0);
+        let pairs = w.pairs.clone();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.tick = Duration::from_millis(2);
+        cfg.measures = measures;
+        cfg.now = fixed;
+        let world =
+            start(w.replica, toggles::rules(), store.clone(), cfg).expect("the world starts");
+        for s in 1..=acts {
+            let (body, thing) = pairs[(s % 4) as usize];
+            let f = answer(&send(
+                &world,
+                &toggle(body, thing, s / 4 + 1, fixed() + 60_000_000),
+            ));
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            assert_eq!(
+                m.contains_key(&replica::intents::ANSWER_TIMES),
+                measures,
+                "the block rides the answer exactly when measures are on"
+            );
+            assert_eq!(read(&f).0, 1, "a receipt");
+        }
+        world.stop();
+        store.bytes()
+    }
+
+    #[test]
+    fn o4_a5_the_log_is_the_same_with_measures_on_and_off() {
+        let on = seeded_log(true, 200);
+        let off = seeded_log(false, 200);
+        assert_eq!(
+            recover(&on).unwrap().records.len(),
+            200,
+            "one record per act"
+        );
+        assert_eq!(
+            replica::ids::sha256(&on),
+            replica::ids::sha256(&off),
+            "the log hash, measures on and off"
+        );
+    }
+
+    /// `"<name>":{"items":n,"oldest_us":m}` in a health file: (n, m).
+    fn queue(health: &str, name: &str) -> (u64, u64) {
+        let at = health
+            .find(&format!("\"{name}\":{{\"items\":"))
+            .expect(name);
+        let rest = &health[at + name.len() + 12..];
+        let num = |s: &str| {
+            s.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+        };
+        let items = num(rest);
+        let rest = &rest[rest.find("\"oldest_us\":").unwrap() + 12..];
+        (items.parse().unwrap(), num(rest).parse().unwrap())
+    }
+
+    #[test]
+    fn o4_a2_a4_health_shows_phases_and_queues_and_updates_with_the_clock_stuck() {
+        let dir = std::env::temp_dir().join(format!("o4-health-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("health.json");
+        let w = toggles::World::build(1, 4, 0);
+        let pairs = w.pairs.clone();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.health = Some(path.clone());
+        let world = start(w.replica, toggles::rules(), Held::new(Vec::new()), cfg).unwrap();
+        let later = now() + 600_000_000;
+        for s in 1..=20 {
+            answer(&send(&world, &toggle(pairs[0].0, pairs[0].1, s, later)));
+        }
+        // A2: each tick's phases against the budget, and every queue's oldest item.
+        thread::sleep(Duration::from_millis(2_100));
+        let h = std::fs::read_to_string(&path).unwrap();
+        assert!(h.contains("\"budget_us\":50000"), "{h}");
+        for p in measures::PHASES {
+            assert!(h.contains(&format!("\"{p}\":")), "phase {p}: {h}");
+        }
+        for p in measures::PARTS {
+            assert!(
+                h.contains(&format!("\"{p}\":{{\"count\":20,")),
+                "part {p}: {h}"
+            );
+        }
+        for q in measures::QUEUES {
+            assert_eq!(queue(&h, q).0, 0, "queue {q} is empty at rest: {h}");
+        }
+
+        // A4: the clock thread held for 7 s; the health file keeps coming every 2 s, its arrivals ageing.
+        world
+            .events
+            .send(Event::Stall(Duration::from_secs(7)))
+            .unwrap();
+        thread::sleep(Duration::from_millis(50));
+        let rx = send(&world, &toggle(pairs[1].0, pairs[1].1, 1, later));
+        let start = Instant::now();
+        let mut seen: Vec<(Duration, u64)> = Vec::new();
+        let mut last = String::new();
+        while start.elapsed() < Duration::from_millis(6_500) {
+            let h = std::fs::read_to_string(&path).unwrap_or_default();
+            if h != last && !h.is_empty() {
+                seen.push((start.elapsed(), queue(&h, "arrivals").1));
+                last = h;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        eprintln!(
+            "o4 a4: health.json rewrites while the clock thread is held (since the hold, arrivals oldest µs): {seen:?}"
+        );
+        assert!(
+            seen.len() >= 3,
+            "written at least three times while stuck: {seen:?}"
+        );
+        for pair in seen.windows(2) {
+            assert!(
+                pair[1].0 - pair[0].0 <= Duration::from_millis(2_300),
+                "every 2 s: {seen:?}"
+            );
+            assert!(
+                pair[1].1 > pair[0].1,
+                "the arrival waits, older each time: {seen:?}"
+            );
+        }
+        assert!(seen.last().unwrap().1 >= 4_000_000, "{seen:?}");
+        assert_eq!(
+            read(&answer(&rx)).0,
+            1,
+            "answered once the clock thread is back"
+        );
+        world.stop();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

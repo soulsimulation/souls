@@ -21,9 +21,14 @@
 //!   body's motion in the root frame, and T1's leave and arrive carry it under one transfer id, inside one zone.
 //!   Within one node (one square of the open ground to the next) nothing crosses: the node and frame are the same.
 //!
-//! Not here: other people (N7), gaits (N11), the controller's resources (B1), facing (B1's separate input), drawing.
+//! - **Along the surface** (N11a, #2735). A speed is along the surface: where the walked line climbs or falls, the move
+//!   is walked again from the start, its length on the plan times the line's cosine, so the distance covered on a
+//!   slope is the speed's. The height part of the velocity stored is the climb.
+//!
+//! Not here: other people (N7), the gaits' table (`crate::gaits`), the controller's resources (B1), facing (B1's
+//! separate input), drawing.
 
-use crate::ground::{Piece, SQUARE};
+use crate::ground::{Piece, SQUARE, Terrain};
 use replica::effects::{Refusal, TransferRec};
 use replica::ids::{Id, Scope};
 use replica::pose::{
@@ -76,6 +81,9 @@ pub struct Surface {
     tris: Vec<Vec<Tri>>,
     /// The pieces whose bounds meet each 16 m cell.
     cells: BTreeMap<(i64, i64), Vec<u32>>,
+    /// The terrain under the open ground (N11a, #2735), and per piece, per triangle, whether the triangle lies on it
+    /// (each corner at the terrain's height there): such a triangle's heights are the terrain's own.
+    terrain: Option<(std::sync::Arc<Terrain>, Vec<Vec<bool>>)>,
 }
 
 /// A body the mover owns: its pose and velocity (in its frame), and the piece and triangle it stands in.
@@ -149,7 +157,16 @@ impl Surface {
             pieces,
             tris,
             cells,
+            terrain: None,
         }
+    }
+
+    /// The same surface on terrain `t` (the open ground's, `crate::ground::OpenGround::terrain`): inside a triangle
+    /// that `on` marks (per piece, per triangle: `crate::ground::OpenGround::on_terrain`), the height is the
+    /// terrain's, read at the point; elsewhere (a pier over water, a floor) it is the triangle's.
+    pub fn on_terrain(mut self, t: Terrain, on: Vec<Vec<bool>>) -> Surface {
+        self.terrain = Some((std::sync::Arc::new(t), on));
+        self
     }
 
     pub fn pieces(&self) -> &[Piece] {
@@ -196,6 +213,16 @@ impl Surface {
 
     /// The surface's height at `p` in triangle `t` of piece `q`, µm.
     fn height(&self, q: u32, t: u32, p: [i128; 2]) -> i64 {
+        if let Some((ground, on)) = &self.terrain
+            && on
+                .get(q as usize)
+                .and_then(|l| l.get(t as usize))
+                .copied()
+                .unwrap_or(false)
+            && let Some(h) = ground.height_at(p[0] as i64, p[1] as i64)
+        {
+            return h;
+        }
         let (v, idx, _) = &self.tris[q as usize][t as usize];
         let y = |k: usize| i128::from(self.pieces[q as usize].vertices[idx[k] as usize][1]) * 1000;
         let a = orient(v[0], v[1], v[2]);
@@ -371,12 +398,25 @@ impl Surface {
             div_round(i128::from(input.velocity.x) * dt, m),
             div_round(i128::from(input.velocity.z) * dt, m),
         ];
-        let (q, t, e) = if want == [0, 0] {
+        let (mut q, mut t, mut e) = if want == [0, 0] {
             (body.piece, body.tri, p)
         } else {
             self.walk(body.piece, body.tri, p, [p[0] + want[0], p[1] + want[1]])
         };
-        let y = i128::from(self.height(q, t, e));
+        let mut y = i128::from(self.height(q, t, e));
+        // Speed is along the surface (N11a, #2735): on a slope the move is walked again, shortened by the cosine of
+        // the line just walked (its length on the plan over its length on the surface), once.
+        let dy = y - i128::from(body.pose.position.y);
+        if dy != 0 && want != [0, 0] {
+            let (hx, hz) = (e[0] - p[0], e[1] - p[1]);
+            let h2 = hx * hx + hz * hz;
+            let (h, l) = (h2.isqrt(), (h2 + dy * dy).isqrt());
+            if h > 0 {
+                let w = [div_round(want[0] * h, l), div_round(want[1] * h, l)];
+                (q, t, e) = self.walk(body.piece, body.tri, p, [p[0] + w[0], p[1] + w[1]]);
+                y = i128::from(self.height(q, t, e));
+            }
+        }
         let fit = |v: i128| i64::try_from(v).map_err(|_| ());
         let (Ok(x), Ok(z)) = (fit(e[0]), fit(e[1])) else {
             return refuse("out-of-range", "a position past 64 bits");
