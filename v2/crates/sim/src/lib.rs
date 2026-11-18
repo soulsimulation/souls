@@ -3,12 +3,16 @@
 
 pub mod checkpoint;
 pub mod clock;
+pub mod controller;
 pub mod frozen;
 pub mod ground;
+pub mod host;
+pub mod index;
 pub mod links;
 pub mod log;
 pub mod mover;
 pub mod routes;
+pub mod spots;
 pub mod unstick;
 pub mod walk;
 

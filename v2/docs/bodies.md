@@ -4,8 +4,8 @@ Engine v2 T9 (#2663), contract T9 in [TRUNK.md](TRUNK.md). It fixes what a body 
 is (a claim on them), the one interface a skill touches the world through, and the code hatch's shape. Code:
 `v2/crates/replica/src/bodies.rs` and `host.rs`; the built-in skills in `v2/crates/skills`. Fixtures:
 `v2/crates/replica/fixtures/bodies/`. Checks: `crates/replica/tests/bodies.rs` and `crates/skills/tests/`. Moving
-the real walk behind the interface and handing intents back after a restart (K13), the controller (B1) and running a
-hatch (F8) are not here.
+the real walk behind the interface and handing intents back after a restart (K13, T9b) and running a hatch (F8) are
+not here. The controller (B1) is summarised under [The controller](#the-controller-b1).
 
 ## Bodies and skills
 
@@ -39,10 +39,15 @@ hatch (F8) are not here.
 
 7. **A skill touches the world through one trait, `Host`, in `replica`:** world time (T5; never a machine's clock),
    its body, reading nodes (its body as of this tick, every other node as of the previous tick, T1), a closed list of
-   geometry questions answered in integers (a distance, a point), timers on its body set and cleared (T6 rule 15),
+   geometry questions answered in integers (a distance, a point, and the bodies near it: their ids, positions and
+   velocities on the node it stands on, as of the previous tick), timers on its body set and cleared (T6 rule 15),
    draws from the world's random numbers, controller inputs (T4's own `ControllerInput`: a velocity in three
-   dimensions in the body's frame and a movement mode), and entries of its own node (T6 rule 6: generic changes, all
-   or none, with the named event that says what they meant), any other node refused as `write-outside-own`. A skill
+   dimensions in the body's frame and a movement mode), a request to be carried across a link by the link's move
+   (T4; the controller carries it, its read shows field 40 meanwhile, and a shut door on the way is opened for it by
+   the world, the body as the acting Soul, while it stands that tick), and entries of its own node (T6 rule 6:
+   generic changes, all or none, with the named event that says what they meant), any other node refused as
+   `write-outside-own`, a motion change on its own body refused as `motion-outside-controller` and a reparent of its
+   own body as `reparent-outside-controller` (it moves only by controller inputs and crossings). A skill
    is a `Skill`: its shape and a step that returns going, done or failed with a name. The built-in skills use the
    same trait. A skill only asks: the claims it holds are made by the body, so nothing it returns needs sealing.
 8. **The wall is a crate boundary, and a scan for what the compiler allows.** Built-in skills live in
@@ -55,9 +60,27 @@ hatch (F8) are not here.
    (`HashMap`, `HashSet`, `RandomState`), `skill-names-state` (the fixtures' harness) and `skill-allows-unsafe` (a
    crate root without the `forbid`); `use std as` counts as reaching out. A name reached through a re-export or a
    macro gets past a scan of text.
+   **The walk's fields (T9b A3).** A walker waiting for a link taken in turns sets field 41 on its own body,
+   `[link, distance µm]`, and clears it with `[]`; the world shows field 42 (1) on such a link and field 43, the body
+   its owning node lets in, both read with `read(link)`. The owner reads the marks as of the last tick and writes
+   its grants; a walker never writes the link.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
+
+## The controller (B1)
+
+The controller (`v2/crates/sim/src/controller`, B1 #2680) is the only way a body is moved or posed: it holds each
+body's mover state and is the one caller of the mover. It also carries a body across a link along the link's line
+(T9b #3120, `sim::host::carry`), and answers a dry run (what one step would do to a copy, moving nothing) for the
+world's geometry answers. N7's `Crowd` still keeps its own bodies, stepped by that dry run, until T9c retires it for
+the walk skill (`skills::route`). A driver is a claim
+made by rule 4's rules, so a second driver asking for a held resource is refused by name and the first driver's input
+stands. A driver is a skill, its staged inputs handed on by `sim::host::hand_on` under its run's driver, or a script
+(`v2/tools/body-script`). One input type serves every family: velocity and mode (T4), facing and stance, set only by
+the driver holding all the body's locomotion, and one move per resource, set by that resource's driver; anything else
+is `resource-not-held` or `resource-missing`. An unheld resource gets the neutral input (still, hands down, facing
+kept), which never moves a body. An input is logged only when it changes.
 
 ## The code hatch, shape only
 

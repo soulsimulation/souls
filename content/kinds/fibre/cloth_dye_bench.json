@@ -1,0 +1,100 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cloth_dye_bench",
+  "owner": "thing",
+  "state": {
+    "indigo": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "audience": {"rule": "everyone"}
+    },
+    "rust": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "audience": {"rule": "everyone"}
+    },
+    "water": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 2,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [250, 0, 800]
+    }
+  },
+  "slots": {
+    "cloth": {
+      "admits": "thing",
+      "kinds": ["eden:dyeable_cloth"],
+      "most": 1,
+      "at_mm": [250, 1000, 0],
+      "fits_mm": [400, 80, 300]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [1100, 1020, 700]
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:cloth_dye_bench",
+    "table": [
+      {
+        "part": "arm.l",
+        "field": "indigo",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "arm.r",
+        "field": "rust",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "fill",
+        "field": "water",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "fill",
+        "field": "water",
+        "do": "scale",
+        "axis": "y",
+        "range": [0, 2],
+        "to": [0, 1000]
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-460,460,-260],"size":[60,920,60],"tint":"wood"},{"kind":"box","at":[-460,460,260],"size":[60,920,60],"tint":"wood"},{"kind":"box","at":[460,460,-260],"size":[60,920,60],"tint":"wood"},{"kind":"box","at":[460,460,260],"size":[60,920,60],"tint":"wood"},{"kind":"box","at":[0,940,0],"size":[1100,40,700],"tint":"wood"},{"kind":"box","at":[250,980,0],"size":[500,40,500],"tint":"board"},{"kind":"box","at":[-310,975,-220],"size":[260,30,150],"tint":"enamel"},{"kind":"box","at":[-310,975,220],"size":[260,30,150],"tint":"enamel"},{"kind":"box","at":[-310,995,-220],"size":[200,10,110],"tint":"indigo","role":"arm.l"},{"kind":"box","at":[-310,995,220],"size":[200,10,110],"tint":"rust","role":"arm.r"},{"kind":"box","at":[-310,970,0],"size":[240,20,180],"tint":"enamel"},{"kind":"box","at":[-310,988,0],"size":[230,24,170],"tint":"water","pivot":[-310,976,0],"role":"fill"}],"palette":{"wood":"#79553b","board":"#c3a077","enamel":"#e9e1c8","indigo":"#3450a0","rust":"#b44e32","water":"#4998ba"},"tags":["art","dye","bench","object"]}
+  },
+  "text": {
+    "card": "A cloth-dye bench with an indigo charge, a rust charge and two of water.",
+    "art": "art",
+    "dye": "dye",
+    "cloth": "cloth"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": ["dye", "cloth"]
+  }
+}
