@@ -80,6 +80,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:bread_board",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,965,0],"size":[1200,30,600],"tint":"wood"},{"kind":"box","at":[-500,475,-200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[-500,475,200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,-200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[300,990,0],"size":[350,20,400],"tint":"rack"},{"kind":"cyl","at":[-450,1015,0],"r":45,"h":50,"segments":8,"tint":"dough","when":"@dough>=1"},{"kind":"cyl","at":[-320,1015,0],"r":45,"h":50,"segments":8,"tint":"dough","when":"@dough>=2"},{"kind":"cyl","at":[-190,1015,0],"r":45,"h":50,"segments":8,"tint":"dough","when":"@dough>=3"}],"palette":{"wood":"#b68d60","rack":"#37332e","dough":"#eee0bf"},"tags":["kitchen","table","bread","object"]}

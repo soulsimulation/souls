@@ -80,6 +80,8 @@
       ]
     }
   },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
   "text": {
     "card": "A sailboat: it makes a set trip across the water and back; nobody steers.",
     "getting_around": "transport",

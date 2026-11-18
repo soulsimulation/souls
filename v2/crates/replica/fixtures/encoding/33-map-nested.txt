@@ -1,0 +1,2 @@
+{1: {1: 7, 2: [1]}, 2: {}} # a map holding a map, which holds an array, and an empty map
+a201a2010702810102a0
