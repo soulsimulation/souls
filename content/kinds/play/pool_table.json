@@ -1,0 +1,86 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pool_table",
+  "owner": "thing",
+  "state": { "racked": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "links": { "player": { "n": 1, "from": "body", "most": 2, "audience": { "rule": "everyone" } } },
+  "points": {
+    "by_break_end": { "role": "stand", "at_mm": [-1600, 0, 0] },
+    "by_side": { "role": "stand", "at_mm": [0, 0, 1100] },
+    "cue_ball": { "role": "contact", "at_mm": [-600, 800, 0] }
+  },
+  "slots": {
+    "break_end": { "admits": "body", "most": 1, "at_mm": [-1350, 0, 0], "stand": "by_break_end" },
+    "side": { "admits": "body", "most": 1, "at_mm": [0, 0, 750], "stand": "by_side" }
+  },
+  "geometry": { "bounds_mm": [2554, 912, 1352] },
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
+      "effects": [
+        { "change": "link", "link": "player", "from": "actor", "event": "joined_the_game" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "took_a_place" }
+      ]
+    },
+    "leave": {
+      "who": { "link": "player" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": [
+        { "change": "unlink", "link": "player", "from": "actor", "event": "left_the_game" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stepped_away" }
+      ]
+    },
+    "rack": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "by_break_end" },
+        { "step": "move", "move": "slide", "at": "cue_ball" },
+        { "step": "wait", "us": 10000000 }
+      ],
+      "effects": [{ "change": "set", "field": "racked", "to": true, "event": "balls_racked" }]
+    },
+    "shoot": {
+      "who": { "link": "player" },
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "move", "move": "slide", "at": "cue_ball" }],
+      "effects": [{ "change": "set", "field": "racked", "to": false, "event": "shot_taken" }]
+    }
+  },
+  "roles": { "player": { "need": "required", "places": { "in": "this", "slots": ["break_end", "side"] } } },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:pool_table",
+    "shape": {"shapes":[{"kind":"box","at":[0,620,0],"size":[2240,190,1140],"round":0,"tint":"wood"},{"kind":"box","at":[0,760,0],"size":[2100,30,1000],"round":0,"tint":"felt"},{"kind":"box","at":[0,800,560],"size":[2040,40,40],"round":0,"tint":"rail"},{"kind":"box","at":[0,800,-560],"size":[2040,40,40],"round":0,"tint":"rail"},{"kind":"box","at":[1100,800,0],"size":[40,40,1140],"round":0,"tint":"rail"},{"kind":"box","at":[-1100,800,0],"size":[40,40,1140],"round":0,"tint":"rail"},{"kind":"cyl","at":[-1080,790,-540],"r":70,"h":40,"segments":6,"tint":"pocket"},{"kind":"cyl","at":[1080,790,-540],"r":70,"h":40,"segments":6,"tint":"pocket"},{"kind":"cyl","at":[-1080,790,540],"r":70,"h":40,"segments":6,"tint":"pocket"},{"kind":"cyl","at":[1080,790,540],"r":70,"h":40,"segments":6,"tint":"pocket"},{"kind":"cyl","at":[0,790,-570],"r":70,"h":40,"segments":6,"tint":"pocket"},{"kind":"cyl","at":[0,790,570],"r":70,"h":40,"segments":6,"tint":"pocket"},{"kind":"box","at":[-900,250,-420],"size":[100,440,100],"round":0,"tint":"wood"},{"kind":"box","at":[900,250,-420],"size":[100,440,100],"round":0,"tint":"wood"},{"kind":"box","at":[-900,250,420],"size":[100,440,100],"round":0,"tint":"wood"},{"kind":"box","at":[900,250,420],"size":[100,440,100],"round":0,"tint":"wood"},{"kind":"sphere","at":[500,800,0],"r":28,"segments":4,"tint":"ball","role":"fill"},{"kind":"sphere","at":[560,800,35],"r":28,"segments":4,"tint":"ball2","role":"fill"},{"kind":"sphere","at":[560,800,-35],"r":28,"segments":4,"tint":"ball","role":"fill"},{"kind":"sphere","at":[620,800,0],"r":28,"segments":4,"tint":"ball2","role":"fill"},{"kind":"sphere","at":[-600,800,0],"r":28,"segments":4,"tint":"cue"},{"kind":"cyl","at":[-1050,815,175],"r":12,"h":743,"segments":4,"tint":"cue","pitch":90757,"yaw":109664},{"kind":"cyl","at":[700,860,660],"r":12,"h":808,"segments":4,"tint":"cue","pitch":84339,"yaw":-84282}],"palette":{"wood":"#5e3d27","felt":"#2f6b4a","rail":"#4a2f1e","pocket":"#2b2623","ball":"#d23b2c","ball2":"#e6c23a","cue":"#f2ead8"},"tags":["furniture","game"]},
+    "table": [{ "part": "fill", "field": "racked", "do": "slide", "axis": "x", "at": { "true": 0, "false": -700 } }]
+  },
+  "text": {
+    "card": "A pool table for two players: rack the balls, take turns to shoot.",
+    "game": "game",
+    "billiards": "billiards",
+    "snooker": "snooker",
+    "play": "play",
+    "howto_game": "Two join, one racks the balls, then each shoots in turn."
+  },
+  "card": { "text": "card", "category": "game", "synonyms": ["billiards", "snooker", "play"] },
+  "howtos": {
+    "game": {
+      "text": "howto_game",
+      "steps": [{ "form": "play" }, { "form": "rack" }, { "form": "shoot" }, { "form": "leave" }]
+    }
+  }
+}

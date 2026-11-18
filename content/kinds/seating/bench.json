@@ -4,36 +4,90 @@
   "owner": "thing",
   "state": {},
   "points": {
-    "front_left": { "role": "stand", "at_mm": [-450, 0, 450] },
-    "front_right": { "role": "stand", "at_mm": [450, 0, 450] }
+    "front_left": { "role": "stand", "at_mm": [-400, 0, 574], "yaw_mdeg": 180000 },
+    "front_right": { "role": "stand", "at_mm": [400, 0, 574], "yaw_mdeg": 180000 }
   },
   "slots": {
-    "left": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-450, 450, 0], "stand": "front_left" },
-    "right": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [450, 450, 0], "stand": "front_right" }
+    "left": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-400, 465, 20], "stand": "front_left" },
+    "right": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [400, 465, 20], "stand": "front_right" }
   },
-  "geometry": { "bounds_mm": [1500, 800, 450] },
+  "geometry": { "bounds_mm": [1600, 871, 549] },
   "forms": {
     "sit": {
       "who": "anyone",
       "starts": "act",
       "takes": {
-        "seat": { "type": "slot", "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } }
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
       },
       "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
-      "steps": [
-        { "step": "walk_to", "point": { "arg": "seat" } },
-        { "step": "sit", "slot": { "arg": "seat" } }
-      ],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
       "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
     }
   },
   "motion": { "how": "two_souls" },
   "loose": { "ever": true },
-  "looks": { "model": "look:bench" },
-  "text": {
-    "card": "A wooden bench with room for two to sit side by side.",
-    "seating": "seating",
-    "rest": "rest"
+  "looks": {
+    "model": "look:bench",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [-720, 15, 0],
+          "polygon": [[-20, -235], [20, -235], [20, 235], [-20, 235]],
+          "h": 410,
+          "tint": "iron"
+        },
+        {
+          "kind": "extrude",
+          "at": [720, 15, 0],
+          "polygon": [[-20, -235], [20, -235], [20, 235], [-20, 235]],
+          "h": 410,
+          "tint": "iron"
+        },
+        { "kind": "box", "at": [-720, 620, -240], "size": [60, 500, 60], "round": 0, "tint": "iron", "pitch": -10313 },
+        { "kind": "box", "at": [720, 620, -240], "size": [60, 500, 60], "round": 0, "tint": "iron", "pitch": -10313 },
+        {
+          "kind": "extrude",
+          "at": [0, 433, 160],
+          "polygon": [[-785, -50], [785, -50], [785, 50], [-785, 50]],
+          "h": 15,
+          "tint": "wood"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 433, 0],
+          "polygon": [[-785, -50], [785, -50], [785, 50], [-785, 50]],
+          "h": 15,
+          "tint": "wood"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 433, -160],
+          "polygon": [[-785, -50], [785, -50], [785, 50], [-785, 50]],
+          "h": 15,
+          "tint": "wood"
+        },
+        { "kind": "box", "at": [0, 620, -250], "size": [1600, 110, 30], "round": 0, "tint": "wood", "pitch": -10313 },
+        { "kind": "box", "at": [0, 790, -280], "size": [1600, 110, 30], "round": 0, "tint": "wood", "pitch": -10313 },
+        {
+          "kind": "capsule",
+          "at": [-740, 640, -20],
+          "r": 25,
+          "h": 380,
+          "segments": 5,
+          "tint": "iron",
+          "pitch": 90000
+        },
+        { "kind": "capsule", "at": [740, 640, -20], "r": 25, "h": 380, "segments": 5, "tint": "iron", "pitch": 90000 }
+      ],
+      "round": 15,
+      "palette": { "iron": "#2f3633", "wood": "#9a6b46" },
+      "tags": ["prop", "street", "seat", "bench", "furniture", "park"]
+    }
   },
+  "text": { "card": "A wooden bench with room for two to sit side by side.", "seating": "seating", "rest": "rest" },
   "card": { "text": "card", "category": "seating", "synonyms": ["rest"] }
 }
