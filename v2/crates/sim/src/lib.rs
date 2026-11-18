@@ -7,6 +7,7 @@ pub mod ground;
 pub mod host;
 pub mod links;
 pub mod mover;
+pub mod moves;
 pub mod routes;
 pub mod timers;
 pub mod unstick;

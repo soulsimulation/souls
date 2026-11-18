@@ -6,6 +6,7 @@ version = 4
 name = "bench"
 version = "0.0.0"
 dependencies = [
+ "body-script",
  "import-eden",
  "replica",
  "sim",
