@@ -47,17 +47,20 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 0 | `format` | `souls-entry/1` |
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
-| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`), `default`, `audience` (a rule) |
-| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing` or a kind), `most`, `most_per`, `audience` (below) |
+| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
+| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing` or a kind), `most`, `most_per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
 | 8 | `forms` | What can be done with it (below) |
-| 10 | (reserved) | Engine v2 T3's hashed table of referenced kinds ([#2640](https://github.com/soulsimulation/souls/issues/2640), rule 14); not used here |
-| 11 | `children` | Kinds it admits as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
-| 12 | (reserved) | `reactions` (SA-F15) |
+| 9 | `closed` | The fields and children that take the container's audience until it is opened (SA-F8, [#2849](https://github.com/soulsimulation/souls/issues/2849)) |
+| 10 | (referenced kinds) | Engine v2 T3's table of the kinds this one names, written by the encoder, never in the file |
+| 11 | `children` | Kinds it holds as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
 | 13 | `vehicle` | A thing a Soul sits in or on and steers (below) |
 | 14 | `ride` | A set trip between stops that nobody steers (below) |
+| 15 | `stock` | The things a container is known to hold, yielded when taken (below) |
+| 16 | `areas` | What a kind says about resting on it, or about a named part of its surroundings, where its shape cannot (below) |
+| 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
 | 20 | `looks` | How it looks: `model` (a look id), and `table`, the looks table (below). `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
@@ -67,8 +70,43 @@ A how-to is read by the agent's client from its copy of the entry (`how "<words>
 thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
 chain with a wake entry of its own; the world never waits for a time or a condition.
 
-Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
-(SA-F10), `stock` (SA-F12), `areas` (SA-D6), `hatch` (SA-F9).
+Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15, section 12), `motion` and `loose`
+(SA-F10), `hatch` (SA-F9).
+
+**Areas** (section 16, SA-D6, [#2861](https://github.com/soulsimulation/souls/issues/2861)). Engine v2 E3
+([#2777](https://github.com/soulsimulation/souls/issues/2777)) finds where a body can sit, lie, stand or lean from a
+kind's surfaces and shape, and E4 ([#2772](https://github.com/soulsimulation/souls/issues/2772)) lets a thing be set
+down on any surface, so most kinds write no area. E3 reads a declared area first, then surfaces, then shape; the spot
+a body or thing gets is the engine's choice. An area is a name and any of: `allows` (a posture, `sit`, `lie`, `stand`
+or `lean`, to where: `on` the thing or on its `edge`), `forbids` (postures, by name), `takes` (kinds of thing that may
+be set down on it) and a place, `at_mm` and `radius_mm` (whole millimetres in the thing's own frame, within 20 000 mm),
+a named part of its surroundings: a tree's shade, a river's bank. A placed area is named by a `walk_to` step like a
+point, so a body can be sent to it. Names are one list with points and slots. Refused: an area that says nothing; a
+posture both allowed and forbidden; a forbidden posture the kind's own slot seats; and an area that only repeats what
+the kind's slots already say (the check gate reports it under `shape`). A bed (`content/kinds/rest/bed.json`) allows
+lying on it and sitting on its edge; a piano forbids sitting and lying; a tree declares its shade. A rug or a lawn needs
+no area (a body sits on the ground, SA-G3), and a thing that hangs uses a hang slot (SA-D3). Cases are data
+(`tools/entry/cases/areas.json`). Section 16 is meaning, so covered by the hash.
+
+**An activity** (section 17, SA-G1a, [#2872](https://github.com/soulsimulation/souls/issues/2872); Engine v2 B5,
+[#2724](https://github.com/soulsimulation/souls/issues/2724)). A group activity (a lecture, a supper) is a node Souls enter.
+Its kind is an ordinary entry plus `roles`:
+
+```json
+"roles": {
+  "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
+  "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } }
+}
+```
+
+A role is one of the kind's link types whose `from` is `body` or `soul`; membership is that link, and its `most` is how
+many the role takes. `need` is `required` (the activity cannot start without it), `replaceable` (required, and another
+may take it while it runs) or `optional`. `places` says where a member may be: `in: "this"`, the kind's own `slots` in the
+order listed, each admitting a body; `in: "here"`, body slots of things in the same place within `within_mm` (whole
+millimetres above zero) of the activity, nearest first. Either may name a `posture` (`sit`, `lie`). Entering is an
+ordinary form that links the role to the actor and reparents the actor into a slot argument; the world moves no body.
+Starting, leaving and ending are SA-G1b's and B5's; the rules are `packages/form-rules/src/activity.ts`. Section 17 is
+meaning, so covered by the hash.
 
 **Vehicles and rides** (SA-F14, [#2884](https://github.com/soulsimulation/souls/issues/2884)). A kind says what a vehicle
 is, never how the engine moves it. `vehicle`: `drive` (a slot admitting one body, posture `sit`: the drive seat; every
@@ -82,6 +120,19 @@ spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/v
 of the trip), `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
 `speed_mm_s` and `ground`. A kind is a vehicle or a ride, not both. Sections 13 and 14 are meaning, so covered by the hash.
 
+**Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a
+wardrobe, a fridge or a stall is known to hold, made real when someone reaches for it. A stock is
+`{kind, count, take, carries, refill}`: the kind it yields; `count`, an `int` state field in unit `count` with `min` 0
+and a `max` (so it runs out; its default is how many a copy starts with); `take`, the form that takes one; optional
+`carries`, one to four text fields of the yielded kind that come by reference from a library the world's creator
+supplies (a book's title and first page); optional `refill`, `{every_us}`, one more every so long up to the `max`
+(a timed value, SA-F5a). The take form is checked: it is a Soul's act that needs the count `at_least` 1 (an empty
+stock refuses) and a free hand, and its one `create` makes the kind into `actor_hand`; it never sets the count. The engine
+lowers the count by one in the same batch as the make (`takeStock` shows the batch: a `create` and a `set` with `by` -1), so
+nothing is made from nothing. Stock is free to take; buying, lending and debts are not here. A kind whose contents are
+closed lists `count` in `closed.fields` and shows its stock only once opened (`stockOf` answers `null` until then; a shelf
+or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Section 15 is meaning, so covered by the hash.
+
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
 the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
@@ -90,6 +141,18 @@ end may be linked to (a Soul signs up to three slots). A record that points at a
 it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
 `eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
 the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
+
+A body's family declares the link type `soul` (`from: "soul"`, `most` 1): a body's link to its Soul (contract T2). A
+link declared `from: "soul"` on a thing (an owner, a speaker) has a Soul at its end while the actor is a body, so who-may
+follows the acting body's `soul` link (SA-F7a, [#2848](https://github.com/soulsimulation/souls/issues/2848)). Only a
+body's family declares it.
+
+**Bounds and timed values.** `min` / `max`: whole bounds of an `int` field (or a timed value); an amount moved never
+takes it past them. A `transfer` fills to `max` and draws down to `min`. A `timed` field is a value that changes with
+time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit), and a default
+of three whole numbers, `{"value", "per_s", "set_us"}`: the value in that unit, its rate in that unit per second, and the
+world time it was set, in microseconds. A range need reads it at the state's time; the arithmetic is
+`packages/form-rules/README.md` ("A timed value").
 
 A `list` field holds a short bounded list of small records: `most` (required, 1 to 100, so it stays in tens: it is set
 whole on every change, Engine v2 F11, [#2774](https://github.com/soulsimulation/souls/issues/2774)), `of` (one to eight
@@ -168,16 +231,30 @@ draws; a text, list or schedule field changes no part, so it is not drawn.
   Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument.
 - **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
   a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
-  (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`.
+  (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
+  (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
+  `transfer`). A range need also takes a `timed` field.
   SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
   water comes from a thing in the world, never from a refill the kettle does by itself. Reach to another thing's point
   is not a need the rules can read yet, so `fill` holds the kettle and needs it empty.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
-  `wait` (`us`).
+  `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
+  SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor or this thing
   into a slot or the actor's hand: holding is a change of parent), `link`, `unlink`, `create` (a kind, `here`, in a
-  slot or in the hand), `remove`, `timer`. SA-F2b defines what each does.
+  slot or in the hand), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
+  defines what each does.
+- **transfer** (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)): `{"change": "transfer", "field",
+  "from", "into", "amount", "event"}`. `field` is an `int` field of this kind, and of the same name and unit at the other
+  end; `from` and `into` are each `"this"` or a `thing` argument; `amount` is a whole number above zero, a `count`
+  argument, or `"room"` (fill to the target's `max`, so a field filled to the brim here has a `max`). It moves the least of
+  what it asks and what the source has above its `min`: two `set`s whose amounts sum to zero.
+- **draw** (SA-F13, [#2852](https://github.com/soulsimulation/souls/issues/2852)): an outcome nobody chose.
+  `{"change": "draw", "outcomes": [{"name", "weight", "event", "set": [{"field", "to"}]}]}`. Each `weight` is a whole
+  number from 0 or `{"field": <an int field of this kind>}` (a practice count); names differ. The world draws a whole
+  number below the total and passes it in as data; with no draw the answer is unknown and lists the whole table. A
+  draw carries its events on its rows, not on itself.
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
 
