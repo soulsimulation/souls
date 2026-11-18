@@ -61,6 +61,48 @@ fn a_log_reopens_with_every_record() {
     log.wait_durable(101).unwrap();
 }
 
+/// K4b (#3136): a log opened from a checkpoint's place reads only from there, numbers its records from it, cuts a
+/// torn tail after it, and goes on the chain; a place that does not belong to the log reads the whole log instead.
+#[test]
+fn a_log_opens_from_a_checkpoints_place() {
+    let mem = Mem::default();
+    let (mut log, _) = Log::open(mem.clone(), 1).unwrap();
+    for i in 0..60 {
+        log.append(payload(9, i)).unwrap();
+    }
+    log.wait_durable(60).unwrap();
+    let place = log.durable_at();
+    assert_eq!(place.record, 60);
+    assert_eq!(place.offset as usize, starts(9, 60)[60]);
+    for i in 60..100 {
+        log.append(payload(9, i)).unwrap();
+    }
+    log.wait_durable(100).unwrap();
+    log.close();
+    // A torn record at the end.
+    mem.0.lock().unwrap().bytes.extend_from_slice(&[7; 5]);
+    let (mut log, found) = Log::open_at(mem.clone(), 1, Some(place)).unwrap();
+    assert_eq!((found.first, found.start), (60, place.offset as usize));
+    assert_eq!(
+        found.records,
+        (60..100).map(|i| payload(9, i)).collect::<Vec<_>>()
+    );
+    assert_eq!(found.after(70).len(), 30);
+    assert_eq!(found.torn.map(|t| t.dropped), Some(5));
+    assert_eq!(log.append(payload(9, 100)).unwrap(), 100);
+    log.wait_durable(101).unwrap();
+    log.close();
+    let whole = recover(&mem.0.lock().unwrap().bytes).unwrap();
+    assert_eq!(whole.records.len(), 101, "the chain goes on");
+    // A place whose record does not continue the chain from its checksum: the whole log is read.
+    let wrong = sim::log::At {
+        crc: place.crc ^ 1,
+        ..place
+    };
+    let (_, found) = Log::open_at(mem.clone(), 1, Some(wrong)).unwrap();
+    assert_eq!((found.first, found.records.len()), (0, 101));
+}
+
 /// A2: 50 power cuts at random, with the writer running. Bytes after the last sync are dropped except a random
 /// prefix (the last record cut at a random byte). Odd seeds cut a write part way; even seeds cut the power while a
 /// sync is under way. After recovery no acknowledged
