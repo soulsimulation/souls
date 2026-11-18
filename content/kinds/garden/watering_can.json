@@ -8,6 +8,8 @@
   },
   "geometry": { "bounds_mm": [760, 360, 240] },
   "forms": {},
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:watering_can",
     "shape": {"round":6,"shapes":[{"kind":"lathe","at":[60,0,0],"profile":[[0,0],[114,12],[109,215],[64,266],[0,270]],"segments":10,"tint":"metal"},{"kind":"cyl","at":[60,12,0],"r":115,"h":16,"segments":8,"tint":"dark"},{"kind":"sweep","at":[0,0,0],"path":[[-35,240,0],[0,305,0],[56,266,0]],"r":11,"segments":5,"tint":"metal"},{"kind":"sweep","at":[0,0,0],"path":[[155,50,0],[300,190,0],[440,330,0]],"r":14,"segments":5,"tint":"metal"},{"kind":"cone","at":[452,341,0],"r":36,"h":40,"segments":6,"tint":"metal","roll":-133000}],"palette":{"metal":"#7f9aa3","dark":"#3d4a4f"},"tags":["garden","watering_can","object"]}
