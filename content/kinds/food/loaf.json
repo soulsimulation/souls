@@ -186,6 +186,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:loaf",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,3,0],"size":[45,6,25],"tint":"crumb"},{"kind":"box","at":[-85,70,-50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=1"},{"kind":"box","at":[85,70,-50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=2"},{"kind":"box","at":[-85,70,50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=3"},{"kind":"box","at":[85,70,50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=4"}],"palette":{"crust":"#be843e","crumb":"#d9b970"},"tags":["camping","item","food","bread","object"]}
