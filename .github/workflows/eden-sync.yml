@@ -1,0 +1,100 @@
+# Keeps main's committed tools/world-launcher/soul/eden.mjs what inline.mjs builds from its modules (soul/*.mjs and
+# packages/form-rules/src/rules.ts). Pull requests do not carry a rebuilt eden.mjs (docs/testing.md#the-soul-client-file):
+# CI builds it before every check and the release stamp (release-client.mjs) rebuilds a stale one, so this workflow only
+# keeps the copy in git current for checkouts, tools and local worlds that read it as committed.
+#
+# After a push to main that leaves eden.mjs stale, it opens one pull request (branch bot/eden-sync-<sha12>) carrying
+# only the rebuilt file, labelled no-changelog and merge:ready, so the merge train lands it like any other T1 change. An
+# open sync PR that already carries the same file is kept; an older one that does not is closed with its branch. Nothing
+# is pushed to main directly (the main ruleset refuses it). The PR is created with MERGE_TRAIN_TOKEN when present, as
+# publish.yml does, so CI and the merge train run on it; with github.token alone it opens, but CI waits for a push.
+name: eden-sync
+on:
+  push:
+    branches: [main]
+    paths:
+      - tools/world-launcher/soul/*.mjs
+      - packages/form-rules/src/**
+      - .github/workflows/eden-sync.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: eden-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - name: Build eden.mjs from its modules
+        id: build
+        run: |
+          node tools/world-launcher/soul/inline.mjs
+          if git diff --quiet -- tools/world-launcher/soul/eden.mjs; then
+            echo "eden.mjs on main is current" >> "$GITHUB_STEP_SUMMARY"; echo "stale=0" >> "$GITHUB_OUTPUT"
+          else echo "stale=1" >> "$GITHUB_OUTPUT"; fi
+      - name: Open the sync pull request
+        if: steps.build.outputs.stale == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          file=tools/world-launcher/soul/eden.mjs
+          sha=$(git rev-parse HEAD); short=${sha:0:12}; blob=$(git hash-object "$file")
+          for pr in $(gh pr list --state open --limit 50 --json number,headRefName -q '.[] | select(.headRefName | startswith("bot/eden-sync-")) | .number'); do
+            ref=$(gh pr view "$pr" --json headRefName -q .headRefName)
+            git fetch -q origin "refs/heads/$ref"
+            if [ "$(git rev-parse "FETCH_HEAD:$file")" = "$blob" ]; then
+              echo "#$pr already carries this eden.mjs" >> "$GITHUB_STEP_SUMMARY"; exit 0
+            fi
+            gh pr close "$pr" --delete-branch --comment "Superseded: main is now $short and eden.mjs builds differently; a new sync pull request follows."
+          done
+          branch="bot/eden-sync-$short"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git commit -q -m "chore(soul): rebuild eden.mjs from its modules at $short" -m "node tools/world-launcher/soul/inline.mjs on main $sha (eden-sync.yml run $GITHUB_RUN_ID)." -- "$file"
+          git push -q origin "HEAD:refs/heads/$branch"
+          cat > "$RUNNER_TEMP/body.md" <<EOF
+          ## Problem
+
+          eden.mjs on main ($short) is not what inline.mjs builds from main's modules: a merged change edited a module
+          (tools/world-launcher/soul/*.mjs or packages/form-rules/src/rules.ts) and, as intended, did not carry the
+          rebuilt file. Opened by eden-sync.yml run $GITHUB_RUN_ID; see docs/testing.md#the-soul-client-file.
+
+          ## Acceptance
+
+          - [x] **A1** The PR changes only tools/world-launcher/soul/eden.mjs, and that file is what inline.mjs builds from main $short — evidence: \`node tools/world-launcher/soul/inline.mjs\` on $sha, then \`node tools/world-launcher/soul/inline.mjs --check\` -> exit 0 at this head
+
+          ## Proof
+
+          Tier: T1
+          - proof.json: none; CI on this head is the proof (a generated file)
+          - clips: none (no journey changes; the client is what the merged modules already define)
+          - images: none
+
+          ## Self-audit
+
+          - **Checks run**: \`node tools/world-launcher/soul/inline.mjs\` -> eden.mjs rebuilt; CI runs every check on this head
+          - **Failed attempts**: none
+          - **Long tail / externalities**: none; one generated file
+          - **Known limits**: a later push to main that changes a module again replaces this PR with a newer one
+          - **Docs**: none needed
+
+          ## Changelog
+
+          no-changelog: a generated file
+
+          ## Risk
+
+          None beyond the merged modules it reflects. Rollback: revert, then eden-sync.yml opens it again.
+          EOF
+          GH_TOKEN="$PR_TOKEN" gh pr create --base main --head "$branch" --label no-changelog --label merge:ready \
+            --title "chore(soul): rebuild eden.mjs from its modules at $short" --body-file "$RUNNER_TEMP/body.md"
+          echo "Opened the sync pull request for $branch" >> "$GITHUB_STEP_SUMMARY"
