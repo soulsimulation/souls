@@ -20,7 +20,7 @@ for (const file of readdirSync(DIR).filter((f) => f.endsWith('.json')).sort()) {
   for (const c of doc.cases) cases.push([file, c]);
 }
 
-type Seen = { step: Step; result: Record<string, unknown>; before: State; after: State };
+type Seen = { activity: string; step: Step; result: Record<string, unknown>; before: State; after: State };
 const runs = new Map<string, Seen[]>();
 const isBody = (nodes: State['nodes'], id: string) => !!nodes[id] && !nodes[id].kind && 'hands' in nodes[id];
 
@@ -49,7 +49,7 @@ for (const [file, c] of cases) {
         assert.ok(state.nodes[id], `step ${k}: body ${id} removed`);
         assert.ok(parentOf(state.nodes, id), `step ${k}: body ${id} is nowhere`);
       }
-      seen.push({ step, result, before, after: state });
+      seen.push({ activity: c.activity, step, result, before, after: state });
     });
     for (const [id, want] of Object.entries(c.after ?? {})) assert.ok(same(state.nodes[id] ?? null, want), `${id}: ${JSON.stringify(state.nodes[id] ?? null)}`);
     for (const id of c.gone ?? []) assert.equal(state.nodes[id], undefined, `${id} is removed`);
@@ -63,7 +63,7 @@ test('A1: the speaker leaves: the rules release every member and remove the acti
   const ends = all().filter((s) => s.step.do === 'leave' && s.result.verdict === 'yes' && s.result.role === 'speaker');
   assert.ok(ends.length >= 1);
   for (const s of ends) {
-    const id = Object.keys(s.before.nodes).find((n) => s.before.nodes[n].kind === 'test:talk')!;
+    const id = s.activity, ns = s.before.nodes[id].kind!.split(':')[0];
     const members = Object.values(s.before.nodes[id].links ?? {}).flat() as string[];
     const listeners = (s.before.nodes[id].links?.listener ?? []) as string[];
     assert.ok(listeners.length >= 3, 'a talk with listeners');
@@ -74,7 +74,7 @@ test('A1: the speaker leaves: the rules release every member and remove the acti
     for (const m of members) assert.ok(changes.some((c) => c.change === 'unlink' && c.node === id && c.end === m), `${m} unlinked`);
     for (const m of listeners) assert.deepEqual(parentOf(s.after.nodes, m), parentOf(s.before.nodes, m), `${m} stays seated`);
     const events = (s.result.events as { event: string }[]).map((e) => e.event);
-    assert.deepEqual(events.slice(-2), ['test:released', 'test:ended']);
+    assert.deepEqual(events.slice(-2), [`${ns}:released`, `${ns}:ended`]);
   }
 });
 

@@ -1,0 +1,110 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hall_lecture",
+  "owner": "thing",
+  "state": {
+    "phase": { "n": 1, "type": "enum", "values": ["announced", "speaking"], "default": "announced", "audience": { "rule": "everyone" } },
+    "left_us": { "n": 2, "type": "timed", "unit": "us", "default": { "value": 3600000000, "per_s": -1000000, "set_us": 0 }, "min": 0, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "speaker": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } },
+    "listener": { "n": 2, "from": "body", "most": 120, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "behind_the_lectern": { "role": "stand", "at_mm": [0, 100, -350] }
+  },
+  "slots": {
+    "lectern": { "admits": "body", "most": 1, "at_mm": [0, 100, -350], "stand": "behind_the_lectern" }
+  },
+  "geometry": { "bounds_mm": [1600, 1300, 1200] },
+  "roles": {
+    "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
+    "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } },
+    "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" }
+  },
+  "forms": {
+    "take_the_lectern": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "place": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
+      "effects": [
+        { "change": "link", "link": "speaker", "from": "actor", "event": "took_the_lectern" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "stood_at_the_lectern" },
+        { "change": "set", "field": "phase", "to": "speaking", "event": "lecture_began" }
+      ]
+    },
+    "attend": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "seat": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [
+        { "change": "link", "link": "listener", "from": "actor", "event": "joined_the_audience" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }
+      ]
+    },
+    "step_down": {
+      "who": { "link": "speaker" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": [
+        { "change": "unlink", "link": "speaker", "from": "actor", "event": "stepped_down" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "left_the_lectern" }
+      ]
+    },
+    "leave": {
+      "who": { "link": "listener" },
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "listener", "from": "actor", "event": "left_the_audience" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_up" }
+      ]
+    },
+    "lapse": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        { "need": "state", "field": "left_us", "at_most": 0 },
+        { "need": "unlinked", "link": "speaker" },
+        { "need": "unlinked", "link": "listener" }
+      ],
+      "steps": [],
+      "effects": [{ "change": "remove", "what": "this", "event": "lapsed" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "shape": {
+      "round": 6,
+      "shapes": [
+        { "kind": "box", "at": [0, 50, 0], "size": [1600, 100, 1200], "round": 10, "tint": "dais" },
+        { "kind": "box", "at": [0, 130, 100], "size": [560, 60, 420], "round": 10, "tint": "wood" },
+        { "kind": "box", "at": [0, 640, 100], "size": [380, 980, 300], "round": 12, "tint": "wood" },
+        { "kind": "box", "at": [0, 1160, 60], "size": [700, 50, 500], "round": 8, "pitch": -20000, "tint": "top" }
+      ],
+      "palette": { "dais": "#6b5a4a", "wood": "#9a6b3f", "top": "#b98a57" },
+      "tags": ["hall", "lectern", "lecture"]
+    }
+  },
+  "text": {
+    "card": "A lecture: one Soul speaks at the lectern, others sit in the seats near it.",
+    "gathering": "gathering",
+    "lectern": "lectern",
+    "talk": "talk",
+    "howto_give": "Take the lectern, speak, then step down: that ends it."
+  },
+  "card": { "text": "card", "category": "gathering", "synonyms": ["lectern", "talk"] },
+  "howtos": {
+    "give": { "text": "howto_give", "steps": [{ "form": "take_the_lectern" }, { "form": "step_down" }] }
+  }
+}
