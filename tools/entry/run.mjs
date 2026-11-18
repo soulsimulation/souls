@@ -87,10 +87,16 @@ export function casesFor(kinds, {cases: dir = CASES} = {}) {
 
 // ---------------------------------------------------------------- playing one case through a transport
 
-/** A field's value as today's world holds it: a case writes a bool as 0/1 (effect cases) or true/false. */
+/** A field's value as today's world holds it: a case writes a bool as 0/1 (effect cases) or true/false, and a text as
+ *  a reference `{text: <id>}`, which today's def holds as the id's string (load.mjs). */
 export function asWorld(entry, field, v) {
-  return entry?.state?.[field]?.type === 'bool' && (v === 0 || v === 1) ? v === 1 : v;
+  const type = entry?.state?.[field]?.type;
+  if (type === 'bool' && (v === 0 || v === 1)) return v === 1;
+  if (type === 'text' && typeof v?.text === 'string') return v.text;
+  return v;
 }
+/** The fields a Soul reads back: a text is set but a Soul's read of the thing leaves it out, so it is never compared. */
+export const seen = (entry, fields) => Object.fromEntries(Object.entries(fields).filter(([k]) => entry?.state?.[k]?.type !== 'text'));
 /** The fields a node starts with: the entry's defaults under the case's own. A list, schedule or timed field is not
  *  carried today (load.mjs), and a text with nothing written (null) is left unset. */
 export function startFields(entry, node) {
@@ -171,14 +177,14 @@ async function ruleCase(t, row, kinds, placed) {
   const id = await placed(row.kind);
   const want = startFields(entry, c.state.nodes[c.act.this]);
   await t.set(id, want);
-  const before = await readUntil(t, id, want);
-  if (!sameFields(before, want)) return {result: 'fail', why: `the scene could not be set: the fields read ${JSON.stringify(before)}, not ${JSON.stringify(want)}`};
+  const before = await readUntil(t, id, seen(entry, want));
+  if (!sameFields(before, seen(entry, want))) return {result: 'fail', why: `the scene could not be set: the fields read ${JSON.stringify(before)}, not ${JSON.stringify(seen(entry, want))}`};
   if (form && !(await t.offers(id)).includes(c.act.form)) return {result: 'skip', why: `${c.act.form} is not offered by this world`};
   const gap = setupGap(c, kinds); if (gap) return {result: 'skip', why: gap};
   // the case's other things (an argument: a pot, a pail), placed and set as the effect cases place them
   const ids = {[c.act.this]: id}, others = Object.entries(c.state.nodes).filter(([nid, n]) => n.kind && nid !== c.act.this);
   for (const [nid, n] of others) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
-  for (const [nid, n] of others) await readUntil(t, ids[nid], startFields(kinds.get(n.kind), n));
+  for (const [nid, n] of others) await readUntil(t, ids[nid], seen(kinds.get(n.kind), startFields(kinds.get(n.kind), n)));
   const got = await t.act(id, c.act.form, Object.fromEntries(Object.entries(c.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v])));
   const after = got.verdict === 'no' ? await settled(t, id) : await t.fields(id);
   const {off, via} = judge({...c.expect, ...(c.expect.verdict === 'no' ? {fix: rulesFix(c)} : {})}, got, before, after);
@@ -190,7 +196,7 @@ async function effectCase(t, row, kinds, placed) {
   const gap = setupGap(c, kinds) ?? newEngineGap(c, kinds); if (gap) return {result: 'skip', why: gap};
   const ids = {};
   for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
-  for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind) await readUntil(t, ids[nid], startFields(kinds.get(n.kind), n));
+  for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind) await readUntil(t, ids[nid], seen(kinds.get(n.kind), startFields(kinds.get(n.kind), n)));
   const steps = [];
   for (const [k, step] of c.do.entries()) {
     const kind = c.state.nodes[step.act.this]?.kind, form = kinds.get(kind)?.forms?.[step.act.form], id = ids[step.act.this];
@@ -218,7 +224,7 @@ async function effectCase(t, row, kinds, placed) {
   }
   for (const [nid, want] of Object.entries(c.after ?? {})) {
     if (!ids[nid] || !want?.fields) continue;
-    const entry = kinds.get(c.state.nodes[nid]?.kind), fields = Object.fromEntries(Object.entries(want.fields).map(([k, v]) => [k, asWorld(entry, k, v)]));
+    const entry = kinds.get(c.state.nodes[nid]?.kind), fields = seen(entry, Object.fromEntries(Object.entries(want.fields).map(([k, v]) => [k, asWorld(entry, k, v)])));
     const now = await readUntil(t, ids[nid], fields);
     if (!sameFields(now, fields)) return {result: 'fail', why: `after: ${nid} reads ${JSON.stringify(now)}, not ${JSON.stringify(fields)}`, steps};
   }
@@ -276,8 +282,8 @@ async function disturbCase(t, row, kinds, placed) {
   const scene = async () => {
     const id = await placed(row.kind, {far: true}), want = startFields(entry, c.state.nodes[c.act.this]);
     await t.set(id, want);
-    const got = await readUntil(t, id, want);
-    if (!sameFields(got, want)) throw new Error(`the scene could not be set: the fields read ${JSON.stringify(got)}, not ${JSON.stringify(want)}`);
+    const got = await readUntil(t, id, seen(entry, want));
+    if (!sameFields(got, seen(entry, want))) throw new Error(`the scene could not be set: the fields read ${JSON.stringify(got)}, not ${JSON.stringify(seen(entry, want))}`);
     return {id, fields: got};
   };
   const {id, fields: before} = await scene();
@@ -325,7 +331,7 @@ const timerAfter = (c, step) => c.do.flatMap(s => s.expect?.timers ?? []).find(x
 /** The `set` changes a step expects, as fields per world id, in the world's terms (a bool's 0/1 as false/true). */
 export function setsOf(expect, ids, c, kinds) {
   const out = {};
-  for (const x of expect?.changes ?? []) if (x.change === 'set' && ids[x.node]) (out[ids[x.node]] ??= {})[x.field] = asWorld(kinds?.get(c?.state?.nodes?.[x.node]?.kind), x.field, x.to);
+  for (const x of expect?.changes ?? []) if (x.change === 'set' && ids[x.node] && kinds?.get(c?.state?.nodes?.[x.node]?.kind)?.state?.[x.field]?.type !== 'text') (out[ids[x.node]] ??= {})[x.field] = asWorld(kinds?.get(c?.state?.nodes?.[x.node]?.kind), x.field, x.to);
   return out;
 }
 const brief = g => ({verdict: g.verdict, ...(g.reason ? {reason: g.reason} : {}), ...(g.code ? {code: g.code} : {}), ...(g.receipt ? {receipt: g.receipt} : {})});

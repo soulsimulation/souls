@@ -56,6 +56,7 @@ test('(3) text is carried as a string; a list, schedule or timed field is new en
   assert.ok(skipped.some(s => s.what === 'state.open_times' && /new engine only/.test(s.why)));
   assert.equal(loadDef(kind('mural_panel'), 'x@1').def.state.picture.type, 'string');
   assert.deepEqual(startFields(kind('mural_panel'), {}), {}, 'a text with nothing written is left unset, not set to null');
+  assert.deepEqual(startFields(kind('mural_panel'), {fields: {picture: {text: 't_mural_1'}}}), {picture: 't_mural_1'}, 'a text reference is held as its id');
   const kinds = new Map([['eden:kiosk', kind('kiosk')]]);
   assert.match(newEngineGap({state: {nodes: {t1: {kind: 'eden:kiosk', fields: {open_times: []}}}}}, kinds), /open_times \(a schedule field\): new engine only/);
   assert.equal(newEngineGap(caseNamed('open_a_closed_kiosk'), kinds), null, 'a default the case does not name is not needed');
