@@ -140,13 +140,35 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
-      # pnpm's version comes from package.json `packageManager` (pnpm@10.27.0).
+      # pnpm's version comes from package.json `packageManager` (pnpm@10.27.0). The `v2` job (Rust only) skips the install.
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        if: matrix.kind != 'v2'
         # Instances on one host share a user and home, so the default dest would collide between concurrent jobs (#1162).
         with: { dest: '${{ runner.temp }}/setup-pnpm' }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: matrix.kind != 'v2'
         with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
+      - if: matrix.kind != 'v2'
+        run: pnpm install --frozen-lockfile
+      # Engine v2 (K15, #2637): the toolchain v2/rust-toolchain.toml pins, and a cargo cache keyed on it and the lockfile.
+      - name: Install the pinned Rust toolchain
+        if: matrix.kind == 'v2'
+        working-directory: v2
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --no-self-update
+          cargo --version
+      - name: Restore cargo cache
+        if: matrix.kind == 'v2'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            v2/target
+          key: v2-cargo-${{ runner.os }}-${{ hashFiles('v2/rust-toolchain.toml', 'v2/Cargo.lock') }}
+          restore-keys: v2-cargo-${{ runner.os }}-
       - name: Restore media cache
         if: matrix.assets
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -237,6 +259,10 @@ jobs:
               # form-rules' own tests and the launcher test that reads content/kinds: a change confined to the low-risk
               # paths (ci-scope.mjs LOW_RISK) runs this job and no packages or launcher job
               node --test --test-concurrency=4 packages/form-rules/src/*.test.ts tools/world-launcher/soul/card-search.test.mjs
+              ;;
+            v2)
+              # Engine v2 (K15, #2637): not a gate step; picked by ci-scope.mjs from its own paths
+              bash v2/tools/ci.sh
               ;;
             server)
               # The server shard, then (on the shard with `godSkill`, ci-scope.mjs) the god-skill unit tests, replay
