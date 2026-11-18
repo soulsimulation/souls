@@ -1,0 +1,35 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:long_table",
+  "owner": "thing",
+  "state": { "clean": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "points": {
+    "side": { "role": "stand", "at_mm": [0, 0, 850], "yaw_mdeg": 180000 },
+    "top": { "role": "contact", "at_mm": [0, 760, 0] }
+  },
+  "geometry": { "bounds_mm": [2770, 745, 870] },
+  "forms": {
+    "wipe": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "walk_to", "point": "side" }, { "step": "move", "move": "slide", "at": "top" }],
+      "effects": [{ "change": "set", "field": "clean", "to": true, "event": "wiped" }]
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:long_table",
+    "shape": {"shapes":[{"kind":"extrude","at":[0,715,0],"polygon":[[-1385,-435],[1385,-435],[1385,435],[-1385,435]],"h":30,"tint":"top"},{"kind":"extrude","at":[-1200,25,0],"polygon":[[-25,-335],[25,-335],[25,335],[-25,335]],"h":670,"tint":"legs"},{"kind":"extrude","at":[1200,25,0],"polygon":[[-25,-335],[25,-335],[25,335],[-25,335]],"h":670,"tint":"legs"},{"kind":"box","at":[0,200,0],"size":[2300,60,60],"round":0,"tint":"legs"},{"kind":"cyl","at":[0,762,0],"r":140,"h":3,"segments":12,"tint":"spill","role":"fill"}],"palette":{"top":"#c49a63","legs":"#5e3d27","spill":"#6b4a2e"},"tags":["furniture","table","surface","long"],"round":15},
+    "table": [{ "part": "fill", "field": "clean", "do": "show", "at": { "true": 0, "false": 1 } }]
+  },
+  "text": {
+    "card": "A long table for feasts and workshops, moved by two; wipe it clean.",
+    "table": "table",
+    "feast": "feast",
+    "refectory": "refectory",
+    "wipe": "wipe"
+  },
+  "card": { "text": "card", "category": "table", "synonyms": ["feast", "refectory"] }
+}

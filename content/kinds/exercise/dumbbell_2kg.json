@@ -1,0 +1,22 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:dumbbell_2kg",
+  "owner": "thing",
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 120, 0] }
+  },
+  "geometry": { "bounds_mm": [480, 240, 240] },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:dumbbell_2kg",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,120,0],"size":[480,35,35],"tint":"steel"},{"kind":"box","at":[-215,120,0],"size":[25,100,100],"tint":"steel"},{"kind":"box","at":[215,120,0],"size":[25,100,100],"tint":"steel"}],"palette":{"steel":"#b7b8be"},"tags":["exercise","dumbbell","item"]}
+  },
+  "text": {
+    "card": "A 2 kg dumbbell: the kit's bare handle, carried in one hand.",
+    "exercise": "exercise",
+    "dumbbell": "dumbbell",
+    "weight": "weight"
+  },
+  "card": { "text": "card", "category": "exercise", "synonyms": ["dumbbell", "weight"] }
+}
