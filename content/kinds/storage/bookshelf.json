@@ -1,0 +1,254 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bookshelf",
+  "owner": "thing",
+  "state": {
+    "books": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 40,
+      "default": 40,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "neat": {
+      "n": 2,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        610
+      ],
+      "yaw_mdeg": 180000
+    },
+    "shelves": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        1100,
+        170
+      ]
+    }
+  },
+  "slots": {
+    "shelf_1": {
+      "admits": "thing",
+      "most": 6,
+      "at_mm": [
+        300,
+        85,
+        20
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    },
+    "shelf_2": {
+      "admits": "thing",
+      "most": 6,
+      "at_mm": [
+        300,
+        565,
+        20
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    },
+    "shelf_3": {
+      "admits": "thing",
+      "most": 6,
+      "at_mm": [
+        300,
+        1045,
+        20
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    },
+    "shelf_4": {
+      "admits": "thing",
+      "most": 6,
+      "at_mm": [
+        300,
+        1525,
+        20
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      910,
+      2010,
+      320
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "books",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "stand"
+        }
+      ],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "eden:book",
+          "into": "actor_hand",
+          "event": "taken"
+        },
+        {
+          "change": "set",
+          "field": "neat",
+          "to": false,
+          "event": "left_untidy"
+        }
+      ]
+    },
+    "straighten": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "shelves"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "neat",
+          "to": true,
+          "event": "straightened"
+        }
+      ]
+    },
+    "dust": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "shelves"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "stock": {
+    "books": {
+      "kind": "eden:book",
+      "count": "books",
+      "take": "take",
+      "carries": [
+        "title",
+        "first_page"
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:bookshelf",
+    "table": [
+      {
+        "part": "fill",
+        "field": "books",
+        "do": "show",
+        "range": [
+          0,
+          1
+        ],
+        "to": [
+          0,
+          1
+        ]
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"box","at":[0,1000,-150],"size":[900,2000,20],"round":0,"tint":"wood"},{"kind":"box","at":[-440,1000,0],"size":[30,2000,320],"round":0,"tint":"wood"},{"kind":"box","at":[440,1000,0],"size":[30,2000,320],"round":0,"tint":"wood"},{"kind":"box","at":[0,2000,0],"size":[910,20,310],"round":0,"tint":"wood"},{"kind":"box","at":[0,50,0],"size":[880,30,300],"round":0,"tint":"wood"},{"kind":"box","at":[0,530,0],"size":[880,30,300],"round":0,"tint":"wood"},{"kind":"box","at":[0,1010,0],"size":[880,30,300],"round":0,"tint":"wood"},{"kind":"box","at":[0,1490,0],"size":[880,30,300],"round":0,"tint":"wood"},{"kind":"box","at":[-200,220,0],"size":[400,270,220],"round":0,"color":"#8b2f2f","role":"fill","pivot":[-200,85,0]},{"kind":"box","at":[220,190,0],"size":[280,220,220],"round":0,"color":"#2f5d8b","role":"fill","pivot":[220,80,0]},{"kind":"box","at":[-170,700,0],"size":[400,230,220],"round":0,"color":"#3d7a4a","role":"fill","pivot":[-170,585,0]},{"kind":"box","at":[200,670,0],"size":[280,220,220],"round":0,"color":"#c79a3a","role":"fill","pivot":[200,560,0]},{"kind":"box","at":[-140,1180,0],"size":[400,270,220],"round":0,"color":"#6b3f7a","role":"fill","pivot":[-140,1045,0]},{"kind":"box","at":[180,1150,0],"size":[280,220,220],"round":0,"color":"#b5562d","role":"fill","pivot":[180,1040,0]},{"kind":"box","at":[-110,1660,0],"size":[400,230,220],"round":0,"color":"#d8cdb0","role":"fill","pivot":[-110,1545,0]},{"kind":"box","at":[160,1630,0],"size":[280,220,220],"round":0,"color":"#4a6f7a","role":"fill","pivot":[160,1520,0]}],"palette":{"wood":"#5e3d27"},"tags":["furniture","storage","bookshelf","books","library"]}
+  },
+  "text": {
+    "card": "A tall bookshelf: take a book to read; straighten the books, dust the shelves.",
+    "storage": "storage",
+    "books": "books",
+    "library": "library",
+    "howto_read": "With a hand free, take a book from the shelf, then read it."
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "books",
+      "library"
+    ]
+  },
+  "howtos": {
+    "read": {
+      "text": "howto_read",
+      "steps": [
+        {
+          "form": "take"
+        }
+      ]
+    }
+  }
+}

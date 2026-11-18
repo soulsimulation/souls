@@ -31,7 +31,7 @@
       "who": { "link": "writer" },
       "starts": "act",
       "needs": [
-        { "need": "linked", "link": "writer" },
+        { "need": "linked", "link": "writer", "end": "actor", "says": "not_your_line" },
         { "need": "within_reach", "point": "line" }
       ],
       "steps": [{ "step": "move", "move": "slide", "at": "line" }],
@@ -49,6 +49,7 @@
   },
   "text": {
     "card": "One signed line in a notebook; only its writer crosses it out.",
+    "not_your_line": "You have no line in this notebook; only its writer crosses a line out.",
     "line": "line"
   },
   "card": { "text": "card", "category": "line" }

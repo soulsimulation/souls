@@ -1,0 +1,192 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:firewood",
+  "owner": "thing",
+  "state": {
+    "logs": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 12,
+      "min": 0,
+      "max": 12,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        800
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1400,
+      728,
+      701
+    ]
+  },
+  "forms": {
+    "take_log": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "logs",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        }
+      ],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "eden:firewood_log",
+          "into": "actor_hand",
+          "event": "log_taken"
+        }
+      ]
+    },
+    "stack_log": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "log": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:firewood_log",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "logs",
+          "at_most": 11
+        },
+        {
+          "need": "hand",
+          "holds": "eden:firewood_log"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        }
+      ],
+      "effects": [
+        {
+          "change": "remove",
+          "what": {
+            "arg": "log"
+          },
+          "event": "log_stacked"
+        },
+        {
+          "change": "set",
+          "field": "logs",
+          "by": 1,
+          "event": "stack_grew"
+        }
+      ]
+    }
+  },
+  "stock": {
+    "logs": {
+      "kind": "eden:firewood_log",
+      "count": "logs",
+      "take": "take_log"
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:firewood",
+    "table": [
+      {
+        "part": "fill",
+        "field": "logs",
+        "do": "scale",
+        "axis": "y",
+        "range": [
+          0,
+          12
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      },
+      {
+        "part": "fill",
+        "field": "logs",
+        "do": "show",
+        "range": [
+          0,
+          1
+        ],
+        "to": [
+          0,
+          1
+        ]
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"cyl","at":[-380,90,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[-190,90,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[0,90,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[190,90,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[380,90,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[-285,255,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[-95,255,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[95,255,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[285,255,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[-190,420,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[0,420,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[190,420,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"extrude","at":[-620,15,0],"polygon":[[-15,-15],[15,-15],[15,15],[-15,15]],"h":590,"tint":"post"},{"kind":"extrude","at":[620,15,0],"polygon":[[-15,-15],[15,-15],[15,15],[-15,15]],"h":590,"tint":"post"},{"kind":"box","at":[0,680,0],"size":[1400,40,700],"round":0,"tint":"roof","pitch":4584}],"palette":{"log":"#8c6a48","log2":"#9c7a52","post":"#5e4630","roof":"#4a4f4d"},"tags":["prop","street","firewood","wood","farm"]}
+  },
+  "text": {
+    "card": "A covered stack of split firewood: take a log for the fire.",
+    "garden": "garden",
+    "woodpile": "woodpile",
+    "logs": "logs",
+    "wood": "wood",
+    "howto_fire": "Take a log from the stack; stack it back if it is not burned."
+  },
+  "card": {
+    "text": "card",
+    "category": "garden",
+    "synonyms": [
+      "woodpile",
+      "logs",
+      "wood"
+    ]
+  },
+  "howtos": {
+    "fire": {
+      "text": "howto_fire",
+      "steps": [
+        {
+          "form": "take_log"
+        },
+        {
+          "form": "stack_log"
+        }
+      ]
+    }
+  }
+}
