@@ -8,10 +8,9 @@ use std::path::Path;
 use replica::bodies::{Class, Family};
 use replica::effects::{Change, fixture_bytes};
 use replica::encode::{Name, Value, decode};
-use replica::host::Progress;
 use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move, Seat};
-use replica::pose::{Frame, Quat, Support, Vec3, fixture};
+use replica::pose::{Quat, Support, Vec3, fixture};
 use sim::controller::Stance;
 use sim::ground::Piece;
 use sim::host::{Runner, named};
@@ -278,10 +277,7 @@ fn a_second_birth_is_refused_by_name_and_a_lost_connection_retires_nobody() {
     assert_eq!(w.life.body_of(s), Some(body), "still embodied");
     let p = w.runner.controller.body(body).expect("still standing").pose;
     assert!(matches!(p.support, Support::Surface { .. }));
-    assert!(matches!(
-        w.runner.ended.get(&body),
-        Some((_, Progress::Failed(_))) | None
-    ));
+    assert_eq!(w.life.link_of(s), Some(born[0].link), "still linked");
 }
 
 #[test]
@@ -318,8 +314,4 @@ fn no_birth_effect_holds_an_account_id() {
     assert!(!ids.contains(&account));
     assert_eq!(b.body.scope(), WORLD, "the world mints the body");
     assert_eq!(b.link.scope(), WORLD);
-    let _ = Frame {
-        node: floor,
-        slot: None,
-    };
 }
