@@ -1,6 +1,6 @@
 {
  "format": "souls-effect-cases/1",
- "about": "eden:planter over ten world days, by the rules alone. A Soul sows it at 0; after that only its own timers act. Sown moist (4 L), each timer finds the soil above the dry line and a stage follows a day apart: sprout, leafy, flowering, fruiting on day 4; the last arms no timer, so nothing changes through day 10 while its water runs out (dry from day 6.1, empty from day 9.3, its plants hanging by the looks table). Sown dry (1 L), the sprout timer on day 1 is refused and nothing more is armed: it stays seed, dry all along and empty from day 2.3, its plants hanging. Each act carries its own world time.",
+ "about": "eden:planter over days, by the rules alone. Sown moist (4 L) it sprouts, leafs, flowers and fruits a world day apart and then waits; sown dry (1 L) its first stage is refused and nothing more is armed. Watered on three days and picked twice: each watering soaks the soil full and arms all four stage timers, only the one for its stage and a day old is done, and the two picks move 3 + 3 tomatoes into the basket. Each act carries its own world time.",
  "cases": [
   {
    "name": "sown_moist_fruits_on_day_4_with_no_soul",
@@ -60,6 +60,17 @@
         "field": "stage",
         "n": 2,
         "to": "seed"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 0
+        }
        }
       ],
       "events": [
@@ -68,6 +79,13 @@
         "node": "p1",
         "changes": [
          0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
         ]
        },
        {
@@ -81,7 +99,7 @@
         "node": "p1",
         "form": "sprout",
         "after_us": 86400000000,
-        "event": 1
+        "event": 2
        }
       ]
      }
@@ -102,6 +120,17 @@
         "field": "stage",
         "n": 2,
         "to": "sprout"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 86400000000
+        }
        }
       ],
       "events": [
@@ -110,6 +139,13 @@
         "node": "p1",
         "changes": [
          0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
         ]
        },
        {
@@ -123,7 +159,7 @@
         "node": "p1",
         "form": "leaf",
         "after_us": 86400000000,
-        "event": 1
+        "event": 2
        }
       ]
      }
@@ -144,6 +180,17 @@
         "field": "stage",
         "n": 2,
         "to": "leafy"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 172800000000
+        }
        }
       ],
       "events": [
@@ -152,6 +199,13 @@
         "node": "p1",
         "changes": [
          0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
         ]
        },
        {
@@ -165,7 +219,7 @@
         "node": "p1",
         "form": "flower",
         "after_us": 86400000000,
-        "event": 1
+        "event": 2
        }
       ]
      }
@@ -186,6 +240,17 @@
         "field": "stage",
         "n": 2,
         "to": "flowering"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 259200000000
+        }
        }
       ],
       "events": [
@@ -194,6 +259,13 @@
         "node": "p1",
         "changes": [
          0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
         ]
        },
        {
@@ -207,7 +279,7 @@
         "node": "p1",
         "form": "fruit",
         "after_us": 86400000000,
-        "event": 1
+        "event": 2
        }
       ]
      }
@@ -228,6 +300,24 @@
         "field": "stage",
         "n": 2,
         "to": "fruiting"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "fruit",
+        "n": 4,
+        "to": 3
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 345600000000
+        }
        }
       ],
       "events": [
@@ -236,6 +326,20 @@
         "node": "p1",
         "changes": [
          0
+        ]
+       },
+       {
+        "event": "eden:ripe",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         2
         ]
        }
       ],
@@ -252,7 +356,13 @@
        "value": 4000000,
        "per_s": -5,
        "set_us": 0
-      }
+      },
+      "ripening": {
+       "value": 0,
+       "per_s": 1,
+       "set_us": 345600000000
+      },
+      "fruit": 3
      }
     }
    }
@@ -315,6 +425,17 @@
         "field": "stage",
         "n": 2,
         "to": "seed"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 0
+        }
        }
       ],
       "events": [
@@ -323,6 +444,13 @@
         "node": "p1",
         "changes": [
          0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
         ]
        },
        {
@@ -336,7 +464,7 @@
         "node": "p1",
         "form": "sprout",
         "after_us": 86400000000,
-        "event": 1
+        "event": 2
        }
       ]
      }
@@ -364,7 +492,1016 @@
        "value": 1000000,
        "per_s": -5,
        "set_us": 0
+      },
+      "ripening": {
+       "value": 0,
+       "per_s": 1,
+       "set_us": 0
       }
+     }
+    }
+   }
+  },
+  {
+   "name": "watered_three_days_then_picked_twice",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "p1"
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "bk1",
+       "right": "c1"
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "c1": {
+      "kind": "eden:watering_can"
+     },
+     "bk1": {
+      "kind": "eden:basket",
+      "fields": {
+       "fruit": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "p1",
+      "form": "sow"
+     },
+     "now_us": 0,
+     "receipt": "rs1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "seed"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 0
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sown",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:sprout_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "sprout",
+        "after_us": 86400000000,
+        "event": 2
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "water"
+     },
+     "now_us": 43200000000,
+     "receipt": "rs2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "water",
+        "n": 1,
+        "to": {
+         "value": 4000000,
+         "per_s": -5,
+         "set_us": 43200000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:watered",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:sprout_due",
+        "node": "p1",
+        "changes": []
+       },
+       {
+        "event": "eden:leaf_due",
+        "node": "p1",
+        "changes": []
+       },
+       {
+        "event": "eden:flower_due",
+        "node": "p1",
+        "changes": []
+       },
+       {
+        "event": "eden:fruit_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "sprout",
+        "after_us": 86400000000,
+        "event": 1
+       },
+       {
+        "node": "p1",
+        "form": "leaf",
+        "after_us": 86400000000,
+        "event": 2
+       },
+       {
+        "node": "p1",
+        "form": "flower",
+        "after_us": 86400000000,
+        "event": 3
+       },
+       {
+        "node": "p1",
+        "form": "fruit",
+        "after_us": 86400000000,
+        "event": 4
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "sprout"
+     },
+     "now_us": 86400000000,
+     "receipt": "rs3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "sprout"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 86400000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sprouted",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:leaf_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "leaf",
+        "after_us": 86400000000,
+        "event": 2
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "sprout"
+     },
+     "now_us": 129600000000,
+     "receipt": "rs4",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "leaf"
+     },
+     "now_us": 129600000000,
+     "receipt": "rs5",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 2
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "flower"
+     },
+     "now_us": 129600000000,
+     "receipt": "rs6",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "fruit"
+     },
+     "now_us": 129600000000,
+     "receipt": "rs7",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "water"
+     },
+     "now_us": 129600000000,
+     "receipt": "rs8",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "water",
+        "n": 1,
+        "to": {
+         "value": 4000000,
+         "per_s": -5,
+         "set_us": 129600000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:watered",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:sprout_due",
+        "node": "p1",
+        "changes": []
+       },
+       {
+        "event": "eden:leaf_due",
+        "node": "p1",
+        "changes": []
+       },
+       {
+        "event": "eden:flower_due",
+        "node": "p1",
+        "changes": []
+       },
+       {
+        "event": "eden:fruit_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "sprout",
+        "after_us": 86400000000,
+        "event": 1
+       },
+       {
+        "node": "p1",
+        "form": "leaf",
+        "after_us": 86400000000,
+        "event": 2
+       },
+       {
+        "node": "p1",
+        "form": "flower",
+        "after_us": 86400000000,
+        "event": 3
+       },
+       {
+        "node": "p1",
+        "form": "fruit",
+        "after_us": 86400000000,
+        "event": 4
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "leaf"
+     },
+     "now_us": 172800000000,
+     "receipt": "rs9",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "leafy"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 172800000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:leafed",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:flower_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "flower",
+        "after_us": 86400000000,
+        "event": 2
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "sprout"
+     },
+     "now_us": 216000000000,
+     "receipt": "rs10",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "leaf"
+     },
+     "now_us": 216000000000,
+     "receipt": "rs11",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "flower"
+     },
+     "now_us": 216000000000,
+     "receipt": "rs12",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 2
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "fruit"
+     },
+     "now_us": 216000000000,
+     "receipt": "rs13",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "water"
+     },
+     "now_us": 216000000000,
+     "receipt": "rs14",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "water",
+        "n": 1,
+        "to": {
+         "value": 4000000,
+         "per_s": -5,
+         "set_us": 216000000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:watered",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:sprout_due",
+        "node": "p1",
+        "changes": []
+       },
+       {
+        "event": "eden:leaf_due",
+        "node": "p1",
+        "changes": []
+       },
+       {
+        "event": "eden:flower_due",
+        "node": "p1",
+        "changes": []
+       },
+       {
+        "event": "eden:fruit_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "sprout",
+        "after_us": 86400000000,
+        "event": 1
+       },
+       {
+        "node": "p1",
+        "form": "leaf",
+        "after_us": 86400000000,
+        "event": 2
+       },
+       {
+        "node": "p1",
+        "form": "flower",
+        "after_us": 86400000000,
+        "event": 3
+       },
+       {
+        "node": "p1",
+        "form": "fruit",
+        "after_us": 86400000000,
+        "event": 4
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "flower"
+     },
+     "now_us": 259200000000,
+     "receipt": "rs15",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "flowering"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 259200000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:flowered",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:fruit_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "fruit",
+        "after_us": 86400000000,
+        "event": 2
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "sprout"
+     },
+     "now_us": 302400000000,
+     "receipt": "rs16",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "leaf"
+     },
+     "now_us": 302400000000,
+     "receipt": "rs17",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "flower"
+     },
+     "now_us": 302400000000,
+     "receipt": "rs18",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "fruit"
+     },
+     "now_us": 302400000000,
+     "receipt": "rs19",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 2
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "fruit"
+     },
+     "now_us": 345600000000,
+     "receipt": "rs20",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "fruiting"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "fruit",
+        "n": 4,
+        "to": 3
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 345600000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fruited",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripe",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "pick",
+      "args": {
+       "basket": "bk1"
+      }
+     },
+     "now_us": 349200000000,
+     "receipt": "rs21",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "fruit",
+        "n": 4,
+        "to": 0,
+        "by": -3
+       },
+       {
+        "change": "set",
+        "node": "bk1",
+        "field": "fruit",
+        "n": 1,
+        "to": 3,
+        "by": 3
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "flowering"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 349200000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:picked",
+        "node": "p1",
+        "changes": [
+         0,
+         1
+        ]
+       },
+       {
+        "event": "eden:back_to_flowering",
+        "node": "p1",
+        "changes": [
+         2
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         3
+        ]
+       },
+       {
+        "event": "eden:fruit_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "fruit",
+        "after_us": 86400000000,
+        "event": 3
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "fruit"
+     },
+     "now_us": 435600000000,
+     "receipt": "rs22",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "fruiting"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "fruit",
+        "n": 4,
+        "to": 3
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 435600000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fruited",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:ripe",
+        "node": "p1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "pick",
+      "args": {
+       "basket": "bk1"
+      }
+     },
+     "now_us": 439200000000,
+     "receipt": "rs23",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "fruit",
+        "n": 4,
+        "to": 0,
+        "by": -3
+       },
+       {
+        "change": "set",
+        "node": "bk1",
+        "field": "fruit",
+        "n": 1,
+        "to": 6,
+        "by": 3
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "stage",
+        "n": 2,
+        "to": "flowering"
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "ripening",
+        "n": 3,
+        "to": {
+         "value": 0,
+         "per_s": 1,
+         "set_us": 439200000000
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:picked",
+        "node": "p1",
+        "changes": [
+         0,
+         1
+        ]
+       },
+       {
+        "event": "eden:back_to_flowering",
+        "node": "p1",
+        "changes": [
+         2
+        ]
+       },
+       {
+        "event": "eden:ripening_restarted",
+        "node": "p1",
+        "changes": [
+         3
+        ]
+       },
+       {
+        "event": "eden:fruit_due",
+        "node": "p1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "p1",
+        "form": "fruit",
+        "after_us": 86400000000,
+        "event": 3
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "p1": {
+     "kind": "eden:planter",
+     "fields": {
+      "stage": "flowering",
+      "water": {
+       "value": 4000000,
+       "per_s": -5,
+       "set_us": 216000000000
+      },
+      "ripening": {
+       "value": 0,
+       "per_s": 1,
+       "set_us": 439200000000
+      },
+      "fruit": 0
+     }
+    },
+    "bk1": {
+     "kind": "eden:basket",
+     "fields": {
+      "fruit": 6
      }
     }
    }

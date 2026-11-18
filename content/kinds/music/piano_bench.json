@@ -1,0 +1,30 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:piano_bench",
+  "owner": "thing",
+  "geometry": {"bounds_mm":[770,460,310]},
+  "motion": {"how":"two_hands"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:piano_bench",
+    "shape": {
+      "round": 15,
+      "shapes": [
+        {"kind":"extrude","at":[0,445,0],"polygon":[[-385,-155],[385,-155],[385,155],[-385,155]],"h":30,"tint":"wood"},
+        {"kind":"cyl","at":[-320,215,-100],"r":25,"h":430,"segments":6,"r2":20,"tint":"wood"},
+        {"kind":"cyl","at":[320,215,-100],"r":25,"h":430,"segments":6,"r2":20,"tint":"wood"},
+        {"kind":"cyl","at":[-320,215,100],"r":25,"h":430,"segments":6,"r2":20,"tint":"wood"},
+        {"kind":"cyl","at":[320,215,100],"r":25,"h":430,"segments":6,"r2":20,"tint":"wood"}
+      ],
+      "palette": {"wood":"#3a2a22","keys":"#f4f2ec","black":"#222222"},
+      "tags": ["furniture","seat","bench","piano"]
+    }
+  },
+  "text": {
+    "card": "A piano bench: sit on it to play the piano in front of it.",
+    "seating": "seating",
+    "bench": "bench",
+    "stool": "stool"
+  },
+  "card": {"text":"card","category":"seating","synonyms":["bench","stool"]}
+}

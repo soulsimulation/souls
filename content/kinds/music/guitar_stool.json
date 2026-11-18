@@ -1,0 +1,105 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:guitar_stool",
+  "owner": "thing",
+  "state": {
+    "music": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
+  },
+  "links": {"player":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
+  "points": {"seat_front":{"role":"stand","at_mm":[0,0,450]}},
+  "slots": {"seat":{"admits":"body","posture":"sit","most":1,"at_mm":[0,650,0],"stand":"seat_front"}},
+  "geometry": {"bounds_mm":[600,1100,450]},
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need":"state","field":"music","is":"silent"},
+        {"need":"unlinked","link":"player"},
+        {"need":"slot_free","slot":"seat"}
+      ],
+      "steps": [{"step":"walk_to","point":"seat"},{"step":"sit","slot":"seat"}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":"seat","event":"sat_to_play"},
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"calm","event":"played_calm"}
+      ]
+    },
+    "play_happy": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need":"state","field":"music","is":"silent"},
+        {"need":"unlinked","link":"player"},
+        {"need":"slot_free","slot":"seat"}
+      ],
+      "steps": [{"step":"walk_to","point":"seat"},{"step":"sit","slot":"seat"}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":"seat","event":"sat_to_play"},
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"happy","event":"played_happy"}
+      ]
+    },
+    "play_sad": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need":"state","field":"music","is":"silent"},
+        {"need":"unlinked","link":"player"},
+        {"need":"slot_free","slot":"seat"}
+      ],
+      "steps": [{"step":"walk_to","point":"seat"},{"step":"sit","slot":"seat"}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":"seat","event":"sat_to_play"},
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"sad","event":"played_sad"}
+      ]
+    },
+    "stop": {
+      "who": {"link":"player"},
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","not":"silent"}],
+      "steps": [{"step":"rise"}],
+      "effects": [
+        {"change":"set","field":"music","to":"silent","event":"stopped_playing"},
+        {"change":"unlink","link":"player","from":"actor","event":"stepped_away"},
+        {"change":"reparent","what":"actor","into":"here","event":"rose"}
+      ]
+    }
+  },
+  "motion": {"how":"two_hands"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:guitar_stool",
+    "table": [
+      {"do":"sound","sound":"tune","mood":"calm","mode":"loop","field":"music","at":{"calm":700},"reach_mm":12000},
+      {"do":"sound","sound":"tune","mood":"happy","mode":"loop","field":"music","at":{"happy":700},"reach_mm":12000},
+      {"do":"sound","sound":"tune","mood":"sad","mode":"loop","field":"music","at":{"sad":700},"reach_mm":12000}
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"collide":false,"kind":"cyl","at":[0,620,0],"r":180,"h":50,"color":"#7a5230"},
+        {"collide":false,"kind":"cyl","at":[100,300,100],"r":20,"h":600,"color":"#4a3220"},
+        {"collide":false,"kind":"cyl","at":[-100,300,100],"r":20,"h":600,"color":"#4a3220"},
+        {"collide":false,"kind":"cyl","at":[100,300,-100],"r":20,"h":600,"color":"#4a3220"},
+        {"collide":false,"kind":"cyl","at":[-100,300,-100],"r":20,"h":600,"color":"#4a3220"},
+        {"collide":false,"kind":"cyl","at":[330,320,50],"r":190,"h":90,"pitch":90000,"color":"#b9773c","role":"body"},
+        {"collide":false,"kind":"cyl","at":[330,560,50],"r":145,"h":90,"pitch":90000,"color":"#b9773c","role":"body"},
+        {"collide":false,"kind":"cyl","at":[330,400,97],"r":50,"h":10,"pitch":90000,"color":"#1a1a1a"},
+        {"collide":false,"kind":"box","at":[330,940,50],"size":[55,480,30],"color":"#5a3a22"},
+        {"collide":false,"kind":"box","at":[330,1220,50],"size":[85,160,30],"color":"#2a1d14"}
+      ],
+      "tags": ["music","guitar"]
+    }
+  },
+  "text": {
+    "card": "A tall stool with a guitar leaning on it: sit and play the guitar.",
+    "instrument": "instrument",
+    "guitar": "guitar",
+    "stool": "stool",
+    "howto_play": "Play it (play, play_happy or play_sad), then stop."
+  },
+  "card": {"text":"card","category":"instrument","synonyms":["guitar","stool"]},
+  "howtos": {"play":{"text":"howto_play","steps":[{"form":"play"},{"form":"stop"}]}}
+}
