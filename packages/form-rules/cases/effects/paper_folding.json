@@ -1,0 +1,427 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Paper folding (from #1652): a boat is folded onto the tray (a sheet used, the boat made in one batch); a bird cannot be folded while the boat is on the tray, nor while the boat is held. The last sheet folded into a bird leaves the desk empty, and a third fold is refused. A boat and a bird already made are each taken into a free hand.",
+  "cases": [
+    {
+      "name": "fold_a_boat_take_it_fold_a_bird",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1"
+            ]
+          },
+          "d1": {
+            "kind": "eden:folding_desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "fold_boat"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "d1",
+                "field": "sheets",
+                "n": 1,
+                "to": 1
+              },
+              {
+                "change": "create",
+                "node": "r1.0",
+                "kind": "eden:paper_boat",
+                "to": {
+                  "node": "d1",
+                  "slot": "out"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sheet_used",
+                "node": "d1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:boat_folded",
+                "node": "d1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "d1",
+            "form": "fold_bird"
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "r1.0",
+            "form": "take"
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "r1.0",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "r1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "d1",
+            "form": "fold_bird"
+          },
+          "receipt": "r4",
+          "expect": {
+            "verdict": "no",
+            "reason": "hand_not_empty",
+            "need": 2
+          }
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "eden:folding_desk",
+          "fields": {
+            "sheets": 1
+          },
+          "slots": {
+            "out": []
+          }
+        },
+        "r1.0": {
+          "kind": "eden:paper_boat"
+        },
+        "b1": {
+          "hands": {
+            "left": "r1.0",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "fold_the_last_sheet_into_a_bird",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1"
+            ]
+          },
+          "d1": {
+            "kind": "eden:folding_desk",
+            "fields": {
+              "sheets": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "fold_bird"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "d1",
+                "field": "sheets",
+                "n": 1,
+                "to": 0
+              },
+              {
+                "change": "create",
+                "node": "r1.0",
+                "kind": "eden:paper_bird",
+                "to": {
+                  "node": "d1",
+                  "slot": "out"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sheet_used",
+                "node": "d1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:bird_folded",
+                "node": "d1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "r1.0",
+            "form": "take"
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "r1.0",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "r1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "d1",
+            "form": "fold_boat"
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "eden:folding_desk",
+          "fields": {
+            "sheets": 0
+          },
+          "slots": {
+            "out": []
+          }
+        },
+        "r1.0": {
+          "kind": "eden:paper_bird"
+        },
+        "b1": {
+          "hands": {
+            "left": "r1.0",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "take_a_paper_boat",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:paper_boat"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "take"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "p1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "p1": {
+          "kind": "eden:paper_boat"
+        },
+        "b1": {
+          "hands": {
+            "left": "p1",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "take_a_paper_bird",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:paper_bird"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "take"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "p1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "p1": {
+          "kind": "eden:paper_bird"
+        },
+        "b1": {
+          "hands": {
+            "left": "p1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}

@@ -36,12 +36,28 @@
       "who": { "link": "author" },
       "starts": "act",
       "needs": [
-        { "need": "linked", "link": "author" },
+        { "need": "linked", "link": "author", "end": "actor", "says": "author_only" },
         { "need": "within_reach", "point": "sheet" }
       ],
       "steps": [{ "step": "move", "move": "press", "at": "sheet" }],
       "effects": [
         { "change": "unlink", "link": "author", "from": "actor", "event": "poster_taken_down" },
+        { "change": "set", "field": "title", "to": null, "event": "title_cleared" },
+        { "change": "set", "field": "detail", "to": null, "event": "detail_cleared" },
+        { "change": "set", "field": "out_of_date", "to": false, "event": "place_cleared" }
+      ]
+    },
+    "take_down_out_of_date": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "linked", "link": "author" },
+        { "need": "state", "field": "out_of_date", "is": true, "says": "author_only" },
+        { "need": "within_reach", "point": "sheet" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "sheet" }],
+      "effects": [
+        { "change": "unlink", "link": "author", "from": "all", "event": "old_poster_taken_down" },
         { "change": "set", "field": "title", "to": null, "event": "title_cleared" },
         { "change": "set", "field": "detail", "to": null, "event": "detail_cleared" },
         { "change": "set", "field": "out_of_date", "to": false, "event": "place_cleared" }
@@ -69,6 +85,7 @@
   },
   "text": {
     "card": "A place for one signed poster; out of date three world days after it goes up.",
+    "author_only": "Only its author takes a poster down until it is out of date.",
     "poster": "poster",
     "flyer": "flyer"
   },

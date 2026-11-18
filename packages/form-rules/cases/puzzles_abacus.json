@@ -1,0 +1,111 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:abacus (from #1719). Two rods, tens and ones, each 0 to 9 (the original's one count 0-99 is the two digits a real abacus shows). With empty hands ('Put down what you are holding before counting.') a Soul adds or takes away one or ten in three seconds, or clears it. A ten past ninety or below zero is refused ('That change would exceed the abacus range 0–99.'); a rod has no carry, so a ninth one is refused with its way round, and clearing a clear abacus is refused.",
+  "cases": [
+    {
+      "name": "abacus_add_one_every_need_met",
+      "act": {"this":"a1","form":"add_one"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"ones":3}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "abacus_add_one_hands_full",
+      "act": {"this":"a1","form":"add_one"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "abacus_add_one_ones_at_nine",
+      "act": {"this":"a1","form":"add_one"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"ones":9}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"ones_full"}
+    },
+    {
+      "name": "abacus_subtract_one_every_need_met",
+      "act": {"this":"a1","form":"subtract_one"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"ones":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "abacus_subtract_one_hands_full",
+      "act": {"this":"a1","form":"subtract_one"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"ones":1}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "abacus_subtract_one_ones_at_zero",
+      "act": {"this":"a1","form":"subtract_one"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"ones_empty"}
+    },
+    {
+      "name": "abacus_add_ten_every_need_met",
+      "act": {"this":"a1","form":"add_ten"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"tens":8}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "abacus_add_ten_hands_full",
+      "act": {"this":"a1","form":"add_ten"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "abacus_add_ten_past_ninety_nine",
+      "act": {"this":"a1","form":"add_ten"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"tens":9,"ones":5}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"out_of_range"}
+    },
+    {
+      "name": "abacus_subtract_ten_every_need_met",
+      "act": {"this":"a1","form":"subtract_ten"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"tens":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "abacus_subtract_ten_hands_full",
+      "act": {"this":"a1","form":"subtract_ten"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"tens":1}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "abacus_subtract_ten_below_zero",
+      "act": {"this":"a1","form":"subtract_ten"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"ones":7}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"out_of_range"}
+    },
+    {
+      "name": "abacus_clear_every_need_met",
+      "act": {"this":"a1","form":"clear"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"tens":4,"ones":2}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "abacus_clear_hands_full",
+      "act": {"this":"a1","form":"clear"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus","fields":{"tens":4}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "abacus_clear_already_clear",
+      "act": {"this":"a1","form":"clear"},
+      "state": {"actor":"b1","nodes":{"a1":{"kind":"eden:abacus"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"already_clear"}
+    }
+  ]
+}

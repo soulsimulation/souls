@@ -4,13 +4,15 @@
   "owner": "thing",
   "state": {
     "water": { "n": 1, "type": "timed", "unit": "mg", "default": { "value": 400000, "per_s": -5, "set_us": 0 }, "min": 0, "max": 4000000, "audience": { "rule": "everyone" } },
-    "stage": { "n": 2, "type": "enum", "values": ["bare", "seed", "sprout", "leafy", "flowering", "fruiting"], "default": "bare", "audience": { "rule": "everyone" } }
+    "stage": { "n": 2, "type": "enum", "values": ["bare", "seed", "sprout", "leafy", "flowering", "fruiting"], "default": "bare", "audience": { "rule": "everyone" } },
+    "ripening": { "n": 3, "type": "timed", "unit": "count", "default": { "value": 0, "per_s": 1, "set_us": 0 }, "min": 0, "audience": { "rule": "everyone" } },
+    "fruit": { "n": 4, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
   },
   "points": {
-    "soil": { "role": "contact", "at_mm": [0, 372, 0] },
-    "stand": { "role": "stand", "at_mm": [0, 0, 600] }
+    "soil": { "role": "contact", "at_mm": [0,372,0] },
+    "stand": { "role": "stand", "at_mm": [0,0,600] }
   },
-  "geometry": { "bounds_mm": [900, 900, 500] },
+  "geometry": { "bounds_mm": [900,900,500] },
   "forms": {
     "sow": {
       "who": "anyone",
@@ -19,49 +21,108 @@
         { "need": "state", "field": "stage", "is": "bare" },
         { "need": "within_reach", "point": "soil" }
       ],
-      "steps": [{ "step": "move", "move": "press", "at": "soil" }],
+      "steps": [
+        { "step": "move", "move": "press", "at": "soil" }
+      ],
       "effects": [
         { "change": "set", "field": "stage", "to": "seed", "event": "sown" },
+        { "change": "set", "field": "ripening", "to": 0, "rate": 1, "event": "ripening_restarted" },
         { "change": "timer", "form": "sprout", "after_us": 86400000000, "event": "sprout_due" }
+      ]
+    },
+    "water": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "hand", "holds": "eden:watering_can" }
+      ],
+      "steps": [
+        { "step": "move", "move": "pour", "at": "soil" }
+      ],
+      "effects": [
+        { "change": "set", "field": "water", "to": 4000000, "rate": -5, "event": "watered" },
+        { "change": "timer", "form": "sprout", "after_us": 86400000000, "event": "sprout_due" },
+        { "change": "timer", "form": "leaf", "after_us": 86400000000, "event": "leaf_due" },
+        { "change": "timer", "form": "flower", "after_us": 86400000000, "event": "flower_due" },
+        { "change": "timer", "form": "fruit", "after_us": 86400000000, "event": "fruit_due" }
+      ]
+    },
+    "pick": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "basket": { "type": "thing", "select": { "of": "things", "kind": "eden:basket", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } } },
+      "needs": [
+        { "need": "state", "field": "stage", "is": "fruiting" },
+        { "need": "room" }
+      ],
+      "steps": [
+        { "step": "move", "move": "pick", "at": "soil" }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "fruit", "from": "this", "into": { "arg": "basket" }, "amount": 3, "event": "picked" },
+        { "change": "set", "field": "stage", "to": "flowering", "event": "back_to_flowering" },
+        { "change": "set", "field": "ripening", "to": 0, "rate": 1, "event": "ripening_restarted" },
+        { "change": "timer", "form": "fruit", "after_us": 86400000000, "event": "fruit_due" }
       ]
     },
     "sprout": {
       "who": "world",
       "starts": "timer",
-      "needs": [{ "need": "state", "field": "water", "at_least": 1360000 }],
+      "needs": [
+        { "need": "state", "field": "water", "at_least": 1360000 },
+        { "need": "state", "field": "stage", "is": "seed" },
+        { "need": "state", "field": "ripening", "at_least": 86400 }
+      ],
       "steps": [],
       "effects": [
         { "change": "set", "field": "stage", "to": "sprout", "event": "sprouted" },
+        { "change": "set", "field": "ripening", "to": 0, "rate": 1, "event": "ripening_restarted" },
         { "change": "timer", "form": "leaf", "after_us": 86400000000, "event": "leaf_due" }
       ]
     },
     "leaf": {
       "who": "world",
       "starts": "timer",
-      "needs": [{ "need": "state", "field": "water", "at_least": 1360000 }],
+      "needs": [
+        { "need": "state", "field": "water", "at_least": 1360000 },
+        { "need": "state", "field": "stage", "is": "sprout" },
+        { "need": "state", "field": "ripening", "at_least": 86400 }
+      ],
       "steps": [],
       "effects": [
         { "change": "set", "field": "stage", "to": "leafy", "event": "leafed" },
+        { "change": "set", "field": "ripening", "to": 0, "rate": 1, "event": "ripening_restarted" },
         { "change": "timer", "form": "flower", "after_us": 86400000000, "event": "flower_due" }
       ]
     },
     "flower": {
       "who": "world",
       "starts": "timer",
-      "needs": [{ "need": "state", "field": "water", "at_least": 1360000 }],
+      "needs": [
+        { "need": "state", "field": "water", "at_least": 1360000 },
+        { "need": "state", "field": "stage", "is": "leafy" },
+        { "need": "state", "field": "ripening", "at_least": 86400 }
+      ],
       "steps": [],
       "effects": [
         { "change": "set", "field": "stage", "to": "flowering", "event": "flowered" },
+        { "change": "set", "field": "ripening", "to": 0, "rate": 1, "event": "ripening_restarted" },
         { "change": "timer", "form": "fruit", "after_us": 86400000000, "event": "fruit_due" }
       ]
     },
     "fruit": {
       "who": "world",
       "starts": "timer",
-      "needs": [{ "need": "state", "field": "water", "at_least": 1360000 }],
+      "needs": [
+        { "need": "state", "field": "water", "at_least": 1360000 },
+        { "need": "state", "field": "stage", "is": "flowering" },
+        { "need": "state", "field": "ripening", "at_least": 86400 }
+      ],
       "steps": [],
       "effects": [
-        { "change": "set", "field": "stage", "to": "fruiting", "event": "fruited" }
+        { "change": "set", "field": "stage", "to": "fruiting", "event": "fruited" },
+        { "change": "set", "field": "fruit", "to": 3, "event": "ripe" },
+        { "change": "set", "field": "ripening", "to": 0, "rate": 1, "event": "ripening_restarted" }
       ]
     }
   },
@@ -71,16 +132,18 @@
     "model": "look:planter",
     "table": [
       { "part": "fill", "field": "stage", "do": "grow", "at": { "seed": 0, "sprout": 1000, "leafy": 2000, "flowering": 3000, "fruiting": 4000 } },
-      { "part": "fill", "field": "water", "do": "wilt", "range": [0, 1360000], "to": [1000, 0] },
-      { "part": "fill", "field": "water", "do": "tint", "range": [1359999, 1360000], "to": ["#b8a184", "#3b2b1d"] }
+      { "part": "fill", "field": "water", "do": "wilt", "range": [0,1360000], "to": [1000,0] },
+      { "part": "fill", "field": "water", "do": "tint", "range": [1359999,1360000], "to": ["#b8a184", "#3b2b1d"] }
     ],
     "shape": {"round":10,"shapes":[{"kind":"box","at":[0,180,0],"size":[900,360,500],"round":20,"tint":"wood"},{"kind":"box","at":[0,362,0],"size":[820,16,420],"round":0,"tint":"soil","role":"fill","pivot":[0,372,0]}],"palette":{"wood":"#7a5a3c","soil":"#5b4632"},"tags":["garden","planter","plant","object"]}
   },
   "text": {
-    "card": "A planter: sow it and it grows by itself while its soil is moist.",
+    "card": "A planter: sow and water it, and it grows by itself; pick its tomatoes.",
     "garden": "garden",
     "plant": "plant",
-    "grow": "grow"
+    "grow": "grow",
+    "water": "water",
+    "harvest": "harvest"
   },
-  "card": { "text": "card", "category": "garden", "synonyms": ["plant", "grow"] }
+  "card": { "text": "card", "category": "garden", "synonyms": ["plant", "grow", "water", "harvest"] }
 }
