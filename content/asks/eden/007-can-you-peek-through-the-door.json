@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":7,"group":"object","words":"can you peek through the door without going in","obvious":2,"things":{"door":"eden:door"},"chain":[{"this":"door","form":"open"},{"this":"me","form":"look_at","args":{"target":"door"}}]}

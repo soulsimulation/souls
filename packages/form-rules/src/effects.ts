@@ -7,7 +7,8 @@
 //
 // - An amount moved between two things is two `set` changes on one field, each carrying its signed `by`
 //   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not.
-// - Holding is a parent: take and put are `reparent` into or out of a hand or a slot.
+// - Holding is a parent: take and put are `reparent` into or out of a hand, a slot or the actor's place (`here`).
+//   What is moved is the actor, this thing, a thing argument of the form, or the one thing at the end of a link.
 // - A made thing appears where its form names: a slot, the actor's hand, or `here`, loose in the actor's
 //   place (the spot is Engine v2's set-down, E4, and is not chosen here). Its id comes from the receipt.
 // - Effects are worked out in order on a copy, so a later effect sees an earlier one, and a form whose
@@ -23,7 +24,7 @@
 // - An event's name is `namespace:name`, the declaring kind's namespace before the name its entry writes.
 // No float decides anything; nothing here imports more than the rules.
 
-import { decide, measure, type Entry, type DrawRow, type Input, type Node, type Verdict } from './rules.ts';
+import { decide, measure, valueAt, type Entry, type DrawRow, type Input, type Node, type Verdict } from './rules.ts';
 
 export type Place = { node: string; slot: string } | { node: string; hand: string } | { node: string };
 export type Change =
@@ -152,7 +153,18 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     }
     return slotPlace(into);
   };
-  const subject = (what: unknown) => (what === 'actor' ? actor : what === 'this' ? self : null);
+  // The node an effect moves or removes: the actor, this thing, a thing argument of the form (a body's pick_up), or
+  // `{link}`: the one thing at the end of that link of this node (what a give hands over, SA-G4); never a body.
+  const subject = (what: unknown): string | null => {
+    if (what === 'actor' || what === 'this') return what === 'actor' ? actor : self;
+    if (has(what, 'arg')) {
+      const id = args[(what as { arg: string }).arg];
+      return typeof id === 'string' && has(work, id) ? id : null;
+    }
+    const link = what && typeof what === 'object' ? (what as { link?: unknown }).link : undefined;
+    const ends = typeof link === 'string' ? ((work[self].links?.[link] ?? []) as string[]) : [];
+    return ends.length === 1 && has(work, ends[0]) && !has(work[ends[0]], 'hands') ? ends[0] : null;
+  };
 
   const effectList = entry.forms![act.form].effects ?? [];
   for (let i = 0; i < effectList.length; i++) {
@@ -180,8 +192,22 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     if (e.change === 'set') {
       const def = has(entry.state, e.field ?? '') ? entry.state![e.field!] : undefined;
       if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: e.field ?? null });
+      if (def.type === 'timed') {
+        // a timed value is settled at the act's time and given its new rate: the three stored numbers are rewritten
+        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const now = valueAt(def, held, state.now_us);
+        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: e.field! });
+        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: { value: now, per_s: e.rate!, set_us: state.now_us! } });
+      } else if (has(e, 'by')) {
+        // a count or an amount used up (a sip): the field's value plus `by`, within its bounds; nothing balances it
+        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const to = Number.isSafeInteger(held) && Number.isSafeInteger(e.by) ? (held as number) + e.by! : null;
+        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: e.field! });
+        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to });
+      } else {
       const to = stored(def, arg(e.to, args));
       out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });
+      }
     } else if (e.change === 'transfer') {
       const m = measure(kinds, work, self, args, e);
       if ('bad' in m) return refuse(i, 'bad_input', { what: m.bad, ...m.detail });

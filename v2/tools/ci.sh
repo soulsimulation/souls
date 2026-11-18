@@ -19,6 +19,10 @@ step() {
 step toolchain bash -c 'rustup component add rustfmt clippy && rustup target add wasm32-unknown-unknown'
 
 step format cargo fmt --all --check
+# Engine code names no kind (K3, #2667): the fixture kinds' names are in no Rust code under the crates' src/. Comment
+# lines and lines that embed a fixture file (data) are set aside; tests and fixtures name kinds on purpose.
+step no-kind-names bash -c '! grep -rniEw --include="*.rs" "lamps?|seats?|cups?" crates/*/src |
+  grep -vE "^[^:]+:[0-9]+:[[:space:]]*//" | grep -v "include_str!"'
 step lints cargo clippy --workspace --all-targets --locked -- -D warnings
 # replica's WASM-only code (the wasm-bindgen export) is linted on its own target too.
 step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked -- -D warnings
@@ -53,4 +57,28 @@ step ids-goldens node --input-type=module -e '
   r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
   const got = r.ids_goldens(), want = readFileSync("crates/replica/fixtures/ids/goldens.txt", "utf8");
   console.log(`${got}ids-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
+  if (got !== want) process.exit(1);'
+# The time goldens (T5, #2643), beat 1,000,000 at 130 a minute among them, the same way (crates/replica/tests/time.rs).
+step time-goldens node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
+  const got = r.time_goldens(), want = readFileSync("crates/replica/fixtures/time/goldens.txt", "utf8");
+  console.log(`${got}time-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
+  if (got !== want) process.exit(1);'
+# The pose goldens (T4, #2644): the three fixtures and 1,000 hand-offs, the same way (crates/replica/tests/pose.rs).
+step pose-goldens node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
+  const got = r.pose_goldens(), want = readFileSync("crates/replica/fixtures/pose/goldens.txt", "utf8");
+  console.log(`${got}pose-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
+  if (got !== want) process.exit(1);'
+# The effects goldens (T6, #2645): the seven generic changes' bytes and state hashes, the same way (tests/effects.rs).
+step effects-goldens node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
+  const got = r.effects_goldens(), want = readFileSync("crates/replica/fixtures/effects/goldens.txt", "utf8");
+  console.log(`${got}effects-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
   if (got !== want) process.exit(1);'

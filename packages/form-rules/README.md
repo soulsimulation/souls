@@ -22,7 +22,9 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 - `{verdict: "no", reason, need, detail, fix, read}`: the first unmet need, by its index in the form. `reason` is one
   of `REASONS`; `detail` says what is missing (the field, what was found and wanted; the slot; the point and move;
   the link and how many there are). `fix` is one act that would meet the need, taken only from data: a form of the
-  same thing that anyone may start and whose `set`, `link` or `unlink` effect meets it; the same form with another
+  same thing that anyone, or its holder, may start and whose `set` (with `by`: the value it adds up to, within the field's bounds, so a crank that adds
+  charge fixes too little charge), `link` or `unlink` effect meets it, or whose
+  `transfer` into the thing would meet it at the field's `max` (out of it: at its `min`); the same form with another
   free slot; or a closed step (`walk_to` a point, `take`, `put`). Where the data offers none, `fix` is `null`.
 - `{verdict: "unknown", need, node, field | link, read}`: a need read a field or link outside the asker's audience
   and no need was definitely unmet. A definite "no" from another need wins over "unknown".
@@ -36,10 +38,17 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 
 `NEEDS` is one closed list, shared with R2: `state` (a field `is` or is `not` a value, or lies within `at_least` and
 `at_most`, whole numbers), `slot_free`, `within_reach` (of a point, by the reach of the move the form's step makes
-there, compared as squares in big integers), `hand` (`free: true` or `holds: <kind>`), `held_by_actor`, and `linked`
+there, compared as squares in big integers; reach to another thing is read in this order: of a `thing` argument the
+form walks to, met when the thing is in the actor's place, since the walk is taken as done; else `"of": {"arg": "tap"}`
+names the point of another thing given as a form argument, placed by that node's `at_mm` in the input, with no
+rotation, the fix a `walk_to` its `stand` point, SA-F2; else, an unknown pose, `unknown`), `hand` (`free: true` or
+`holds: <kind>`), `held_by_actor` (this thing, or a `thing` argument), `moves` (a `thing` argument moves `by` `carry`
+or `push`, read from its kind's `motion.how`: `moves_by`, `motion_unsaid`, `needs_souls`, or `no_free_hand` when
+carrying takes more hands), and `linked`
 / `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
-overflows). A need on a `timed` field reads its value at the state's `now_us` (below). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
+overflows) and `enough` (every amount they ask is there to give at the source, else `not_enough`, with the source, what
+it can give and the amount asked). A need on a `timed` field reads its value at the state's `now_us` (below). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
 the test kinds in `cases/kinds/test/`.
 
 ## A case
@@ -96,10 +105,11 @@ is left out, and a `set` without `to` clears the field to its default. `outsideP
 leaves the profile, with the profile's name for the refusal (`simple`, `null`, `float`, `text-not-name`, ...);
 `effects` refuses to write such a value and `apply` refuses to accept one.
 
-The entry's effects map to changes like this: `set` sets a field of the thing; `transfer` moves an amount of one
+The entry's effects map to changes like this: `set` sets a field of the thing (on a timed value, `rate`: the value at the state's `now_us` with the new rate, `{value, per_s, set_us}` written whole; with `by` instead of `to`, the int value plus `by`, refused as `out_of_range` outside the field's `min`, or 0, and `max`, and written as `to` alone, since nothing balances a sip); `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
 `"room"`), the least of what it asks and what the source has above its field's `min`, as two `set`s whose `by`s sum
-to zero; `reparent` moves the actor or the thing into a slot or the actor's first free hand (holding is a parent);
+to zero; `reparent` moves the actor, the thing or a `thing` argument into a slot, the actor's first free hand or
+`here`, loose in the actor's place (holding is a parent);
 `create` makes a thing in a slot, the actor's first free hand or `here`, loose in the place the actor is in (where
 on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.<n>`; `link` / `unlink` join the
 actor to the thing. Effects are worked out in order on a copy, so a later one sees an earlier one; one that cannot be
@@ -133,7 +143,7 @@ test kinds `test:dartboard` and `test:die`.
 ## An effect case
 
 A file in `cases/effects/` is `{"format": "souls-effect-cases/1", "about": ..., "cases": [...]}`. A case is a state
-and the acts done in it, in order, each with its `receipt`, an optional `actor` (another body in the same state) and
+and the acts done in it, in order, each with its `receipt`, an optional `actor` (another body in the same state), an optional `now_us` (the act's world time, when it differs from the state's) and
 what `effects` should return (`expect`, compared like a rule case's). `after` names nodes and what each should be
 once every act is applied (`null`: removed), compared whole. Every act that is done is also applied a second time
 with its receipt, which must change nothing.
@@ -270,8 +280,23 @@ actor as a member, with no place. `enter` and `leave` then also keep the stage: 
 arrives, a `sitting_began` event sets the stage to `sitting`; when the last one present rises, `sitting_ended` returns
 it to `idle`; a member who is present cannot part (`still_present`); and a standing activity is not ended by its last
 member parting. `lapse(input)` is the end date: it runs the world form (the engine's timer, at the time its needs
-state) and puts a `released` event first, unlinking every member; it moves no body. Cases are in `cases/activity/standing/`
+state) and puts a `released` event first, unlinking every member; a body standing in the activity's own slots is moved
+out to its place, so removing the activity removes no body. Cases are in `cases/activity/standing/`
 (the same step format, with `join` and `world` running `lapse`); the example is a weekly class (`test:class`).
+
+### Between two Souls
+
+A pair (SA-G4, [#2876](https://github.com/soulsimulation/souls/issues/2876)) is an activity of two required roles with
+a `pair` section (see the format page): give, hug, handshake, high five, dance and push the swing. `pairOf(entry,
+moves)` answers whether a kind is one, or `{bad, detail}` naming the first thing wrong: the accepting form is allowed
+only to the invited Soul and needs the asker's role linked and the countdown above 0; the asker offers by a form
+allowed to one link; each role has a leaving form; the expiry is a world timer form at the countdown's end that needs
+the other role unlinked and removes the offer; no form moves anything by a link except a give's thing into the
+accepter's hand; contact points name a move from `content/moves/`. `accept(input)` asks who may, then, for a give,
+that the asker still holds the thing in a hand (`not_held`), then `enter`s. An effect's `what` may be `{"link":
+<type>}`, the one thing at the end of that link of this node, never a body. Cases are in `cases/activity/pairs/` (the
+same step format, with `offer`, `accept`, `leave`, `world` running `lapse` and `now`); the test checks that no change
+names a body that is neither the actor nor a member.
 
 ## Looks
 

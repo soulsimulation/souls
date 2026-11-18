@@ -2,9 +2,15 @@
 //! Empty but for the load probe (K1, #2638).
 #![forbid(unsafe_code)]
 
+pub mod effects;
 pub mod encode;
 pub mod ids;
+pub mod kinds;
+pub mod pose;
+pub mod time;
+pub mod tree;
 pub mod world_model;
+pub mod zones;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;

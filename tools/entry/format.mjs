@@ -14,19 +14,20 @@ import {pathToFileURL} from 'node:url';
 export const FORMAT = 'souls-entry/1';
 
 /** Every section has a number, so a section can be added without moving the others. Sections 1 to 19 are the kind's
- *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640). */
-// Section 10 is reserved for Engine v2 T3's hashed table of referenced kinds (T3, #2640, rule 14); it is not implemented
-// here. Section 11 is `children`, the kinds a thing admits as children: a check at commit by plain kind name, never a
-// hashed reference, so `kindRefs` does not follow it. Section 12 is `reactions` (SA-F15), numbered when that task lands.
-export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14, stock: 15,
+ *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640).
+ *  Section 10 is Engine v2 T3's table of referenced kinds, written by the encoder, never in a file; 12 is `reactions`. */
+export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14, stock: 15, areas: 16, roles: 17, motion: 18, loose: 19,
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
-export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10', areas: 'SA-D6', hatch: 'SA-F9'});
+export const RESERVED = Object.freeze({reactions: 'SA-F15'});
 
 /** What a kind is the kind of: a thing, a body's family, or a kind of ground or place (Engine v2 E21, #2791). */
 export const OWNERS = Object.freeze(['thing', 'family', 'place']);
-export const FIELD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration', 'text', 'list', 'schedule']);
+export const FIELD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration', 'text', 'list', 'schedule', 'timed']);
+/** A timed value (SA-F5a, #2845): a value that changes with time, stored as three whole numbers: `value` (in the field's
+ *  unit), `per_s` (the rate, in that unit per second) and `set_us` (the world time it was set). */
+export const TIMED_KEYS = Object.freeze(['value', 'per_s', 'set_us']);
 /** A schedule is data a kind publishes (SA-F16, #2854): a bounded list of times a client reads and plans from. The world
  *  never waits for one and never reminds a mind of one. A `once` entry runs between two world times; a `weekly` entry
  *  repeats on named days between two local times of day (the clock of the place the thing stands in). */
@@ -65,13 +66,24 @@ export const STAND_MARGIN_MM = 2000;
 export const POSTURES = Object.freeze(['sit', 'lie']);
 export const WHO = Object.freeze(['anyone', 'holder', 'world']);
 export const STARTS = Object.freeze(['act', 'timer']);
-export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'duration', 'count']);
+/** `placement`: one of the placement words (packages/form-rules/placements.json), chosen when the form is done. */
+export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'duration', 'count', 'placement']);
 /** A described target: one closed list with Engine v2 E2 (#2709): a candidate set, an anchor, an order and a rank. */
 export const SELECT = Object.freeze({of: ['things', 'free_slots'], in: ['this', 'here', 'parent'], anchor: ['me', 'this'], order: ['nearest', 'furthest']});
 /** The closed lists. Each grows only with the task that first needs a new member. */
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked']);
-export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait']);
-export const CHANGES = Object.freeze(['set', 'reparent', 'link', 'unlink', 'create', 'remove', 'timer']);
+/** `moves`: the thing argument moves the way the form moves it (`carry` or `push`), by its kind's section 18. */
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough', 'moves']);
+export const MOVED_BY = Object.freeze(['carry', 'push']);
+/** `settle`: a body takes a ground posture where it stands, with no slot (SA-G3, #2875). */
+export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait', 'settle']);
+/** `transfer` moves an amount between two int fields of one name (SA-F2b, #2844); `draw` is an outcome nobody chose,
+ *  from a weighted table the world draws from (SA-F13, #2852). */
+export const CHANGES = Object.freeze(['set', 'reparent', 'link', 'unlink', 'create', 'remove', 'timer', 'transfer', 'draw']);
+/** An activity's roles (SA-G1a, #2872; Engine v2 B5, #2724): how much a role is needed, and where its members may be. */
+export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
+export const PLACES_IN = Object.freeze(['this', 'here']);
+/** The link a body declares to its Soul (SA-F7a, #2848), so who-may can match a Soul to the body that acts. */
+export const SOUL_LINK = 'soul';
 export const SUBJECTS = Object.freeze(['actor', 'this']);
 /** A vehicle (SA-F14, #2884) declares what Engine v2 needs to let a Soul drive it, never how it moves: a drive seat, a speed,
  *  its size (the bounds) and the kind of ground it may cross. Ground is whole kinds: `level` (no doors, stairs or ladders)
@@ -81,6 +93,15 @@ export const VEHICLE_GROUNDS = Object.freeze(['level', 'deep_water']);
 export const SPOTS = Object.freeze(['level', 'shallow', 'deep_water', 'door', 'stairs', 'ladder', 'blocked']);
 export const SPOTS_STAND = Object.freeze(['level', 'shallow']);
 export const SPOTS_SWIM = Object.freeze(['deep_water']);
+/** The code hatch (SA-F9, #2850): a form may name one pure function by the hash of its WASM module (Engine v2 F8, #2823; T9,
+ *  #2663), with the state it reads and a step limit. It is metered, has no clock, randomness or float, and cannot reach a thing
+ *  it did not declare. No code lives in an entry; only the name, the reads and the limit. The kind's hash covers all three. */
+export const HATCH_KEYS = Object.freeze(['module', 'reads', 'steps_most', 'answers', 'why']);
+export const HATCH_MODULE = /^prov-1220[0-9a-f]{64}$/;
+export const HATCH_READS_MOST = 16;
+export const HATCH_STEPS_MOST = 1_000_000;
+export const HATCH_ARGS = Object.freeze(['count', 'duration']);
+export const HATCH_FIELDS = Object.freeze(['bool', 'enum', 'int', 'duration', 'timed', 'list']);
 
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const KIND = /^[a-z][a-z0-9-]*:[a-z][a-z0-9_]*$/;
@@ -112,7 +133,8 @@ export function validateEntry(entry) {
   if (!isObj(entry)) return [{path: '', reason: 'an entry is an object'}];
   scan(entry, '', err);
   for (const key of Object.keys(entry)) {
-    if (key in RESERVED) err(key, `section "${key}" is not defined yet; ${RESERVED[key]} adds it`);
+    if (key === 'hatch') err(key, 'a hatch is declared by the form that uses it, under its "hatch" key; there is no section of this name');
+    else if (key in RESERVED) err(key, `section "${key}" is not defined yet; ${RESERVED[key]} adds it`);
     else if (key === 'extends') err(key, 'a published kind is written out in full; it extends nothing');
     else if (!(key in SECTIONS)) err(key, `unknown section "${key}"`);
   }
@@ -129,6 +151,9 @@ export function validateEntry(entry) {
   if (entry.closed !== undefined) closed(entry.closed, state, links, err);
   children(section(entry, 'children', err), err);
   stock(entry, err);
+  areas(entry, err);
+  roles(entry, err);
+  motion(entry, err);
   if (entry.vehicle !== undefined) vehicle(entry, err);
   if (entry.ride !== undefined) ride(entry, err);
   if (entry.vehicle !== undefined && entry.ride !== undefined) err('ride', 'a kind is a vehicle (steered) or a ride (a set trip), not both');
@@ -140,6 +165,7 @@ export function validateEntry(entry) {
     if (l.most !== undefined && !(isInt(l.most) && l.most > 0)) err(`${p}.most`, 'how many may be linked at the from end to one of these, a whole number above zero');
     if (l.most_per !== undefined && !(isInt(l.most_per) && l.most_per > 0)) err(`${p}.most_per`, 'how many of these one from end may be linked to, a whole number above zero');
     audience(l, p, links, err);
+    if (name === SOUL_LINK && !(entry.owner === 'family' && l.from === 'soul' && l.most === 1)) err(p, 'the soul link is a body\'s link to its Soul: declared by a body\'s family (owner "family"), from "soul", most 1');
   }
   for (const [name, pt] of Object.entries(points)) {
     const p = `points.${name}`;
@@ -166,10 +192,13 @@ export function validateEntry(entry) {
   places(entry, points, slots, err);
   if (entry.geometry !== undefined) {
     if (!isObj(entry.geometry)) err('geometry', 'an object');
-    else { only(entry.geometry, ['bounds_mm'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true); }
+    else {
+      only(entry.geometry, ['bounds_mm', 'front'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true);
+      if (entry.geometry.front !== undefined && !FRONTS.includes(entry.geometry.front)) err('geometry.front', `one of ${FRONTS.join(', ')}: "z" is the front the frame names, "none" a thing with no front (a round table)`);
+    }
   }
 
-  const ctx = {state, links, points, slots, forms};
+  const ctx = {text, state, links, points, slots, forms, areas: isObj(entry.areas) ? entry.areas : {}};
   for (const [name, f] of Object.entries(forms)) {
     if (!IDENT.test(name)) err(`forms.${name}`, 'a form name is lower_snake_case');
     form(f, `forms.${name}`, ctx, err);
@@ -351,6 +380,108 @@ export function refilled(entry, name, count, us) {
   return s.refill ? Math.min(cap, count + Math.floor(us / s.refill.every_us)) : count;
 }
 
+/** Areas (SA-D6, #2861): what a kind says about resting on it, or about a part of its surroundings, where its shape cannot.
+ *  Engine v2 E3 (#2777) reads a declared area first, then surfaces, then shape, so a kind writes an area only where shape
+ *  gives the wrong answer or none: a bed is for lying and sitting on its edge, a piano is for neither, a tree has shade.
+ *  An area may carry `allows` (posture -> `on` the thing or on its `edge`), `forbids` (postures, by name), `takes` (kinds of
+ *  thing that may be set down on it, Engine v2 E4) and a place: `at_mm` and `radius_mm`, whole millimetres in the thing's
+ *  own frame, a named part of its surroundings a body can be sent to (`walk_to`). The spot a body or thing gets is the
+ *  engine's choice. An area that only repeats what the kind's slots already say is refused. */
+export const REST_POSTURES = Object.freeze(['sit', 'lie', 'stand', 'lean']);
+export const REST_WHERE = Object.freeze(['on', 'edge']);
+export const AREA_KEYS = ['allows', 'forbids', 'takes', 'at_mm', 'radius_mm'];
+export const AREA_REACH_MM = 20000;
+function areas(entry, err) {
+  const table = section(entry, 'areas', err), points = section(entry, 'points', err), slots = section(entry, 'slots', err);
+  const slotList = Object.values(slots).filter(isObj);
+  for (const [name, a] of Object.entries(table)) {
+    const p = `areas.${name}`;
+    if (name in points || name in slots) err(p, `"${name}" is already a ${name in points ? 'point' : 'slot'}; a part's name is used once`);
+    if (!isObj(a)) { err(p, 'an area is an object: {"allows", "forbids", "takes", "at_mm", "radius_mm"}'); continue; }
+    only(a, AREA_KEYS, p, err);
+    if (!(entry.owner === 'thing' || entry.owner === 'place')) err(p, 'a thing or a place declares areas');
+    const allows = isObj(a.allows) ? a.allows : {}, forbids = Array.isArray(a.forbids) ? a.forbids : [], takes = Array.isArray(a.takes) ? a.takes : [];
+    const placed = a.at_mm !== undefined || a.radius_mm !== undefined;
+    if (a.allows !== undefined) {
+      if (!isObj(a.allows) || !Object.keys(a.allows).length) err(`${p}.allows`, 'a table of posture to where, never empty');
+      else for (const [k, w] of Object.entries(a.allows)) {
+        if (!REST_POSTURES.includes(k)) err(`${p}.allows.${k}`, `a posture, one of ${REST_POSTURES.join(', ')}`);
+        else if (!REST_WHERE.includes(w)) err(`${p}.allows.${k}`, `where, one of ${REST_WHERE.join(', ')}`);
+      }
+    }
+    if (a.forbids !== undefined) {
+      if (!Array.isArray(a.forbids) || !a.forbids.length || !a.forbids.every(k => REST_POSTURES.includes(k) || FORBIDDABLE.includes(k)) || new Set(a.forbids).size !== a.forbids.length) err(`${p}.forbids`, `one or more different names of ${[...REST_POSTURES, ...FORBIDDABLE].join(', ')}`);
+      else for (const k of forbids) {
+        if (k in allows) err(`${p}.forbids`, `"${k}" is both admitted and forbidden`);
+        if (slotList.some(s => s.admits === 'body' && s.posture === k)) err(`${p}.forbids`, `"${k}" is forbidden, but a slot of this kind seats a body in that posture`);
+      }
+    }
+    if (a.takes !== undefined && !(Array.isArray(a.takes) && a.takes.length && a.takes.every(k => typeof k === 'string' && KIND.test(k)))) err(`${p}.takes`, 'one or more kinds, "namespace:name": what may be set down on it');
+    if (placed) {
+      vec(a.at_mm, `${p}.at_mm`, err);
+      if (Array.isArray(a.at_mm) && a.at_mm.some(v => isInt(v) && Math.abs(v) > AREA_REACH_MM)) err(`${p}.at_mm`, `within ${AREA_REACH_MM} mm of the thing, in its own frame`);
+      if (!(isInt(a.radius_mm) && a.radius_mm > 0 && a.radius_mm <= AREA_REACH_MM)) err(`${p}.radius_mm`, `a place has a radius, whole millimetres from 1 to ${AREA_REACH_MM}`);
+    }
+    if (!placed && !Object.keys(allows).length && !forbids.length && !takes.length) { err(p, 'an area says something: allows, forbids, takes, or a place (at_mm and radius_mm)'); continue; }
+    // Repeating what the slots say adds nothing: no place, no forbid, and every posture and kind already a slot's.
+    const restRepeats = Object.entries(allows).every(([k, w]) => w === 'on' && slotList.some(s => s.admits === 'body' && s.posture === k));
+    const takesRepeat = takes.every(k => slotList.some(s => s.admits === 'thing' && (!s.kinds || s.kinds.includes(k))));
+    if (!placed && !forbids.length && restRepeats && takesRepeat) err(p, 'only repeats what the slots of this kind already say; leave the area out');
+  }
+}
+
+/** How a kind moves and how long it lasts loose (SA-F10, #2882; sections 18 and 19). One closed list, shared with Engine v2 E5
+ *  (#2778): `one_hand` and `two_hands` are carried, `pushed_by_one` and `wheeled` are pushed by one Soul, `two_souls` needs
+ *  two (Engine v2 B9), `fixed` does not move. `loose`: how long a thing lasts once nobody holds or owns it, Engine v2 F10
+ *  (#2773): `{"ever": true}` or `{"us": <microseconds>}`; owned, or in a slot, a thing lasts. */
+export const MOTIONS = Object.freeze(['one_hand', 'two_hands', 'pushed_by_one', 'two_souls', 'wheeled', 'fixed']);
+export const CARRIED = Object.freeze({one_hand: 1, two_hands: 2});
+export const PUSHED = Object.freeze({pushed_by_one: 1, wheeled: 1, two_souls: 2});
+/** The six things any thing allows are forms of the body's own family (SA-G3), so a kind writes none of them. */
+export const BASE_FORMS = Object.freeze(['go_to', 'look_at', 'point', 'touch', 'lean_on', 'wait_by']);
+/** A kind forbids one by name in an area's `forbids`: leaning is the posture `lean`; the others by their form's name. */
+export const FORBIDDABLE = Object.freeze(['go_to', 'look_at', 'point', 'touch', 'wait_by']);
+function motion(entry, err) {
+  if (entry.motion !== undefined) {
+    const m = entry.motion;
+    if (entry.owner !== 'thing') err('motion', 'a thing says how it moves');
+    else if (!isObj(m)) err('motion', `an object: {"how": one of ${MOTIONS.join(', ')}}`);
+    else { only(m, ['how'], 'motion', err); if (!MOTIONS.includes(m.how)) err('motion.how', `how it moves, one of ${MOTIONS.join(', ')}`); }
+  }
+  if (entry.loose !== undefined) {
+    const l = entry.loose;
+    if (entry.owner !== 'thing') err('loose', 'a thing says how long it lasts loose');
+    else if (!isObj(l)) err('loose', 'an object: {"ever": true} or {"us": <microseconds>}');
+    else {
+      only(l, ['ever', 'us'], 'loose', err);
+      if ((l.ever === undefined) === (l.us === undefined)) err('loose', 'says exactly one of "ever": true, or "us": whole microseconds');
+      else if (l.ever !== undefined && l.ever !== true) err('loose.ever', 'true: it lasts for ever');
+      else if (l.us !== undefined && !(isInt(l.us) && l.us > 0)) err('loose.us', 'whole microseconds above zero');
+    }
+  }
+}
+
+/** Whether a body may carry, or push, a copy of this kind, by how the kind moves. A refusal names how it moves. */
+export function moveBy(entry, {act, souls = 1}) {
+  const how = entry?.motion?.how;
+  if (!MOTIONS.includes(how)) return {ok: false, code: 'unsaid', how: null, reason: `${entry?.kind} does not say how it moves`};
+  if (act === 'carry') return how in CARRIED ? {ok: true, how, hands: CARRIED[how]} : {ok: false, code: 'moves_by', how, reason: `${entry.kind} is ${how}: it moves that way, not carried`};
+  if (act === 'push') {
+    if (!(how in PUSHED)) return {ok: false, code: 'moves_by', how, reason: `${entry.kind} is ${how}: it moves that way, not pushed`};
+    return souls >= PUSHED[how] ? {ok: true, how, souls: PUSHED[how]} : {ok: false, code: 'souls', how, reason: `${entry.kind} is ${how}: it takes ${PUSHED[how]} Souls, not ${souls}`};
+  }
+  return {ok: false, code: 'unknown_act', how, reason: `"${act}" is neither carry nor push`};
+}
+
+/** Whether a body may do one of the six base forms on a copy of this kind: allowed unless an area of the kind forbids it by
+ *  name (leaning is `lean`). The form is the body's own, so the kind writes nothing for the rest. */
+export function allowsBase(entry, form) {
+  if (!BASE_FORMS.includes(form)) return {ok: false, code: 'not_base', reason: `"${form}" is not one of ${BASE_FORMS.join(', ')}`};
+  const name = form === 'lean_on' ? 'lean' : form;
+  for (const [area, a] of Object.entries(entry?.areas ?? {})) if (Array.isArray(a?.forbids) && a.forbids.includes(name)) return {ok: false, code: 'forbidden', name, area, reason: `${entry.kind} forbids "${name}" (area ${area})`};
+  return {ok: true};
+}
+
 function speed(v, path, err) {
   if (!(isInt(v.speed_mm_s) && v.speed_mm_s > 0)) err(`${path}.speed_mm_s`, 'its speed in whole millimetres per second, above zero');
   if (!VEHICLE_GROUNDS.includes(v.ground)) err(`${path}.ground`, `the ground it may cross, one of ${VEHICLE_GROUNDS.join(', ')}`);
@@ -518,9 +649,45 @@ function vec(v, path, err, positive = false) {
   if (!Array.isArray(v) || v.length !== 3 || !v.every(x => isInt(x) && (!positive || x > 0))) err(path, `three whole numbers of millimetres${positive ? ' above zero' : ''}`);
 }
 
+/** `min` / `max`: whole bounds of an `int` field (or a timed value); an amount moved never takes it past them (SA-F2b). */
+function bounds(f, path, err) {
+  for (const k of ['min', 'max']) {
+    if (f[k] === undefined) continue;
+    if (f.type !== 'int' && f.type !== 'timed') err(`${path}.${k}`, 'only an int or a timed value has bounds');
+    else if (!isInt(f[k])) err(`${path}.${k}`, 'a whole number in the field\'s unit');
+  }
+  if (isInt(f.min) && isInt(f.max) && f.min > f.max) err(`${path}.min`, `min ${f.min} is above max ${f.max}`);
+}
+
+/** An activity's roles (SA-G1a): each role is one of the kind's link types to a body or a Soul, with how much it is needed
+ *  and where its members may be: the activity's own body slots (`this`), or body slots near it (`here`, within_mm). */
+function roles(entry, err) {
+  const table = section(entry, 'roles', err), links = isObj(entry.links) ? entry.links : {}, slots = isObj(entry.slots) ? entry.slots : {};
+  for (const [name, r] of Object.entries(table)) {
+    const p = `roles.${name}`;
+    if (!(isObj(links[name]) && (links[name].from === 'body' || links[name].from === 'soul'))) err(p, 'a role is a link type of this kind whose from end is a body or a Soul');
+    if (!isObj(r)) { err(p, 'a role is an object: {"need", "places"}'); continue; }
+    only(r, ['need', 'places'], p, err);
+    if (!ROLE_NEEDS.includes(r.need)) err(`${p}.need`, `one of ${ROLE_NEEDS.join(', ')}`);
+    const pl = r.places, pp = `${p}.places`;
+    if (!isObj(pl)) { err(pp, 'an object: {"in", ...}'); continue; }
+    if (!PLACES_IN.includes(pl.in)) { err(`${pp}.in`, `one of ${PLACES_IN.join(', ')}`); continue; }
+    if (pl.in === 'this') {
+      only(pl, ['in', 'slots', 'posture'], pp, err);
+      if (!(Array.isArray(pl.slots) && pl.slots.length)) err(`${pp}.slots`, 'a list of this kind\'s own slots, never empty');
+      else pl.slots.forEach((n, i) => { if (slots[n]?.admits !== 'body') err(`${pp}.slots.${i}`, 'names a slot of this kind that admits a body'); });
+    } else {
+      only(pl, ['in', 'within_mm', 'posture'], pp, err);
+      if (!(isInt(pl.within_mm) && pl.within_mm > 0)) err(`${pp}.within_mm`, 'how near the activity, whole millimetres above zero');
+    }
+    if (pl.posture !== undefined && !POSTURES.includes(pl.posture)) err(`${pp}.posture`, `one of ${POSTURES.join(', ')}`);
+  }
+}
+
 function field(f, path, links, err, taken = false) {
   if (!isObj(f)) { err(path, 'a field is an object'); return; }
   if (f.type !== 'list' && f.type !== 'schedule') only(f, ['n', 'type', 'default', 'audience', 'values', 'unit', 'min', 'max'], path, err);
+  bounds(f, path, err);
   if (taken) { if (f.audience !== undefined) err(`${path}.audience`, 'this field takes the container\'s audience (closed); it declares none of its own'); }
   else audience(f, path, links, err);
   if (ID_TYPES.has(f.type)) { err(`${path}.type`, `"${f.type}" would put an id inside a field; a relation is a link (links section)`); return; }
@@ -539,17 +706,26 @@ function field(f, path, links, err, taken = false) {
     if (!UNITS.includes(rate)) err(`${path}.unit`, `a whole-number unit (${UNITS.join(', ')}), or a rate per second written <unit>/s`);
     if (!isInt(d)) err(`${path}.default`, 'a whole number');
   }
+  if (f.type === 'timed') {
+    if (!UNITS.includes(f.unit)) err(`${path}.unit`, `a whole-number unit (${UNITS.join(', ')}); the rate is in that unit per second`);
+    if (!isObj(d)) err(`${path}.default`, `an object: {${TIMED_KEYS.join(', ')}}`);
+    else {
+      only(d, TIMED_KEYS, `${path}.default`, err);
+      for (const k of TIMED_KEYS) if (!isInt(d[k]) || (k === 'set_us' && d[k] < 0)) err(`${path}.default.${k}`, k === 'set_us' ? 'the world time it was set, whole microseconds' : 'a whole number');
+    }
+  }
   if (f.type === 'duration' && !(isInt(d) && d >= 0)) err(`${path}.default`, 'whole microseconds');
   if (f.type === 'text' && d !== null) err(`${path}.default`, 'null; inline words in state are refused, a text field holds a reference once written');
   if (f.type !== 'enum' && f.values !== undefined) err(`${path}.values`, 'only an enum has values');
-  if (f.type !== 'int' && f.unit !== undefined) err(`${path}.unit`, 'only an int has a unit');
+  if (f.type !== 'int' && f.type !== 'timed' && f.unit !== undefined) err(`${path}.unit`, 'only an int or a timed value has a unit');
 }
 
 const isArg = v => isObj(v) && Object.keys(v).length === 1 && typeof v.arg === 'string';
 
 function form(f, path, ctx, err) {
   if (!isObj(f)) { err(path, 'a form is an object'); return; }
-  only(f, ['who', 'starts', 'takes', 'needs', 'steps', 'effects'], path, err);
+  only(f, ['who', 'starts', 'takes', 'needs', 'steps', 'effects', 'hatch'], path, err);
+  if (f.hatch !== undefined) hatch(f, path, ctx, err);
   const takes = isObj(f.takes) ? f.takes : {};
   if (f.takes !== undefined && !isObj(f.takes)) err(`${path}.takes`, 'a table of argument name to type');
   for (const [name, a] of Object.entries(takes)) {
@@ -565,9 +741,11 @@ function form(f, path, ctx, err) {
   };
   const place = (v, p) => {
     if (isArg(v)) arg(v, p, ['slot', 'part', 'thing']);
-    else if (!(typeof v === 'string' && (v in ctx.points || v in ctx.slots))) err(p, 'names a point or slot of this kind, or an argument');
+    else if (!(typeof v === 'string' && (v in ctx.points || v in ctx.slots || isObj(ctx.areas[v]) && 'at_mm' in ctx.areas[v]))) err(p, 'names a point, slot or placed area of this kind, or an argument');
   };
   const slot = (v, p) => { if (isArg(v)) arg(v, p, ['slot']); else if (!(v in ctx.slots)) err(p, 'names a slot of this kind, or an argument'); };
+  const thingArg = (v, p) => { if (!isArg(v)) err(p, 'an argument of type thing'); else arg(v, p, ['thing']); };
+  const subject = (v, p) => { if (isArg(v)) arg(v, p, ['thing']); else if (!SUBJECTS.includes(v)) err(p, `one of ${SUBJECTS.join(', ')}, or a thing argument`); };
   const fieldName = (v, p) => { if (!(typeof v === 'string' && v in ctx.state)) err(p, 'names a state field of this kind'); };
   const linkName = (v, p) => { if (!(typeof v === 'string' && v in ctx.links)) err(p, 'names a link type of this kind'); };
   const value = (fname, v, p) => {
@@ -600,19 +778,27 @@ function form(f, path, ctx, err) {
       if (ranged) {
         if (exact || negated) err(p, 'a range (at_least, at_most) or one of is, not; not both');
         const fd = ctx.state[n.field];
-        if (fd && fd.type !== 'int' && fd.type !== 'duration') err(`${p}.field`, 'a range needs an int or duration field');
+        if (fd && fd.type !== 'int' && fd.type !== 'duration' && fd.type !== 'timed') err(`${p}.field`, 'a range needs an int or duration field, or a timed value');
         for (const k of ['at_least', 'at_most']) if (k in n && !isInt(n[k])) err(`${p}.${k}`, 'a whole number');
         if (isInt(n.at_least) && isInt(n.at_most) && n.at_least > n.at_most) err(p, 'at_least is above at_most; nothing is in that range');
       } else if (exact === negated) err(p, 'exactly one of is, not, or a range (at_least, at_most)');
       else value(n.field, exact ? n.is : n.not, `${p}.${exact ? 'is' : 'not'}`);
     } else if (n.need === 'slot_free') { only(n, ['need', 'slot'], p, err); slot(n.slot, `${p}.slot`); }
     else if (n.need === 'within_reach') { only(n, ['need', 'point'], p, err); place(n.point, `${p}.point`); }
-    else if (n.need === 'held_by_actor') only(n, ['need'], p, err);
+    else if (n.need === 'held_by_actor') { only(n, ['need', 'thing'], p, err); if (n.thing !== undefined) thingArg(n.thing, `${p}.thing`); }
+    else if (n.need === 'moves') {
+      only(n, ['need', 'thing', 'by'], p, err);
+      thingArg(n.thing, `${p}.thing`);
+      if (!MOVED_BY.includes(n.by)) err(`${p}.by`, `how the form moves it, one of ${MOVED_BY.join(', ')}`);
+    }
     else if (n.need === 'hand') {
       only(n, ['need', 'free', 'holds'], p, err);
       if (('free' in n) === ('holds' in n)) err(p, 'exactly one of free, holds');
       else if ('free' in n) { if (n.free !== true) err(`${p}.free`, 'true (a hand that must hold something is "holds")'); }
       else if (!(typeof n.holds === 'string' && KIND.test(n.holds))) err(`${p}.holds`, 'a kind, "namespace:name"');
+    } else if (n.need === 'room' || n.need === 'enough') {
+      only(n, ['need'], p, err);
+      if (!(Array.isArray(f.effects) && f.effects.some(e => e?.change === 'transfer'))) err(p, `${n.need} is about every amount the form's transfers move (room where it lands, enough at its source); this form has no transfer`);
     } else { only(n, ['need', 'link'], p, err); linkName(n.link, `${p}.link`); }
   });
   list(f.steps, `${path}.steps`, 'step', STEPS, err, (s, p) => {
@@ -624,17 +810,29 @@ function form(f, path, ctx, err) {
       if (s.at !== undefined) place(s.at, `${p}.at`);
       if (s.toward !== undefined && !isArg(s.toward)) err(`${p}.toward`, 'an argument');
       else if (s.toward !== undefined) arg(s.toward, `${p}.toward`, ['thing', 'slot', 'part']);
-    } else if (s.step === 'take' || s.step === 'put') { only(s, ['step', 'slot'], p, err); if (s.slot !== undefined) slot(s.slot, `${p}.slot`); }
+    } else if (s.step === 'take') { only(s, ['step', 'slot'], p, err); if (s.slot !== undefined) slot(s.slot, `${p}.slot`); }
+    else if (s.step === 'put') {
+      only(s, ['step', 'slot', 'place'], p, err);
+      if (s.slot !== undefined && s.place !== undefined) err(p, 'a slot or a place, not both');
+      if (s.slot !== undefined) slot(s.slot, `${p}.slot`);
+      if (s.place !== undefined) placement(s.place, `${p}.place`, arg, err);
+    }
+    else if (s.step === 'settle') { only(s, ['step', 'posture'], p, err); if (!POSTURES.includes(s.posture)) err(`${p}.posture`, `a ground posture taken where the body stands, one of ${POSTURES.join(', ')}`); }
     else if (s.step === 'wait') { only(s, ['step', 'us'], p, err); if (!(isInt(s.us) && s.us > 0)) err(`${p}.us`, 'a pause of a stated length, whole microseconds above zero; never a wait for a time or a condition'); }
     else only(s, ['step'], p, err);
   });
   list(f.effects, `${path}.effects`, 'change', CHANGES, err, (e, p) => {
+    if (e.change === 'draw') { draw(e, p, ctx, value, fieldName, err); return; }
     if (typeof e.event !== 'string' || !IDENT.test(e.event)) err(`${p}.event`, 'every effect names its event, lower_snake_case');
-    if (e.change === 'set') { only(e, ['change', 'field', 'to', 'event'], p, err); fieldName(e.field, `${p}.field`); if (!('to' in e)) err(`${p}.to`, 'required'); else value(e.field, e.to, `${p}.to`); }
+    // A timed value is never set to a value: a set gives its new `rate` (per second) and the rules settle it at the act's time.
+    if (e.change === 'set' && ctx.state[e.field]?.type === 'timed') { only(e, ['change', 'field', 'rate', 'event'], p, err); if (!isInt(e.rate)) err(`${p}.rate`, 'a whole number: the new rate, in the field\'s unit per second; its value is settled at the act\'s time'); }
+    // `by` (signed, not zero) instead of `to` adds to an int field: a count, or an amount used up (a sip)
+    else if (e.change === 'set' && 'by' in e) { only(e, ['change', 'field', 'by', 'event'], p, err); if (ctx.state[e.field]?.type !== 'int') err(`${p}.field`, 'names an int state field of this kind; by adds to it'); if (!(isInt(e.by) && e.by !== 0)) err(`${p}.by`, 'a whole number, not zero'); }
+    else if (e.change === 'set') { only(e, ['change', 'field', 'to', 'event'], p, err); fieldName(e.field, `${p}.field`); if (!('to' in e)) err(`${p}.to`, 'required'); else value(e.field, e.to, `${p}.to`); }
     else if (e.change === 'reparent') {
       only(e, ['change', 'what', 'into', 'event'], p, err);
-      if (!SUBJECTS.includes(e.what)) err(`${p}.what`, `one of ${SUBJECTS.join(', ')}`);
-      if (e.into !== 'actor_hand') slot(e.into, `${p}.into`);
+      subject(e.what, `${p}.what`);
+      if (e.into !== 'actor_hand' && e.into !== 'here') slot(e.into, `${p}.into`);
     } else if (e.change === 'link' || e.change === 'unlink') {
       only(e, ['change', 'link', 'from', 'event'], p, err);
       linkName(e.link, `${p}.link`);
@@ -643,12 +841,84 @@ function form(f, path, ctx, err) {
       only(e, ['change', 'kind', 'into', 'event'], p, err);
       if (typeof e.kind !== 'string' || !KIND.test(e.kind)) err(`${p}.kind`, 'a kind, "namespace:name"');
       if (e.into !== 'here' && e.into !== 'actor_hand') slot(e.into, `${p}.into`);
-    } else if (e.change === 'remove') { only(e, ['change', 'what', 'event'], p, err); if (!SUBJECTS.includes(e.what)) err(`${p}.what`, `one of ${SUBJECTS.join(', ')}`); }
-    else if (e.change === 'timer') {
+    } else if (e.change === 'remove') { only(e, ['change', 'what', 'event'], p, err); subject(e.what, `${p}.what`); }
+    else if (e.change === 'transfer') {
+      only(e, ['change', 'field', 'from', 'into', 'amount', 'event'], p, err);
+      if (ctx.state[e.field]?.type !== 'int') err(`${p}.field`, 'names an int state field of this kind; both ends move that field');
+      for (const k of ['from', 'into']) { if (isArg(e[k])) arg(e[k], `${p}.${k}`, ['thing']); else if (e[k] !== 'this') err(`${p}.${k}`, '"this", or a thing argument'); }
+      if (isArg(e.amount)) arg(e.amount, `${p}.amount`, ['count']);
+      else if (e.amount === 'room') { if (e.into === 'this' && ctx.state[e.field]?.type === 'int' && !isInt(ctx.state[e.field].max)) err(`${p}.amount`, `"room" fills to the field's max; "${e.field}" has none`); }
+      else if (!(isInt(e.amount) && e.amount > 0)) err(`${p}.amount`, 'a whole number above zero, a count argument, or "room"');
+    } else if (e.change === 'timer') {
       only(e, ['change', 'form', 'after_us', 'event'], p, err);
       if (ctx.forms[e.form]?.starts !== 'timer') err(`${p}.form`, 'names a form of this kind that a timer starts');
       if (!(isInt(e.after_us) && e.after_us > 0)) err(`${p}.after_us`, 'whole microseconds above zero');
     }
+  });
+}
+
+/** A hatch: one pure function, named by the hash of its module, with the fields and arguments it reads and a step limit.
+ *  `answers` is "verdict" (the form can be done only if the function says yes) or {"field": <a field of this kind>} (the
+ *  function's whole-number answer is that field's new value). `why` names a text entry saying what no declared form could do. */
+function hatch(f, path, ctx, err) {
+  const p = `${path}.hatch`, h = f.hatch;
+  if (!isObj(h)) { err(p, 'an object: {"module", "reads", "steps_most", "answers", "why"}'); return; }
+  only(h, HATCH_KEYS, p, err);
+  if (!(typeof h.module === 'string' && HATCH_MODULE.test(h.module))) err(`${p}.module`, 'the hash of the function\'s module, "prov-1220" and 64 hex digits (never the code itself)');
+  if (!Array.isArray(h.reads) || h.reads.length === 0) err(`${p}.reads`, 'the fields and arguments the function reads, a list of {"field"} or {"arg"}; a hatch that reads nothing declares nothing');
+  else {
+    if (h.reads.length > HATCH_READS_MOST) err(`${p}.reads`, `at most ${HATCH_READS_MOST} reads`);
+    const seen = new Set();
+    h.reads.forEach((r, i) => {
+      const rp = `${p}.reads.${i}`;
+      if (!isObj(r) || Object.keys(r).length !== 1 || !('field' in r || 'arg' in r)) { err(rp, 'exactly one of {"field": <state field>} or {"arg": <argument>}'); return; }
+      const key = 'field' in r ? `f:${r.field}` : `a:${r.arg}`;
+      if (seen.has(key)) err(rp, 'already read; list each once');
+      seen.add(key);
+      if ('field' in r) {
+        const t = ctx.state[r.field]?.type;
+        if (!t) err(`${rp}.field`, 'names a state field of this kind');
+        else if (!HATCH_FIELDS.includes(t)) err(`${rp}.field`, `a function reads whole values only: a field of type ${HATCH_FIELDS.join(', ')}, not ${t}`);
+      } else {
+        const t = isObj(f.takes) ? f.takes[r.arg]?.type : undefined;
+        if (!t) err(`${rp}.arg`, 'names an argument in takes');
+        else if (!HATCH_ARGS.includes(t)) err(`${rp}.arg`, `a function reads a count or a duration, not a ${t}`);
+      }
+    });
+  }
+  if (!(isInt(h.steps_most) && h.steps_most > 0 && h.steps_most <= HATCH_STEPS_MOST)) err(`${p}.steps_most`, `the most steps the function may take before it is stopped, a whole number from 1 to ${HATCH_STEPS_MOST}`);
+  if (h.answers === 'verdict') { /* a yes or a no */ }
+  else if (isObj(h.answers) && Object.keys(h.answers).length === 1 && 'field' in h.answers) {
+    const t = ctx.state[h.answers.field]?.type;
+    if (!t || !['bool', 'enum', 'int', 'duration'].includes(t)) err(`${p}.answers.field`, 'names a bool, enum, int or duration state field of this kind that takes the answer');
+  } else err(`${p}.answers`, '"verdict", or {"field": <a state field of this kind>}');
+  if (!(typeof h.why === 'string' && h.why in ctx.text)) err(`${p}.why`, 'names an entry of the text table saying what no declared form could do');
+}
+
+/** A draw: a table of outcomes, each a name, a weight (a whole number, or one int field of this kind), an event and the
+ *  fields it sets. The world draws a whole number below the total and passes it in as data (SA-F13). */
+function draw(e, p, ctx, value, fieldName, err) {
+  only(e, ['change', 'outcomes'], p, err);
+  if (!(Array.isArray(e.outcomes) && e.outcomes.length)) { err(`${p}.outcomes`, 'a list of outcomes, never empty'); return; }
+  const names = new Set();
+  e.outcomes.forEach((o, i) => {
+    const op = `${p}.outcomes.${i}`;
+    if (!isObj(o)) { err(op, 'an outcome is an object: {"name", "weight", "event", "set"}'); return; }
+    only(o, ['name', 'weight', 'event', 'set'], op, err);
+    if (!(typeof o.name === 'string' && IDENT.test(o.name))) err(`${op}.name`, 'lower_snake_case');
+    else if (names.has(o.name)) err(`${op}.name`, `"${o.name}" is already an outcome of this draw`);
+    else names.add(o.name);
+    if (isObj(o.weight)) { only(o.weight, ['field'], `${op}.weight`, err); if (ctx.state[o.weight.field]?.type !== 'int') err(`${op}.weight.field`, 'names an int state field of this kind'); }
+    else if (!(isInt(o.weight) && o.weight >= 0)) err(`${op}.weight`, 'a whole number from 0, or {"field": <an int field of this kind>}');
+    if (typeof o.event !== 'string' || !IDENT.test(o.event)) err(`${op}.event`, 'every outcome names its event, lower_snake_case');
+    if (!Array.isArray(o.set)) { err(`${op}.set`, 'a list of {"field", "to"} (empty if none)'); return; }
+    o.set.forEach((s, j) => {
+      const sp = `${op}.set.${j}`;
+      if (!isObj(s)) { err(sp, 'an object: {"field", "to"}'); return; }
+      only(s, ['field', 'to'], sp, err);
+      fieldName(s.field, `${sp}.field`);
+      if (!('to' in s)) err(`${sp}.to`, 'required'); else value(s.field, s.to, `${sp}.to`);
+    });
   });
 }
 
@@ -660,6 +930,61 @@ function list(arr, path, tag, kinds, err, each) {
     else if (!kinds.includes(x[tag])) err(`${p}.${tag}`, path.startsWith('forms.') && WHEN_NAME.test(x[tag]) ? `${WHEN_REASON} ("${x[tag]}" is not a ${tag})` : `"${x[tag]}" is not in the closed list (${kinds.join(', ')}); the task that needs a new one adds it`);
     else each(x, p);
   });
+}
+
+/** Where a thing is put down (SA-F11, #2883): one closed list in `packages/form-rules/placements.json`, shared with Engine v2 E2
+ *  (#2709) and E4 (#2772). A placement is `{at, anchor, facing}`: `at` one of the words, `anchor` the thing it is by (an argument
+ *  of type thing, which may carry a selector), `facing` how it ends up. With `at: "facing"` the thing turns where it stands. */
+export const PLACEMENTS = JSON.parse(readFileSync(new URL('../../packages/form-rules/placements.json', import.meta.url), 'utf8'));
+export const PLACE_WORDS = Object.freeze(Object.keys(PLACEMENTS.words));
+export const FACINGS = Object.freeze(Object.keys(PLACEMENTS.facings));
+export const FRONTS = Object.freeze(['z', 'none']);
+function placement(pl, path, arg, err) {
+  if (!isObj(pl)) { err(path, 'an object: {"at", "anchor", "facing"}'); return; }
+  only(pl, ['at', 'anchor', 'facing'], path, err);
+  const anchored = (v, p) => { if (!isArg(v)) err(p, 'an argument of type thing (named, or described by a selector)'); else arg(v, p, ['thing']); };
+  // A word given when the form is done: whether it needs the anchor is asked then, by place().
+  if (isArg(pl.at)) { arg(pl.at, `${path}.at`, ['placement']); if (pl.anchor !== undefined) anchored(pl.anchor, `${path}.anchor`); if (pl.facing !== undefined) err(`${path}.facing`, 'a word given when the form is done takes no facing'); return; }
+  const w = PLACEMENTS.words[pl.at];
+  if (!w) { err(`${path}.at`, `"${pl.at}" is not a placement word; one of ${PLACE_WORDS.join(', ')}`); return; }
+  if (w.anchor) { if (pl.anchor === undefined) err(`${path}.anchor`, `"${pl.at}" is by something: name its anchor`); else anchored(pl.anchor, `${path}.anchor`); }
+  else if (pl.anchor !== undefined) err(`${path}.anchor`, `"${pl.at}" is by nothing; leave the anchor out`);
+  if (pl.facing === undefined) return;
+  if (w.turns_only) { err(`${path}.facing`, `"${pl.at}" already says which way; leave facing out`); return; }
+  const f = typeof pl.facing === 'string' ? pl.facing : isObj(pl.facing) && Object.keys(pl.facing).length === 1 ? Object.keys(pl.facing)[0] : undefined;
+  if (!(f in PLACEMENTS.facings)) err(`${path}.facing`, `one of ${FACINGS.join(', ')} ("toward" is {"toward": argument})`);
+  else if (PLACEMENTS.facings[f].anchor) { if (!isObj(pl.facing)) err(`${path}.facing`, `"${f}" is by something: {"${f}": argument}`); else anchored(pl.facing[f], `${path}.facing.${f}`); }
+  else if (typeof pl.facing !== 'string') err(`${path}.facing`, `"${f}" is by nothing: write it as a word`);
+}
+
+/** Whether a thing may be put down as a placement says, from plain data (SA-F11, #2883): the thing may be moved, the anchor
+ *  is named, a front exists where the word needs one. `thing` and `anchor` are entries; `node` and `anchorNode` are the ids of
+ *  the copies, and a thing is by itself only when they are one node: two chairs of one kind share an entry, not a node.
+ *  Whether the spot is free and legal is the world's answer, never this one's. Returns the placement in full: the word, the
+ *  anchor, how it will face, and whether it moves at all (a turn does not). */
+export function place(thing, pl, {anchor, facingAnchor, node, anchorNode} = {}) {
+  const no = (code, reason) => ({ok: false, code, reason});
+  const w = PLACEMENTS.words[pl?.at];
+  if (!w) return no('unknown_word', `"${pl?.at}" is not a placement word; one of ${PLACE_WORDS.join(', ')}`);
+  const how = thing?.motion?.how;
+  if (!MOTIONS.includes(how)) return no('unsaid', `${thing?.kind} does not say how it moves`);
+  if (how === 'fixed') return no('fixed', `${thing.kind} is fixed: it is not put anywhere`);
+  const hasFront = e => e?.geometry?.front !== 'none';
+  if (w.anchor && !anchor) return no('no_anchor', `"${pl.at}" is by something: name its anchor`);
+  if (w.anchor && node !== undefined && node === anchorNode) return no('self', `${thing.kind} cannot be put ${pl.at} itself`);
+  if (w.front_of_anchor && !hasFront(anchor)) return no('no_front', `"${pl.at}" needs a front; ${anchor.kind} has none`);
+  if (w.front_of_thing && !hasFront(thing)) return no('no_front', `"${pl.at}" turns a front; ${thing.kind} has none`);
+  let facing = {kind: 'as_it_was'};
+  if (pl.at === 'facing') facing = {kind: 'toward', anchor: anchor.kind};
+  else if (pl.facing !== undefined) {
+    const f = typeof pl.facing === 'string' ? pl.facing : Object.keys(pl.facing)[0];
+    const fw = PLACEMENTS.facings[f];
+    if (!fw) return no('unknown_facing', `"${f}" is not a facing; one of ${FACINGS.join(', ')}`);
+    if (fw.anchor && !facingAnchor) return no('no_anchor', `"${f}" is by something: name what it faces`);
+    if (fw.front_of_thing && !hasFront(thing)) return no('no_front', `"${f}" turns a front; ${thing.kind} has none`);
+    facing = fw.anchor ? {kind: f, anchor: facingAnchor.kind} : {kind: f};
+  }
+  return {ok: true, at: pl.at, anchor: anchor?.kind ?? null, facing, moves: !w.turns_only};
 }
 
 function select(s, path, err) {
@@ -725,6 +1050,11 @@ export function hashKinds(entries) {
   };
   for (const e of entries) visit(e.kind);
   return done;
+}
+
+/** The hatches an entry declares, one per form that names one. A kind with any waits for Engine v2 to run (SA-F9). */
+export function hatchesOf(entry) {
+  return Object.entries(isObj(entry?.forms) ? entry.forms : {}).filter(([, f]) => isObj(f) && isObj(f.hatch)).map(([form, f]) => ({form, ...f.hatch}));
 }
 
 export function loadDir(dir) {

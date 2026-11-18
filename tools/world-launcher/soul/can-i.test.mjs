@@ -43,15 +43,15 @@ const home = (url) => { const dir = mkdtempSync(join(tmpdir(), "eden-can-")); wr
 const run = (dir, ...args) => new Promise((res) => execFile(process.execPath, [CLI, ...args], { cwd: dir }, (e, out) => res({ code: e?.code ?? 0, out: out ? JSON.parse(out) : null })));
 
 test("A1: an empty kettle: the client names what is missing and the next act, and sends no act", async (t) => {
-  const w = await world({ truth: { water: "empty", heating: false }, body: BODY });
+  const w = await world({ truth: { water: 0, heating: false }, body: BODY });
   t.after(() => w.server.close());
   const dir = home(w.url);
   const r = (await run(dir, "can", "kettle", "switch_on")).out;
   assert.equal(r.can, "no");
   assert.equal(r.missing.field, "water");
-  assert.equal(r.missing.found, "empty");
-  assert.match(r.missing.text, /water is "empty"; this needs it to be anything but "empty"/);
-  assert.deepEqual(r.next, { find: "water" }, "fill is the holder's form, not a fix anyone can start: the next act is to look for water");
+  assert.equal(r.missing.found, 0);
+  assert.match(r.missing.text, /water is 0; this needs it at least 1/);
+  assert.deepEqual(r.next, { act: "object:kettle:fill" }, "the world's verdict names fill, the holder's form whose transfer from a tap fills it: the next act is fill");
   assert.equal(typeof r.age_s, "number");
   assert.deepEqual(w.asked, [], "no act was sent");
   const again = (await run(dir, "can", "object:kettle:switch_on")).out;
@@ -59,7 +59,7 @@ test("A1: an empty kettle: the client names what is missing and the next act, an
 });
 
 test("a kettle that is ready is yes when the body is held, and unknown (never a no) when the copy has no body reading", async (t) => {
-  const ready = { water: "cold", heating: false };
+  const ready = { water: 1000, heating: false };
   const withBody = await world({ truth: ready, body: BODY }), without = await world({ truth: ready });
   t.after(() => { withBody.server.close(); without.server.close(); });
   assert.equal((await run(home(withBody.url), "can", "kettle", "switch_on")).out.can, "yes");
@@ -72,7 +72,7 @@ test("a kettle that is ready is yes when the body is held, and unknown (never a 
 });
 
 test("a definite no from the thing's state wins over what the copy cannot judge; a forms list answers each form", async (t) => {
-  const w = await world({ truth: { water: "empty", heating: true } });
+  const w = await world({ truth: { water: 0, heating: true } });
   t.after(() => w.server.close());
   const dir = home(w.url);
   const r = (await run(dir, "can", "kettle", "switch_on")).out;
@@ -84,18 +84,18 @@ test("a definite no from the thing's state wins over what the copy cannot judge;
 });
 
 test("A2: after a refusal the client's copy matches what the world reported, and says what changed", async (t) => {
-  const w = await world({ truth: { water: "cold", heating: false }, body: BODY });
+  const w = await world({ truth: { water: 1000, heating: false }, body: BODY });
   t.after(() => w.server.close());
   const dir = home(w.url);
-  assert.equal((await run(dir, "can", "kettle", "switch_on")).out.can, "yes", "the copy says cold water");
-  w.truth.water = "empty";   // the world moved on: someone poured it out
+  assert.equal((await run(dir, "can", "kettle", "switch_on")).out.can, "yes", "the copy says the kettle holds water");
+  w.truth.water = 0;   // the world moved on: someone poured it out
   const refused = (await run(dir, "act", "object:kettle:switch_on")).out;
   assert.equal(refused.accepted, false);
-  assert.deepEqual(refused.changed, [{ thing: "kettle", field: "water", was: "cold", now: "empty" }]);
+  assert.deepEqual(refused.changed, [{ thing: "kettle", field: "water", was: 1000, now: 0 }]);
   assert.equal(refused.missing.field, "water");
   assert.deepEqual(w.asked, ["object:kettle:switch_on"]);
   const copy = JSON.parse(readFileSync(join(dir, "world-live.json"), "utf8"));
-  assert.equal(copy.live.things.kettle.water, "empty", "the copy on disk is what the world read");
+  assert.equal(copy.live.things.kettle.water, 0, "the copy on disk is what the world read");
   const after = (await run(dir, "can", "kettle", "switch_on")).out;
   assert.equal(after.can, "no", "the next question is answered on the corrected copy");
   assert.equal(w.asked.length, 1, "and still sends nothing");

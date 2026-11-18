@@ -1,0 +1,12 @@
+# Zone B of the transfer fixture (Engine v2 T1, #2642, v2/docs/zones.md): a second zone of the same world, a place
+# with one room. Its nodes were minted by the world's first writer before the zone was split off, so they keep those
+# ids; what zone B's own writer mints from now on is in its own fresh scope (v2/docs/ids.md rule 1).
+{
+  1: [],
+  2: {},
+  3: [
+    {1: 20, 2: "souls:place"},
+    {1: 21, 2: "souls:room", 3: 20, 6: {1: "garden"}}
+  ],
+  4: []
+}

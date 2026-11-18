@@ -39,13 +39,16 @@ function waitOf(entry, form) {
 
 /** `h` for `thing` as the client's plan: steps up to and including the first wait, and what remains with the wake that continues it. */
 export function planOf(ix, h, thing, { copy, me, now = Date.now() } = {}) {
-  // A leading step whose every effect is a set this copy already shows is done (a kettle already filled): passed over, and said.
+  // A leading step whose every effect this copy already shows is done (a kettle already filled): passed over, and said. A set is
+  // shown when the field is its value; a transfer into the thing itself (filling it from a tap) when the field already holds some.
   const fields = copy?.live?.things?.[thing.id];
-  const isDone = (s) => { const fx = h.entry.forms?.[s.form]?.effects ?? []; return !!fields && fx.length > 0 && fx.every((e) => e.change === "set" && fields[e.field] === e.to); };
+  const shown = (e) => (e.change === "set" && "to" in e && fields[e.field] === e.to) ||
+    (e.change === "transfer" && e.into === "this" && Number.isFinite(fields[e.field]) && fields[e.field] > 0);
+  const isDone = (s) => { const fx = h.entry.forms?.[s.form]?.effects ?? []; return !!fields && fx.length > 0 && fx.every(shown); };
   let skip = 0;
   while (skip < h.steps.length && isDone(h.steps[skip])) skip++;
   const done = h.steps.slice(0, skip).map((s) => ({ form: s.form, act: `object:${thing.id}:${s.form}`,
-    why: `already so on this copy: ${(h.entry.forms[s.form].effects).map((e) => `${e.field} is ${JSON.stringify(e.to)}`).join(", ")}` }));
+    why: `already so on this copy: ${(h.entry.forms[s.form].effects).map((e) => `${e.field} is ${JSON.stringify(e.change === "set" ? e.to : fields[e.field])}`).join(", ")}` }));
   const used = h.steps.slice(skip, skip + HOW_STEPS_MAX), cut = h.steps.length - skip - used.length;
   const rows = used.map((s) => {
     const form = h.entry.forms?.[s.form], c = canI(ix, thing.id, s.form, { copy, me, now });
