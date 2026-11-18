@@ -6,8 +6,8 @@
 use import_eden::json::{self, Json};
 use import_eden::{
     F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE, F_PLACE_KIND,
-    F_PLACE_OF, F_SILL, F_STAIRS, F_WIDTH, FLOOR, Import, PLACE, ROOM, WINDOW, count, load,
-    world_of,
+    F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import, PLACE, ROOM,
+    WINDOW, base64, count, load, world_of,
 };
 use replica::encode::Value;
 use replica::world_model::plain;
@@ -65,6 +65,7 @@ const SMALL: &str = r#"{
     {"id": "e_lake.water", "of": "water", "kind": "lake", "entity": "e_lake", "name": "west-lake", "polygon": [[50000, 0], [60000, 0], [60000, 10000]], "level": -500},
     {"id": "e_lake.shore", "of": "shore", "kind": "shore", "entity": "e_lake", "name": "west-lake shore", "polygon": [[49000, -1000], [61000, -1000], [61000, 11000]]}
   ],
+  "ground": {"tileM": 2, "tiles": [{"tx": 0, "tz": 0, "heights": "AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA", "classes": "AAECAw=="}]},
   "bake": {"things": 4, "doors": 1, "rooms": 3, "floors": 2, "floor surfaces": 2, "solids": 1, "slots": 1, "windows": 1, "doorways": 2, "stairs:stairs": 1},
   "byRef": {"core-house@1": 1, "core-door@2": 1, "core-chair@1": 1, "core-lake@1": 1}
 }"#;
@@ -143,6 +144,49 @@ fn a_small_world_loads_through_commit_with_its_rooms_doorways_windows_stairs_and
         (chair.x, chair.y, chair.z),
         (10_500_000, 100_000, 21_000_000)
     );
+
+    // The terrain is the open ground's: its tile side in mm and the tile's bytes as exported (N1b, #3197).
+    let g = t.node(t.handle(im.nodes["ground"]).unwrap()).unwrap();
+    assert_eq!(g.fields().get(&F_TILE_SIZE), Some(&Value::Uint(2000)));
+    let want = Value::Array(vec![Value::Array(vec![
+        Value::Uint(0),
+        Value::Uint(0),
+        Value::Bytes(
+            [0i32, 1000, 2000, 0, 1000, 2000, -500, 500, 1500]
+                .iter()
+                .flat_map(|h| h.to_le_bytes())
+                .collect(),
+        ),
+        Value::Bytes(vec![0, 1, 2, 3]),
+    ])]);
+    assert_eq!(g.fields().get(&F_TILES), Some(&want));
+}
+
+/// N1b (#3197) A1: every terrain tile's heights and classes, read back from the tree, are the exported bytes.
+fn tiles_round_trip(im: &Import, facts: &Json) -> usize {
+    let t = &im.tree;
+    let g = t.node(t.handle(im.nodes["ground"]).unwrap()).unwrap();
+    let Some(Value::Array(rows)) = g.fields().get(&F_TILES) else {
+        panic!("the open ground holds no tiles")
+    };
+    let tiles = facts.get("ground").unwrap().get("tiles").unwrap().arr();
+    assert_eq!(rows.len(), tiles.len());
+    for (r, e) in rows.iter().zip(tiles) {
+        let Value::Array(r) = r else {
+            panic!("a tile row")
+        };
+        let field = |k: &str| base64(e.get(k).and_then(Json::str).unwrap()).unwrap();
+        let int = |k: &str| e.get(k).and_then(Json::int).unwrap();
+        let at = |v: &Value| match v {
+            Value::Uint(u) => *u as i64,
+            Value::Nint(n) => -1 - *n as i64,
+            _ => panic!("a tile's place"),
+        };
+        assert_eq!((at(&r[0]), at(&r[1])), (int("tx"), int("tz")));
+        assert_eq!(r[2], Value::Bytes(field("heights")), "heights");
+        assert_eq!(r[3], Value::Bytes(field("classes")), "classes");
+    }
+    rows.len()
 }
 
 #[test]
@@ -248,4 +292,8 @@ fn eden_2026_loads_with_the_bakes_counts_and_its_poses_compose_to_the_world() {
         worst <= 5_000,
         "a pose is {worst} µm from today's world pose"
     );
+
+    let tiles = tiles_round_trip(&im, &f);
+    println!("{tiles} terrain tiles read back byte for byte");
+    assert_eq!(tiles, 256);
 }
