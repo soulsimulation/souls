@@ -1071,10 +1071,11 @@ function placement(pl, path, arg, err) {
 }
 
 /** Whether a thing may be put down as a placement says, from plain data (SA-F11, #2883): the thing may be moved, the anchor
- *  is named, a front exists where the word needs one. `thing` and `anchor` are entries. Whether the spot is free and legal is
- *  the world's answer, never this one's. Returns the placement in full: the word, the anchor, how it will face, and whether
- *  it moves at all (a turn does not). */
-export function place(thing, pl, {anchor, facingAnchor} = {}) {
+ *  is named, a front exists where the word needs one. `thing` and `anchor` are entries; `node` and `anchorNode` are the ids of
+ *  the copies, and a thing is by itself only when they are one node: two chairs of one kind share an entry, not a node.
+ *  Whether the spot is free and legal is the world's answer, never this one's. Returns the placement in full: the word, the
+ *  anchor, how it will face, and whether it moves at all (a turn does not). */
+export function place(thing, pl, {anchor, facingAnchor, node, anchorNode} = {}) {
   const no = (code, reason) => ({ok: false, code, reason});
   const w = PLACEMENTS.words[pl?.at];
   if (!w) return no('unknown_word', `"${pl?.at}" is not a placement word; one of ${PLACE_WORDS.join(', ')}`);
@@ -1083,7 +1084,7 @@ export function place(thing, pl, {anchor, facingAnchor} = {}) {
   if (how === 'fixed') return no('fixed', `${thing.kind} is fixed: it is not put anywhere`);
   const hasFront = e => e?.geometry?.front !== 'none';
   if (w.anchor && !anchor) return no('no_anchor', `"${pl.at}" is by something: name its anchor`);
-  if (w.anchor && anchor === thing) return no('self', `${thing.kind} cannot be put ${pl.at} itself`);
+  if (w.anchor && node !== undefined && node === anchorNode) return no('self', `${thing.kind} cannot be put ${pl.at} itself`);
   if (w.front_of_anchor && !hasFront(anchor)) return no('no_front', `"${pl.at}" needs a front; ${anchor.kind} has none`);
   if (w.front_of_thing && !hasFront(thing)) return no('no_front', `"${pl.at}" turns a front; ${thing.kind} has none`);
   let facing = {kind: 'as_it_was'};
