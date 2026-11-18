@@ -1,0 +1,68 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:wardrobe",
+  "owner": "thing",
+  "state": {
+    "coats": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 6,
+      "min": 0,
+      "max": 6
+    }
+  },
+  "links": {
+    "opener": {
+      "n": 1,
+      "from": "soul",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "stock": {
+    "coats": {
+      "kind": "test:coat",
+      "count": "coats",
+      "take": "take_coat"
+    }
+  },
+  "forms": {
+    "take_coat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "coats",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "test:coat",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "text": {},
+  "closed": {
+    "audience": {
+      "rule": "linked",
+      "link": "opener"
+    },
+    "fields": [
+      "coats"
+    ]
+  }
+}
