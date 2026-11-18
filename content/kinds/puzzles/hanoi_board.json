@@ -353,6 +353,8 @@
       ]
     }
   },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:hanoi_board",
     "shape": {
