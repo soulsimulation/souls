@@ -2,7 +2,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { Entry, Input, Verdict } from './rules.ts';
+import type { Entry, Input, Verdict, WhoVerdict } from './rules.ts';
 
 export const PACKAGE = resolve(import.meta.dirname, '..');
 export const ROOT = resolve(PACKAGE, '../..');
@@ -10,7 +10,7 @@ export const CASES = join(PACKAGE, 'cases');
 /** Where kinds come from: the published entries, then the test kinds only cases use. */
 export const KIND_DIRS = [join(ROOT, 'content/kinds'), join(CASES, 'kinds')];
 
-export type Case = Omit<Input, 'kinds'> & { name: string; expect: Partial<Verdict> & Record<string, unknown> };
+export type Case = Omit<Input, 'kinds'> & { name: string; expect: Partial<Verdict | WhoVerdict> & Record<string, unknown> };
 
 function jsonFiles(dir: string, deep: boolean): string[] {
   const out: string[] = [];
@@ -34,19 +34,19 @@ export function loadKinds(dirs: string[] = KIND_DIRS): Record<string, Entry> {
   return kinds;
 }
 
-/** Every case file directly in `dir` (not its kinds/ folder), as [file, case]. */
-export function loadCases(dir: string = CASES): [string, Case][] {
+/** Every case file directly in `dir` (not its kinds/ folder), as [file, case]. Who-may cases (cases/who/) share the shape. */
+export function loadCases(dir: string = CASES, format: string = 'souls-form-cases/1'): [string, Case][] {
   const out: [string, Case][] = [];
   for (const file of jsonFiles(dir, false)) {
     const doc = parse(readFileSync(file, 'utf8'));
-    if (doc.format !== 'souls-form-cases/1') throw new Error(`${file}: format is not souls-form-cases/1`);
+    if (doc.format !== format) throw new Error(`${file}: format is not ${format}`);
     for (const c of doc.cases) out.push([file, c]);
   }
   return out;
 }
 
 /** `now_us`: world time of this act, when it differs from the state's (a timed value read later). */
-export type EffectStep = { act: Input['act']; actor?: string; now_us?: number; receipt: string; expect?: Record<string, unknown> };
+export type EffectStep = { act: Input["act"]; actor?: string; now_us?: number; receipt: string; draw?: number[]; expect?: Record<string, unknown> };
 export type EffectCase = { name: string; state: Input['state']; do: EffectStep[]; after?: Record<string, unknown> };
 
 /** Every effect case in `dir` (souls-effect-cases/1), as [file, case]. */

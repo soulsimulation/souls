@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
+import { awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, MIXED_CAP, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
 import { JOBS } from './ci-scope.mjs';
 
 const M = 'owner';
@@ -345,8 +345,9 @@ test('landing: pending head checks (merge:ready re-runs proof-ok) wait, not stri
   assert.equal(strictAnyway.pauses(), 0); // main red: strict regardless, no wait
 });
 
-// A queue-mode next(): `prs` maps number -> overrides; `state` maps number -> the PR's queue state.
-function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type: 'merge_queue' }], files = ['docs/a.md'], approved = [], freeze = null }) {
+// A queue-mode next(): `prs` maps number -> overrides; `state` maps number -> the PR's queue state; `filesFor` maps
+// number -> that PR's files, or 'unreadable' for a files read that fails.
+function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type: 'merge_queue' }], files = ['docs/a.md'], filesFor = {}, approved = [], freeze = null }) {
   const pr = n => ({ number: n, title: 't', labels: [{ name: 'merge:ready' }], head: { ref: `agent/${n}-x`, sha: `h${n}`, repo: { full_name: 'o/r' } }, base: { ref: 'main' }, mergeable: true, mergeable_state: 'clean', ...prs[n] });
   const reads = { pr: {}, checks: 0, comments: [], held: [] };
   const api = {
@@ -360,7 +361,11 @@ function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type
       if (path.startsWith('repos/o/r/rules/branches/main')) return rules;
       if (path.startsWith('repos/o/r/issues?')) return Object.keys(prs).map(number => ({ number: Number(number), pull_request: {} }));
       if (path.includes('/check-runs') || path.includes('/actions/')) { reads.checks++; return []; }
-      if (path.includes('/files')) return files.map(filename => ({ filename }));
+      if (path.includes('/files')) {
+        const own = filesFor[Number(path.split('/')[4])] ?? files;
+        if (own === 'unreadable') throw new Error('HTTP 502');
+        return own.map(filename => ({ filename }));
+      }
       if (path.includes('/reviews')) return approved.includes(Number(path.split('/')[4])) ? [{ user: { login: M }, state: 'APPROVED' }] : [];
       return [];
     },
@@ -402,6 +407,41 @@ test('queue: a queued PR is skipped, so the self-dispatch ends', () => {
   assert.equal(r.more, false);
   assert.deepEqual(r.skipped.map(s => [s.pr, s.why]), [[20, 'queued'], [21, 'queued']]);
   assert.equal(queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: state[20] } }).run().pr, 21);
+});
+
+test('queue: mixed cap: with 4 mixed PRs queued, a 5th mixed PR waits and a low-risk one is enqueued', () => {
+  assert.equal(MIXED_CAP, 4);
+  const mixed = ['apps/server/src/x.ts'], low = ['tools/entry/a.mjs', 'changes/a.md'];
+  const state = { 20: { isInMergeQueue: true }, 21: { autoMergeRequest: { enabledAt: 'x' } }, 22: { isInMergeQueue: true }, 23: { autoMergeRequest: { enabledAt: 'x' } }, 24: { isInMergeQueue: true } };
+  // 20-23 are mixed and queued, 24 is low-risk and queued (it does not count), 25 is mixed, 26 low-risk.
+  const t = queueTrain({ prs: { 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {} }, state, files: mixed, filesFor: { 24: low, 26: low } });
+  const r = t.run();
+  assert.deepEqual([r.pr, r.mode], [26, 'queue']);
+  assert.deepEqual(r.skipped.at(-1), { pr: 25, tier: r.skipped.at(-1).tier, why: 'mixed-cap', mixed_queued: 4 });
+  assert.deepEqual([t.reads.held, t.reads.comments], [[], []], 'held back: not taken out of anything, not ejected, no comment');
+  // The waiting PR keeps merge:ready and goes on a later pass, once one of the four has left the queue.
+  const after = queueTrain({ prs: { 21: {}, 22: {}, 23: {}, 25: {} }, state, files: mixed }).run();
+  assert.deepEqual([after.pr, after.mode], [25, 'queue']);
+});
+
+test('queue: mixed cap: with 3 mixed PRs queued, a 4th mixed PR is enqueued', () => {
+  const state = { 20: { isInMergeQueue: true }, 21: { autoMergeRequest: { enabledAt: 'x' } }, 22: { isInMergeQueue: true } };
+  const r = queueTrain({ prs: { 20: {}, 21: {}, 22: {}, 23: {} }, state, files: ['apps/web/src/x.ts'] }).run();
+  assert.deepEqual([r.pr, r.mode], [23, 'queue']);
+});
+
+test('queue: mixed cap: a PR whose file list cannot be read counts as not low-risk', () => {
+  const state = { 20: { isInMergeQueue: true }, 21: { isInMergeQueue: true }, 22: { isInMergeQueue: true }, 23: { isInMergeQueue: true } };
+  // 20-22 are mixed; 23 is queued but its files cannot be read, so it is the fourth mixed one and 24 waits.
+  const t = queueTrain({ prs: { 20: {}, 21: {}, 22: {}, 23: {}, 24: {} }, state, files: ['apps/server/src/x.ts'], filesFor: { 23: 'unreadable' } });
+  const r = t.run();
+  assert.equal(r.pr, '');
+  assert.deepEqual(r.skipped.map(s => [s.pr, s.why]), [[20, 'queued'], [21, 'queued'], [22, 'queued'], [23, 'files-unreadable'], [24, 'mixed-cap']]);
+  // With 23 readable and low-risk, only three mixed PRs are queued and 24 goes.
+  assert.equal(queueTrain({ prs: { 20: {}, 21: {}, 22: {}, 23: {}, 24: {} }, state, files: ['apps/server/src/x.ts'], filesFor: { 23: ['docs/a.md'] } }).run().pr, 24);
+  // A candidate whose own files cannot be read waits too: not picked, not ejected.
+  const own = queueTrain({ prs: { 20: {} }, filesFor: { 20: 'unreadable' } }).run();
+  assert.deepEqual([own.pr, own.skipped], ['', [{ pr: 20, why: 'files-unreadable' }]]);
 });
 
 test('queue: a PR with auto-merge on and a failed required check is reported, once, not skipped silently', () => {

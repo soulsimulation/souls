@@ -96,7 +96,7 @@ test('the soul-actions job runs on its own paths, full scope included, and on no
 });
 
 test('the soul-tools job runs on its own paths, full scope included, and on nothing else (#1111)', () => {
-  for (const f of ['tools/soul-runtime/run.test.mjs', 'tools/soul-trace/tap.mjs', 'tools/world-launcher/soul/eden.mjs', 'apps/server/src/edge/comms/testing.ts']) assert.ok(names([f]).includes('soul-tools'), f);
+  for (const f of ['tools/soul-runtime/run.test.mjs', 'tools/soul-trace/tap.mjs', 'tools/world-launcher/soul/eden.mjs', 'apps/server/src/edge/comms/testing.ts', 'tools/entry/check.mjs', 'content/kinds/chair.json', 'packages/form-rules/src/index.ts']) assert.ok(names([f]).includes('soul-tools'), f);
   for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'tools/edge-skill/client.mjs', 'tools/soul-actions/shared-crew.test.mjs']) assert.ok(!names([f]).includes('soul-tools'), f);
   assert.ok(names(['pnpm-lock.yaml']).includes('soul-tools'));
   assert.ok(!('paths' in jobsFor(['tools/soul-trace/x.test.mjs']).include.find(j => j.name === 'soul-tools')));
@@ -269,5 +269,63 @@ test('ci.yml: the window reaches the scope step, and a deferred run fails ci-ok'
   assert.match(ok, /if: needs\.scope\.outputs\.deferred == 'true'[\s\S]*?exit 1/);
   const labels = readFileSync(fileURLToPath(new URL('../labels.yml', import.meta.url)), 'utf8');
   for (const l of WINDOW_LABELS) assert.match(labels, new RegExp(`name: "${l}"`));
+});
+
+// Low-risk paths (Gene, 17 Nov): a change confined to entry, content, form-rules, docs or changelog fragments runs no
+// server, smoke (e2e), walk (packages) or bundle (types-web) job; it keeps repo (always), the entry tests and the
+// form-rules tests (soul-tools).
+const SKIPPED = JOBS.filter(j => j.kind === 'server' || ['latency', 'packages', 'types-web', 'launcher', 'native', 'client-cli', 'soul-actions'].includes(j.name)).map(j => j.name);
+const LOW = ['tools/entry/check.mjs', 'content/kinds/seating/bench.json', 'content/asks/a.json', 'content/moves/a.json', 'packages/form-rules/cases/kettle.json', 'docs/testing.md', 'changes/a-fragment.md', 'README.md'];
+
+test('low-risk: a diff confined to the allowlist runs soul-tools only: no server, smoke, walk or bundle job', () => {
+  const plan = jobsFor(LOW);
+  assert.equal(plan.scope, 'low-risk');
+  assert.deepEqual(plan.include.map(j => j.name), ['soul-tools']);
+  for (const n of SKIPPED) assert.ok(!names(LOW).includes(n), n);
+  assert.equal(smokeFor(LOW), false);
+  for (const f of LOW) assert.deepEqual(names([f]).filter(n => SKIPPED.includes(n)), [], f);
+  assert.deepEqual(names(['changes/a.md']), [], 'a fragment alone runs no job');
+  assert.deepEqual(names(['docs/site/api.md']), ['docs-reference'], 'the reference pages still run their generator');
+  // the soul-tools job runs the entry tests, the form-rules tests and the launcher test that reads content/kinds
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const tools = workflow.slice(workflow.indexOf('            soul-tools)'), workflow.indexOf('            server)'));
+  for (const t of ['tools/entry/*.test.mjs', 'packages/form-rules/src/*.test.ts', 'tools/world-launcher/soul/card-search.test.mjs']) assert.ok(tools.includes(t), t);
+});
+
+test('low-risk: form-rules source keeps the web jobs, because apps/web imports it', () => {
+  assert.deepEqual(names(['packages/form-rules/src/looks.ts']).sort(), ['soul-tools', 'types-web', 'web']);
+  const importer = readFileSync(fileURLToPath(new URL('../../apps/web/src/gen-mesh/vocab-look.ts', import.meta.url)), 'utf8');
+  assert.match(importer, /packages\/form-rules\/src\/looks\.ts/);
+});
+
+test('low-risk: exact prefixes; one file outside the allowlist runs the full battery', () => {
+  for (const f of ['content/other/a.json', 'contents/kinds/a.json', 'tools/entryx/a.mjs', 'packages/form-rules-x/a.ts', 'AGENTS.md', 'CLAUDE.md', 'apps/docs/a.md'])
+    assert.notEqual(jobsFor([...LOW, f]).scope, 'low-risk', f);
+  // a PR carries a changelog fragment, which the path map does not name: beside any outside file, every job runs
+  for (const f of ['apps/server/src/world.ts', 'tools/proof/tier.mjs', 'AGENTS.md', 'pnpm-lock.yaml', '.github/workflows/ci.yml'])
+    assert.deepEqual(names([...LOW, f]), JOBS.map(j => j.name), f);
+  assert.deepEqual(names(['tools/entry/check.mjs', 'mars/viewer/x.js']), JOBS.map(j => j.name), 'an unmapped path, no fragment');
+  assert.equal(smokeFor([...LOW, 'apps/server/src/world.ts']), true);
+});
+
+test('low-risk: an empty, missing or unreadable diff runs the full battery', () => {
+  for (const files of [[], null, undefined]) {
+    assert.equal(jobsFor(files).scope, 'full', String(files));
+    assert.deepEqual(names(files), JOBS.map(j => j.name), String(files));
+    assert.equal(smokeFor(files), true, String(files));
+  }
+  assert.equal(changedFiles('abc', 'def', () => { throw Error('bad object'); }), null);
+  for (const event of ['pull_request', 'merge_group']) {
+    const empty = run('--files', '', '--event', event, '--labels', '["ci:run"]');
+    assert.deepEqual([empty.scope, empty.matrix, empty.smoke], ['full', JOBS.map(j => j.name), 'true'], event);
+  }
+});
+
+test('low-risk: a merge group of two allowlist PRs is scoped; one with a server PR in it runs everything', () => {
+  const a = ['tools/entry/format.mjs', 'changes/sa-f6c.md'], b = ['content/kinds/kitchen/kettle.json', 'packages/form-rules/cases/kettle.json', 'changes/sa-d3.md'];
+  const group = run('--files', [...a, ...b].join(','), '--event', 'merge_group');
+  assert.deepEqual([group.scope, group.matrix, group.smoke, group.deferred, group.any], ['low-risk', ['soul-tools'], 'false', 'false', 'true']);
+  const mixed = run('--files', [...a, ...b, 'apps/server/src/world.ts', 'changes/server.md'].join(','), '--event', 'merge_group');
+  assert.deepEqual([mixed.scope, mixed.matrix, mixed.smoke], ['full', JOBS.map(j => j.name), 'true']);
 });
 
