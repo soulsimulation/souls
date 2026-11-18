@@ -33,6 +33,7 @@
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
 
+pub mod exits;
 pub mod scene;
 
 use i_overlay::core::fill_rule::FillRule;
