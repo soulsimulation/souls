@@ -94,6 +94,8 @@
       "effects": [{ "change": "set", "field": "on", "to": false, "event": "put_out" }]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:crank_lamp",
     "table": [
