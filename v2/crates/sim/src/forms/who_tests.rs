@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use replica::audience::{link_type, owners};
 use replica::ids::{FIXTURE_SCOPE_A, Id};
 use replica::rules::json::{Value, parse};
 use replica::tree::Tree;
@@ -95,8 +96,9 @@ fn strs(v: Option<&Value>) -> Vec<String> {
 
 /// Loads a case's `state` as a T2 tree: a public root place; each node with hands a body of the fixtures' family,
 /// under the root, linked to its Soul by `souls:body-of`; each other node a thing of its kind, in the hand that
-/// holds it or under the root; each link `t` of a thing's kind `ns:k` a link `ns:t` from its end to the thing, public
-/// when the kind's link is, else in an audience whose members are its ends, each body counted as its Soul.
+/// holds it or under the root; each link `t` of a thing's kind `ns:k` a link `ns:t` (`souls:owns` for its `owner`)
+/// from its end to the thing, public when the kind's link is, else in an audience whose members are its ends, each
+/// body counted as its Soul.
 fn build(kinds: &Value, state: &Value) -> Built {
     let nodes = state.get("nodes").and_then(Value::obj).unwrap_or(&[]);
     let thing_kinds: BTreeSet<&str> = nodes
@@ -202,7 +204,6 @@ fn build(kinds: &Value, state: &Value) -> Built {
             continue;
         }
         let kind = n.get("kind").and_then(Value::str).expect("a kind");
-        let ns = kind.split(':').next().expect("a namespace");
         for (t, ends) in n.get("links").and_then(Value::obj).unwrap_or(&[]) {
             let public = kinds
                 .get(kind)
@@ -224,7 +225,7 @@ fn build(kinds: &Value, state: &Value) -> Built {
             for e in ends {
                 draft.links.push(Link {
                     id: next(FIXTURE_SCOPE_A),
-                    ty: format!("{ns}:{t}"),
+                    ty: link_type(kind, t),
                     ends: [e, ids[k]],
                     owner: End::Second,
                     audience,
@@ -571,4 +572,106 @@ fn f6_a2_a3_the_clients_check_and_the_worlds_agree_on_10000_cases_and_no_refusal
     );
     assert_eq!(agree, GENERATED);
     assert!(checked_hidden > 100);
+}
+
+// --- One owner (#3265) --------------------------------------------------------------------------------------------
+
+const OWNED: usize = 1_000;
+
+/// One generated thing of a made-up kind with an `owner` link (its audience the `owner` rule) and another link `a`:
+/// one to four bodies, each with a Soul of its own; each link's ends drawn from the Souls and their bodies; the thing
+/// maybe in a hand.
+fn owned(r: &mut Rng, kind: &str) -> Value {
+    let bodies = 1 + r.below(4) as usize;
+    let held_by = (r.below(3) == 0).then(|| r.below(bodies as u64) as usize);
+    let mut candidates = Vec::new();
+    let mut nodes = Vec::new();
+    for i in 0..bodies {
+        let (b, s) = (format!("b{i}"), format!("s{i}"));
+        candidates.extend([b.clone(), s.clone()]);
+        let right = match held_by == Some(i) {
+            true => Value::s("t"),
+            false => Value::Null,
+        };
+        nodes.push((
+            b,
+            Value::object([
+                (
+                    "hands",
+                    Value::object([("left", Value::Null), ("right", right)]),
+                ),
+                (
+                    "links",
+                    Value::Obj(vec![("soul".into(), Value::Arr(vec![Value::s(&s)]))]),
+                ),
+            ]),
+        ));
+    }
+    let mut links = Vec::new();
+    for t in ["owner", "a"] {
+        let mut ends: Vec<String> = Vec::new();
+        for _ in 0..r.below(4) {
+            let e = candidates[r.below(candidates.len() as u64) as usize].clone();
+            if !ends.contains(&e) {
+                ends.push(e);
+            }
+        }
+        if !ends.is_empty() {
+            links.push((
+                t.to_owned(),
+                Value::Arr(ends.iter().map(|e| Value::s(e)).collect()),
+            ));
+        }
+    }
+    nodes.push((
+        "t".to_owned(),
+        Value::object([("kind", Value::s(kind)), ("links", Value::Obj(links))]),
+    ));
+    Value::object([("nodes", Value::Obj(nodes))])
+}
+
+/// #3265 A2: for 1,000 generated things, the Souls the `owner` audience rule names (who may see as owner) are exactly
+/// the Souls whose bodies may do a form whose `who` is `{"link": "owner"}` (who may use as owner).
+#[test]
+fn one_owner_who_may_see_and_who_may_use_as_owner_name_the_same_soul() {
+    let name = "f7:o".to_owned();
+    let entry = parse(&format!(
+        r#"{{"format":"souls-entry/1","kind":"{name}","owner":"thing",
+        "links":{{"owner":{{"n":1,"from":"soul","most":4,"audience":{{"rule":"owner"}}}},
+                  "a":{{"n":2,"from":"soul","most":4,"audience":{{"rule":"everyone"}}}}}},
+        "forms":{{"use":{{"who":{{"link":"owner"}}}}}}}}"#
+    ))
+    .expect("JSON");
+    let kinds = Value::Obj(vec![(name.clone(), entry.clone())]);
+    let mut r = Rng(3265);
+    let mut with_owner = 0;
+    for _ in 0..OWNED {
+        let state = owned(&mut r, &name);
+        let b = build(&kinds, &state);
+        let thing = b.id("t");
+        let see = owners(thing, &b.tree.to_state());
+        let used: BTreeSet<Id> = b
+            .souls
+            .iter()
+            .filter(|(body, _)| {
+                may(
+                    &b.tree,
+                    &b.audiences,
+                    &|id| b.name(id),
+                    **body,
+                    thing,
+                    &entry,
+                    "use",
+                )
+                .is_ok()
+            })
+            .map(|(_, soul)| *soul)
+            .collect();
+        assert_eq!(see, used, "{}", state.to_json());
+        with_owner += usize::from(!see.is_empty());
+    }
+    println!(
+        "one owner: {OWNED} things (seed 3265), {with_owner} with an owner; who may see as owner is who may use as owner in every one"
+    );
+    assert!(with_owner > OWNED / 2);
 }

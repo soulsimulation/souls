@@ -744,7 +744,6 @@ fn f6_commit_checks_who_may_before_a_run_starts() {
         audience: Audience::Everyone,
     };
     let root = mint.mint().expect("id");
-    let ns = kind.split(':').next().expect("a namespace");
     let draft = Draft {
         kinds: kinds.clone(),
         souls: [soul].into(),
@@ -764,7 +763,7 @@ fn f6_commit_checks_who_may_before_a_run_starts() {
             ),
             link(
                 mint.mint().expect("id"),
-                format!("{ns}:owner"),
+                replica::audience::link_type(kind, "owner"),
                 [soul, node],
                 End::Second,
             ),

@@ -41,8 +41,10 @@
 //!   commit ([`may`]) whatever the client said, and starts the run. The test is R2's ([`replica::who_may`]), one code
 //!   for the client and the world, read from the form's `who`: anyone, the holder, the world alone, or the ends of a
 //!   link of a type the thing's kind declares (its owner, a member, the Soul whose turn it is). On the tree, a kind's
-//!   link `t` is the type `<the kind's namespace>:t`, and a body is its Soul by `souls:body-of`. A refusal,
-//!   `not-permitted`, names who may: the rule, and the ends' names only when the asker is in the links' audience.
+//!   link `t` is the type `<the kind's namespace>:t`, except its `owner`: that is `souls:owns`, the one owner relation
+//!   the `owner` audience rule reads too (`replica::audience::link_type`, #3265). A body is its Soul by
+//!   `souls:body-of`. A refusal, `not-permitted`, names who may: the rule, and the ends' names only when the asker is
+//!   in the links' audience.
 //!   Ownership changing mid-form changes nothing: it is checked once, at commit.
 //!
 //! Not here: amounts, making and removing (F4), a walk across a link (the walk's crossings are not
@@ -50,6 +52,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use replica::audience;
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Refusal, Rest, read_id,
 };
@@ -832,8 +835,7 @@ pub fn may(
     let holds = thing.as_ref().and_then(|n| n.parent()) == Some(body);
     let (ends, seen) = match (&who, &thing) {
         (Who::Link(t), Some(n)) => {
-            let ns = n.kind().as_str().split(':').next().unwrap_or_default();
-            let ty = format!("{ns}:{t}");
+            let ty = audience::link_type(n.kind().as_str(), t);
             let links: Vec<_> = tree
                 .links_at(node)
                 .iter()

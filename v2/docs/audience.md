@@ -18,8 +18,11 @@ The store that keeps the words (K16), signing in (W1), removal end to end (W7) a
 2. **One resolver for SA-F8's four rules** (#2947), run when a record is committed. `everyone` is everyone; `creator`
    is the world's creator's own principal id. `owner` and `{linked, link: L}` name the principals at the far end of
    `souls:owns` or `L` links at the thing itself (never on a parent: SA-F8's open point, settled here), each body
-   counted as its Soul by `souls:body-of` (whichever end the body is). They resolve to the thing's audience node for
-   that rule whose members are exactly those principals: a child of the thing, of kind `souls:audience`, with the
+   counted as its Soul by `souls:body-of` (whichever end the body is). `souls:owns` is the one owner relation: a
+   kind's own `owner` link in the entry format is `souls:owns` on the tree, not `<namespace>:owner`, so who may use a
+   thing as its owner (F6's `{"link": "owner"}`) is who sees it as owner (#3265). They resolve to the thing's
+   audience node for that rule whose members are exactly those principals: a child of the thing, of kind
+   `souls:audience`, with the
    thing's own audience and fields `{1: 1 owner or 2 linked, 2: link type}`. When none matches (none yet, or someone
    joined or left), the commit writes a new one first (`audience-not-declared` names the members it needs). A role
    (`roles.now`, section 17) is a link type, resolved like any other. A creator cannot be a link end (T2 rule 7), so
