@@ -171,3 +171,27 @@ test('route-reach/1: enclosedIn memo never seals a room that opens onto ground a
   assert.equal(enclosedIn(s, room, 0.5, 0.5), true, 'a room with no door is sealed');
   assert.equal(enclosedIn(s, room, 0.5, 0.5), true);
 });
+
+// #2631: a wall the length of the world (thin, so the coarse path still crosses it) parts every window, and neither side is
+// sealed inside the first one, so each refusal ran the wider retry: up to a million expansions on the main thread, again
+// for every point near the same place (a seat's approach points, Soul after Soul; 4.98 s in one sit check under a
+// 100-agent burst). The retry is now skipped when its two ends lie in different standing areas of its window: the same
+// refusal, without the search, and the side the walker stands in is flooded once.
+test('route-reach/1 (#2631): the wider retry is not searched when its ends lie apart; the refusals are unchanged', async () => {
+  const { wideHopMetrics } = await import('../../../mars/viewer/engine/spatial/tiled.ts');
+  const cut = { e_cut: { surfaces: [], solids: [wall('cut', [85, 0], [0.11, 990])], links: [] } } as unknown as WorldEditV1['set'];
+  const off = world('cut-off', cut), on = world('cut-on', cut, [], true);
+  const goals: [number, number][] = Array.from({ length: 12 }, (_, i) => [100 + (i % 4) * 0.5, 30 + Math.floor(i / 4) * 0.5]);
+  const m0 = wideHopMetrics();
+  for (const g of goals) {
+    const a = off.reachV1({ p: [70, 32] }, { p: g }), b = on.reachV1({ p: [70, 32] }, { p: g });
+    assert.equal(b.ok, false, JSON.stringify(b));
+    assert.deepEqual(b, a, 'the same refusal as without the policy (the searched retry found nothing either)');
+  }
+  const m = wideHopMetrics(), d = { skipped: m.skipped - m0.skipped, searched: m.searched - m0.searched, floods: m.floods - m0.floods };
+  assert.deepEqual(d, { skipped: goals.length, searched: 0, floods: 1 }, 'every wider retry skipped; the walker\'s side flooded once');
+  // a way round inside the wide window is still searched and found (the fence above: both ends in one area)
+  const fenced = world('fence-again', fence, [], true), s0 = wideHopMetrics().searched;
+  assert.equal(fenced.reachV1({ p: [70, 32] }, { p: [100, 32] }).ok, true);
+  assert.equal(wideHopMetrics().searched - s0, 1);
+});

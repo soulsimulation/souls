@@ -103,98 +103,6 @@
         }
       },
       {
-        "id": "mars-swim",
-        "seat": "sol",
-        "atSec": 5,
-        "channel": "card",
-        "text": "Head over to the nearest body of water and take a swim, then get back onto its bank. Tell me when you are back on dry ground.",
-        "budgetSec": 180,
-        "setup": {
-          "maxWallSec": 180,
-          "steps": [
-            "stand:here",
-            "walk:field",
-            "walk:g-campus-swimming-pond.shore-bank",
-            {
-              "verb": "turn",
-              "heading": 0
-            }
-          ],
-          "expect": {
-            "pos": [
-              -32.9,
-              -17.5
-            ],
-            "radiusM": 3,
-            "heading": 0,
-            "posture": [
-              "standing"
-            ],
-            "places": [
-              "g-campus-swimming-pond.shore-bank"
-            ]
-          }
-        },
-        "expect": {
-          "kind": "journey",
-          "journey": {
-            "fixtureId": "mars-swim-v1",
-            "source": "coordinator-reviewed patched physical fixture (freeze pending)",
-            "readiness": "blocked",
-            "firstActionSec": 30,
-            "discoveryCalls": 3,
-            "maxSampleGapSec": 6,
-            "phases": [
-              {
-                "name": "swimming",
-                "region": {
-                  "pos": [
-                    -44,
-                    -20
-                  ],
-                  "radiusM": 13
-                },
-                "postures": [
-                  "swimming"
-                ],
-                "holdSec": 4,
-                "receipt": {
-                  "verb": "swim",
-                  "capabilities": [
-                    "swim:campus-swimming-pond",
-                    "swim:g-campus-swimming-pond"
-                  ]
-                }
-              },
-              {
-                "name": "safe bank",
-                "region": {
-                  "pos": [
-                    -44,
-                    -20
-                  ],
-                  "radiusM": 16
-                },
-                "postures": [
-                  "standing"
-                ],
-                "places": [
-                  "g-campus-swimming-pond.shore-bank"
-                ],
-                "receipt": {
-                  "verb": "walk",
-                  "capabilities": [
-                    "walk:campus-swimming-pond",
-                    "walk:g-campus-swimming-pond.shore-bank",
-                    "walk:campus-swimming-pond/shore-bank"
-                  ]
-                }
-              }
-            ]
-          }
-        }
-      },
-      {
         "id": "mars-behind",
         "seat": "sol",
         "atSec": 5,
@@ -275,7 +183,6 @@
           "maxWallSec": 180,
           "steps": [
             "stand:here",
-            "walk:g-campus-swimming-pond.shore-bank",
             {
               "verb": "go",
               "target": {

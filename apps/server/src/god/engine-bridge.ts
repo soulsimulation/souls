@@ -39,6 +39,7 @@ import { fadingIds } from '../art/art.ts';
 import { createWatering, type Watering } from './watering.ts';
 import { createMending, type Mending } from './mending.ts';
 import { createTea, type Tea } from './tea.ts';
+import { createFormsAdapter, type FormsAdapter } from './forms-adapter.ts';
 import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService, isContactActuator } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
@@ -344,7 +345,9 @@ export class EngineBridge {
       this.edge.concealedThing=(id)=>{const x=this.engine.world.entities[id] as {support?:{kind:string;on?:string;slot?:string}}|undefined;if(x?.support?.kind!=='resting-on')return false;const box=this.keptIn(x);return !!box&&(box.hidden||!box.open);};
       this.edge.thingName=(id)=>this.model.entities.has(id)?this.model.pathOf(id):null;
       // #1751: the catalog's acts per thing and the live picture's thing states, from the def's own action list
-      this.edge.thingActs=(id)=>{const e=this.model.entities.get(id),def=e&&this.model.resolvedDef(e.def);if(!def)return null;const acts=catalogActs(def),state=stateDefaults(def);return acts.length||Object.keys(state).length?{acts,state}:null;};
+      this.edge.thingActs=(id)=>{const e=this.model.entities.get(id),def=e&&this.model.resolvedDef(e.def);if(!def)return null;const acts=catalogActs(def,this.forms?.actions),state=stateDefaults(def);return acts.length||Object.keys(state).length?{acts,state}:null;};
+      // SA-C3 (forms-adapter.ts): a thing loaded from an entry publishes its entry in the catalog
+      this.edge.thingEntry=(id)=>{const e=this.model.entities.get(id);return e?this.forms?.catalogEntry(this.model.resolvedDef(e.def))??null:null;};
       let states:{v:number;m:Map<string,Record<string,unknown>>}|null=null;
       this.edge.thingStates=()=>{if(states?.v===this.model.editSeq)return states.m;const m=new Map<string,Record<string,unknown>>();
         for(const e of this.model.entities.values()){if(!e.state)continue;const def=this.model.resolvedDef(e.def),d=def&&stateDiff(e,def);if(d)m.set(e.id,d);}
@@ -377,9 +380,13 @@ export class EngineBridge {
     this.watering = createWatering({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
     // Entry 43: the tea acts (tea.ts), the same way
     this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false });
+    // SA-F3a (forms-adapter.ts): an entry thing's forms ride the tea act's hooks (plan, expect, outcome), so perceive and the
+    // ledger are unchanged: native steps when offered, the form's changes applied once when its programme ends
+    const forms = this.forms = createFormsAdapter({ model: this.god.model, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) }), tea = this.tea;
+    this.tea = { ...tea, plan: (soul, id, action) => forms.plan(soul, id, action) ?? tea.plan(soul, id, action), expect: (body, cap) => { if (cap && forms.owns(cap)) forms.begun(body, cap); else tea.expect(body, cap); }, outcome: (cap, body, done) => forms.outcome(cap, body, done) ?? tea.outcome(cap, body, done) };
     // #438: the picking acts (harvest.ts), the same way
     this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why), actApplied: (body, capability) => this.edge?.actApplied(body, capability) });
-    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, worldDay: () => worldDayOf(o.host), version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
+    this.perceive = new GodPerceive({ formActions: forms.actions, mending: this.mending, model: this.god.model, worldDay: () => worldDayOf(o.host), version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -519,6 +526,8 @@ export class EngineBridge {
   private mending?: Mending;
   /** Entry 43: the tea acts; read by perception for a kettle's and a cup's compact facts. */
   tea?: Tea;
+  /** SA-F3a: this world's forms adapter (its entries and moves are its own, #2416). */
+  private forms?: FormsAdapter;
   /** #438: the picking acts; read by perception for a basket's and a vase's compact facts. */
   harvest?: HarvestFaculty;
   /** Entry 18: when the world day changes, gardens dry by the days passed (capped at 3; time set backwards restarts the count). */

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":20,"group":"object","words":"sit down","obvious":3,"things":{"chair":"eden:chair"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"chair"}}]}

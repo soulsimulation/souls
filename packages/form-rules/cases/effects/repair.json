@@ -1,0 +1,132 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Repair and mending (SA-X12, #2907; from #1074, #1575, #1641). The broken state is set from outside (the world's creator breaks a thing); a Soul with the tool in hand mends it, and the result lands only when the form completes, so an interrupted repair leaves it broken. A second Soul who comes to it after is refused: it is no longer broken (the original told the later one it was already whole). The tool stays in the hand. A Soul with empty hands picks up the brush first (the refusal's fix), then restores the bowl.",
+  "cases": [
+    {
+      "name": "bench_occupied_then_repaired_then_whole",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "rb1"] },
+          "rb1": { "kind": "eden:repairable_bench", "fields": { "condition": "cracked" }, "slots": { "left": ["b2"] } },
+          "h1": { "kind": "eden:hammer" },
+          "b1": { "kind": "eden:humanoid", "hands": { "left": null, "right": "h1" } },
+          "b2": { "kind": "eden:humanoid", "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        { "act": { "this": "rb1", "form": "repair" }, "receipt": "rr0", "expect": { "verdict": "no", "reason": "slot_taken", "need": 2 } }
+      ],
+      "after": {
+        "rb1": { "kind": "eden:repairable_bench", "fields": { "condition": "cracked" }, "slots": { "left": ["b2"] } }
+      }
+    },
+    {
+      "name": "bench_repaired_then_sat_on",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "rb1"] },
+          "rb1": { "kind": "eden:repairable_bench", "fields": { "condition": "cracked" } },
+          "h1": { "kind": "eden:hammer" },
+          "b1": { "kind": "eden:humanoid", "hands": { "left": null, "right": "h1" } },
+          "b2": { "kind": "eden:humanoid", "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "rb1", "form": "repair" },
+          "receipt": "rr1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "rb1", "field": "condition", "n": 1, "to": "whole" }],
+            "events": [{ "event": "eden:repaired", "node": "rb1", "changes": [0] }],
+            "timers": []
+          }
+        },
+        { "act": { "this": "rb1", "form": "repair" }, "receipt": "rr2", "expect": { "verdict": "no", "reason": "field_differs", "need": 0 } },
+        {
+          "actor": "b2",
+          "act": { "this": "rb1", "form": "sit", "args": { "seat": "left" } },
+          "receipt": "rr3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b2", "to": { "node": "rb1", "slot": "left" } }],
+            "events": [{ "event": "eden:sat_down", "node": "rb1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": {
+        "rb1": { "kind": "eden:repairable_bench", "fields": { "condition": "whole" }, "slots": { "left": ["b2"] } },
+        "b1": { "kind": "eden:humanoid", "hands": { "left": null, "right": "h1" } }
+      }
+    },
+    {
+      "name": "tent_mended_once_by_two_souls",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:mendable_tent", "fields": { "condition": "torn" } },
+          "a1": { "kind": "eden:sewing_awl" },
+          "a2": { "kind": "eden:sewing_awl" },
+          "b1": { "kind": "eden:humanoid", "hands": { "left": "a1", "right": null } },
+          "b2": { "kind": "eden:humanoid", "hands": { "left": "a2", "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "mend" },
+          "receipt": "rt1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "condition", "n": 1, "to": "whole" }],
+            "events": [{ "event": "eden:mended", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        },
+        { "actor": "b2", "act": { "this": "t1", "form": "mend" }, "receipt": "rt2", "expect": { "verdict": "no", "reason": "field_differs", "need": 0 } }
+      ],
+      "after": {
+        "t1": { "kind": "eden:mendable_tent", "fields": { "condition": "whole" } },
+        "b1": { "kind": "eden:humanoid", "hands": { "left": "a1", "right": null } }
+      }
+    },
+    {
+      "name": "bowl_brush_picked_up_then_restored",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "g1", "l1"] },
+          "g1": { "kind": "eden:gold_seam_station" },
+          "l1": { "kind": "eden:lacquer_brush" },
+          "b1": { "kind": "eden:humanoid", "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        { "act": { "this": "g1", "form": "restore" }, "receipt": "rg0", "expect": { "verdict": "no", "reason": "not_holding_kind", "need": 1, "fix": { "step": "take", "kind": "eden:lacquer_brush" } } },
+        {
+          "act": { "this": "b1", "form": "pick_up", "args": { "thing": "l1" } },
+          "receipt": "rg1",
+          "expect": { "verdict": "yes", "changes": [{ "change": "reparent", "node": "l1", "to": { "node": "b1", "hand": "left" } }] }
+        },
+        {
+          "act": { "this": "g1", "form": "restore" },
+          "receipt": "rg2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "g1", "field": "condition", "n": 1, "to": "restored" }],
+            "events": [{ "event": "eden:restored", "node": "g1", "changes": [0] }],
+            "timers": []
+          }
+        },
+        { "act": { "this": "g1", "form": "restore" }, "receipt": "rg3", "expect": { "verdict": "no", "reason": "field_differs", "need": 0 } }
+      ],
+      "after": {
+        "room": { "loose": ["b1", "g1"] },
+        "g1": { "kind": "eden:gold_seam_station", "fields": { "condition": "restored" } },
+        "b1": { "kind": "eden:humanoid", "hands": { "left": "l1", "right": null } }
+      }
+    }
+  ]
+}

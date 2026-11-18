@@ -5,8 +5,13 @@
 //! - **Legs.** The route (N5, a body with hands) from where the body stands to the goal; each link it crosses is a
 //!   leg's end, at the link's near end on the node the body stands on (N4, read with the open ground: a doorway
 //!   between a building and the open ground has one end on each).
-//! - **The next corner.** The leg's end when a straight walk on the body's surface reaches it (N6's walk, on a copy of
-//!   the body), else the second point of the first line of the route from where it stands to the leg's end.
+//! - **The next corner** (#3167: a fixed cost a tick). Each walker keeps a line of corners toward its leg's end: the
+//!   leg's end when a straight walk on the body's surface reaches it (N6's walk, on a copy of the body), else the
+//!   first line of the route from where it stands (on the open ground, on to the next portal the route crosses). It
+//!   moves on as each corner is reached ([`AT_CORNER`]), and a new line is searched for ([`View::search`], counted in
+//!   [`Spent`]) only for a new leg's end or node, when the walker is pushed more than [`OFF_LINE`] off it, at the end
+//!   of a line that stops short of the leg's end, or when a straight walk to the next corner, checked once in
+//!   [`CHECK`] calls, is refused.
 //! - **A crossing.** At the near end: a shut door is asked to open and the opening written at the end of that tick
 //!   (N4's writer, the world as the cause and the walker as the Soul), and the body stands. Then the controller
 //!   carries it along the
@@ -28,7 +33,7 @@
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, Scene};
+use crate::ground::{HUMAN_RADIUS, OpenGround, Scene, exits};
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
@@ -43,7 +48,7 @@ use replica::pose::{ControllerInput, Frame, Mode, Quat, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
@@ -55,11 +60,43 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 
 /// How far a leg's end may lie off the ground and still be aimed at, mm: a link's end on its piece's edge.
 const AT_EDGE: i64 = 20;
+/// How far a crossing's landing may be moved onto the far surface, µm: less than a body's radius (#3168).
+const LAND: i64 = HUMAN_RADIUS * 1000;
+/// How far from a link's near end a crossing may be asked, µm (the walk asks within 50 mm of it, #3168).
+const REACH: i64 = 1_000_000;
+
+/// The squared distance across the ground (x and z), µm².
+fn flat2(a: Vec3, b: Vec3) -> i128 {
+    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+    d(a.x, b.x) + d(a.z, b.z)
+}
 
 /// A crossing the controller carries: the end it went in by, and where the body stood when it began.
 struct Crossing {
     from: u8,
     start: Vec3,
+}
+
+/// What finding the next corner cost (#3167): the calls, the searches and the straight-walk checks, counted always;
+/// their time in ns only when the town is given a [`Town::meter`] (a bench's; the engine reads no clock).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Spent {
+    /// `corner` calls, and their time.
+    pub corners: u64,
+    pub corner_ns: u64,
+    /// Straight-walk checks (`clear`), and their time.
+    pub clears: u64,
+    pub clear_ns: u64,
+    /// Route searches (`Map::route`), and their time.
+    pub searches: u64,
+    pub search_ns: u64,
+    /// Lines searched for ([`View::search`]: a straight-walk check to `to`, then a route search unless it passed), by
+    /// why: a new `to` or node (a new leg, order or target), pushed off the line, at the end of a line that stops
+    /// short of `to` (where the route leaves the piece it began on), and a straight walk to the next corner refused.
+    pub lines_new: u64,
+    pub lines_off: u64,
+    pub lines_end: u64,
+    pub lines_blocked: u64,
 }
 
 /// The engine as the walk skill reads it.
@@ -75,7 +112,37 @@ pub struct Town {
     pub turns: Option<Turns>,
     /// The standing spots' tables, by owning node (N9).
     pub spots: Spots,
+    /// A monotonic ns reader for timing [`Spent`], given by a bench; `None` (the engine's own) times nothing.
+    pub meter: Option<fn() -> u64>,
+    /// What the next corners cost so far.
+    pub spent: Cell<Spent>,
+    /// Each walker's line of corners (#3167), kept from the search that found it.
+    lines: BTreeMap<Id, Line>,
     crossings: BTreeMap<Id, Crossing>,
+    /// Where each link is in `buildings` (building, link), the first that holds it: read every tick by each walker
+    /// with a link ahead, so not searched for (#3213).
+    link_at: BTreeMap<Id, (usize, usize)>,
+}
+
+/// Where each link is in `buildings`: the first building, and its first link, with that id.
+fn link_index(buildings: &[Building]) -> BTreeMap<Id, (usize, usize)> {
+    let mut at = BTreeMap::new();
+    for (i, b) in buildings.iter().enumerate() {
+        for (j, l) in b.links.iter().enumerate() {
+            at.entry(l.id).or_insert((i, j));
+        }
+    }
+    at
+}
+
+/// Link `id` in `buildings`, by the index [`link_index`] made of them.
+fn find_link<'b>(
+    link_at: &BTreeMap<Id, (usize, usize)>,
+    buildings: &'b [Building],
+    id: Id,
+) -> Option<&'b crate::links::Link> {
+    let &(i, j) = link_at.get(&id)?;
+    buildings.get(i)?.links.get(j).filter(|l| l.id == id)
 }
 
 impl Town {
@@ -133,21 +200,26 @@ impl Town {
             doors: &gdoors,
         };
         buildings.push(Building::of_ground(&tree, open, &known)?);
+        let link_at = link_index(&buildings);
         Ok(Town {
             tree,
             ground,
             map,
             surfaces,
             buildings,
+            link_at,
             doors,
             turns: Some(Turns::new()),
             spots: Spots::new(),
+            meter: None,
+            spent: Cell::new(Spent::default()),
+            lines: BTreeMap::new(),
             crossings: BTreeMap::new(),
         })
     }
 
     fn link(&self, id: Id) -> Option<&crate::links::Link> {
-        self.building(id).and_then(|b| b.link(id))
+        find_link(&self.link_at, &self.buildings, id)
     }
 
     fn building(&self, link: Id) -> Option<&Building> {
@@ -162,7 +234,12 @@ impl Town {
             map: RefCell::new(&mut self.map),
             surfaces: &self.surfaces,
             buildings: &self.buildings,
+            link_at: &self.link_at,
             turns: self.turns.as_ref(),
+            meter: self.meter,
+            spent: &self.spent,
+            lines: RefCell::new(&mut self.lines),
+            ground: self.ground,
         }
     }
 }
@@ -173,7 +250,83 @@ pub struct View<'a> {
     map: RefCell<&'a mut Map>,
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
+    link_at: &'a BTreeMap<Id, (usize, usize)>,
     turns: Option<&'a Turns>,
+    meter: Option<fn() -> u64>,
+    spent: &'a Cell<Spent>,
+    lines: RefCell<&'a mut BTreeMap<Id, Line>>,
+    ground: Id,
+}
+
+/// A corner is reached within this, µm.
+pub const AT_CORNER: i64 = 100_000;
+/// A walker pushed further than this off the stretch of its line it walks is searched for again, µm.
+pub const OFF_LINE: i64 = 1_000_000;
+/// A straight walk to the next corner is checked once in this many of a walker's corner calls (a second at 20 ticks
+/// a second); each walker's first check is staggered by its id.
+pub const CHECK: u32 = 20;
+
+/// A walker's line of corners toward `to` on `node` (#3167): where the body stood when it was searched for, then
+/// the corners, x and z µm. It ends at `to` (`whole`), or where the route leaves the piece the search began on.
+pub struct Line {
+    node: Id,
+    to: Vec3,
+    points: Vec<[i64; 2]>,
+    /// The corner aimed at: an index into `points`, from 1.
+    next: usize,
+    whole: bool,
+    /// Corner calls until the next straight-walk check.
+    check: u32,
+}
+
+impl Line {
+    /// Moves on past the corners `p` has reached or gone past. Why the line no longer serves, if it does not: `p` is
+    /// more than [`OFF_LINE`] off the stretch it walks ([`Why::Off`]), or it has reached the end of a line that stops
+    /// short of `to` ([`Why::End`]).
+    fn follow(&mut self, p: [i64; 2]) -> Option<Why> {
+        loop {
+            let (a, c) = (self.points[self.next - 1], self.points[self.next]);
+            let past = (p[0] - c[0]) as i128 * (c[0] - a[0]) as i128
+                + (p[1] - c[1]) as i128 * (c[1] - a[1]) as i128
+                > 0;
+            if dist2_xz(p, c) > sq(AT_CORNER) && !past {
+                return (dist2_xz(p, nearest_on(p, a, c)) > sq(OFF_LINE)).then_some(Why::Off);
+            }
+            if self.next + 1 == self.points.len() {
+                // The last corner: `to` is aimed at until the walk arrives; a piece's end is searched on from.
+                return (!self.whole).then_some(Why::End);
+            }
+            self.next += 1;
+        }
+    }
+}
+
+/// Why a walker's line is searched for again.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Why {
+    New,
+    Off,
+    End,
+    Blocked,
+}
+
+fn sq(v: i64) -> i128 {
+    i128::from(v) * i128::from(v)
+}
+
+fn dist2_xz(a: [i64; 2], b: [i64; 2]) -> i128 {
+    sq(a[0] - b[0]) + sq(a[1] - b[1])
+}
+
+/// The point of the segment `a`-`c` nearest `p` (x and z).
+fn nearest_on(p: [i64; 2], a: [i64; 2], c: [i64; 2]) -> [i64; 2] {
+    let e = [i128::from(c[0] - a[0]), i128::from(c[1] - a[1])];
+    let l2 = e[0] * e[0] + e[1] * e[1];
+    if l2 == 0 {
+        return a;
+    }
+    let t = (i128::from(p[0] - a[0]) * e[0] + i128::from(p[1] - a[1]) * e[1]).clamp(0, l2);
+    [a[0] + (e[0] * t / l2) as i64, a[1] + (e[1] * t / l2) as i64]
 }
 
 fn walk(v: [i64; 2]) -> ControllerInput {
@@ -306,6 +459,7 @@ impl World for Town {
             turns,
             buildings,
             crossings,
+            link_at,
             ..
         } = self;
         // A crossing ends when the controller no longer carries the body.
@@ -325,8 +479,9 @@ impl World for Town {
             .flatten()
             .collect();
         ids.extend(turns.owners.values().flat_map(|m| m.keys().copied()));
+        let mut refused = None;
         for id in ids {
-            let Some(l) = buildings.iter().find_map(|b| b.link(id)) else {
+            let Some(l) = find_link(link_at, buildings, id) else {
                 continue;
             };
             if !narrow(l) {
@@ -360,9 +515,12 @@ impl World for Town {
                     })
                 });
             }
-            turns.write(l.owner, l, &f, at)?;
+            // One link's refusal does not stop the others' writes; the first is returned once all are written.
+            if let Err(r) = turns.write(l.owner, l, &f, at) {
+                refused.get_or_insert(r);
+            }
         }
-        Ok(())
+        refused.map_or(Ok(()), Err)
     }
 
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
@@ -405,8 +563,30 @@ impl World for Town {
 }
 
 impl View<'_> {
-    /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm).
-    fn clear(&self, body: &Body, to: [i64; 2]) -> Result<bool, Refusal> {
+    fn now(&self) -> u64 {
+        self.meter.map_or(0, |m| m())
+    }
+
+    fn spend(&self, f: impl FnOnce(&mut Spent)) {
+        let mut s = self.spent.get();
+        f(&mut s);
+        self.spent.set(s);
+    }
+
+    /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm), or comes within
+    /// `within` of it. Counted.
+    fn clear(&self, body: &Body, to: [i64; 2], within: i64) -> Result<bool, Refusal> {
+        let t0 = self.now();
+        let r = self.straight(body, to, within);
+        let t1 = self.now();
+        self.spend(|s| {
+            s.clears += 1;
+            s.clear_ns += t1.saturating_sub(t0);
+        });
+        r
+    }
+
+    fn straight(&self, body: &Body, to: [i64; 2], within: i64) -> Result<bool, Refusal> {
         let node = node_of(body);
         let s = self
             .surfaces
@@ -415,16 +595,80 @@ impl View<'_> {
         let p = body.pose.position;
         // In one second, at the velocity that is the whole way: the controller's dry run, moving nothing.
         let b = Controller::probe(s, body, walk([to[0] - p.x, to[1] - p.z]), 1_000_000, 0)?;
-        Ok([b.pose.position.x, b.pose.position.z] == to)
+        Ok(dist2_xz([b.pose.position.x, b.pose.position.z], to) <= sq(within))
     }
 
     /// Where `body` aims next on its way to `to` (on the node it stands on), x and z µm: `to` when a straight walk
     /// reaches it, else the next corner of the line there.
     pub fn corner(&self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
-        if self.clear(body, [to.x, to.z])? {
-            return Ok([to.x, to.z]);
-        }
+        let t0 = self.now();
+        let r = self.next_corner(body, to);
+        let t1 = self.now();
+        self.spend(|s| {
+            s.corners += 1;
+            s.corner_ns += t1.saturating_sub(t0);
+        });
+        r
+    }
+
+    /// The next corner from the walker's kept line: it moves on as each corner is reached, and is searched for again
+    /// ([`View::search`]) only for a new `to` or node (a new leg, a new order, a moved target), when the walker is
+    /// pushed off it, at the end of a line that stops short of `to`, or when a straight walk to the next corner,
+    /// checked once in [`CHECK`] calls, is refused.
+    fn next_corner(&self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
         let node = node_of(body);
+        let p = [body.pose.position.x, body.pose.position.z];
+        let mut lines = self.lines.borrow_mut();
+        let why = match lines.get_mut(&body.id) {
+            Some(l) if l.node == node && l.to == to => match l.follow(p) {
+                Some(why) => why,
+                None => {
+                    let c = l.points[l.next];
+                    l.check -= 1;
+                    if l.check > 0 {
+                        return Ok(c);
+                    }
+                    l.check = CHECK;
+                    // A corner lies on the ground's edge: coming within reach of it is reaching it.
+                    if self.clear(body, c, AT_CORNER)? {
+                        return Ok(c);
+                    }
+                    Why::Blocked
+                }
+            },
+            _ => Why::New,
+        };
+        self.spend(|s| match why {
+            Why::New => s.lines_new += 1,
+            Why::Off => s.lines_off += 1,
+            Why::End => s.lines_end += 1,
+            Why::Blocked => s.lines_blocked += 1,
+        });
+        let l = self.search(body, to)?;
+        let c = l.points[l.next];
+        lines.insert(body.id, l);
+        Ok(c)
+    }
+
+    /// The planning call (#3167): the line from where `body` stands toward `to` on its node, `[here, to]` when a
+    /// straight walk reaches `to`, else the first line of N5's route there. Counted. It reads the body's place, the
+    /// surfaces, the map and the tree and writes only the map's caches, so the world's tick (K18, #3160) may run it
+    /// off the clock thread and hand the line back.
+    pub fn search(&self, body: &Body, to: Vec3) -> Result<Line, Refusal> {
+        let node = node_of(body);
+        let p = [body.pose.position.x, body.pose.position.z];
+        // The first check: a whole period after the search, plus a share of one by id, so checks spread over ticks.
+        let line = |points: Vec<[i64; 2]>, whole: bool| Line {
+            node,
+            to,
+            points,
+            next: 1,
+            whole,
+            check: CHECK + (body.id.counter() % u64::from(CHECK)) as u32,
+        };
+        if self.clear(body, [to.x, to.z], 0)? {
+            return Ok(line(vec![p, [to.x, to.z]], true));
+        }
         let mut map = self.map.borrow_mut();
         let (Some(from), Some(goal)) = (
             map.spot_near(node, body.pose.position, AT_EDGE),
@@ -433,21 +677,48 @@ impl View<'_> {
         ) else {
             return Err(refusal("off-ground", show(node)));
         };
-        let r = map.route(self.tree, from, goal, HANDS)?;
-        // The first point of the line that is not where the body stands (the funnel may repeat a point).
-        let c = r
-            .first_line
-            .iter()
-            .skip(1)
-            .find(|&&c| c != [from.at[0], from.at[2]])
-            .copied()
-            .unwrap_or([goal.at[0], goal.at[2]]);
-        Ok([c[0] * 1000, c[1] * 1000])
+        let t0 = self.now();
+        let r = map.route(self.tree, from, goal, HANDS);
+        let t1 = self.now();
+        self.spend(|s| {
+            s.searches += 1;
+            s.search_ns += t1.saturating_sub(t0);
+        });
+        let r = r?;
+        let start = [from.at[0], from.at[2]];
+        let end = [goal.at[0], goal.at[2]];
+        // The line's points that are not where the body stands (the funnel may repeat a point), mm.
+        let mut corners: Vec<[i64; 2]> = r.first_line.iter().skip(1).copied().collect();
+        corners.dedup();
+        corners.retain(|&c| c != start);
+        if corners.is_empty() {
+            // Standing where the line ends, on the edge of its piece: aim at the goal, and check again next call (as
+            // each tick searched before #3167).
+            let mut l = line(vec![p, [to.x, to.z]], false);
+            l.check = 1;
+            return Ok(l);
+        }
+        let mut whole = corners.last() == Some(&end);
+        // On the open ground the first line ends on its square's edge: the line goes on to the next portal the route
+        // crosses (its middle, the ground's frame), or the goal, so the walker is searched for again inside the next
+        // square, not on the edge between the two.
+        if !whole && node == self.ground {
+            match r.waypoints.get(1) {
+                Some(w) => corners.push([w[0], w[2]]),
+                None => {
+                    corners.push(end);
+                    whole = true;
+                }
+            }
+        }
+        let mut points = vec![p];
+        points.extend(corners.iter().map(|c| [c[0] * 1000, c[1] * 1000]));
+        Ok(line(points, whole))
     }
 
     /// A link taken in turns as the walk reads it ([`Town::read_link`]).
     pub fn read_link(&self, link: Id) -> Option<Seen> {
-        link_seen(self.turns, self.buildings, self.tree, link)
+        link_seen(self.turns, self.link_at, self.buildings, self.tree, link)
     }
 }
 
@@ -484,7 +755,8 @@ impl Town {
         let door = l.door;
         // The line is in the building's frame; on the open ground it is followed placed there. Between frames it
         // ends where the body stands on the far side: the far end's middle, on its piece (it may lie on the
-        // piece's edge, within the grid's rounding).
+        // piece's edge, within the grid's rounding). Every landing is one the far surface's mover holds
+        // ([`Town::landing`]), or the crossing is refused before the body moves.
         let mut arrive = None;
         if here == self.ground || to == self.ground {
             let place = self
@@ -493,11 +765,16 @@ impl Town {
                 .ok_or_else(|| refusal("link-missing", show(link)))?;
             let out = |e: String| refusal("out-of-range", e);
             if let Some(e) = far {
-                let s = self
+                // Where the map stands it, else the end's middle; then on the mover's surface (#3168).
+                let stand = self
                     .map
                     .spot_near(to, e.middle(), AT_EDGE)
+                    .map_or(e.middle(), |s| {
+                        Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
+                    });
+                let stand = self
+                    .landing(to, stand)
                     .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
-                let stand = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
                 let last = if to == self.ground {
                     back(&place, stand).map_err(out)?
                 } else {
@@ -513,6 +790,21 @@ impl Town {
                     *p = place.point(*p).map_err(out)?;
                 }
             }
+        } else if let Some(last) = line.last_mut() {
+            *last = self
+                .landing(to, *last)
+                .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+        }
+        // The carry starts at the near end: a body asking from further off would be carried there in a straight
+        // line, through whatever stands between (#3168).
+        if line
+            .first()
+            .is_some_and(|s| flat2(*s, p) > i128::from(REACH) * i128::from(REACH))
+        {
+            return Err(refusal(
+                "link-not-here",
+                format!("{} from {} µm", show(link), flat2(line[0], p).isqrt()),
+            ));
         }
         if let Some(door) = door {
             let shut = self
@@ -545,12 +837,37 @@ impl Town {
     /// A link taken in turns as the walk skill reads it (T9b A3): [`F_TURNS`], and [`F_GRANTED`] the walker its
     /// owner lets in now. Any other link, or none, reads as free (`None`).
     pub fn read_link(&self, link: Id) -> Option<Seen> {
-        link_seen(self.turns.as_ref(), &self.buildings, &self.tree, link)
+        link_seen(
+            self.turns.as_ref(),
+            &self.link_at,
+            &self.buildings,
+            &self.tree,
+            link,
+        )
+    }
+
+    /// Where a crossing stands a body on `node` for the point `at` (µm, its frame): `at` when the mover's surface
+    /// holds it, else the surface's nearest legal point within [`LAND`] (N5's map and N6's mover cut the ground
+    /// apart, so a link's end on a map piece's edge can lie just off the mover's), else none (#3168).
+    fn landing(&self, node: Id, at: Vec3) -> Option<Vec3> {
+        let s = self.surfaces.get(&node)?;
+        let frame = Frame { node, slot: None };
+        if s.place(node, frame, at, Quat::IDENTITY).is_ok() {
+            return Some(at);
+        }
+        let (_, q) = exits::nearest(s.pieces(), at)?;
+        (flat2(q, at) <= i128::from(LAND) * i128::from(LAND)).then_some(q)
     }
 }
 
-fn link_seen(turns: Option<&Turns>, buildings: &[Building], tree: &Tree, link: Id) -> Option<Seen> {
-    let l = buildings.iter().find_map(|b| b.link(link))?;
+fn link_seen(
+    turns: Option<&Turns>,
+    link_at: &BTreeMap<Id, (usize, usize)>,
+    buildings: &[Building],
+    tree: &Tree,
+    link: Id,
+) -> Option<Seen> {
+    let l = find_link(link_at, buildings, link)?;
     if !narrow(l) {
         return None;
     }

@@ -1,0 +1,237 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lighthouse",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      6000,
+      17000,
+      6000
+    ]
+  },
+  "areas": {
+    "entrance": {
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "radius_mm": 2682
+    },
+    "room": {
+      "at_mm": [
+        0,
+        3100,
+        0
+      ],
+      "radius_mm": 2682
+    },
+    "room_2": {
+      "at_mm": [
+        0,
+        6100,
+        0
+      ],
+      "radius_mm": 2682
+    },
+    "room_3": {
+      "at_mm": [
+        0,
+        9100,
+        0
+      ],
+      "radius_mm": 2682
+    },
+    "lantern": {
+      "at_mm": [
+        0,
+        12100,
+        0
+      ],
+      "radius_mm": 2682
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "climb": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "lantern"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:lighthouse",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "profile": [
+            [
+              3000,
+              0
+            ],
+            [
+              2600,
+              12000
+            ],
+            [
+              0,
+              12000
+            ]
+          ],
+          "segments": 16,
+          "tint": "wall"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            3000,
+            0
+          ],
+          "r": 2920,
+          "h": 1200,
+          "segments": 16,
+          "tint": "trim"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            8000,
+            0
+          ],
+          "r": 2760,
+          "h": 1200,
+          "segments": 16,
+          "tint": "trim"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            12100,
+            0
+          ],
+          "r": 3200,
+          "h": 200,
+          "segments": 16,
+          "tint": "trim"
+        },
+        {
+          "kind": "torus",
+          "at": [
+            0,
+            13100,
+            0
+          ],
+          "r": 3150,
+          "r2": 50,
+          "segments": 16,
+          "pitch": 90000,
+          "tint": "trim"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            13400,
+            0
+          ],
+          "r": 2000,
+          "h": 2400,
+          "segments": 12,
+          "tint": "glass"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            14600,
+            0
+          ],
+          "r": 2100,
+          "segments": 12,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1150,
+            2980
+          ],
+          "size": [
+            1000,
+            2100,
+            60
+          ],
+          "tint": "doorway"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#f4f1ea",
+        "trim": "#b23a2e",
+        "roof": "#b23a2e",
+        "doorway": "#2b2622",
+        "glass": "#d9eef2"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "lighthouse"
+      ]
+    }
+  },
+  "text": {
+    "card": "A round lighthouse: a spiral stair up five floors to its glazed lantern room.",
+    "building": "building",
+    "beacon": "beacon",
+    "light_tower": "light tower"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "beacon",
+      "light_tower"
+    ]
+  }
+}

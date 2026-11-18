@@ -1,0 +1,168 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:pottery_bench (SA-X7, #2902; from #1660): three portions of clay, one terracotta vase each, made onto a tray that must be clear.",
+  "cases": [
+    {
+      "name": "make_take_make_until_the_clay_is_gone",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "k1"
+            ]
+          },
+          "b1": {
+            "kind": "eden:humanoid",
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "k1": {
+            "kind": "eden:pottery_bench",
+            "fields": {
+              "clay": 2
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "k1",
+            "form": "make_vase"
+          },
+          "receipt": "rk1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "k1",
+                "field": "clay",
+                "n": 1,
+                "to": 1
+              },
+              {
+                "change": "create",
+                "node": "rk1.0",
+                "kind": "eden:clay_vase",
+                "to": {
+                  "node": "k1",
+                  "slot": "out"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:clay_used",
+                "node": "k1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:vase_made",
+                "node": "k1",
+                "changes": [
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "k1",
+            "form": "make_vase"
+          },
+          "receipt": "rk2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "b1",
+            "form": "pick_up",
+            "args": {
+              "thing": "rk1.0"
+            }
+          },
+          "receipt": "rk3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "rk1.0",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "k1",
+            "form": "make_vase"
+          },
+          "receipt": "rk4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "k1",
+                "field": "clay",
+                "n": 1,
+                "to": 0
+              },
+              {
+                "change": "create",
+                "node": "rk4.0",
+                "kind": "eden:clay_vase",
+                "to": {
+                  "node": "k1",
+                  "slot": "out"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "k1": {
+          "kind": "eden:pottery_bench",
+          "fields": {
+            "clay": 0
+          },
+          "slots": {
+            "out": [
+              "rk4.0"
+            ]
+          }
+        },
+        "rk1.0": {
+          "kind": "eden:clay_vase"
+        },
+        "rk4.0": {
+          "kind": "eden:clay_vase"
+        },
+        "b1": {
+          "kind": "eden:humanoid",
+          "hands": {
+            "left": "rk1.0",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}

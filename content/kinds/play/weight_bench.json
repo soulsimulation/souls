@@ -1,0 +1,38 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:weight_bench",
+  "owner": "thing",
+  "points": {
+    "side": { "role": "stand", "at_mm": [450, 0, 0], "yaw_mdeg": 270000 },
+    "barbell": { "role": "grip", "at_mm": [0, 1100, -500] }
+  },
+  "geometry": { "bounds_mm": [500, 1200, 1400] },
+  "forms": {
+    "lift": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "side" },
+        { "step": "move", "move": "press", "at": "barbell" },
+        { "step": "wait", "us": 30000000 }
+      ],
+      "effects": []
+    }
+  },
+  "areas": { "pad": { "allows": { "lie": "on", "sit": "edge" } } },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:weight_bench",
+    "shape": {"shapes":[{"kind":"box","at":[0,450,0],"size":[320,80,1250],"color":"#2f3b46","collide":false},{"kind":"box","at":[0,200,0],"size":[80,400,1000],"color":"#5d646b","collide":false},{"kind":"cyl","at":[-300,600,-500],"r":30,"h":1200,"color":"#5d646b","collide":false},{"kind":"cyl","at":[300,600,-500],"r":30,"h":1200,"color":"#5d646b","collide":false},{"kind":"cyl","at":[0,1100,-500],"r":20,"h":1600,"color":"#888888","roll":90000,"collide":false}],"tags":["eden","gym","sport","weight-bench"]}
+  },
+  "text": {
+    "card": "A bench press under a barbell rack: lie on the bench and lift.",
+    "gym": "gym",
+    "bench_press": "bench press",
+    "barbell": "barbell",
+    "workout": "workout"
+  },
+  "card": { "text": "card", "category": "gym", "synonyms": ["bench_press", "barbell", "workout"] }
+}

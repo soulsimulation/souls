@@ -1,0 +1,316 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:market_stall: 24 apples free to take, one at a time into a free hand; the engine lowers the count as it makes the apple (SA-F12). Souls queue in front and one Soul minds it. Its open times are a schedule the client reads; no form waits on them.",
+  "cases": [
+    {
+      "name": "take_an_apple",
+      "act": {
+        "this": "t1",
+        "form": "take_apple"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:market_stall"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_the_last_apple",
+      "act": {
+        "this": "t1",
+        "form": "take_apple"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:market_stall",
+            "fields": {
+              "apples": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_when_none_are_left",
+      "act": {
+        "this": "t1",
+        "form": "take_apple"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:market_stall",
+            "fields": {
+              "apples": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "apples",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "take_with_both_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "take_apple"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:market_stall"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:apple"
+          },
+          "x2": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "queue_at_the_stall",
+      "act": {
+        "this": "t1",
+        "form": "queue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:market_stall"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "leave_the_queue",
+      "act": {
+        "this": "t1",
+        "form": "leave_queue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:market_stall",
+            "links": {
+              "queue": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "mind_an_unminded_stall",
+      "act": {
+        "this": "t1",
+        "form": "mind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:market_stall"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "mind_a_stall_someone_minds",
+      "act": {
+        "this": "t1",
+        "form": "mind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:market_stall",
+            "links": {
+              "minder": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "already_linked",
+        "need": 0,
+        "detail": {
+          "link": "minder",
+          "count": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "stop_minding",
+      "act": {
+        "this": "t1",
+        "form": "stop_minding"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:market_stall",
+            "links": {
+              "minder": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}
