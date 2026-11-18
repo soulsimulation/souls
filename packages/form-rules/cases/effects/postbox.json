@@ -126,7 +126,19 @@
                 "to": {
                   "node": "b1",
                   "hand": "left"
-                }
+                },
+                "stock": "post",
+                "carries": [
+                  "words"
+                ]
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "letters",
+                "n": 2,
+                "to": 0,
+                "by": -1
               }
             ],
             "events": [
@@ -134,7 +146,8 @@
                 "event": "eden:collected",
                 "node": "t1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               }
             ]
@@ -173,7 +186,7 @@
         "t1": {
           "kind": "eden:postbox",
           "fields": {
-            "letters": 1,
+            "letters": 0,
             "locked": 1
           }
         },
