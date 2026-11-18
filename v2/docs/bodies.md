@@ -63,7 +63,14 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
    **The walk's fields (T9b A3).** A walker waiting for a link taken in turns sets field 41 on its own body,
    `[link, distance µm]`, and clears it with `[]`; the world shows field 42 (1) on such a link and field 43, the body
    its owning node lets in, both read with `read(link)`. The owner reads the marks as of the last tick and writes
-   its grants; a walker never writes the link.
+   its grants; a walker never writes the link. **N10 and N9 (T9c #3127).** The world sets on a walker's body field
+   44 (1: the shoulder turn, no body pushes it), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
+   ...]]`, walked from its first leg: N10's reroute, or the way to a standing spot N9 granted) and field 46 (1: the
+   world walks it out to legal ground, and the walk stands); it shows field 47 (1) on a body standing on its own
+   granted spot. Ending a walk by name is the world's: it ends the run. A new run on a body starts without the marks
+   of the run before it: fields 41, 44 and 45 go when it starts (#3168). A crossing is carried only from within 1 m
+   of the link's near end (else `link-not-here`), and lands on a point the far surface's mover holds, moved onto it
+   by less than a body's radius if need be (else `link-end-off-ground`); both are refused before the body moves.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
@@ -73,14 +80,24 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
 The controller (`v2/crates/sim/src/controller`, B1 #2680) is the only way a body is moved or posed: it holds each
 body's mover state and is the one caller of the mover. It also carries a body across a link along the link's line
 (T9b #3120, `sim::host::carry`), and answers a dry run (what one step would do to a copy, moving nothing) for the
-world's geometry answers. N7's `Crowd` still keeps its own bodies, stepped by that dry run, until T9c retires it for
-the walk skill (`skills::route`). A driver is a claim
+world's geometry answers. By its own rule, with no driver, it carries a body found on illegal ground to the nearest
+legal point (N10's walk-out, T9c #3127). Skills run on its bodies through `sim::host::Runner`, a tick at a time; N7's
+`Crowd` is retired (T9c). A driver is a claim
 made by rule 4's rules, so a second driver asking for a held resource is refused by name and the first driver's input
 stands. A driver is a skill, its staged inputs handed on by `sim::host::hand_on` under its run's driver, or a script
 (`v2/tools/body-script`). One input type serves every family: velocity and mode (T4), facing and stance, set only by
 the driver holding all the body's locomotion, and one move per resource, set by that resource's driver; anything else
 is `resource-not-held` or `resource-missing`. An unheld resource gets the neutral input (still, hands down, facing
 kept), which never moves a body. An input is logged only when it changes.
+
+Gaze and voice (B11 #2742). Where a body looks is part of its input (a node, a point or ahead, record field 8), set
+by the driver holding its gaze and logged when it changes. Its voice carries one utterance at a time: a new one
+replaces the one under way or waits behind it, by the intent's `replace`, and lasts its length from its words, one
+timer. The world writes each as `souls:said {1: {21: words}, 2: reach mm, 3: [hearer, ...], 4: length µs}` in an
+entry whose audience says who may read it ([audience.md](audience.md) rule 4, `replica::speech`). Its hearers are
+resolved when it is written and recorded (`sim::speech`): for ordinary talk, the Souls whose interest set (R4) holds
+the speaker, found from the bodies within the set's leave distance, never a scan. So a body walks, carries and talks
+at once, each under its own driver.
 
 ## Moves (B2)
 

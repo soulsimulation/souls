@@ -1,0 +1,14 @@
+[package]
+name = "scan-ids"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Engine v2 W1 (#2704): scans every byte of a world's log and views for account ids, provider subjects and emails."
+
+[dependencies]
+
+[dev-dependencies]
+directoryd = { path = "../../crates/directoryd" }
+replica = { path = "../../crates/replica" }
+ring = "0.17"
+serde_json = "1"

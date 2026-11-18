@@ -1,0 +1,21 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Melody box (from #1725): with every step a rest, winding is refused; a Soul composes two notes and a tempo, winds it (it plays), is refused a third note while it plays, stops it, then composes.",
+  "cases": [
+    {
+      "name": "compose_wind_stop",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","m1"]},"m1":{"kind":"eden:melody_box","fields":{"step_1":"rest","step_2":"rest","step_3":"rest","step_4":"rest","step_5":"rest","step_6":"rest","step_7":"rest","step_8":"rest"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"m1","form":"wind"},"receipt":"rm0","expect":{"verdict":"no","reason":"field_differs","need":2}},
+        {"act":{"this":"m1","form":"compose","args":{"step":"step_1","note":"e4"}},"receipt":"rm1","expect":{"verdict":"yes","changes":[{"change":"set","node":"m1","field":"step_1","n":1,"to":"e4"}],"events":[{"event":"eden:composed","node":"m1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"m1","form":"compose","args":{"step":"step_5","note":"c5"}},"receipt":"rm2","expect":{"verdict":"yes","changes":[{"change":"set","node":"m1","field":"step_5","n":5,"to":"c5"}],"events":[{"event":"eden:composed","node":"m1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"m1","form":"set_tempo","args":{"tempo":"bpm_60"}},"receipt":"rm3","expect":{"verdict":"yes","changes":[{"change":"set","node":"m1","field":"tempo","n":9,"to":"bpm_60"}],"events":[{"event":"eden:tempo_set","node":"m1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"m1","form":"wind"},"receipt":"rm4","expect":{"verdict":"yes","changes":[{"change":"set","node":"m1","field":"playing","n":10,"to":1},{"change":"set","node":"m1","field":"winds","n":11,"to":1}],"events":[{"event":"eden:wound","node":"m1","changes":[0]},{"event":"eden:wound","node":"m1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"m1","form":"compose","args":{"step":"step_3","note":"g4"}},"receipt":"rm5","expect":{"verdict":"no","reason":"field_differs","need":1}},
+        {"act":{"this":"m1","form":"stop"},"receipt":"rm6","expect":{"verdict":"yes","changes":[{"change":"set","node":"m1","field":"playing","n":10,"to":0}],"events":[{"event":"eden:stopped","node":"m1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"m1","form":"compose","args":{"step":"step_3","note":"g4"}},"receipt":"rm7","expect":{"verdict":"yes","changes":[{"change":"set","node":"m1","field":"step_3","n":3,"to":"g4"}],"events":[{"event":"eden:composed","node":"m1","changes":[0]}],"timers":[]}}
+      ],
+      "after": {"m1":{"kind":"eden:melody_box","fields":{"step_1":"e4","step_2":"rest","step_3":"g4","step_4":"rest","step_5":"c5","step_6":"rest","step_7":"rest","step_8":"rest","tempo":"bpm_60","playing":0,"winds":1}}}
+    }
+  ]
+}

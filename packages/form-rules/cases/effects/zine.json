@@ -1,0 +1,318 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Zine (from #1698): an untitled draft cannot be bound; the title and three pages are written, the zine is bound by the Soul who is then its author, a page cannot be changed after, and the bound zine is carried.",
+  "cases": [
+    {
+      "name": "write_the_zine_bind_it_then_nothing_changes",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "z1"
+            ]
+          },
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "z1",
+            "form": "bind"
+          },
+          "receipt": "r0",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 2
+          }
+        },
+        {
+          "act": {
+            "this": "z1",
+            "form": "write_title",
+            "args": {
+              "words": "w0"
+            }
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "z1",
+                "field": "title",
+                "n": 1,
+                "to": {
+                  "text": "w0"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:title_written",
+                "node": "z1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "z1",
+            "form": "write_page_1",
+            "args": {
+              "words": "w1"
+            }
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "z1",
+                "field": "page_1",
+                "n": 2,
+                "to": {
+                  "text": "w1"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:page_written",
+                "node": "z1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "z1",
+            "form": "write_page_2",
+            "args": {
+              "words": "w2"
+            }
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "z1",
+                "field": "page_2",
+                "n": 3,
+                "to": {
+                  "text": "w2"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:page_written",
+                "node": "z1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "z1",
+            "form": "write_page_3",
+            "args": {
+              "words": "w3"
+            }
+          },
+          "receipt": "r4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "z1",
+                "field": "page_3",
+                "n": 4,
+                "to": {
+                  "text": "w3"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:page_written",
+                "node": "z1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "z1",
+            "form": "bind"
+          },
+          "receipt": "r5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "z1",
+                "field": "stage",
+                "n": 5,
+                "to": "bound"
+              },
+              {
+                "change": "set",
+                "node": "z1",
+                "field": "binding",
+                "n": 6,
+                "to": 0
+              },
+              {
+                "change": "link",
+                "node": "z1",
+                "link": "author",
+                "n": 1,
+                "end": "b1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:zine_bound",
+                "node": "z1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:binding_used",
+                "node": "z1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:author_credited",
+                "node": "z1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "z1",
+            "form": "write_page_2",
+            "args": {
+              "words": "w8"
+            }
+          },
+          "receipt": "r6",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "z1",
+            "form": "take"
+          },
+          "receipt": "r7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "z1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "z1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "z1": {
+          "kind": "eden:zine",
+          "fields": {
+            "title": {
+              "text": "w0"
+            },
+            "page_1": {
+              "text": "w1"
+            },
+            "page_2": {
+              "text": "w2"
+            },
+            "page_3": {
+              "text": "w3"
+            },
+            "stage": "bound",
+            "binding": 0
+          },
+          "links": {
+            "author": [
+              "b1"
+            ]
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "z1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}
