@@ -36,7 +36,7 @@ export const HELD_MS = 600_000;
 export const SPEAKER_MS = 60_000;
 const HOUR_MS = 3_600_000, DAY_MS = 86_400_000;
 
-const USAGE = `usage: wake | wake add <${ADDABLE.filter((k) => k !== "at" && k !== "every").join("|")}> [params-json] [--every <seconds>] | wake add at <ISO time> | wake add every <minutes ≥ ${EVERY_MIN}> | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n> | wake away <on|off>`;
+const USAGE = `usage: wake | wake add <${ADDABLE.filter((k) => k !== "at" && k !== "every").join("|")}> [params-json] [--every <seconds>] | wake add at <ISO time> | wake add <at <ISO time>|thing-state '{"thing":…,"field":…,"is":…}'> --plan '<steps>' [--end <ISO time>] | wake add every <minutes ≥ ${EVERY_MIN}> | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n> | wake away <on|off>`;
 /** `wake budget` arguments as a change: {hour} or {day}. Throws what is wrong. */
 export function parseBudget(argv) {
   const [a, b, ...extra] = argv;
@@ -48,11 +48,27 @@ export function parseBudget(argv) {
 /** `wake add` arguments as a rule (without its id). Throws what is wrong. */
 export function parseRule(argv) {
   const rest = [];
-  let every = WAKE_EVERY_S;
+  let every = WAKE_EVERY_S, planText, endText;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--every") { const v = argv[++i]; if (!/^\d+$/.test(v ?? "")) throw new Error("--every takes whole seconds"); every = Number(v); }
+    else if (argv[i] === "--plan") { planText = argv[++i]; if (planText === undefined) throw new Error("--plan takes the steps to send: '[\"walk:table\",...]'"); }
+    else if (argv[i] === "--end") { endText = argv[++i]; if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(endText ?? "") || Number.isNaN(Date.parse(endText))) throw new Error("--end takes an ISO time: --end 2026-11-12T09:30:00Z"); }
     else rest.push(argv[i]);
   }
+  const rule = parseKind(rest, every);
+  if (planText === undefined && endText === undefined) return rule;
+  // SA-C4a: an entry: a trigger (a time, or a change this client sees), the steps to send then, an end, and what a miss does
+  if (planText === undefined || !["at", "thing-state"].includes(rule.kind)) throw new Error("--plan (with --end) goes on `wake add at <time>` or `wake add thing-state <params>`");
+  let steps; try { steps = JSON.parse(planText); } catch { throw new Error("--plan takes JSON: the steps to send, as plan does"); }
+  if (!Array.isArray(steps) || !steps.length) throw new Error("--plan takes a list of steps, as plan does");
+  const end = endText ? new Date(Date.parse(endText)).toISOString() : rule.kind === "at" ? new Date(Date.parse(rule.params.at) + PLAN_GRACE_MS).toISOString() : null;
+  if (!end) throw new Error("a plan on a change needs its end: --end <ISO time>, after which it is dropped and you are told once");
+  if (Date.parse(end) < (rule.kind === "at" ? Date.parse(rule.params.at) : 0)) throw new Error("--end is before the time it is to start");
+  return { ...rule, plan: steps, end, every: 0 };
+}
+/** SA-C4a: a plan entry on a time with no end given is dropped this long after its time. */
+const PLAN_GRACE_MS = 10 * 60_000;
+function parseKind(rest, every) {
   const [kind, text, ...extra] = rest;
   if (ALWAYS.includes(kind)) throw new Error(`${kind} is always on`);
   if (!ADDABLE.includes(kind) || extra.length) throw new Error(USAGE);
@@ -109,7 +125,7 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 /** What `wake` prints: each rule with its last match and last firing, how many wakes wait, and the budget. */
 export function view(wake, now = 0) {
   const w = { ...fresh(), ...wake };
-  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, ...(r.ended ? { ended: r.ended } : {}), lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now), away: w.awayOff ? "off" : "on" };
+  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, ...(r.plan ? { plan: r.plan.map((x) => x.id), end: r.end } : {}), ...(r.ended ? { ended: r.ended } : {}), lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now), away: w.awayOff ? "off" : "on" };
 }
 
 const perHour = (w) => { const h = w.budget?.hour ?? "normal"; return typeof h === "number" ? h : h in BUDGETS ? BUDGETS[h] : BUDGETS.normal; };
@@ -210,13 +226,22 @@ export function evaluate(rules, state, now) {
   const fired = [];
   const out = rules.map((r0) => {
     const r = { ...r0 };
-    const fire = (why, untrusted = false) => {
+    const fire = (why, untrusted = false, extra = null) => {
       r.lastMatch = now;
       if (r.every && r.lastFired && now - r.lastFired < r.every * 1000) return false;
       r.lastFired = now;
-      fired.push({ id: r.id, kind: r.kind, why, at: new Date(now).toISOString(), ...(untrusted ? { untrusted: true } : {}) });
+      fired.push({ id: r.id, kind: r.kind, why, at: new Date(now).toISOString(), ...(untrusted ? { untrusted: true } : {}), ...(extra ?? {}) });
       return true;
     };
+    // SA-C4a: a plan entry past its end is dropped, and the mind is told once; before it, one fires when its trigger holds and no plan of
+    // this client is running (it waits for that one, within its end). A fired entry carries its steps: serve sends them, no model turn.
+    const planDue = (why) => {
+      if (r.ended) return;
+      const p = state.plan;
+      if (p && !["done", "failed", "replaced"].includes(p.state)) return;
+      r.ended = "fired"; fire(why, false, { plan: r.plan });
+    };
+    if (r.plan && !r.ended && now > Date.parse(r.end)) { r.ended = "dropped"; fire(`the plan you set for ${r.kind === "at" ? r.params.at : `${r.params.thing} ${r.params.field}`} was dropped: its end ${r.end} passed first`, false, { dropped: true }); return r; }
     if (r.kind === "owner-message") for (const m of newMessages) { if (!m.acked) fire(`the owner wrote (${m.id})`); }
     else if (r.kind === "speech-to-me") for (const x of newSpeech) fire(`${x.from ?? x.soulId ?? "someone"} spoke to you`);
     else if (r.kind === "plan-stopped") {
@@ -253,7 +278,8 @@ export function evaluate(rules, state, now) {
       // #1930: once, at the time; a time that passed before this serve started, or before the rule was first seen, is dropped
       const t = Date.parse(r.params.at);
       r.from ??= now;
-      if (!r.ended && t < Math.max(state.since ?? 0, r.from)) r.ended = "dropped";
+      if (r.plan) { if (now >= t) planDue(`it is ${r.params.at}: sending the plan you set`); }
+      else if (!r.ended && t < Math.max(state.since ?? 0, r.from)) r.ended = "dropped";
       else if (!r.ended && now >= t && fire(`it is ${r.params.at}`)) r.ended = "fired";
     } else if (r.kind === "every") {
       // #1930: every n minutes from when the rule was first seen; times that passed while serve was not running are dropped
@@ -280,7 +306,9 @@ export function evaluate(rules, state, now) {
       const t = state.catalog.things.get(r.params.thing), s = t ? thingState(state.catalog, t, live.things) : null;
       if (s && r.params.field in s) {
         const v = JSON.stringify(s[r.params.field]);
-        if (r.was !== undefined && v !== r.was && (!("is" in r.params) || v === JSON.stringify(r.params.is))) fire(`${r.params.thing} ${r.params.field} is now ${v.slice(0, 60)}`);
+        const hit = r.was !== undefined && v !== r.was && (!("is" in r.params) || v === JSON.stringify(r.params.is));
+        if (r.plan) { if (hit) r.due = `${r.params.thing} ${r.params.field} is now ${v.slice(0, 60)}: sending the plan you set`; if (r.due) planDue(r.due); }
+        else if (hit) fire(`${r.params.thing} ${r.params.field} is now ${v.slice(0, 60)}`);
         r.was = v;
       }
     } else if (r.kind === "soul-arrives" && live) {

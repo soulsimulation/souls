@@ -34,8 +34,8 @@ use crate::ids::{Hash, Id, Scope};
 use crate::pose::{Frame, Owner, Pose, Quat, Support, Vec3};
 use crate::time::{Micros, TimeEffect};
 use crate::world_model::{Audience, DEPTH_LIMIT, End};
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 type R<T> = Result<T, Refusal>;
 
@@ -175,7 +175,7 @@ struct Away {
     links: Vec<(Id, LinkRec)>,
 }
 
-type Undo = Box<dyn FnOnce(&mut Tree)>;
+type Undo = Box<dyn FnOnce(&mut Tree) + Send + Sync>;
 
 /// The nodes an entry may write (T6 rule 6): its own node, and the nodes it creates under it.
 struct Own {
@@ -260,7 +260,8 @@ impl NodeRef<'_> {
 }
 
 /// One zone's tree: its nodes, links and their indexes, the dense array of moving nodes, and the zone's log state
-/// (next sequence, transfers in flight, arrived transfer ids, timers, time effects). Not `Clone`: there is one.
+/// (next sequence, transfers in flight, arrived transfer ids, timers, time effects). Not `Clone`: there is one, and
+/// [`Tree::frozen`] copies it for readers.
 pub struct Tree {
     root: u32,
     nodes: Vec<NodeRec>,
@@ -282,12 +283,22 @@ pub struct Tree {
     time: Vec<TimeEffect>,
     undo: Vec<Undo>,
     dead: Vec<u32>,
-    node_reads: Cell<u64>,
-    link_reads: Cell<u64>,
+    /// The gaps a view declared for the part being applied ([`Tree::apply_gaps`]), each `(first, count)`, and how many
+    /// were met. Empty between parts.
+    gaps: Vec<(u64, u64)>,
+    gaps_met: usize,
+    node_reads: Reads,
+    link_reads: Reads,
 }
 
-fn bump(c: &Cell<u64>) {
-    c.set(c.get() + 1);
+/// A read counter. A load and a store, not an atomic add: one thread reads a live tree. A frozen copy (K8, #2671),
+/// read by many threads at once, counts nothing, so its readers never write to memory they share.
+struct Reads(Option<AtomicU64>);
+
+fn bump(c: &Reads) {
+    if let Some(c) = &c.0 {
+        c.store(c.load(Relaxed) + 1, Relaxed);
+    }
 }
 
 impl Tree {
@@ -311,8 +322,10 @@ impl Tree {
             time: Vec::new(),
             undo: Vec::new(),
             dead: Vec::new(),
-            node_reads: Cell::new(0),
-            link_reads: Cell::new(0),
+            gaps: Vec::new(),
+            gaps_met: 0,
+            node_reads: Reads(Some(AtomicU64::new(0))),
+            link_reads: Reads(Some(AtomicU64::new(0))),
         };
         let kind = t.intern(&kind);
         t.nodes.push(NodeRec {
@@ -399,12 +412,42 @@ impl Tree {
 
     /// Node reads and link reads since the tree was built or the counters were last reset.
     pub fn reads(&self) -> (u64, u64) {
-        (self.node_reads.get(), self.link_reads.get())
+        let get = |c: &Reads| c.0.as_ref().map_or(0, |c| c.load(Relaxed));
+        (get(&self.node_reads), get(&self.link_reads))
     }
 
     pub fn reset_reads(&self) {
-        self.node_reads.set(0);
-        self.link_reads.set(0);
+        for c in [&self.node_reads, &self.link_reads] {
+            c.0.iter().for_each(|c| c.store(0, Relaxed));
+        }
+    }
+
+    /// A whole copy for readers on other threads (K8, #2671; `sim::frozen`): everything but the undo of a part being
+    /// applied (none between parts) and the read counters, which a copy does not keep.
+    pub fn frozen(&self) -> Tree {
+        Tree {
+            root: self.root,
+            nodes: self.nodes.clone(),
+            free: self.free.clone(),
+            by_id: self.by_id.clone(),
+            links: self.links.clone(),
+            elsewhere: self.elsewhere.clone(),
+            moving: self.moving.clone(),
+            moving_free: self.moving_free.clone(),
+            names: self.names.clone(),
+            name_ix: self.name_ix.clone(),
+            next: self.next,
+            in_flight: self.in_flight.clone(),
+            arrived: self.arrived.clone(),
+            timers: self.timers.clone(),
+            time: self.time.clone(),
+            undo: Vec::new(),
+            dead: self.dead.clone(),
+            gaps: Vec::new(),
+            gaps_met: 0,
+            node_reads: Reads(None),
+            link_reads: Reads(None),
+        }
     }
 
     /// The sequence the zone's next effect takes: how many effects the tree holds.
@@ -515,7 +558,7 @@ impl Tree {
 
     // --- Steps, each recording its undo ---------------------------------------------------------------------------
 
-    fn log(&mut self, f: impl FnOnce(&mut Tree) + 'static) {
+    fn log(&mut self, f: impl FnOnce(&mut Tree) + Send + Sync + 'static) {
         self.undo.push(Box::new(f));
     }
 
@@ -835,6 +878,19 @@ impl Tree {
         self.transact(header, part, None)
     }
 
+    /// Applies a part of a view (T7 rule 4) as a viewer does: a view skips the entries it does not hold, and says which.
+    /// Each declared gap, `(first, count)` in sequence order, is the sequences `first..first + count` the view did not
+    /// hold; the entry after it must come at exactly `first + count`, every gap must be met, and any other jump is still
+    /// `sequence-gap`. All of it or none.
+    pub fn apply_gaps(&mut self, header: &Header, part: &Part, gaps: &[(u64, u64)]) -> R<()> {
+        self.gaps = gaps.to_vec();
+        self.gaps_met = 0;
+        let r = self.transact(header, part, None);
+        self.gaps.clear();
+        self.gaps_met = 0;
+        r
+    }
+
     /// Applies a part as the zone's writer commits it: the same apply, plus T2's checks on each change and the
     /// balance of amounts moved over the part ([`Rules`]). All of it or none.
     pub fn commit(&mut self, header: &Header, part: &Part, rules: &Rules) -> R<()> {
@@ -868,6 +924,12 @@ impl Tree {
         {
             result = rules.balanced(effects);
         }
+        if result.is_ok() && self.gaps_met != self.gaps.len() {
+            result = refuse(
+                "gap-unmet",
+                format!("{} declared gaps, {} met", self.gaps.len(), self.gaps_met),
+            );
+        }
         if result.is_err() {
             while let Some(u) = self.undo.pop() {
                 u(self);
@@ -884,6 +946,18 @@ impl Tree {
 
     fn entry(&mut self, header: &Header, e: &Effect, rules: Option<&Rules>) -> R<()> {
         let env = e.envelope;
+        if let Some(&(first, count)) = self.gaps.get(self.gaps_met)
+            && first == self.next
+            && first.checked_add(count) == Some(env.sequence)
+        {
+            // A gap the view declared (`apply_gaps`): the entries it did not hold.
+            self.gaps_met += 1;
+            self.next = env.sequence;
+            self.log(move |t| {
+                t.next = first;
+                t.gaps_met -= 1;
+            });
+        }
         if env.sequence != self.next {
             return refuse(
                 "sequence-gap",

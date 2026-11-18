@@ -1,0 +1,102 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:armchair (SA-X24): one seat; lean its back back and sit up again. One Soul pushes it.",
+  "cases": [
+    {
+      "name": "armchair_sit_free",
+      "act": { "this": "t1", "form": "sit", "args": { "seat": "seat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:armchair", "slots": { "seat": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "armchair_sit_when_full",
+      "act": { "this": "t1", "form": "sit", "args": { "seat": "seat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:armchair", "slots": { "seat": ["o0"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "detail": { "node": "t1", "slot": "seat" }, "fix": null }
+    },
+    {
+      "name": "armchair_recline_upright",
+      "act": { "this": "t1", "form": "recline" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:armchair" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "armchair_recline_already_back",
+      "act": { "this": "t1", "form": "recline" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:armchair", "fields": { "reclined": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": { "field": "reclined", "found": true, "wanted": { "is": false } },
+        "fix": { "form": "sit_up" }
+      }
+    },
+    {
+      "name": "armchair_sit_up_reclined",
+      "act": { "this": "t1", "form": "sit_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:armchair", "fields": { "reclined": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "armchair_sit_up_already_upright",
+      "act": { "this": "t1", "form": "sit_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:armchair" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": { "form": "recline" } }
+    }
+  ]
+}

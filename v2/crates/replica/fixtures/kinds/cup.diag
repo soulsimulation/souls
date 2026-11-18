@@ -1,0 +1,8 @@
+# A cup (Engine v2 K3, #2667): a thing a hand holds by its grip point, with an amount in it.
+{
+  1: "souls:cup",
+  2: "thing",
+  3: {1: {1: "water_g", 2: "int", 3: 0, 4: "holder"}},
+  5: {1: {1: "handle", 2: [45, 50, 0], 3: "grip"}},
+  8: {1: {1: "sip", 2: [["raise", 1], ["tip", 1]]}}
+}

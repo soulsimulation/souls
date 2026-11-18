@@ -1,0 +1,210 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:dartboard. Three darts: anyone with a hand free throws one from the oche while fewer than three are in the board; anyone collects them once one is in.",
+  "cases": [
+    {
+      "name": "throw_the_first_dart",
+      "act": {
+        "this": "t1",
+        "form": "throw"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dartboard"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "throw_the_third_dart",
+      "act": {
+        "this": "t1",
+        "form": "throw"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dartboard",
+            "fields": {
+              "darts_in": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "throw_a_fourth_is_fixed_by_collect",
+      "act": {
+        "this": "t1",
+        "form": "throw"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dartboard",
+            "fields": {
+              "darts_in": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "collect"
+        }
+      }
+    },
+    {
+      "name": "throw_with_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "throw"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dartboard"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:toy_blocks"
+          },
+          "x2": {
+            "kind": "eden:toy_blocks"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "collect_three",
+      "act": {
+        "this": "t1",
+        "form": "collect"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dartboard",
+            "fields": {
+              "darts_in": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "collect_none_is_fixed_by_throw",
+      "act": {
+        "this": "t1",
+        "form": "collect"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dartboard"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "throw"
+        }
+      }
+    }
+  ]
+}

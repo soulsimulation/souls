@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":10,"group":"object","words":"switch on all the lamps in here","obvious":2,"things":{"lamp1":"eden:floor_lamp","lamp2":"eden:floor_lamp"},"chain":[{"this":"lamp1","form":"switch_on"},{"this":"lamp2","form":"switch_on"}]}

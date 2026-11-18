@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":301,"group":"open-ended","words":"make yourself useful","obvious":2,"things":{"bowl":"eden:bowl","sink":"eden:sink","can":"eden:watering_can"},"chain":[{"any":[[{"this":"me","form":"pick_up","carry":"bowl","args":{"thing":"bowl"}},{"this":"sink","form":"turn_on"},{"this":"sink","form":"wash","args":{"thing":"bowl"}}],[{"this":"can","form":"water"}]]}]}

@@ -1,0 +1,25 @@
+{
+  "format": "souls-entry/1",
+  "kind": "looks:planter",
+  "owner": "thing",
+  "state": {
+    "ripeness": { "n": 1, "type": "int", "unit": "permille", "default": 0, "min": 0, "max": 1000, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [900, 900, 500] },
+  "looks": {
+    "model": "look:looks_planter",
+    "shape": {
+      "make": { "kind": "gen", "gen": "kit/2", "args": { "round": 0.01, "shapes": [
+        { "kind": "box", "at": [0, 0.18, 0], "size": [0.9, 0.36, 0.5], "round": 0.02, "tint": "wood" },
+        { "kind": "box", "at": [0, 0.362, 0], "size": [0.82, 0.016, 0.42], "round": 0, "tint": "soil", "role": "fill", "pivot": [0, 0.372, 0] }
+      ] } },
+      "palette": { "wood": "#7a5a3c", "soil": "#5b4632" },
+      "tags": ["planter"]
+    },
+    "table": [
+      { "part": "fill", "field": "ripeness", "do": "grow", "range": [0, 1000], "to": [0, 4000] }
+    ]
+  },
+  "text": { "card": "A planter whose plants are at the stage its field says, from seed to fruit." },
+  "card": { "text": "card" }
+}

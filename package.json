@@ -23,6 +23,8 @@
     "e2e:smoke": "node e2e/local-smoke.mjs",
     "assets:pull": "node tools/assets/pull.mjs",
     "assets:check": "node tools/assets/pull.mjs --check",
+    "entry": "node tools/entry/check.mjs",
+    "test:entry": "node --test tools/entry/*.test.mjs",
     "prepare": "node .github/scripts/install-hooks.mjs"
   },
   "devDependencies": {

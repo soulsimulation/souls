@@ -1,0 +1,143 @@
+{
+  "format": "souls-timed-cases/1",
+  "about": "test:timed_kettle (cases/kinds/test/timed_kettle.json): heat in mC (thousandths of a degree), held between 20000 and 100000. A case is a stored timed value {value, per_s, set_us} of one field of a kind; `values` are [now_us, the value then]; `crossings` are a level (at_least or at_most), the time to look from, and the first whole microsecond at or after it at which the value meets the level, or null if it never does. The value at t is the stored value plus rate x (t - set_us) / 1000000 truncated toward zero, held within min and max; a crossing is that time rounded up. A refusal is {bad: <what>}. World time is a signed 64-bit count: a whole number beyond 2^53 - 1 is read as a big integer, and only a number outside the signed 64-bit range is refused (beyond_i64). `wear` has no max, for values past 2^53.",
+  "cases": [
+    {
+      "name": "switched_on_at_seven_seconds_heats_and_boils",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 533, "set_us": 7000000 },
+      "values": [
+        [7000000, 20000],
+        [7000001, 20000],
+        [7001876, 20000],
+        [7001877, 20001],
+        [8000000, 20533],
+        [157093808, 99999],
+        [157093809, 100000],
+        [3600000000, 100000]
+      ],
+      "crossings": [
+        { "at_least": 100000, "from_us": 7000000, "expect": 157093809 },
+        { "at_least": 100000, "from_us": 157093808, "expect": 157093809 },
+        { "at_least": 100000, "from_us": 200000000, "expect": 200000000 },
+        { "at_least": 100001, "from_us": 7000000, "expect": null },
+        { "at_most": 20000, "from_us": 7000000, "expect": 7000000 },
+        { "at_most": 19999, "from_us": 7000000, "expect": null }
+      ]
+    },
+    {
+      "name": "switched_off_at_boiling_cools_to_room_heat",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 100000, "per_s": -50, "set_us": 200000000 },
+      "values": [
+        [200019999, 100000],
+        [200020000, 99999],
+        [201000000, 99950],
+        [1800000000, 20000],
+        [90000000000, 20000]
+      ],
+      "crossings": [
+        { "at_most": 99999, "from_us": 200000000, "expect": 200020000 },
+        { "at_most": 20000, "from_us": 200000000, "expect": 1800000000 },
+        { "at_most": 19999, "from_us": 200000000, "expect": null },
+        { "at_least": 100000, "from_us": 200020000, "expect": null }
+      ]
+    },
+    {
+      "name": "cold_and_off_never_boils",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 0, "set_us": 0 },
+      "values": [[0, 20000], [86400000000, 20000]],
+      "crossings": [{ "at_least": 100000, "from_us": 0, "expect": null }]
+    },
+    {
+      "name": "switched_on_at_seven_seconds_read_at_the_end_of_signed_64_bit_time",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 533, "set_us": 7000000 },
+      "values": [
+        [9007199254740992, 100000],
+        [9007199254740993, 100000],
+        [9223372036854775807, 100000],
+        [9223372036854775808, { "bad": "beyond_i64" }]
+      ],
+      "crossings": [
+        { "at_least": 100000, "from_us": 9007199254740993, "expect": 9007199254740993 },
+        { "at_least": 100000, "from_us": 9223372036854775808, "expect": { "bad": "beyond_i64" } }
+      ]
+    },
+    {
+      "name": "switched_on_at_2_to_the_53_boils_past_it",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 533, "set_us": 9007199254740992 },
+      "values": [
+        [9007199254740992, 20000],
+        [9007199254740993, 20000],
+        [9007199404834800, 99999],
+        [9007199404834801, 100000]
+      ],
+      "crossings": [
+        { "at_least": 100000, "from_us": 9007199254740992, "expect": 9007199404834801 },
+        { "at_least": 100000, "from_us": 9007199254740993, "expect": 9007199404834801 }
+      ]
+    },
+    {
+      "name": "switched_on_near_2_to_the_63_boils_before_it_or_never_within_it",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 533, "set_us": 9223372036654775807 },
+      "values": [
+        [9223372036804869615, 99999],
+        [9223372036804869616, 100000],
+        [9223372036854775807, 100000]
+      ],
+      "crossings": [{ "at_least": 100000, "from_us": 9223372036654775807, "expect": 9223372036804869616 }]
+    },
+    {
+      "name": "switched_on_too_near_2_to_the_63_to_boil_within_it",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 533, "set_us": 9223372036854775000 },
+      "values": [[9223372036854775807, 20000]],
+      "crossings": [{ "at_least": 100000, "from_us": 9223372036854775000, "expect": { "bad": "beyond_i64" } }]
+    },
+    {
+      "name": "wear_counts_past_2_to_the_53",
+      "kind": "test:timed_kettle",
+      "field": "wear",
+      "stored": { "value": 9007199254740990, "per_s": 1000000, "set_us": 0 },
+      "values": [
+        [1, 9007199254740991],
+        [2, 9007199254740992],
+        [3, 9007199254740993]
+      ],
+      "crossings": [
+        { "at_least": 9007199254740993, "from_us": 0, "expect": 3 },
+        { "at_least": 9007199254740992, "from_us": 1, "expect": 2 }
+      ]
+    },
+    {
+      "name": "wear_up_to_2_to_the_63_minus_1_and_no_further",
+      "kind": "test:timed_kettle",
+      "field": "wear",
+      "stored": { "value": 9223372036854775000, "per_s": 1000000, "set_us": 0 },
+      "values": [
+        [807, 9223372036854775807],
+        [808, { "bad": "beyond_i64" }]
+      ],
+      "crossings": [{ "at_least": 9223372036854775807, "from_us": 0, "expect": 807 }]
+    },
+    {
+      "name": "a_time_before_it_was_set_is_refused",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 533, "set_us": 7000000 },
+      "values": [[6999999, { "bad": "time_before_set" }]],
+      "crossings": [{ "at_least": 100000, "from_us": 6999999, "expect": { "bad": "time_before_set" } }]
+    }
+  ]
+}

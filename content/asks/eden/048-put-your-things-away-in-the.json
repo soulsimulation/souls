@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":48,"group":"object","words":"put your things away in the dresser","obvious":2,"things":{"dresser":"eden:dresser"},"chain":[{"this":"dresser","form":"open"},{"this":"dresser","form":"put_away"}]}
