@@ -10,7 +10,7 @@
 //!   and its references go to `<work dir>/private.txt`. Prints `stream <dir>`, then `done <parts> <entries> <bytes per
 //!   part, comma separated>`.
 //! - `eden <facts> <work dir> <seconds>` (V5, #2714): the same, with N1's import of Eden 2026 (`import-eden`'s facts
-//!   file) committed at world time 0 in place of the room, and [`WALKERS`] walkers on its open ground, each pacing
+//!   file) committed at world time 0 in place of the room, and [`walkers`] walkers on its open ground, each pacing
 //!   20 m near a named place at walking speed, at the terrain's height where it starts. A test feed for `v2/web`:
 //!   every sample goes through the same log, tier and writer.
 //! - `scan <work dir>`: A5. Every part under `www` is unpacked and read; prints its text items (names only, T6 rule
@@ -281,7 +281,13 @@ impl World {
     }
 }
 
-const WALKERS: usize = 200;
+/// Eden's walkers: 200, or `V2_WALKERS` (V8 measures 1,000).
+fn walkers() -> usize {
+    std::env::var("V2_WALKERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(200)
+}
 /// A walker's speed and the length it paces, µm/s and µm.
 const WALK_SPEED: i64 = 1_400_000;
 const WALK_LEN: i64 = 20_000_000;
@@ -423,7 +429,7 @@ impl World {
                 .wrapping_add(1_442_695_040_888_963_407);
             ((seed >> 33) % m.max(1) as u64) as i64
         };
-        for _ in 0..WALKERS {
+        for _ in 0..walkers() {
             let (cx, cz) = centres[rand(centres.len() as i64) as usize];
             let (x, z) = (cx + rand(20_000) - 10_000, cz + rand(20_000) - 10_000);
             let a = rand(360_000) as f64 * std::f64::consts::PI / 180_000.0;
@@ -466,7 +472,7 @@ impl World {
     fn walk(&mut self, n: usize) -> Vec<u8> {
         let at = n as i64 * TICK_US;
         let ground = self.room;
-        let quarter = WALKERS / 4;
+        let quarter = self.paths.len() / 4;
         let mut entries = Vec::with_capacity(quarter);
         for i in 0..quarter {
             let k = (n % 4) * quarter + i;
