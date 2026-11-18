@@ -1,5 +1,5 @@
 //! Boarding links (Engine v2 N12, #2737): the link between the ground at a stop and a moving frame's deck
-//! (`crate::tracks`). Getting on and off is a crossing of it, usable only while the frame stands at that stop.
+//! (`crate::courses`). Getting on and off is a crossing of it, usable only while the frame stands at that stop.
 //!
 //! - **The grant is N8's.** A boarding link is narrow ([`super::turns`]): its owner, the moving node, writes who may
 //!   cross from the facts of the last tick (T1). The deck end has room only while the frame dwells at the link's stop
@@ -19,8 +19,8 @@
 
 use super::turns::{Facts, Turns};
 use super::{Kind, Link};
+use crate::courses::Table;
 use crate::mover::{Body, Surface};
-use crate::tracks::Table;
 use replica::effects::{Refusal, TransferRec};
 use replica::ids::{Id, Scope};
 use replica::pose::{Frame, HandOff, Owner, Scene, Support, Track, Vec3};

@@ -1,7 +1,7 @@
 //! Moving frames on a track (Engine v2 N12, #2737): a ride on a loop with two stops and a boat line there and back,
 //! each E23's moving group (`v2/docs/moving-group.md`).
 //!
-//! `cargo test -p sim --test tracks -- --nocapture` prints the lap's effect list (A1), the two runs and the replay
+//! `cargo test -p sim --test courses -- --nocapture` prints the lap's effect list (A1), the two runs and the replay
 //! compared (A2), E23's check on both groups (A3), the queue at the boarding link (A4) and the stop check (A5).
 
 use replica::effects::TransferRec;
@@ -10,11 +10,11 @@ use replica::ids::{Id, Scope};
 use replica::pose::{Frame, HandOff, Movable, Owner, Pose, Quat, Scene, Support, Track, Vec3};
 use replica::time::Micros;
 use replica::world_model::show;
+use sim::courses::{Course, Shape, Station, Table, group};
 use sim::ground::Piece;
 use sim::links::boarding::{Boarding, CROSSING};
 use sim::links::turns::{Facts, Turn, Turns};
 use sim::mover::Surface;
-use sim::tracks::{Course, Shape, Station, Table, group};
 use std::collections::BTreeMap;
 
 const TICK: Micros = 50_000;
