@@ -97,7 +97,8 @@ list in `packages/form-rules/placements.json`, which the format reads and nothin
 by a selector (a `takes` entry with `select`). `facing` is `{"toward": argument}`, `as_it_was` or `to_wall`; the word `facing`
 turns a thing where it stands, so the position is not touched and no `facing` field is written beside it. A kind with no front
 (a round table) says `geometry.front: "none"`; the default is `"z"`, the front the frame names. `place(thing, placement,
-{anchor, facingAnchor})` decides only what plain data can: the thing may be moved (`fixed` is refused), the anchor is named, a
+{anchor, facingAnchor, node, anchorNode})` decides only what plain data can: the thing may be moved (`fixed` is refused), the
+anchor is named and is another node (`self` is decided by node id, so two chairs of one kind may stand next to each other), a
 front exists where the word needs one (`behind` and `in_front_of` need the anchor's, `facing` and `toward` need the thing's). A
 refusal has a `code` (`no_front`, `no_anchor`, `fixed`, `unsaid`, `self`, `unknown_word`, `unknown_facing`) and names the word and
 the kind. The spot is the engine's choice, recorded (E4); whether it is free and legal is the world's answer. Cases:
@@ -285,8 +286,10 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`). A range need also takes a `timed` field.
   SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
-  water comes from a thing in the world, never from a refill the kettle does by itself. Reach to another thing's point
-  is not a need the rules can read yet, so `fill` holds the kettle and needs it empty.
+  water comes from a thing in the world, never from a refill the kettle does by itself. Its effect is a `transfer` of
+  `water` (grams) out of the tap and into the kettle until it is full, so a need for water on the switch names `fill`
+  as its fix. Reach to another thing's point is not a need the rules can read yet, so `fill` holds the kettle and needs
+  it empty.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
@@ -294,7 +297,11 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor or this thing
   into a slot or the actor's hand: holding is a change of parent), `link`, `unlink`, `create` (a kind, `here`, in a
   slot or in the hand), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
-  defines what each does.
+  defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
+  per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
+  boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
+  an `int` field may give `by` (signed, never 0) instead of `to`: it adds to the value, within the field's bounds, for a
+  count or an amount used up that nothing balances. A cup's `sip` lowers its `water` by 50 and raises its `sips` by 1.
 - **transfer** (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)): `{"change": "transfer", "field",
   "from", "into", "amount", "event"}`. `field` is an `int` field of this kind, and of the same name and unit at the other
   end; `from` and `into` are each `"this"` or a `thing` argument; `amount` is a whole number above zero, a `count`

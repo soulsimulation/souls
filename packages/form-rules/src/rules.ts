@@ -72,6 +72,10 @@ export type Effect = {
   after_us?: number;
   /** A `draw`: the table the world draws one outcome from (SA-F13). */
   outcomes?: DrawRow[];
+  /** A set on a timed value: its new rate per second, settled at the act's time. */
+  rate?: number;
+  /** A set on an int field may add `by` (signed) to its value instead of naming `to`: a count, or an amount used up. */
+  by?: number;
 };
 /** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
 export type DrawRow = { name: string; weight: number | { field: string }; event: string; set: { field: string; to: unknown }[] };
@@ -164,12 +168,13 @@ export function decide(input: Input): Verdict {
   // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
   const sees = (audience: Audience) => seesAudience(asker.sees, audience);
 
-  // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
+  // A fix taken only from data: a form of this kind that anyone, or its holder, may start as an act and has an effect
+  // that meets the need. A holder's form refused for want of holding names its own fix (take).
   // `ready`, when given, passes over a form its own needs would refuse now (a dimmer step on a lamp that is dark).
   const formFix = (meets: (e: Effect) => boolean, ready?: (f: Form) => boolean): Fix | null => {
     for (const name of sorted(entry.forms)) {
       const f = entry.forms![name];
-      if (name === act.form || f.who !== 'anyone' || f.starts !== 'act') continue;
+      if (name === act.form || (f.who !== 'anyone' && f.who !== 'holder') || f.starts !== 'act') continue;
       if (ready && !ready(f)) continue;
       if ((f.effects ?? []).some(meets)) return { form: name };
     }
@@ -207,8 +212,10 @@ export function decide(input: Input): Verdict {
       if (meets(value)) return { ok: true };
       const wanted: Record<string, unknown> = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
+      // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does;
       // the fix's own needs on this field must hold now, or it would be refused in turn
-      const fix = formFix((e) => e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to),
+      const fix = formFix((e) => (e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
+        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))),
         (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },

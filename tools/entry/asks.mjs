@@ -141,9 +141,9 @@ function runChain(chain, ctx, state) {
       if (!r.ok) { refuse(i, `${r.code}: ${r.reason}`); continue; }
     }
     if (isObj(s.place)) {
-      // place() knows a thing put by itself by its entry; two things of one kind are two copies, so the anchor is a copy.
+      // A request's things are its nodes, so place() tells a thing put by itself from two things of one kind.
       const anchor = s.place.anchor ? kinds[kindOf(s.place.anchor)] : undefined;
-      const r = place(kinds[kindOf(s.place.thing)], {at: s.place.at, facing: s.place.facing}, {anchor: anchor && s.place.anchor !== s.place.thing ? {...anchor} : anchor});
+      const r = place(kinds[kindOf(s.place.thing)], {at: s.place.at, facing: s.place.facing}, {anchor, node: s.place.thing, anchorNode: s.place.anchor});
       if (!r.ok) { refuse(i, `${r.code}: ${r.reason}`); continue; }
     }
     if (!form) continue;
