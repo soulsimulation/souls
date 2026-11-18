@@ -46,5 +46,6 @@ sim = { path = "../../crates/sim" }
 testworld = { path = "../testworld" }
 worldd = { path = "../../crates/worldd" }
 import-eden = { path = "../import-eden" }
+skills = { path = "../../crates/skills" }
 # The `moves` bench places its bodies with the script driver's helpers (B2, #2681).
 body-script = { path = "../body-script" }
