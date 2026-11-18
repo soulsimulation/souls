@@ -5,6 +5,9 @@
 //! facts file (`node v2/tools/import-eden/export/export.ts` from the repository root) and runs with
 //! `cargo test -p sim --release --test mover -- --ignored --nocapture`. Each A1 run posts its cost per step (A4).
 
+// Times its own runs: the wall-clock rule (K7) binds the engine, not this test.
+#![allow(clippy::disallowed_methods)]
+
 use import_eden::Import;
 use replica::effects::TransferRec;
 use replica::ids::{Minter, Scope};

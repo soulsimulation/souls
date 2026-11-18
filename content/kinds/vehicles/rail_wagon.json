@@ -1,0 +1,106 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:rail_wagon",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "side_left": {"role":"stand","at_mm":[-1300,0,0],"yaw_mdeg":90000},
+    "side_right": {"role":"stand","at_mm":[1300,0,0],"yaw_mdeg":-90000}
+  },
+  "slots": {
+    "bench_1": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [-450,700,-1200],
+      "stand": "side_left",
+      "row": "left",
+      "place": 1,
+      "end": "first"
+    },
+    "bench_2": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [450,700,-1200],
+      "stand": "side_right",
+      "row": "right",
+      "place": 1,
+      "end": "first"
+    },
+    "bench_3": {"admits":"body","posture":"sit","most":1,"at_mm":[-450,700,0],"stand":"side_left","row":"left","place":2},
+    "bench_4": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [450,700,0],
+      "stand": "side_right",
+      "row": "right",
+      "place": 2
+    },
+    "bench_5": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [-450,700,1200],
+      "stand": "side_left",
+      "row": "left",
+      "place": 3,
+      "end": "last"
+    },
+    "bench_6": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [450,700,1200],
+      "stand": "side_right",
+      "row": "right",
+      "place": 3,
+      "end": "last"
+    }
+  },
+  "geometry": {"bounds_mm":[1660,1450,4040]},
+  "forms": {
+    "board": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+      "effects": [{"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"}]
+    }
+  },
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:rail_wagon",
+    "shape": {
+      "shapes": [
+        {"kind":"extrude","at":[0,520,0],"polygon":[[-780,-1680],[780,-1680],[780,1680],[-780,1680]],"h":860,"tint":"body"},
+        {"kind":"box","at":[0,1420,0],"size":[1660,60,3460],"round":0,"tint":"trim"},
+        {"kind":"extrude","at":[0,380,0],"polygon":[[-580,-1780],[580,-1780],[580,1780],[-580,1780]],"h":140,"tint":"chassis"},
+        {"kind":"cyl","at":[-600,350,1100],"r":350,"h":120,"segments":10,"tint":"wheel","roll":90000,"role":"wheel"},
+        {"kind":"cyl","at":[600,350,1100],"r":350,"h":120,"segments":10,"tint":"wheel","roll":90000,"role":"wheel"},
+        {"kind":"cyl","at":[-600,350,-1100],"r":350,"h":120,"segments":10,"tint":"wheel","roll":90000,"role":"wheel"},
+        {"kind":"cyl","at":[600,350,-1100],"r":350,"h":120,"segments":10,"tint":"wheel","roll":90000,"role":"wheel"},
+        {"kind":"sphere","at":[0,450,1900],"r":120,"segments":5,"tint":"chassis"},
+        {"kind":"sphere","at":[0,450,-1900],"r":120,"segments":5,"tint":"chassis"}
+      ],
+      "round": 20,
+      "palette": {"body":"#3f6b4f","trim":"#c9b26b","chassis":"#2b2b2b","wheel":"#4a4f4d"},
+      "tags": ["transport","vehicle","rail","train","wagon","moving"]
+    }
+  },
+  "text": {
+    "card": "An open rail wagon with six seats; it goes where the locomotive pulls it.",
+    "getting_around": "transport",
+    "train": "train",
+    "carriage": "carriage",
+    "wagon": "wagon",
+    "howto_board": "Climb in and take a seat; the train carries you along its line."
+  },
+  "card": {"text":"card","category":"getting_around","synonyms":["train","carriage","wagon"]},
+  "howtos": {"board":{"text":"howto_board","steps":[{"form":"board"}]}}
+}

@@ -1,0 +1,179 @@
+<!doctype html>
+<!-- Engine v2 V14 (#2659): a bird's-eye debug view of a birdseye trace. One static file: a 2D canvas, no network, no
+     library. Open it in a browser and choose a trace (`cargo run -p birdseye --release -- <out.trace>`). It plays the
+     raw samples at real speed: a dot per body, the outlines of the rooms and places on the floor shown, floors as tabs.
+     A body that has not moved 0.5 m from where it last made progress for 30 s turns red; a step longer than one
+     tick's walking distance is flagged. The trace is a throwaway, not a contract (see src/main.rs). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bird's-eye view</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #f4f3ef; color: #222; font: 13px/1.35 system-ui, sans-serif; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; display: flex; gap: 8px; align-items: center; padding: 6px 10px;
+         background: #fff; border-bottom: 1px solid #ddd; z-index: 1; }
+  #bar button { font: inherit; padding: 3px 10px; border: 1px solid #bbb; background: #fafafa; border-radius: 4px; cursor: pointer; }
+  #bar button.on { background: #222; color: #fff; border-color: #222; }
+  #time { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 210px; }
+  #flags { position: fixed; right: 10px; top: 46px; width: 270px; max-height: 60%; overflow: auto; background: #fffe;
+           border: 1px solid #ddd; padding: 6px 8px; font-variant-numeric: tabular-nums; }
+  #flags h3 { margin: 0 0 4px; font-size: 12px; }
+  #flags div { white-space: nowrap; }
+  .red { color: #d01c1c; } .jump { color: #c06000; }
+  canvas { position: fixed; top: 38px; left: 0; }
+  [hidden] { display: none !important; }
+  #drop { position: fixed; inset: 38px 0 0 0; display: grid; place-items: center; color: #777; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <input id="file" type="file" accept=".trace">
+  <button id="play" disabled>Play</button>
+  <span id="tabs"></span>
+  <span id="time">no trace</span>
+  <span id="counts"></span>
+</div>
+<canvas id="c"></canvas>
+<div id="drop">Choose a trace, or drop one here.</div>
+<div id="flags" hidden><h3>Flags</h3><div id="now"></div><div id="log"></div></div>
+<script>
+'use strict';
+const STUCK_TICKS_S = 30, PROGRESS_CM = 50, JUMP_SHOW_S = 10, ROUNDING_CM = 2;
+const $ = (id) => document.getElementById(id);
+const cv = $('c'), cx = cv.getContext('2d');
+let T = null;          // the trace: header, sample arrays
+let floor = 0;         // the floor shown
+let playing = false, t0 = 0, done = 0;   // real-time start (ms), the last tick processed
+let anchor, since, stuck, jumps, lastJump;
+
+function load(buf) {
+  const dv = new DataView(buf), n = dv.getUint32(0, true);
+  const h = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, n)));
+  const start = 4 + n + ((4 - (4 + n) % 4) % 4), N = h.bodies, row = 5 * N;
+  const ticks = Math.min(h.ticks, Math.floor((buf.byteLength - start) / row));
+  T = { h, N, ticks, start, row, buf };
+  anchor = new Int32Array(2 * N); since = new Int32Array(N); stuck = new Uint8Array(N); lastJump = new Int32Array(N).fill(-1e9);
+  jumps = [];
+  const x0 = xs(0), z0 = zs(0);
+  for (let k = 0; k < N; k++) { anchor[2 * k] = x0[k]; anchor[2 * k + 1] = z0[k]; }
+  done = 0;
+  // The bounds: every outline and the first positions.
+  let lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+  const grow = (x, z) => { lo = [Math.min(lo[0], x), Math.min(lo[1], z)]; hi = [Math.max(hi[0], x), Math.max(hi[1], z)]; };
+  for (const o of h.outlines) for (const [x, z] of o.pts) grow(x, z);
+  for (let k = 0; k < N; k++) grow(x0[k], z0[k]);
+  T.lo = [lo[0] - 500, lo[1] - 500]; T.hi = [hi[0] + 500, hi[1] + 500];
+  $('tabs').replaceChildren(...h.floors.map((f) => {
+    const b = document.createElement('button'); b.textContent = `floor ${f}`; b.dataset.floor = f;
+    b.onclick = () => { floor = f; tabs(); draw(); }; return b;
+  }));
+  floor = h.floors[0]; tabs();
+  $('play').disabled = false; $('drop').hidden = true; $('flags').hidden = false; $('log').replaceChildren();
+  draw();
+}
+const xs = (t) => new Int16Array(T.buf, T.start + t * T.row, T.N);
+const zs = (t) => new Int16Array(T.buf, T.start + t * T.row + 2 * T.N, T.N);
+const ns = (t) => new Uint8Array(T.buf, T.start + t * T.row + 4 * T.N, T.N);
+function tabs() { for (const b of $('tabs').children) b.classList.toggle('on', +b.dataset.floor === floor); }
+const clock = (tick) => { const s = tick * T.h.tick_us / 1e6, m = Math.floor(s / 60); return `${m}:${(s - 60 * m).toFixed(2).padStart(5, '0')}`; };
+
+/** Every tick up to `upto`, in order, whatever the frame rate: progress, stillness and jumps from the raw samples. */
+function advance(upto) {
+  const limit = STUCK_TICKS_S * 1e6 / T.h.tick_us, step = T.h.step_cm + ROUNDING_CM;
+  for (let t = done + 1; t <= upto; t++) {
+    const x = xs(t), z = zs(t), px = xs(t - 1), pz = zs(t - 1);
+    for (let k = 0; k < T.N; k++) {
+      const d = Math.hypot(x[k] - px[k], z[k] - pz[k]);
+      if (d > step) {
+        jumps.push({ k, t, cm: Math.round(d) }); lastJump[k] = t;
+        const e = document.createElement('div'); e.className = 'jump';
+        e.textContent = `${clock(t)}  body ${k} jumped ${(d / 100).toFixed(2)} m`;
+        $('log').prepend(e);
+      }
+      if (Math.hypot(x[k] - anchor[2 * k], z[k] - anchor[2 * k + 1]) > PROGRESS_CM || d > step) {
+        anchor[2 * k] = x[k]; anchor[2 * k + 1] = z[k]; since[k] = t;
+        if (stuck[k]) {
+          stuck[k] = 0;
+          const e = document.createElement('div');
+          e.textContent = `${clock(t)}  body ${k} moves again`;
+          $('log').prepend(e);
+        }
+      } else if (!stuck[k] && t - since[k] >= limit) {
+        stuck[k] = 1;
+        const e = document.createElement('div'); e.className = 'red';
+        e.textContent = `${clock(t)}  body ${k}: no progress for 30 s (since ${clock(since[k])})`;
+        $('log').prepend(e);
+      }
+    }
+  }
+  done = Math.max(done, upto);
+}
+
+function draw() {
+  const W = innerWidth, H = innerHeight - 38, dpr = devicePixelRatio || 1;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px'; }
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.clearRect(0, 0, W, H);
+  if (!T) return;
+  const right = 290, s = Math.min((W - right - 20) / (T.hi[0] - T.lo[0]), (H - 20) / (T.hi[1] - T.lo[1]));
+  const X = (x) => 10 + (x - T.lo[0]) * s, Z = (z) => 10 + (z - T.lo[1]) * s;
+  for (const o of T.h.outlines) {
+    if (o.floor !== floor && !(o.kind === 'place' && floor === T.h.floors[0])) continue;
+    cx.beginPath(); o.pts.forEach(([x, z], i) => i ? cx.lineTo(X(x), Z(z)) : cx.moveTo(X(x), Z(z))); cx.closePath();
+    cx.fillStyle = o.kind === 'room' ? '#e6ecf5' : '#ecebe4'; cx.fill();
+    cx.strokeStyle = o.kind === 'room' ? '#6a82a8' : '#b9b6a8'; cx.lineWidth = 1; cx.stroke();
+  }
+  const t = done, x = xs(t), z = zs(t), nd = ns(t), nodes = T.h.nodes;
+  const per = new Map(T.h.floors.map((f) => [f, 0]));
+  let red = 0;
+  cx.fillStyle = '#2f5d8a';
+  for (let k = 0; k < T.N; k++) {
+    const f = nodes[nd[k]].floor; per.set(f, per.get(f) + 1);
+    if (f !== floor || stuck[k]) continue;
+    cx.fillRect(X(x[k]) - 1.5, Z(z[k]) - 1.5, 3, 3);
+  }
+  for (let k = 0; k < T.N; k++) {
+    if (!stuck[k]) continue; red++;
+    if (nodes[nd[k]].floor !== floor) continue;
+    cx.fillStyle = '#d01c1c'; cx.beginPath(); cx.arc(X(x[k]), Z(z[k]), 6, 0, 7); cx.fill();
+    cx.fillStyle = '#000'; cx.font = '12px system-ui'; cx.fillText(`${k}`, X(x[k]) + 8, Z(z[k]) + 4);
+  }
+  const show = JUMP_SHOW_S * 1e6 / T.h.tick_us;
+  for (const j of jumps) {
+    if (t - j.t > show || nodes[ns(j.t)[j.k]].floor !== floor) continue;
+    const a = [xs(j.t - 1)[j.k], zs(j.t - 1)[j.k]], b = [xs(j.t)[j.k], zs(j.t)[j.k]];
+    cx.strokeStyle = '#e07000'; cx.lineWidth = 2; cx.setLineDash([4, 3]);
+    cx.beginPath(); cx.moveTo(X(a[0]), Z(a[1])); cx.lineTo(X(b[0]), Z(b[1])); cx.stroke(); cx.setLineDash([]);
+    cx.beginPath(); cx.arc(X(b[0]), Z(b[1]), 9, 0, 7); cx.stroke();
+    cx.fillStyle = '#000'; cx.font = '12px system-ui'; cx.fillText(`jump: body ${j.k}, ${(j.cm / 100).toFixed(2)} m`, X(b[0]) + 12, Z(b[1]) + 4);
+  }
+  $('time').textContent = `${clock(t)} / ${clock(T.ticks - 1)}  tick ${t}`;
+  $('counts').textContent = `${T.N} bodies: ${[...per].map(([f, c]) => `floor ${f} ${c}`).join(', ')}; red ${red}; jumps ${jumps.length}`;
+  $('now').replaceChildren(...[...stuck.keys()].filter((k) => stuck[k]).map((k) => {
+    const e = document.createElement('div'); e.className = 'red'; e.textContent = `now red: body ${k}, still since ${clock(since[k])}`; return e;
+  }));
+}
+
+function frame() {
+  if (!playing) return;
+  const tick = Math.min(T.ticks - 1, Math.floor((performance.now() - t0) * 1000 / T.h.tick_us));
+  advance(tick); draw();
+  if (tick >= T.ticks - 1) { playing = false; $('play').textContent = 'Play'; return; }
+  requestAnimationFrame(frame);
+}
+$('play').onclick = () => {
+  if (!T) return;
+  if (playing) { playing = false; $('play').textContent = 'Play'; return; }
+  if (done >= T.ticks - 1) load(T.buf);
+  playing = true; $('play').textContent = 'Pause';
+  t0 = performance.now() - done * T.h.tick_us / 1000;
+  requestAnimationFrame(frame);
+};
+const read = (f) => f && f.arrayBuffer().then(load);
+$('file').onchange = (e) => read(e.target.files[0]);
+addEventListener('dragover', (e) => e.preventDefault());
+addEventListener('drop', (e) => { e.preventDefault(); read(e.dataTransfer.files[0]); });
+addEventListener('resize', draw);
+</script>
+</body>
+</html>

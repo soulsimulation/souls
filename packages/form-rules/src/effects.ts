@@ -6,7 +6,9 @@
 // made. `apply` applies such a result to plain state: all of it or none, and once per receipt.
 //
 // - An amount moved between two things is two `set` changes on one field, each carrying its signed `by`
-//   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not.
+//   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not. An amount
+//   moved between two fields of one thing (`into_field`: a stock into a well) is two sets on that thing, and balances
+//   the same way.
 // - Holding is a parent: take and put are `reparent` into or out of a hand, a slot or the actor's place (`here`).
 //   What is moved is the actor, this thing, a thing argument of the form, or the one thing at the end of a link.
 // - A made thing appears where its form names: a slot, the actor's hand, or `here`, loose in the actor's
@@ -17,7 +19,10 @@
 //   marked with the stock's name, and a `set` of the count with `by: -1`. The make is the other side of that `by`,
 //   so `apply` counts it, and nothing is made from nothing. An empty stock is refused `empty`, a closed container
 //   `closed` (the actor is not linked by the link its `closed` audience names), each before the rules are asked.
-// - A timer is not a change to state: it is returned beside the changes, with its event.
+// - A timer is not a change to state: it is returned beside the changes, with its event. A timer is named by the
+//   form it starts; starting one replaces the node's pending timer of that form, which it names in `replaces`, so the
+//   engine clears it (Engine v2 T6 rule 15: a clear is "fired or cancelled"). A lamp put out early and lit again is
+//   not put out by the earlier timer.
 // - Every value is one Engine v2's encoding profile holds (T0, v2/docs/encoding.md): whole numbers and names,
 //   never a float, a boolean or null. A flag is 0 or 1, text is a key by reference `{text: <key>}` (never
 //   words), and a value that is missing is left out: a `set` without `to` clears the field to its default.
@@ -37,7 +42,8 @@ export type Change =
 export const CHANGES = Object.freeze(['set', 'link', 'unlink', 'reparent', 'create', 'remove']);
 /** `outcome` is set on the event of a draw: the name of the row the world drew. */
 export type Event = { event: string; node: string; changes: number[]; outcome?: string };
-export type Timer = { node: string; form: string; after_us: number; event: number };
+/** `replaces`: the ids of this node's pending timers of the same form, cleared by this one (present only when there are any). */
+export type Timer = { node: string; form: string; after_us: number; event: number; replaces?: string[] };
 export type Done = { verdict: 'yes'; receipt: string; actor: string; changes: Change[]; events: Event[]; timers: Timer[] };
 /**
  * A draw was asked and the world has not answered: the client's answer for the outcome. `could_be` is the whole table
@@ -190,32 +196,35 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     } else {
     if (!e || typeof e.event !== 'string') return refuse(i, 'bad_input', { what: 'no_event' });
     if (e.change === 'set') {
-      const def = has(entry.state, e.field ?? '') ? entry.state![e.field!] : undefined;
-      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: e.field ?? null });
+      // A field argument names one of the form's own fields (the rules refused any other choice); the change names the field.
+      const named = arg(e.field, args);
+      const field = typeof named === 'string' ? named : '';
+      const def = has(entry.state, field) ? entry.state![field] : undefined;
+      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: (named ?? null) as unknown });
       if (def.type === 'timed') {
         // a timed value is settled at the act's time and given its new rate: the three stored numbers are rewritten
-        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
         const now = valueAt(def, held, state.now_us);
-        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: e.field! });
+        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: field });
         // a set may also give the value from now on (a planter watered full), else the value settles where it is
-        if (e.to !== undefined && !Number.isSafeInteger(e.to)) return refuse(i, 'bad_input', { what: 'malformed_value', field: e.field! });
-        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: { value: e.to === undefined ? now : e.to as number, per_s: e.rate!, set_us: state.now_us! } });
+        if (e.to !== undefined && !Number.isSafeInteger(e.to)) return refuse(i, 'bad_input', { what: 'malformed_value', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to: { value: e.to === undefined ? now : e.to as number, per_s: e.rate!, set_us: state.now_us! } });
       } else if (has(e, 'by')) {
         // a count or an amount used up (a sip): the field's value plus `by`, within its bounds; nothing balances it
-        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
         const to = Number.isSafeInteger(held) && Number.isSafeInteger(e.by) ? (held as number) + e.by! : null;
-        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: e.field! });
-        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to });
+        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to });
       } else {
       const to = stored(def, arg(e.to, args));
-      out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });
+      out.push({ change: 'set', node: self, field: field, n: def.n, ...(to === undefined ? {} : { to }) });
       }
     } else if (e.change === 'transfer') {
       const m = measure(kinds, work, self, args, e);
       if ('bad' in m) return refuse(i, 'bad_input', { what: m.bad, ...m.detail });
-      if (m.room !== null && m.moved > m.room) return refuse(i, 'no_room', { node: m.into, field: m.field, room: m.room, amount: m.moved });
-      out.push({ change: 'set', node: m.from, field: m.field, n: m.fromDef.n, to: m.there - m.moved, by: -m.moved });
-      out.push({ change: 'set', node: m.into, field: m.field, n: m.intoDef.n, to: m.has + m.moved, by: m.moved });
+      if (m.room !== null && m.moved > m.room) return refuse(i, 'no_room', { node: m.into, field: m.intoField, room: m.room, amount: m.moved });
+      out.push({ change: 'set', node: m.from, field: m.field, n: m.fromDef.n, to: m.there - m.moved, by: 0 - m.moved });
+      out.push({ change: 'set', node: m.into, field: m.intoField, n: m.intoDef.n, to: m.has + m.moved, by: m.moved });
     } else if (e.change === 'link' || e.change === 'unlink') {
       const def = has(entry.links, e.link ?? '') ? entry.links![e.link!] : undefined;
       if (!def) return refuse(i, 'bad_input', { what: 'no_such_link', link: e.link ?? null });
@@ -248,7 +257,8 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
       out.push({ change: 'remove', node });
     } else if (e.change === 'timer') {
       if (typeof e.form !== 'string' || !Number.isSafeInteger(e.after_us) || e.after_us! <= 0) return refuse(i, 'bad_input', { what: 'malformed_timer' });
-      done.timers.push({ node: self, form: e.form, after_us: e.after_us!, event: done.events.length });
+      const pending = (Array.isArray(work[self].timers) ? work[self].timers! : []).filter((t) => t && t.form === e.form).map((t) => t.id);
+      done.timers.push({ node: self, form: e.form, after_us: e.after_us!, event: done.events.length, ...(pending.length ? { replaces: pending } : {}) });
     } else return refuse(i, 'bad_input', { what: 'unknown_change', change: e.change ?? null });
 
     event = { event: e.event.includes(':') ? e.event : namespace + e.event, node: self, changes: [] };

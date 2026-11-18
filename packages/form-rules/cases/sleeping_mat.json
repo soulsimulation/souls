@@ -1,0 +1,206 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:sleeping_mat (SA-X24): lie or sleep on it and get up; roll it up when nobody is on it, and unroll it to use it again.",
+  "cases": [
+    {
+      "name": "sleeping_mat_lie_free",
+      "act": { "this": "t1", "form": "lie", "args": { "place": "mat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": false }, "slots": { "mat": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "sleeping_mat_lie_when_full",
+      "act": { "this": "t1", "form": "lie", "args": { "place": "mat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": false }, "slots": { "mat": ["o0"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 1, "fix": null }
+    },
+    {
+      "name": "sleeping_mat_sleep_free",
+      "act": { "this": "t1", "form": "sleep", "args": { "place": "mat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": false }, "slots": { "mat": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "sleeping_mat_sleep_when_full",
+      "act": { "this": "t1", "form": "sleep", "args": { "place": "mat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": false }, "slots": { "mat": ["o0"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 1, "fix": null }
+    },
+    {
+      "name": "sleeping_mat_get_up_lying_there",
+      "act": { "this": "t1", "form": "get_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:sleeping_mat",
+            "fields": { "rolled": false },
+            "slots": { "mat": ["b1"] },
+            "links": { "sleeper": ["b1"] }
+          },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "sleeping_mat_get_up_when_nobody_lies_there",
+      "act": { "this": "t1", "form": "get_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": false }, "slots": { "mat": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_linked", "need": 0, "detail": { "link": "sleeper", "count": 0 } }
+    },
+    {
+      "name": "sleeping_mat_lie_rolled_up",
+      "act": { "this": "t1", "form": "lie", "args": { "place": "mat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": { "form": "unroll" } }
+    },
+    {
+      "name": "sleeping_mat_sleep_rolled_up",
+      "act": { "this": "t1", "form": "sleep", "args": { "place": "mat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": { "form": "unroll" } }
+    },
+    {
+      "name": "sleeping_mat_roll_up_empty",
+      "act": { "this": "t1", "form": "roll_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "sleeping_mat_roll_up_with_someone_on_it",
+      "act": { "this": "t1", "form": "roll_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "slots": { "mat": ["b2"] }, "links": { "sleeper": ["b2"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "already_linked", "need": 0 }
+    },
+    {
+      "name": "sleeping_mat_roll_up_already_rolled",
+      "act": { "this": "t1", "form": "roll_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "fix": { "form": "unroll" } }
+    },
+    {
+      "name": "sleeping_mat_unroll_rolled",
+      "act": { "this": "t1", "form": "unroll" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "sleeping_mat_unroll_already_flat",
+      "act": { "this": "t1", "form": "unroll" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:sleeping_mat" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": { "form": "roll_up" } }
+    }
+  ]
+}

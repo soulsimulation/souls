@@ -1,0 +1,52 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:open_sign",
+  "owner": "thing",
+  "state": {
+    "open": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "knob": { "role": "contact", "at_mm": [40, 1100, 0] },
+    "beside": { "role": "stand", "at_mm": [500, 0, 0], "yaw_mdeg": 270000 }
+  },
+  "geometry": { "bounds_mm": [560, 1600, 340] },
+  "forms": {
+    "turn_to_open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "open", "is": false },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "knob" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "knob" }],
+      "effects": [{ "change": "set", "field": "open", "to": true, "event": "turned_to_open" }]
+    },
+    "turn_to_closed": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "open", "is": true },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "knob" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "knob" }],
+      "effects": [{ "change": "set", "field": "open", "to": false, "event": "turned_to_closed" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:open_sign",
+    "table": [
+      { "part": "flip", "field": "open", "do": "tint", "at": { "true": "#2f6b3a", "false": "#8c2f25" } }
+    ],
+    "shape": {"round":6,"shapes":[{"kind":"box","at":[0,20,0],"size":[340,40,340],"tint":"post"},{"kind":"box","at":[0,650,0],"size":[50,1220,50],"tint":"post"},{"kind":"box","at":[40,1100,0],"size":[30,44,44],"tint":"knob"},{"kind":"box","at":[0,1420,0],"size":[560,320,24],"tint":"board"},{"kind":"box","at":[0,1420,14],"size":[460,120,4],"tint":"word","role":"flip"},{"kind":"box","at":[0,1420,-14],"size":[460,120,4],"tint":"word","role":"flip"}],"palette":{"post":"#5b4a3a","knob":"#3f3a34","board":"#f2ead8","word":"#ffffff"},"tags":["sign","shop","object"]}
+  },
+  "text": {
+    "card": "A shop's sign on a post: turn it by hand at its knob to say Open or Closed.",
+    "sign": "sign",
+    "shop_sign": "shop sign"
+  },
+  "card": { "text": "card", "category": "sign", "synonyms": ["shop_sign"] }
+}

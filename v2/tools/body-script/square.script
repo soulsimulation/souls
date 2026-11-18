@@ -1,0 +1,40 @@
+# Engine v2 B1 (#2680): a humanoid and a four-legged body walk round a 4 m square at 1 m/s, facing the way they
+# walk, and stop. No skill code: this script is the driver.
+#
+#   body <name> <family> <x mm> <z mm>        a body standing on the open ground (humanoid or quadruped)
+#   <ms> <name> claim                         a script driver claims the body's locomotion
+#   <ms> <name> walk <vx mm/s> <vz mm/s>      velocity, in the ground's axes
+#   <ms> <name> face <yaw mdeg>               facing (0 faces +z, 90000 faces +x)
+#   <ms> <name> stop                          velocity zero
+#   <ms> <name> release                       the driver ends; the body gets the neutral input
+#   <ms> end                                  the run ends
+body human humanoid 0 0
+body dog quadruped 10000 0
+
+0 human claim
+0 human walk 1000 0
+0 human face 90000
+0 dog claim
+0 dog walk 1000 0
+0 dog face 90000
+
+4000 human walk 0 1000
+4000 human face 0
+4000 dog walk 0 1000
+4000 dog face 0
+
+8000 human walk -1000 0
+8000 human face 270000
+8000 dog walk -1000 0
+8000 dog face 270000
+
+12000 human walk 0 -1000
+12000 human face 180000
+12000 dog walk 0 -1000
+12000 dog face 180000
+
+16000 human stop
+16000 dog stop
+17000 human release
+17000 dog release
+18000 end

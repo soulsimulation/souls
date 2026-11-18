@@ -1,0 +1,897 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:sink (core/sink@1, 4 placed): its tap runs and stops; with the water running, hands are washed (a free hand) and a held dish is washed up, each using water from the supply. Its water is a supply, like the tap.",
+ "cases": [
+  {
+   "name": "sink_turn_on_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "turn_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": false
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1070,
+       100
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sink_turn_on_running_unmet",
+   "act": {
+    "this": "t1",
+    "form": "turn_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": true
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1070,
+       100
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "sink_turn_on_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "turn_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": false
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1070,
+       2900
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1
+   }
+  },
+  {
+   "name": "sink_turn_off_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "turn_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": true
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1070,
+       100
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sink_turn_off_running_unmet",
+   "act": {
+    "this": "t1",
+    "form": "turn_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": false
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1070,
+       100
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "sink_turn_off_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "turn_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": true
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1070,
+       2900
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1
+   }
+  },
+  {
+   "name": "sink_wash_hands_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "wash_hands"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": true
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1060,
+       110
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sink_wash_hands_running_unmet",
+   "act": {
+    "this": "t1",
+    "form": "wash_hands"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": false
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1060,
+       110
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "sink_wash_hands_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "wash_hands"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": true
+      }
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "x2": {
+      "kind": "eden:cup"
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       1060,
+       110
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1
+   }
+  },
+  {
+   "name": "sink_wash_hands_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "wash_hands"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": true
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1060,
+       2910
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2
+   }
+  },
+  {
+   "name": "sink_wash_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "wash",
+    "args": {
+     "thing": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": true
+      }
+     },
+     "w1": {
+      "kind": "eden:bowl"
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "w1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1060,
+       110
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sink_wash_thing_not_held",
+   "act": {
+    "this": "t1",
+    "form": "wash",
+    "args": {
+     "thing": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": true
+      }
+     },
+     "w1": {
+      "kind": "eden:bowl"
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "w1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1060,
+       110
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_held",
+    "need": 0
+   }
+  },
+  {
+   "name": "sink_wash_running_unmet",
+   "act": {
+    "this": "t1",
+    "form": "wash",
+    "args": {
+     "thing": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": false
+      }
+     },
+     "w1": {
+      "kind": "eden:bowl"
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "w1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1060,
+       110
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1
+   }
+  },
+  {
+   "name": "sink_wash_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "wash",
+    "args": {
+     "thing": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:sink",
+      "fields": {
+       "running": true
+      }
+     },
+     "w1": {
+      "kind": "eden:bowl"
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "w1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1060,
+       2910
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2
+   }
+  }
+ ]
+}

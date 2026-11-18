@@ -1,6 +1,11 @@
-//! The world process (Engine v2, #2635). Empty so far (K1, #2638).
+//! The world process (Engine v2, #2635): so far its clock and watchdog (K7, #2647).
 
-fn main() {}
+mod watchdog;
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    std::process::exit(watchdog::run(&args));
+}
 
 #[cfg(test)]
 mod tests {

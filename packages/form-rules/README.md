@@ -29,6 +29,8 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 - `{verdict: "unknown", need, node, field | link, read}`: a need read a field or link outside the asker's audience
   and no need was definitely unmet. A definite "no" from another need wins over "unknown".
 - Malformed input never throws: it is `no` with reason `bad_input` and `detail.what`.
+- A need that names its refusal's words (`says`, a key of the entry's text table) adds `says` to its `no`, so a client
+  words the refusal as the kind's author did; a `bad_input` carries none.
 
 `read` lists what the verdict read, as `[address, value]`: `<node>/field/<n>` (by the field's number),
 `<node>/link/<n>` (how many links), `<node>/slot/<name>` (how many are in it), `<body>/hand/<name>`,
@@ -41,14 +43,29 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 there, compared as squares in big integers; reach to another thing is read in this order: of a `thing` argument the
 form walks to, met when the thing is in the actor's place, since the walk is taken as done; else `"of": {"arg": "tap"}`
 names the point of another thing given as a form argument, placed by that node's `at_mm` in the input, with no
-rotation, the fix a `walk_to` its `stand` point, SA-F2; else, an unknown pose, `unknown`), `hand` (`free: true` or
-`holds: <kind>`), `held_by_actor` (this thing, or a `thing` argument), `moves` (a `thing` argument moves `by` `carry`
+rotation, the fix a `walk_to` its `stand` point, SA-F2; else, an unknown pose, `unknown`), `hand` (`free: true`, `empty: true` (every hand holds nothing, else
+`hand_not_empty` with how many hold something) or `holds: <kind>`), `held_by_actor` (this thing, or a `thing` argument), `moves` (a `thing` argument moves `by` `carry`
 or `push`, read from its kind's `motion.how`: `moves_by`, `motion_unsaid`, `needs_souls`, or `no_free_hand` when
 carrying takes more hands), and `linked`
 / `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
 overflows) and `enough` (every amount they ask is there to give at the source, else `not_enough`, with the source, what
-it can give and the amount asked). A need on a `timed` field reads its value at the state's `now_us` (below). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
+it can give and the amount asked), and `sum` (two or more `int` fields of this kind added up, `at_least` and/or
+`at_most`; with `after_moves`, each as the form's transfers would leave it, measured as `room` measures them; a refusal
+is `field_differs` with `detail: {fields, found, wanted}`). A need on a `timed` field reads its value at the state's `now_us` (below). A `state`
+need with a `link` reads a field of the place at the end of that link (`from: "place"`, `most` 1): the place's kind
+says the field's number and audience, the read is `<place>/field/<n>`, an asker outside it gets `unknown` naming the
+place, and a refusal names the place in `detail.node` with no fix (nothing this thing does changes its place); with no
+place linked it is `not_linked`. The place is never read from the tree (Engine v2 T2: a parent is lifetime and frame).
+A `state` need with `of: {arg}` reads a field of the thing that argument names, the same way: the named thing's kind
+says the field's number and audience, an asker outside it gets `unknown` naming the thing, a refusal names it in
+`detail.node` with no fix, and a missing argument is `bad_input` (`argument_missing`).
+A `state` need's `field` may be a `field` argument and its `is` or `not` a `value` argument: a choice from the form's
+own list (`takes.<name>.of`). Any act whose choice is outside that list is `bad_input` (`not_a_choice`, need -1)
+before a need is read, so a form never reads or writes a field it does not name. A refusal of a need compared with a
+value argument names as its fix the same form with the first other choice that meets it (brush the cell the other
+way). `any` (at least one of two or more fields of this kind is `not` a value; a refusal is `field_differs` with
+`detail: {fields, found: [each value], wanted: {not}}`, and its fix is a form that sets one of them to another value). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
 the test kinds in `cases/kinds/test/`.
 
 ## A case
@@ -96,7 +113,10 @@ layers of Engine v2's contract T6:
 - `events`, one per effect the entry declares, in order: its name, the node, and the indexes of its changes. The name
   is `namespace:name`: the declaring kind's namespace before the plain name its entry writes (`poured` in an
   `eden:` kind is `eden:poured`).
-- `timers`: a `timer` effect is not a change to state; it is returned here with the index of its event.
+- `timers`: a `timer` effect is not a change to state; it is returned here with the index of its event. A timer is
+  named by the form it starts: if the node already has pending timers of that form (`timers` on the node in the state,
+  `{id, form, due_us}`, Engine v2 T6 rule 15), the new one carries `replaces`, their ids, which the engine clears, so
+  a crank lamp put out early and lit again goes dark at its new time and not at the earlier one.
 
 Every value in a result is one that Engine v2's encoding profile holds (T0, `v2/docs/encoding.md`): whole numbers and
 names, never a float, a boolean or `null`. A flag is 0 or 1 (an entry may still write `true` or `false`, and the
@@ -105,10 +125,11 @@ is left out, and a `set` without `to` clears the field to its default. `outsideP
 leaves the profile, with the profile's name for the refusal (`simple`, `null`, `float`, `text-not-name`, ...);
 `effects` refuses to write such a value and `apply` refuses to accept one.
 
-The entry's effects map to changes like this: `set` sets a field of the thing (on a timed value, `rate`: the value at the state's `now_us`, or `to` when the effect gives one, with the new rate, `{value, per_s, set_us}` written whole; with `by` instead of `to`, the int value plus `by`, refused as `out_of_range` outside the field's `min`, or 0, and `max`, and written as `to` alone, since nothing balances a sip); `transfer` moves an amount of one
+The entry's effects map to changes like this: `set` sets a field of the thing (the field a `field` argument chooses, named in the change by its own name and number; on a timed value, `rate`: the value at the state's `now_us`, or `to` when the effect gives one, with the new rate, `{value, per_s, set_us}` written whole; with `by` instead of `to`, the int value plus `by`, refused as `out_of_range` outside the field's `min`, or 0, and `max`, and written as `to` alone, since nothing balances a sip); `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
 `"room"`), the least of what it asks and what the source has above its field's `min`, as two `set`s whose `by`s sum
-to zero; `reparent` moves the actor, the thing or a `thing` argument into a slot, the actor's first free hand or
+to zero, or between two fields of this one thing (`into_field`, both ends `"this"`), as two `set`s on it that sum to
+zero the same way; `reparent` moves the actor, the thing or a `thing` argument into a slot, the actor's first free hand or
 `here`, loose in the actor's place (holding is a parent);
 `create` makes a thing in a slot, the actor's first free hand or `here`, loose in the place the actor is in (where
 on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.<n>`; `link` / `unlink` join the

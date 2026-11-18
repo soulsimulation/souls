@@ -1,0 +1,10 @@
+[package]
+name = "body-script"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "The script driver (Engine v2 B1, #2680): drives bodies through the controller from a text script, with no skill code."
+
+[dependencies]
+replica = { path = "../../crates/replica" }
+sim = { path = "../../crates/sim" }

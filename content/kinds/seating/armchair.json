@@ -1,0 +1,111 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:armchair",
+  "owner": "thing",
+  "state": { "reclined": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "points": { "front": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 } },
+  "slots": { "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 510, 80], "stand": "front" } },
+  "geometry": { "bounds_mm": [900, 880, 800] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    },
+    "recline": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "reclined", "is": false }],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "reclined", "to": true, "event": "leaned_back" }]
+    },
+    "sit_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "reclined", "is": true }],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "reclined", "to": false, "event": "sat_up" }]
+    }
+  },
+  "motion": { "how": "pushed_by_one" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:armchair",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [0, 115, 0],
+          "polygon": [[-385, -365], [385, -365], [385, 365], [-385, 365]],
+          "h": 270,
+          "tint": "fabric"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 405, 60],
+          "polygon": [[-275, -285], [275, -285], [275, 285], [-275, 285]],
+          "h": 90,
+          "tint": "fabric"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 360, -300],
+          "polygon": [[-385, -75], [385, -75], [385, 75], [-385, 75]],
+          "h": 520,
+          "tint": "fabric",
+          "role": "flip",
+          "pivot": [0, 360, -300]
+        },
+        {
+          "kind": "capsule",
+          "at": [360, 500, 20],
+          "r": 90,
+          "h": 620,
+          "segments": 8,
+          "tint": "fabric",
+          "pitch": 90000
+        },
+        {
+          "kind": "capsule",
+          "at": [-360, 500, 20],
+          "r": 90,
+          "h": 620,
+          "segments": 8,
+          "tint": "fabric",
+          "pitch": 90000
+        },
+        { "kind": "cyl", "at": [-300, 50, -280], "r": 25, "h": 100, "segments": 6, "r2": 20, "tint": "wood" },
+        { "kind": "cyl", "at": [300, 50, -280], "r": 25, "h": 100, "segments": 6, "r2": 20, "tint": "wood" },
+        { "kind": "cyl", "at": [-300, 50, 280], "r": 25, "h": 100, "segments": 6, "r2": 20, "tint": "wood" },
+        { "kind": "cyl", "at": [300, 50, 280], "r": 25, "h": 100, "segments": 6, "r2": 20, "tint": "wood" }
+      ],
+      "round": 15,
+      "palette": { "fabric": "#8ea47f", "wood": "#5e3d27" },
+      "tags": ["furniture", "seat", "armchair", "sofa"]
+    },
+    "table": [
+      {
+        "part": "flip",
+        "field": "reclined",
+        "do": "rotate",
+        "axis": "x",
+        "at": { "true": -18000, "false": 0 },
+        "over_us": 800000
+      }
+    ]
+  },
+  "text": {
+    "card": "A deep armchair with rolled arms and one seat; its back leans back.",
+    "furniture": "furniture",
+    "seat": "seat"
+  },
+  "card": { "text": "card", "category": "furniture", "synonyms": ["seat"] }
+}

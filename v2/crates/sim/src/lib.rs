@@ -1,10 +1,16 @@
 //! The world: tree, clock, controllers, movers, log. Native only (Engine v2, #2635). Empty so far (K1, #2638).
 #![forbid(unsafe_code)]
 
+pub mod clock;
+pub mod controller;
+pub mod frozen;
 pub mod ground;
+pub mod host;
 pub mod links;
 pub mod mover;
 pub mod routes;
+pub mod spots;
+pub mod unstick;
 pub mod walk;
 
 #[cfg(test)]
