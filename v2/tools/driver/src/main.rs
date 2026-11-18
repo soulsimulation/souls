@@ -11,8 +11,6 @@
 //! driver's cores (`driverCores`, its own user and system time over the run), the answers, kinds with no v2 intent,
 //! and `byTenth`, the same numbers per tenth of the agents by intended acts, busiest first
 //! (tools/playtest/eval/load.mjs's words).
-// A driver times a run by the wall clock (the wall-clock rule, K7, is the engine's: v2/clippy.toml).
-#![allow(clippy::disallowed_methods)]
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, BufReader};
@@ -242,6 +240,8 @@ fn is_receipt(bytes: &[u8]) -> bool {
 }
 
 /// One agent: first frame and sign-in, then each intent the schedule hands it, sent at once; then its answers.
+// A tool, not the engine: it measures each send's lateness against its due time by the wall clock (K7, v2/clippy.toml).
+#[allow(clippy::disallowed_methods)]
 async fn agent(
     url: String,
     token: String,
@@ -344,6 +344,8 @@ fn spawn(bin: &Path, name: &str, args: &[&str], dir: &Path) -> Child {
 }
 
 // One thread: the driver's cores are this process's alone.
+// A tool, not the engine: due times and the run's length are wall-clock time (K7, v2/clippy.toml).
+#[allow(clippy::disallowed_methods)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let Some(a) = args() else {
