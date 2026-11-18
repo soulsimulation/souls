@@ -388,7 +388,8 @@ pub struct Runner {
     pub asks: BTreeMap<Id, (Target, Id)>,
     /// The place each asker was granted (µm, the target node's frame).
     pub granted: BTreeMap<Id, Vec3>,
-    /// The last tick's refusals, each of one body (the tick went on for the others), in the order they came.
+    /// The last tick's refusals, each of one body (the tick went on for the others), in the order they came; each
+    /// refused body's run ended by the first one's name.
     pub refused: Vec<(Id, Refusal)>,
     /// The routes the world gave each body (`F_ROUTE`), counted.
     routes: BTreeMap<Id, u64>,
@@ -655,8 +656,13 @@ impl Runner {
 
     /// One tick over `town`: the marks read for the turns, every skill stepped against the bodies as they stood at
     /// the tick's start, inputs and crossings handed on, the skills' entries set on their bodies, and the controller
-    /// stepped. The first refusal is returned once the tick is done, and every one is kept in [`Runner::refused`]; the
-    /// others went on.
+    /// stepped.
+    ///
+    /// A refusal of one body mid-tick (its input, its crossing's track, the carry or its landing, its step on the
+    /// surface) is that body's fault alone (#3275): it is kept in [`Runner::refused`], and the body's run ends by the
+    /// refusal's name ([`Runner::end`]), so it does not ask again into the same refusal; every other body's tick is
+    /// as it would be without it, and the tick returns `Ok`. A refusal of the world's own (the turns' or the spot
+    /// tables' write) does not stop the tick either: the tick goes on to its end and returns it.
     pub fn tick(&mut self, town: &mut Town) -> Result<(), Refusal> {
         let at = self.now + self.tick;
         let marks: Vec<Mark> = self
@@ -682,8 +688,9 @@ impl Runner {
                     .copied(),
             })
             .collect();
-        town.turns(&marks, at)?;
-        town.spots(&marks, at)?;
+        // The world's own refusals: the tick goes on, and the first is returned at its end.
+        let world = town.turns(&marks, at).err();
+        let world = world.or(town.spots(&marks, at).err());
         // A walk sent to a point gets its route once its place is granted; a refusal ends it by name.
         let running = self.running_bodies();
         let waiting: Vec<(Id, Target)> = self
@@ -758,10 +765,16 @@ impl Runner {
         }
         let stepped = self.controller.step(&town.surfaces, self.tick, at);
         refused.extend(stepped.refused);
+        // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
+        for (who, r) in &refused {
+            if self.running(*who) {
+                self.end(*who, named(r.name));
+            }
+        }
         self.now = at;
         self.refused = refused;
-        match self.refused.first() {
-            Some((_, r)) => Err(r.clone()),
+        match world {
+            Some(r) => Err(r),
             None => Ok(()),
         }
     }

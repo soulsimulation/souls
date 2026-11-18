@@ -479,6 +479,7 @@ impl World for Town {
             .flatten()
             .collect();
         ids.extend(turns.owners.values().flat_map(|m| m.keys().copied()));
+        let mut refused = None;
         for id in ids {
             let Some(l) = find_link(link_at, buildings, id) else {
                 continue;
@@ -514,9 +515,12 @@ impl World for Town {
                     })
                 });
             }
-            turns.write(l.owner, l, &f, at)?;
+            // One link's refusal does not stop the others' writes; the first is returned once all are written.
+            if let Err(r) = turns.write(l.owner, l, &f, at) {
+                refused.get_or_insert(r);
+            }
         }
-        Ok(())
+        refused.map_or(Ok(()), Err)
     }
 
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {

@@ -37,7 +37,7 @@ use crate::walk::town::Town;
 use crate::walk::{Leg, World, node_of};
 use replica::effects::Refusal;
 use replica::encode::Value;
-use replica::host::{F_HELD, F_SHOULDER};
+use replica::host::{F_HELD, F_SHOULDER, Progress};
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::time::Micros;
@@ -268,13 +268,46 @@ impl Ladder {
         Ok(())
     }
 
-    /// One tick: the runner's tick (the walk-outs under way are carried in it), then the walk-outs ended, then each
-    /// walker's clock and rungs. A refusal in the runner's tick (one body's) is returned once the rungs are climbed:
-    /// it never stops the ladder for the others.
+    /// One tick: the runner's tick (the walk-outs under way are carried in it), then each walker the tick refused
+    /// ended, then the walk-outs ended, then each walker's clock and rungs. A refusal of one walker in the runner's
+    /// tick (`Runner::refused`, #3275) is its fault alone: a walk-out under way is dropped, and its order ends by the
+    /// refusal's name, with its record ([`Rung::Ended`]); it never stops the ladder for the others. A refusal of the
+    /// world's own in the runner's tick is returned once the rungs are climbed.
     pub fn step(&mut self, runner: &mut Runner, town: &mut Town) -> Result<(), Refusal> {
         let ticked = runner.tick(town);
+        self.faults(runner);
         self.climb(runner, town);
         ticked
+    }
+
+    /// Each walker refused in the last tick (its first refusal) whose walk the tick ended or whose walk-out was under
+    /// way: the walk-out dropped, its order ended by name. A body with neither (it stood still) has nothing to end.
+    fn faults(&mut self, runner: &mut Runner) {
+        if runner.refused.is_empty() {
+            return;
+        }
+        let start = runner.now - runner.tick;
+        let mut seen = BTreeSet::new();
+        let refused: Vec<(Id, Refusal)> = runner
+            .refused
+            .iter()
+            .filter(|(who, _)| {
+                self.walkers.contains_key(who)
+                    && (self.outs.contains(who)
+                        || matches!(runner.ended.get(who), Some((t, Progress::Failed(_))) if *t == start))
+                    && seen.insert(*who)
+            })
+            .cloned()
+            .collect();
+        for (who, r) in refused {
+            if self.outs.remove(&who)
+                && let Some(f) = runner.fields.get_mut(&who)
+            {
+                f.remove(&F_HELD);
+            }
+            let order = self.walkers[&who].order;
+            self.end(runner, who, order, r.name, r.detail);
+        }
     }
 
     fn climb(&mut self, runner: &mut Runner, town: &mut Town) {
