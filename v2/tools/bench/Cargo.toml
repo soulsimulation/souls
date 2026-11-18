@@ -70,6 +70,11 @@ path = "resync/main.rs"
 name = "act-latency"
 path = "act-latency/main.rs"
 
+# O4, #2694: the answer's parts summed against the client's wait, and the clock thread's stamping cost.
+[[bin]]
+name = "measures"
+path = "measures/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
