@@ -622,7 +622,8 @@ fn main() {
     let mut birth_tick_us: Vec<i64> = Vec::new();
     // The clock kept through the wave (#2615's bar): ticks run over ticks owed by real time, from the first join
     // asked to 20 s of world time after the last born.
-    let (mut wave0, mut wave1): (Option<(Instant, usize)>, Option<(Instant, usize)>) = (None, None);
+    let mut wave0: Option<(Instant, usize)> = None;
+    let mut wave1: Option<(Instant, usize)> = None;
     let mut last_born: Micros = 0;
 
     // The clock.
