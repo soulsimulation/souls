@@ -26,6 +26,8 @@ step no-kind-names bash -c '! grep -rniEw --include="*.rs" "lamps?|seats?|cups?"
 step lints cargo clippy --workspace --all-targets --locked -- -D warnings
 # replica's WASM-only code (the wasm-bindgen export) is linted on its own target too.
 step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked -- -D warnings
+# The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
+step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
 
 # The WASM build: one artifact (wasm-bindgen --target web) that Node loads with initSync and a page with init().
@@ -82,3 +84,7 @@ step effects-goldens node --input-type=module -e '
   const got = r.effects_goldens(), want = readFileSync("crates/replica/fixtures/effects/goldens.txt", "utf8");
   console.log(`${got}effects-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
   if (got !== want) process.exit(1);'
+# The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
+# same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
+step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
+  node tools/bench/replica-equal/node.mjs target/wasm-load/pkg target/replica-equal crates/replica/tests/queries.txt'

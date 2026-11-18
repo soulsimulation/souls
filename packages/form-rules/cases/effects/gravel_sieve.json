@@ -1,0 +1,233 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The gravel sieve (from #1802): three sieves empty the mixed batches (nine units kept: 0 mixed, 3 coarse, 6 fine), a fourth is refused, and a remix puts one batch back.",
+ "cases": [
+  {
+   "name": "sieve_all_three_then_remix_one",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:gravel_sieve"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "sieve"
+     },
+     "receipt": "rg1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "mixed",
+        "n": 1,
+        "to": 2
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "coarse",
+        "n": 2,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "fine",
+        "n": 3,
+        "to": 2
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:batch_sieved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:coarse_separated",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:fine_separated",
+        "node": "t1",
+        "changes": [
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sieve"
+     },
+     "receipt": "rg2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "mixed",
+        "n": 1,
+        "to": 1
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "coarse",
+        "n": 2,
+        "to": 2
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "fine",
+        "n": 3,
+        "to": 4
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sieve"
+     },
+     "receipt": "rg3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "mixed",
+        "n": 1,
+        "to": 0
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "coarse",
+        "n": 2,
+        "to": 3
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "fine",
+        "n": 3,
+        "to": 6
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sieve"
+     },
+     "receipt": "rg4",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "remix"
+     },
+     "receipt": "rg5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "coarse",
+        "n": 2,
+        "to": 2
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "fine",
+        "n": 3,
+        "to": 4
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "mixed",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:coarse_returned",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:fine_returned",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:batch_remixed",
+        "node": "t1",
+        "changes": [
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:gravel_sieve",
+     "fields": {
+      "mixed": 1,
+      "coarse": 2,
+      "fine": 4
+     }
+    }
+   }
+  }
+ ]
+}
