@@ -1,0 +1,423 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:damper_bell (from #1898). One felt damper, fitted or stored (damped). With a hand free a Soul pulls the rope and the bell rings for four seconds, a timer the world fires; with the damper fitted the pull is refused and names remove_damper. Fitting or removing it takes empty hands and three seconds; fitting does not stop a ring already sounding. The original's words: 'Remove the fitted felt damper before pulling this SAME bell rope.', 'The SAME felt damper is already fitted; remove it to restore ringing.', 'The felt damper is already stored; fit it before removing it.', 'Empty your hands before fitting or removing the felt damper.'",
+ "cases": [
+  {
+   "name": "ring_every_need_met",
+   "act": {
+    "this": "d1",
+    "form": "ring"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "ring_damped_names_remove_damper",
+   "act": {
+    "this": "d1",
+    "form": "ring"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell",
+      "fields": {
+       "damped": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "damped",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "remove_damper"
+    },
+    "says": "remove_damper_first"
+   }
+  },
+  {
+   "name": "ring_hands_full",
+   "act": {
+    "this": "d1",
+    "form": "ring"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "fade_every_need_met",
+   "act": {
+    "this": "d1",
+    "form": "fade"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell",
+      "fields": {
+       "ringing": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "fade_not_ringing_names_ring",
+   "act": {
+    "this": "d1",
+    "form": "fade"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "ringing",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "ring"
+    }
+   }
+  },
+  {
+   "name": "fit_damper_every_need_met",
+   "act": {
+    "this": "d1",
+    "form": "fit_damper"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "fit_damper_already_fitted_names_remove",
+   "act": {
+    "this": "d1",
+    "form": "fit_damper"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell",
+      "fields": {
+       "damped": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "damped",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "remove_damper"
+    },
+    "says": "already_fitted"
+   }
+  },
+  {
+   "name": "fit_damper_holding_something",
+   "act": {
+    "this": "d1",
+    "form": "fit_damper"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "remove_damper_every_need_met",
+   "act": {
+    "this": "d1",
+    "form": "remove_damper"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell",
+      "fields": {
+       "damped": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "remove_damper_already_stored_names_fit",
+   "act": {
+    "this": "d1",
+    "form": "remove_damper"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "damped",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "fit_damper"
+    },
+    "says": "already_stored"
+   }
+  },
+  {
+   "name": "remove_damper_holding_something",
+   "act": {
+    "this": "d1",
+    "form": "remove_damper"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "d1": {
+      "kind": "eden:damper_bell",
+      "fields": {
+       "damped": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  }
+ ]
+}

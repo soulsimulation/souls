@@ -1,0 +1,320 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "The path light (core/bollard-light@1, 5 placed): switch-on and switch-off, anyone, within touch, as today; the switch plate is on its post.",
+ "cases": [
+  {
+   "name": "bollard_light_switch_on_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:bollard_light",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       305
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bollard_light_switch_on_when_already_on_names_switch_off",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:bollard_light",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       305
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "switch_off"
+    }
+   }
+  },
+  {
+   "name": "bollard_light_switch_on_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:bollard_light",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       3105
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  },
+  {
+   "name": "bollard_light_switch_off_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:bollard_light",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       305
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bollard_light_switch_off_when_already_off_names_switch_on",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:bollard_light",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       305
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  },
+  {
+   "name": "bollard_light_switch_off_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:bollard_light",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       300,
+       3105
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  }
+ ]
+}

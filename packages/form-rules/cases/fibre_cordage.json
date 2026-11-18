@@ -1,0 +1,104 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:camp_cord (from #1701), at an eden:cordage_board with one reusable binding. A loose cord is tied as a loop or a guyline at the nearest board: ten seconds with empty hands, and the binding moves from the board onto the cord (a transfer of binding, so it is never in two places). Untying moves it back and leaves the cord loose. Refused with the original's words: the cord not loose, or no binding on the board ('This operation needs loose cord and the available reusable binding; untie a prepared cord first.'), a cord already loose or a board that already has its binding ('Return one prepared cord with its binding to this board before untying.') and a hand holding something ('Put down what you are holding before preparing cord.'). The cord is taken with a free hand.",
+  "cases": [
+    {
+      "name": "camp_cord_take_every_need_met",
+      "act": {"this":"k1","form":"take"},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "camp_cord_take_hands_full",
+      "act": {"this":"k1","form":"take"},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord"},"b1":{"hands":{"left":"x1","right":"x2"}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "cord_tie_loop_every_need_met",
+      "act": {"this":"k1","form":"tie_loop","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord"},"cb1":{"kind":"eden:cordage_board","fields":{"binding":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cord_tie_loop_already_prepared",
+      "act": {"this":"k1","form":"tie_loop","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord","fields":{"prepared":"loop","binding":1}},"cb1":{"kind":"eden:cordage_board","fields":{"binding":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"prepared","found":"loop","wanted":{"is":"loose"}},"fix":{"form":"untie"},"says":"needs_loose"}
+    },
+    {
+      "name": "cord_tie_loop_no_binding_on_board",
+      "act": {"this":"k1","form":"tie_loop","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord"},"cb1":{"kind":"eden:cordage_board","fields":{"binding":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"cb1","field":"binding","has":0,"amount":1},"fix":null,"says":"needs_loose"}
+    },
+    {
+      "name": "cord_tie_loop_holding_something",
+      "act": {"this":"k1","form":"tie_loop","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord"},"cb1":{"kind":"eden:cordage_board","fields":{"binding":1}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "cord_tie_guyline_every_need_met",
+      "act": {"this":"k1","form":"tie_guyline","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord"},"cb1":{"kind":"eden:cordage_board","fields":{"binding":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cord_tie_guyline_already_prepared",
+      "act": {"this":"k1","form":"tie_guyline","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord","fields":{"prepared":"loop","binding":1}},"cb1":{"kind":"eden:cordage_board","fields":{"binding":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"prepared","found":"loop","wanted":{"is":"loose"}},"fix":{"form":"untie"},"says":"needs_loose"}
+    },
+    {
+      "name": "cord_tie_guyline_no_binding_on_board",
+      "act": {"this":"k1","form":"tie_guyline","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord"},"cb1":{"kind":"eden:cordage_board","fields":{"binding":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"cb1","field":"binding","has":0,"amount":1},"fix":null,"says":"needs_loose"}
+    },
+    {
+      "name": "cord_tie_guyline_holding_something",
+      "act": {"this":"k1","form":"tie_guyline","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord"},"cb1":{"kind":"eden:cordage_board","fields":{"binding":1}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "cord_untie_every_need_met",
+      "act": {"this":"k1","form":"untie","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord","fields":{"prepared":"guyline","binding":1}},"cb1":{"kind":"eden:cordage_board","fields":{"binding":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cord_untie_already_loose",
+      "act": {"this":"k1","form":"untie","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord"},"cb1":{"kind":"eden:cordage_board","fields":{"binding":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"prepared","found":"loose","wanted":{"not":"loose"}},"fix":{"form":"tie_guyline"},"says":"return_first"}
+    },
+    {
+      "name": "cord_untie_board_has_its_binding",
+      "act": {"this":"k1","form":"untie","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord","fields":{"prepared":"loop","binding":1}},"cb1":{"kind":"eden:cordage_board","fields":{"binding":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"no_room","need":1,"detail":{"node":"cb1","field":"binding","room":0,"amount":1},"fix":null,"says":"return_first"}
+    },
+    {
+      "name": "cord_untie_holding_something",
+      "act": {"this":"k1","form":"untie","args":{"board":"cb1"}},
+      "state": {"actor":"b1","nodes":{"k1":{"kind":"eden:camp_cord","fields":{"prepared":"loop","binding":1}},"cb1":{"kind":"eden:cordage_board","fields":{"binding":0}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:school_desk",
+  "owner": "thing",
+  "state": {},
+  "points": { "front": { "role": "stand", "at_mm": [0, 0, 550], "yaw_mdeg": 180000 } },
+  "slots": { "top": { "admits": "thing", "most": 3, "at_mm": [0, 740, 0], "stand": "front", "fits_mm": [400, 300, 300] } },
+  "geometry": { "bounds_mm": [700, 735, 500] },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:school_desk",
+    "shape": {
+      "shapes": [
+        { "kind": "box", "at": [0, 720, 0], "size": [700, 30, 500], "round": 0, "tint": "top" },
+        { "kind": "cyl", "at": [-310, 355, -210], "r": 15, "h": 710, "segments": 5, "tint": "iron" },
+        { "kind": "cyl", "at": [310, 355, -210], "r": 15, "h": 710, "segments": 5, "tint": "iron" },
+        { "kind": "cyl", "at": [-310, 355, 210], "r": 15, "h": 710, "segments": 5, "tint": "iron" },
+        { "kind": "cyl", "at": [310, 355, 210], "r": 15, "h": 710, "segments": 5, "tint": "iron" },
+        { "kind": "box", "at": [0, 500, 0], "size": [620, 20, 420], "round": 0, "tint": "iron" }
+      ],
+      "palette": { "top": "#c79a63", "iron": "#5a5f62" },
+      "tags": ["furniture", "table", "school"]
+    }
+  },
+  "text": {
+    "card": "A pupil's desk on steel legs; its top holds up to three small things.",
+    "furniture": "furniture",
+    "desk": "desk"
+  },
+  "card": { "text": "card", "category": "furniture", "synonyms": ["desk"] }
+}

@@ -1,0 +1,2414 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Eden's play and sport things (SA-X32, #2922): the gym's apparatus used, swings sat on and pushed, a see-saw ridden by two in turn, a climbing frame's top taken and left, blocks knocked down and built, an arcade switched and played, three darts thrown and collected, a pool game of two with a break and a re-rack, a tennis court filled by four, and a round of pétanque. A scored outcome (a dart's ring, a pot, a point) is a draw (SA-F13) and is not here.",
+  "cases": [
+    {
+      "name": "pull_up_bar_pull_up_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:pull_up_bar"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "pull_up"
+          },
+          "receipt": "pu1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "pull_up"
+          },
+          "receipt": "pu2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:pull_up_bar"
+        }
+      }
+    },
+    {
+      "name": "weight_bench_lift_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:weight_bench"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "lift"
+          },
+          "receipt": "wb1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "lift"
+          },
+          "receipt": "wb2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:weight_bench"
+        }
+      }
+    },
+    {
+      "name": "dip_bars_dip_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dip_bars"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "dip"
+          },
+          "receipt": "db1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "dip"
+          },
+          "receipt": "db2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:dip_bars"
+        }
+      }
+    },
+    {
+      "name": "dumbbell_rack_lift_weights_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_rack"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "lift_weights"
+          },
+          "receipt": "dr1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "lift_weights"
+          },
+          "receipt": "dr2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:dumbbell_rack"
+        }
+      }
+    },
+    {
+      "name": "situp_bench_sit_ups_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:situp_bench"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "sit_ups"
+          },
+          "receipt": "sb1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "sit_ups"
+          },
+          "receipt": "sb2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:situp_bench"
+        }
+      }
+    },
+    {
+      "name": "slide_slide_down_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:slide"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "slide_down"
+          },
+          "receipt": "sl1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "slide_down"
+          },
+          "receipt": "sl2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:slide"
+        }
+      }
+    },
+    {
+      "name": "swings_two_swing_one_pushes_both_get_off",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "b2",
+              "b3"
+            ]
+          },
+          "t1": {
+            "kind": "eden:swings"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b3": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "swing",
+            "args": {
+              "place": "swing_1"
+            }
+          },
+          "receipt": "sw1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "swinger",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "swing_1"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:began_to_swing",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sat_down",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "swing",
+            "args": {
+              "place": "swing_2"
+            }
+          },
+          "actor": "b2",
+          "receipt": "sw2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "swinger",
+                "n": 1,
+                "end": "b2"
+              },
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "t1",
+                  "slot": "swing_2"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:began_to_swing",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sat_down",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "swing",
+            "args": {
+              "place": "swing_1"
+            }
+          },
+          "actor": "b3",
+          "receipt": "sw3",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "get_off"
+          },
+          "actor": "b2",
+          "receipt": "sw4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "swinger",
+                "n": 1,
+                "end": "b2"
+              },
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:got_off_the_swing",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stood_up",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "push",
+            "args": {
+              "who": "b1"
+            }
+          },
+          "actor": "b2",
+          "receipt": "sw5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "get_off"
+          },
+          "receipt": "sw6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "swinger",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:got_off_the_swing",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stood_up",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:swings",
+          "links": {
+            "swinger": []
+          },
+          "slots": {
+            "swing_1": [],
+            "swing_2": []
+          }
+        }
+      }
+    },
+    {
+      "name": "see_saw_two_ride_push_off_in_turn",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "b2"
+            ]
+          },
+          "t1": {
+            "kind": "eden:see_saw"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "ride",
+            "args": {
+              "place": "end_1"
+            }
+          },
+          "receipt": "ss1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "rider",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "end_1"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:got_on",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sat_down",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "ride",
+            "args": {
+              "place": "end_2"
+            }
+          },
+          "actor": "b2",
+          "receipt": "ss2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "rider",
+                "n": 1,
+                "end": "b2"
+              },
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "t1",
+                  "slot": "end_2"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:got_on",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sat_down",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "push_off_end_1"
+          },
+          "receipt": "ss3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "low_end",
+                "n": 1,
+                "to": "end_2"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:end_2_went_down",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "push_off_end_1"
+          },
+          "receipt": "ss4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "push_off_end_2"
+          },
+          "actor": "b2",
+          "receipt": "ss5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "low_end",
+                "n": 1,
+                "to": "end_1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:end_1_went_down",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "get_off"
+          },
+          "receipt": "ss6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "rider",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:got_off",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stood_up",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "get_off"
+          },
+          "actor": "b2",
+          "receipt": "ss7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "rider",
+                "n": 1,
+                "end": "b2"
+              },
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:got_off",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stood_up",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:see_saw",
+          "fields": {
+            "low_end": "end_1"
+          },
+          "links": {
+            "rider": []
+          },
+          "slots": {
+            "end_1": [],
+            "end_2": []
+          }
+        }
+      }
+    },
+    {
+      "name": "climbing_frame_up_and_down",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "b2"
+            ]
+          },
+          "t1": {
+            "kind": "eden:climbing_frame"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "climb",
+            "args": {
+              "place": "top"
+            }
+          },
+          "receipt": "cf1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "climber",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "top"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:climbed_up",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sat_down",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "climb",
+            "args": {
+              "place": "top"
+            }
+          },
+          "actor": "b2",
+          "receipt": "cf2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "climb_down"
+          },
+          "receipt": "cf3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "climber",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:climbed_down",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stood_up",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "climb",
+            "args": {
+              "place": "top"
+            }
+          },
+          "actor": "b2",
+          "receipt": "cf4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "climber",
+                "n": 1,
+                "end": "b2"
+              },
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "t1",
+                  "slot": "top"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:climbed_up",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sat_down",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:climbing_frame",
+          "links": {
+            "climber": [
+              "b2"
+            ]
+          },
+          "slots": {
+            "top": [
+              "b2"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "toy_blocks_knocked_down_and_built",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:toy_blocks"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "knock_down"
+          },
+          "receipt": "tb1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "built",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tower_knocked_down",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "build"
+          },
+          "receipt": "tb2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "built",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tower_built",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "build"
+          },
+          "receipt": "tb3",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:toy_blocks",
+          "fields": {
+            "built": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "arcade_off_on_and_played",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:arcade_cabinet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "switch_off"
+          },
+          "receipt": "ac1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "on",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:switched_off",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "play"
+          },
+          "receipt": "ac2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "switch_on"
+          },
+          "receipt": "ac3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "on",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:switched_on",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "play"
+          },
+          "receipt": "ac4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:arcade_cabinet",
+          "fields": {
+            "on": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "dartboard_three_darts_then_collect",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dartboard"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "throw"
+          },
+          "receipt": "dt1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "darts_in",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dart_thrown",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "throw"
+          },
+          "receipt": "dt2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "darts_in",
+                "n": 1,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dart_thrown",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "throw"
+          },
+          "receipt": "dt3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "darts_in",
+                "n": 1,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dart_thrown",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "throw"
+          },
+          "receipt": "dt4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "collect"
+          },
+          "receipt": "dt5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "darts_in",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:darts_collected",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:dartboard",
+          "fields": {
+            "darts_in": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pool_two_players_break_and_rerack",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "b2",
+              "b3"
+            ]
+          },
+          "t1": {
+            "kind": "eden:pool_table"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b3": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "break_end"
+            }
+          },
+          "receipt": "pt1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "break_end"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:joined_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:took_a_place",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "side"
+            }
+          },
+          "actor": "b2",
+          "receipt": "pt2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b2"
+              },
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "t1",
+                  "slot": "side"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:joined_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:took_a_place",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "side"
+            }
+          },
+          "actor": "b3",
+          "receipt": "pt3",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "shoot"
+          },
+          "receipt": "pt4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "racked",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shot_taken",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "shoot"
+          },
+          "actor": "b2",
+          "receipt": "pt5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "racked",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shot_taken",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "rack"
+          },
+          "actor": "b3",
+          "receipt": "pt6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "racked",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:balls_racked",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "leave"
+          },
+          "actor": "b2",
+          "receipt": "pt7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b2"
+              },
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:left_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stepped_away",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "leave"
+          },
+          "actor": "b3",
+          "receipt": "pt8",
+          "expect": {
+            "verdict": "no",
+            "reason": "not_linked"
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:pool_table",
+          "fields": {
+            "racked": 1
+          },
+          "links": {
+            "player": [
+              "b1"
+            ]
+          },
+          "slots": {
+            "break_end": [
+              "b1"
+            ],
+            "side": []
+          }
+        }
+      }
+    },
+    {
+      "name": "tennis_four_players_then_one_leaves",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "b2",
+              "b3",
+              "b4",
+              "b5"
+            ]
+          },
+          "t1": {
+            "kind": "eden:tennis_court"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b3": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b4": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b5": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "side_a_1"
+            }
+          },
+          "actor": "b1",
+          "receipt": "tc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "side_a_1"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:joined_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:took_a_place",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "side_b_1"
+            }
+          },
+          "actor": "b2",
+          "receipt": "tc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b2"
+              },
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "t1",
+                  "slot": "side_b_1"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:joined_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:took_a_place",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "side_a_2"
+            }
+          },
+          "actor": "b3",
+          "receipt": "tc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b3"
+              },
+              {
+                "change": "reparent",
+                "node": "b3",
+                "to": {
+                  "node": "t1",
+                  "slot": "side_a_2"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:joined_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:took_a_place",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "side_b_2"
+            }
+          },
+          "actor": "b4",
+          "receipt": "tc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b4"
+              },
+              {
+                "change": "reparent",
+                "node": "b4",
+                "to": {
+                  "node": "t1",
+                  "slot": "side_b_2"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:joined_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:took_a_place",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "side_a_1"
+            }
+          },
+          "actor": "b5",
+          "receipt": "tc5",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "leave"
+          },
+          "actor": "b4",
+          "receipt": "tc6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b4"
+              },
+              {
+                "change": "reparent",
+                "node": "b4",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:left_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stepped_away",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:tennis_court",
+          "links": {
+            "player": [
+              "b1",
+              "b2",
+              "b3"
+            ]
+          },
+          "slots": {
+            "side_a_1": [
+              "b1"
+            ],
+            "side_b_1": [
+              "b2"
+            ],
+            "side_a_2": [
+              "b3"
+            ],
+            "side_b_2": []
+          }
+        }
+      }
+    },
+    {
+      "name": "petanque_a_round",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "b2"
+            ]
+          },
+          "t1": {
+            "kind": "eden:petanque_piste"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "circle"
+            }
+          },
+          "receipt": "pp1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "circle"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:joined_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:took_a_place",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "play",
+            "args": {
+              "place": "circle"
+            }
+          },
+          "actor": "b2",
+          "receipt": "pp2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b2"
+              },
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "t1",
+                  "slot": "circle"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:joined_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:took_a_place",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "throw_boule"
+          },
+          "receipt": "pp3",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "throw_jack"
+          },
+          "receipt": "pp4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "jack_out",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:jack_thrown",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "throw_boule"
+          },
+          "receipt": "pp5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "throw_boule"
+          },
+          "actor": "b2",
+          "receipt": "pp6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "gather"
+          },
+          "actor": "b2",
+          "receipt": "pp7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "jack_out",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:boules_gathered",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "leave"
+          },
+          "receipt": "pp8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "player",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:left_the_game",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stepped_away",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:petanque_piste",
+          "fields": {
+            "jack_out": 0
+          },
+          "links": {
+            "player": [
+              "b2"
+            ]
+          },
+          "slots": {
+            "circle": [
+              "b2"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
