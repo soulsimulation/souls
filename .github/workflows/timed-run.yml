@@ -19,6 +19,11 @@
 # commit) on a fake-mind dev world, recorded by the proof recorder from this workflow's commit with a hardware GL
 # renderer (it fails rather than fall back to SwiftShader). The clip and its sidecar are the artifact; the dispatcher
 # attaches them to the PR with tools/proof/upload.mjs (this job holds no write token). See docs/testing.md.
+# `v2-bench` runs an Engine v2 bench of `ref`: `cargo run -p bench --release --bin <name> -- <args>` from v2/, `repeats`
+# times on the runner's own cores, after an untimed release build. The bin must be a [[bin]] of the ref's
+# v2/tools/bench/Cargo.toml and the bench's args plain tokens. The toolchain v2/rust-toolchain.toml pins is installed
+# with rustup in the per-run directory (RUSTUP_HOME, CARGO_HOME), so nothing lands in the shared home. Each repeat's
+# stdout goes to the job summary; the build and run logs are the artifact. No pnpm install, media or web build.
 name: timed-run
 on:
   workflow_dispatch:
@@ -28,9 +33,9 @@ on:
         required: true
         default: main
       command:
-        description: walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, load, settled, hundred, colocate, viewers, counted, clip or page (no model in any)
+        description: walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, load, settled, hundred, colocate, viewers, counted, clip, page or v2-bench (no model in any)
         type: choice
-        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, load, settled, hundred, colocate, viewers, counted, clip, page]
+        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, load, settled, hundred, colocate, viewers, counted, clip, page, v2-bench]
         default: walk
       base:
         description: 'counted only: the base arm, main or an agent/<name> branch (the candidate arm is ref)'
@@ -44,7 +49,7 @@ on:
         description: Repeats, 1 to 3 (counted - cells per arm)
         default: '1'
       args:
-        description: 'Allowlisted: walk --world; eval-scripted --battery <name> --seat scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; load --world --boots --souls --profile --short; settled --world --souls --settle-min --short; hundred --small --eden --short --fixture-only --active-min --gap-min --settle-min --build-parallel; colocate --forms --settle-s --walk-s --busy --short; viewers --viewers --window-sec --short; counted --scenario --loop-sec; clip --kit --viewport; page --souls --shape --warm-sec --measure-sec --settle-sec --profile-sec --short'
+        description: 'Allowlisted: walk --world; eval-scripted --battery <name> --seat scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; load --world --boots --souls --profile --short; settled --world --souls --settle-min --short; hundred --small --eden --short --fixture-only --active-min --gap-min --settle-min --build-parallel; colocate --forms --settle-s --walk-s --busy --short; viewers --viewers --window-sec --short; counted --scenario --loop-sec; clip --kit --viewport; page --souls --shape --warm-sec --measure-sec --settle-sec --profile-sec --short; v2-bench --bin <name> [-- <plain tokens>]'
         default: ''
       cores:
         description: 'eval-load, bench-client, meetup, slopes-profile, viewers only: a core plan, world=N or world=N,launcher=M (physical cores); the load drivers get the rest. Blank: 2 for the world, the rest for the load'
@@ -131,19 +136,21 @@ jobs:
         run: echo "REF_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       # pnpm's version comes from the ref's package.json `packageManager`; pnpm itself goes in the per-run dir.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: env.INPUT_COMMAND != 'v2-bench'
         with: { package_json_file: src/package.json, dest: '${{ env.PER_RUN }}/setup-pnpm' }
       - name: Install
+        if: env.INPUT_COMMAND != 'v2-bench'
         working-directory: src
         run: pnpm install --frozen-lockfile --store-dir "$npm_config_store_dir"
       - name: Pull media
-        if: env.INPUT_COMMAND != 'counted'
+        if: env.INPUT_COMMAND != 'counted' && env.INPUT_COMMAND != 'v2-bench'
         working-directory: src
         timeout-minutes: 15
         run: |
           if [ "$INPUT_COMMAND" = walk ]; then sets=runtime,test; else sets=web,runtime; fi
           timeout 840 pnpm assets:pull --quiet --set "$sets"
       - name: Build the web bundle
-        if: env.INPUT_COMMAND != 'walk' && env.INPUT_COMMAND != 'counted'
+        if: env.INPUT_COMMAND != 'walk' && env.INPUT_COMMAND != 'counted' && env.INPUT_COMMAND != 'v2-bench'
         working-directory: src
         run: pnpm --filter @souls/web build
       # the capacity benches' worlds refuse genesis without the viewer bundle; a clip's people are drawn from it
@@ -161,6 +168,20 @@ jobs:
           if grep -q 'VERSION_ID="20.04"' /etc/os-release; then export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64; fi
           { echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH"; echo "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-}"; } >> "$GITHUB_ENV"
           mars/viewer/node_modules/.bin/playwright install chromium 2>&1 | grep -v "%" | tail -20
+      # v2-bench: the channel the ref's v2/rust-toolchain.toml pins, minimal profile, in the per-run directory (no sudo, no
+      # shared home); RUSTUP_TOOLCHAIN skips the file's extra components and WASM target, which a native bench never uses.
+      - name: Rust toolchain
+        if: env.INPUT_COMMAND == 'v2-bench'
+        working-directory: src/v2
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          if ! printf '%s' "$channel" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then echo "::error::no pinned channel in v2/rust-toolchain.toml"; exit 1; fi
+          export RUSTUP_HOME="$PER_RUN/rustup" CARGO_HOME="$PER_RUN/cargo"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$PER_RUN/rustup-init.sh"
+          sh "$PER_RUN/rustup-init.sh" -y --quiet --no-modify-path --profile minimal --default-toolchain "$channel"
+          { echo "RUSTUP_HOME=$RUSTUP_HOME"; echo "CARGO_HOME=$CARGO_HOME"; echo "RUSTUP_TOOLCHAIN=$channel"; } >> "$GITHUB_ENV"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          "$CARGO_HOME/bin/cargo" --version
       - name: Start load
         working-directory: src
         run: node "$CTL" load --record "$RECORD"
