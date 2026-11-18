@@ -54,6 +54,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:water_filter",
     "table": [

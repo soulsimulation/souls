@@ -29,6 +29,8 @@
       "effects": [{ "change": "set", "field": "water", "to": 0, "event": "drained" }]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:filter_carafe",
     "table": [
