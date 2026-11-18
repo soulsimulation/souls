@@ -6,9 +6,9 @@ use import_eden::Import;
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::world_model::{plain, show};
+use sim::ground::STEP;
 use sim::ground::Scene;
 use sim::ground::scene::{FLOOR, Terrain, xform_to};
-use sim::ground::STEP;
 use sim::links::Kind;
 use sim::routes::{ALL, Hop, LinkInfo, Map, Spot};
 use std::collections::{BTreeMap, BTreeSet};
@@ -128,7 +128,9 @@ fn a1_cut_off_floors_by_cause() {
         .filter(|(_, r)| !**r)
         .map(|(f, _)| *f)
         .collect();
-    let terrain = Terrain::of(&im.tree, ground).unwrap().expect("Eden's terrain");
+    let terrain = Terrain::of(&im.tree, ground)
+        .unwrap()
+        .expect("Eden's terrain");
     let mut on_terrain: Vec<i64> = Vec::new();
     // Every link of the map with the floor (or the open ground, `None`) at each end.
     let mut touching: BTreeMap<Id, Vec<(LinkInfo, Option<Id>)>> = BTreeMap::new();
@@ -254,7 +256,9 @@ fn a1_cut_off_floors_by_cause() {
     // #3227's A2: no floor is left cut off by a cause the cut or the import can fix.
     for cause in table.keys() {
         assert!(
-            !cause.contains("within a step") && !cause.contains("cycle") && !cause.contains("only links to itself"),
+            !cause.contains("within a step")
+                && !cause.contains("cycle")
+                && !cause.contains("only links to itself"),
             "a floor cut off by a cause that is not a feature of Eden: {cause}"
         );
     }
@@ -286,8 +290,9 @@ impl Seed {
     }
 }
 
-/// The floors of things standing off the open ground's plan at 0 by more than a step (on the terrain), each with its
-/// surfaces' rings in the ground's frame (mm).
+/// The floors of things standing off the open ground's plan at 0 by more than a step (on the terrain), and the rings
+/// (the ground's frame, mm) of every floor that was no footprint on the plan before #3227 (1.8 m or more off 0) and
+/// may be one now.
 fn on_terrain_rings(im: &Import) -> (BTreeSet<Id>, Vec<Vec<[i64; 2]>>) {
     let ground = im.nodes["ground"];
     let gh = im.tree.handle(ground).unwrap();
@@ -295,16 +300,20 @@ fn on_terrain_rings(im: &Import) -> (BTreeSet<Id>, Vec<Vec<[i64; 2]>>) {
     for &c in im.tree.children(gh).unwrap() {
         let th = c;
         let place = xform_to(&im.tree, th, gh).unwrap();
-        if place.pos.y.abs() <= STEP * 1000 {
-            continue;
-        }
         for &f in im.tree.children(th).unwrap() {
             let fid = im.tree.node(f).unwrap().id();
             if kind(im, fid) != FLOOR {
                 continue;
             }
-            floors.insert(fid);
-            if let Ok(s) = Scene::of(&im.tree, fid) {
+            if place.pos.y.abs() > STEP * 1000 {
+                floors.insert(fid);
+            }
+            // A floor (not ground cover) no footprint on the plan before: its surfaces 1.8 m or more off 0.
+            if let Ok(s) = Scene::of(&im.tree, fid)
+                && s.surfaces
+                    .iter()
+                    .all(|sf| (place.pos.y + sf.y).abs() >= 1_800_000)
+            {
                 for sf in &s.surfaces {
                     rings.push(
                         sf.ring
@@ -322,8 +331,17 @@ fn on_terrain_rings(im: &Import) -> (BTreeSet<Id>, Vec<Vec<[i64; 2]>>) {
     (floors, rings)
 }
 
+/// Whether  lies inside the ring , or within 400 mm of it (the cut grows a footprint by the body's clearance).
 fn inside(r: &[[i64; 2]], p: [i64; 2]) -> bool {
-    let mut c = false;
+    let near = (0..r.len()).any(|k| {
+        let (a, b) = (r[k], r[(k + 1) % r.len()]);
+        let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
+        let l2 = (ex * ex + ez * ez).max(1);
+        let t = ((p[0] - a[0]) * ex + (p[1] - a[1]) * ez).clamp(0, l2);
+        let (dx, dz) = (a[0] + ex * t / l2 - p[0], a[1] + ez * t / l2 - p[1]);
+        dx * dx + dz * dz <= 400 * 400
+    });
+    let mut c = near;
     for k in 0..r.len() {
         let (a, b) = (r[k], r[(k + 1) % r.len()]);
         let lhs = i128::from(p[0] - a[0]) * i128::from(b[1] - a[1]);
@@ -344,7 +362,10 @@ fn inside(r: &[[i64; 2]], p: [i64; 2]) -> bool {
 #[ignore = "needs the exported Eden facts file"]
 fn a3_eden_routes_before_and_after() {
     const ROUTES: usize = 10_000;
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../.local/routes/a3-3227.tsv");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../.local/routes/a3-3227.tsv"
+    );
     let im = eden();
     let ground = im.nodes["ground"];
     let mut map = Map::build(&im.tree, ground, &|_| 0).expect("the map");
@@ -362,14 +383,23 @@ fn a3_eden_routes_before_and_after() {
         for &p in &parts {
             *size.entry(p).or_default() += 1;
         }
-        let main = *size.iter().max_by_key(|(k, n)| (**n, std::cmp::Reverse(**k))).unwrap().0;
-        let among: Vec<u32> = (0..pieces as u32).filter(|&q| parts[q as usize] == main).collect();
+        let main = *size
+            .iter()
+            .max_by_key(|(k, n)| (**n, std::cmp::Reverse(**k)))
+            .unwrap()
+            .0;
+        let among: Vec<u32> = (0..pieces as u32)
+            .filter(|&q| parts[q as usize] == main)
+            .collect();
         let mut seed = Seed(2653);
         let mut pick = || loop {
             let q = among[seed.below(among.len())];
             let st = map.standing(q);
             if !st.is_empty() {
-                return Spot { piece: q, at: st[seed.below(st.len())] };
+                return Spot {
+                    piece: q,
+                    at: st[seed.below(st.len())],
+                };
             }
         };
         let pairs: Vec<(Spot, Spot)> = (0..ROUTES).map(|_| (pick(), pick())).collect();
@@ -394,10 +424,17 @@ fn a3_eden_routes_before_and_after() {
     };
     let ids: BTreeMap<String, Id> = {
         let (pieces, ..) = map.counts();
-        (0..pieces as u32).map(|q| map.patch_of(q).node).map(|n| (show(n), n)).collect()
+        (0..pieces as u32)
+            .map(|q| map.patch_of(q).node)
+            .map(|n| (show(n), n))
+            .collect()
     };
     let at = |s: &str| -> Vec3 {
-        let v: Vec<i64> = s.trim_matches(['[', ']']).split(", ").map(|x| x.parse().unwrap()).collect();
+        let v: Vec<i64> = s
+            .trim_matches(['[', ']'])
+            .split(", ")
+            .map(|x| x.parse().unwrap())
+            .collect();
         Vec3::new(v[0] * 1000, v[1] * 1000, v[2] * 1000)
     };
     let (hill, rings) = on_terrain_rings(&im);
@@ -419,15 +456,22 @@ fn a3_eden_routes_before_and_after() {
             })
         })
     };
-    let (mut same, mut changed, mut lost) = (0, 0, 0);
+    let (mut same, mut changed, mut lost, mut lost_inside, mut near) = (0, 0, 0, 0, 0);
     let (mut onto_hill, mut was_through, mut onto_floor, mut other) = (0, 0, 0, 0);
     for row in before.lines() {
         let f: Vec<&str> = row.splitn(6, '\t').collect();
-        let (Some(a), Some(b)) = (
-            map.spot(ids[f[0]], at(f[1])),
-            map.spot(ids[f[2]], at(f[3])),
-        ) else {
+        let (Some(a), Some(b)) = (map.spot(ids[f[0]], at(f[1])), map.spot(ids[f[2]], at(f[3])))
+        else {
             lost += 1;
+            let w = |n: &str, v: Vec3| (n == show(ground)).then_some([v.x / 1000, v.z / 1000]);
+            let gone = [w(f[0], at(f[1])), w(f[2], at(f[3]))]
+                .into_iter()
+                .flatten()
+                .any(|p| rings.iter().any(|r| inside(r, p)));
+            lost_inside += usize::from(gone);
+            if lost - lost_inside <= 3 && !gone {
+                println!("  not found now: {row:.100}");
+            }
             continue;
         };
         let r = match map.route(&im.tree, a, b, ALL) {
@@ -443,12 +487,19 @@ fn a3_eden_routes_before_and_after() {
             continue;
         }
         changed += 1;
-        let joined = r.hops.iter().any(|h| matches!(h, Hop::Patch { at, .. } if hill.contains(&at.node)));
+        let joined = r
+            .hops
+            .iter()
+            .any(|h| matches!(h, Hop::Patch { at, .. } if hill.contains(&at.node)));
         // A step between two floors, neither the open ground: onto another thing's floor.
         let step = r.hops.windows(3).any(|w| match w {
-            [Hop::Patch { at: a, .. }, Hop::Link { kind: Kind::Step, .. }, Hop::Patch { at: b, .. }] => {
-                a.node != b.node && a.node != ground && b.node != ground
-            }
+            [
+                Hop::Patch { at: a, .. },
+                Hop::Link {
+                    kind: Kind::Step, ..
+                },
+                Hop::Patch { at: b, .. },
+            ] => a.node != b.node && a.node != ground && b.node != ground,
             _ => false,
         });
         if joined {
@@ -457,16 +508,23 @@ fn a3_eden_routes_before_and_after() {
             was_through += 1;
         } else if step {
             onto_floor += 1;
+        } else if (r.length as i64 - f[4].parse::<i64>().unwrap()).abs() * 100 < r.length as i64 {
+            near += 1;
         } else {
             other += 1;
             if other <= 5 {
-                println!("  changed otherwise: {row:.160}\n    now {} mm: {:.160}", r.length, wps(&r));
+                println!(
+                    "  changed otherwise: {row}\n    now {} mm: {}",
+                    r.length,
+                    wps(&r)
+                );
             }
         }
     }
     println!(
         "A3: {same} routes unchanged, {changed} changed: {onto_hill} now over a floor of a building on the terrain, \
          {was_through} were through such a building's footprint on the plan, {onto_floor} over a step onto another thing's floor, \
-         {other} otherwise; {lost} not found or refused"
+         {near} by under 1 % (the open ground cut again), {other} otherwise; {lost} not found or refused, {lost_inside} \
+         of them a spot on the open ground now inside a building on the terrain"
     );
 }

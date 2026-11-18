@@ -758,7 +758,12 @@ impl Scene {
                             let w = surfaces_of(tree, h, &xform_to(tree, thing, a)?)?;
                             let mut bb = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
                             for p in w.iter().flat_map(|s| &s.ring) {
-                                bb = [bb[0].min(p[0]), bb[1].min(p[1]), bb[2].max(p[0]), bb[3].max(p[1])];
+                                bb = [
+                                    bb[0].min(p[0]),
+                                    bb[1].min(p[1]),
+                                    bb[2].max(p[0]),
+                                    bb[3].max(p[1]),
+                                ];
                             }
                             let g = tree.node(a).ok_or("the ground")?.id();
                             s.terrain = Terrain::within(tree, g, bb)?;
@@ -787,7 +792,8 @@ impl Scene {
                 s.doorways.extend(inner_steps_of(id, &s.surfaces));
                 if let Some(g) = on_ground {
                     let to_ground = xform_to(tree, thing, g)?;
-                    let steps = steps_of(tree, h, &Xform::IDENTITY, &to_ground, s.terrain.as_ref())?;
+                    let steps =
+                        steps_of(tree, h, &Xform::IDENTITY, &to_ground, s.terrain.as_ref())?;
                     s.doorways.extend(steps);
                 }
             }

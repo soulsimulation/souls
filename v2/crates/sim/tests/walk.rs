@@ -695,15 +695,21 @@ fn terrain_eden_a_walker_goes_into_a_building_on_a_hill_and_back() {
     let mut planned = Vec::new();
     for &(entry, thing, y) in &entries {
         let (from, ..) = either_side(&t, entry, 2_000_000);
-        let frame = Frame { node: ground, slot: None };
+        let frame = Frame {
+            node: ground,
+            slot: None,
+        };
         let Ok(me) = t.surfaces[&ground].place(id(1), frame, from, Quat::IDENTITY) else {
-            println!("  no open ground 2 m outside doorway {} of {}", show(entry), show(thing));
+            println!(
+                "  no open ground 2 m outside doorway {} of {}",
+                show(entry),
+                show(thing)
+            );
             continue;
         };
         let room = rooms_of(&t, thing).into_iter().find(|(_, floor, goal)| {
-            t.plan(&me, *floor, *goal).is_ok_and(|legs| {
-                legs.iter().find_map(|l| l.link) == Some(entry)
-            })
+            t.plan(&me, *floor, *goal)
+                .is_ok_and(|legs| legs.iter().find_map(|l| l.link) == Some(entry))
         });
         match room {
             Some((_, floor, goal)) => planned.push((entry, thing, y, from, floor, goal)),
@@ -724,7 +730,11 @@ fn terrain_eden_a_walker_goes_into_a_building_on_a_hill_and_back() {
     let mut largest = walk_on_ground(&mut t, &mut c);
     let w = &c.walkers[0];
     let arrived_in = w.arrived.expect("the walker arrives in the room");
-    assert_eq!(sim::walk::node_of(&w.body), floor, "in: on the room's floor");
+    assert_eq!(
+        sim::walk::node_of(&w.body),
+        floor,
+        "in: on the room's floor"
+    );
     let inside = world_at(&t, &w.body);
     let body = w.body;
     let mut c = Crowd::new(TICK);
@@ -733,8 +743,14 @@ fn terrain_eden_a_walker_goes_into_a_building_on_a_hill_and_back() {
         .unwrap_or_else(|e| panic!("no plan out: {}: {}", e.name, e.detail));
     largest = largest.max(walk_on_ground(&mut t, &mut c));
     let w = &c.walkers[0];
-    let arrived_out = w.arrived.expect("the walker arrives back on the open ground");
-    assert_eq!(sim::walk::node_of(&w.body), ground, "out: on the open ground");
+    let arrived_out = w
+        .arrived
+        .expect("the walker arrives back on the open ground");
+    assert_eq!(
+        sim::walk::node_of(&w.body),
+        ground,
+        "out: on the open ground"
+    );
     let out = world_at(&t, &w.body);
     println!(
         "  {} ({}, {} mm up): from ({}, {}, {}) mm on the open ground through doorway {} to ({}, {}, {}) mm on {} in \
@@ -973,7 +989,12 @@ fn bridges_eden_a_walker_walks_over_each_bridge_end_to_end() {
             .unwrap()
             .links
             .iter()
-            .find(|l| l.kind == sim::links::Kind::Step && l.nodes[0] == floor && l.nodes[1] != floor && l.nodes[1] != ground)
+            .find(|l| {
+                l.kind == sim::links::Kind::Step
+                    && l.nodes[0] == floor
+                    && l.nodes[1] != floor
+                    && l.nodes[1] != ground
+            })
             .and_then(|l| l.ends[1]);
         let (goal_node, goal) = match (to_ground.get(1), onto) {
             (Some(&s), _) => (ground, either_side(&t, s, 2_000_000).0),
@@ -1032,7 +1053,18 @@ fn bridges_eden_a_walker_walks_over_each_bridge_end_to_end() {
             } else if goal_node == floor {
                 "the deck".to_owned()
             } else {
-                format!("{}'s floor {}", def_of(&t, t.buildings.iter().find(|b| b.floors.contains_key(&goal_node)).unwrap().thing), show(goal_node))
+                format!(
+                    "{}'s floor {}",
+                    def_of(
+                        &t,
+                        t.buildings
+                            .iter()
+                            .find(|b| b.floors.contains_key(&goal_node))
+                            .unwrap()
+                            .thing
+                    ),
+                    show(goal_node)
+                )
             },
             links.len(),
             arrived / 1000

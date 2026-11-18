@@ -501,8 +501,15 @@ impl World for Town {
                     let mut stand = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
                     // The open ground's pieces are a plan at 0; a body there stands on its terrain (#3227).
                     if to == self.ground {
-                        let at = Frame { node: to, slot: None };
-                        stand = self.surface(to)?.place(body.id, at, stand, body.pose.orientation)?.pose.position;
+                        let at = Frame {
+                            node: to,
+                            slot: None,
+                        };
+                        stand = self
+                            .surface(to)?
+                            .place(body.id, at, stand, body.pose.orientation)?
+                            .pose
+                            .position;
                     }
                     let last = if to == self.ground {
                         back(&place, stand).map_err(out)?

@@ -36,7 +36,13 @@
 //!   one end on the floor's patch, the other where its passage meets the ground's squares, walked. It is no link of
 //!   the tree (its id is derived, `ground::scene::step_id`), and an edge with nothing to step down to is no link. A
 //!   step between two of a floor's own surfaces (a bridge's deck) has both ends on the floor's patch, each carried
-//!   onto its piece as a stair's end is, and joins the floor to itself, read alone or with the ground.
+//!   onto its piece as a stair's end is, and joins the floor to itself, read alone or with the ground. An outline
+//!   step that meets no open ground beyond ([`Building::loose`]) but lies over another thing's floor within [`crate::ground::STEP`]
+//!   of it joins the two floors ([`floor_joins`], #3227: the botanic red bridge's east end onto the tea house's
+//!   floor); its far end is the near end carried across the edge onto that floor's patch, and its line is in the
+//!   first building's frame.
+//! - **Ends on the terrain.** An end on the open ground stands at the ground's height there (#3227,
+//!   `ground::scene::Terrain::ground`), as a body on it does (N11a), though N3's pieces of it are a plan at 0.
 //!
 //! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
 //! locked door (the door's `locked` field is not read yet), the durable log (K4).
@@ -202,31 +208,44 @@ pub fn floor_joins(bs: &[&Building]) -> Vec<(usize, Link)> {
     for (i, b) in bs.iter().enumerate() {
         for s in &b.loose {
             let d = 2 * (s.radius + MARGIN + 1) * 1000;
-            let over = |p: Vec3| Vec3::new(p.x + s.across[0] * d / 1_000_000, p.y, p.z + s.across[1] * d / 1_000_000);
-            let (Ok(wa), Ok(wb)) = (b.place.point(over(s.end.a)), b.place.point(over(s.end.b))) else {
+            let over = |p: Vec3| {
+                Vec3::new(
+                    p.x + s.across[0] * d / 1_000_000,
+                    p.y,
+                    p.z + s.across[1] * d / 1_000_000,
+                )
+            };
+            let (Ok(wa), Ok(wb)) = (b.place.point(over(s.end.a)), b.place.point(over(s.end.b)))
+            else {
                 continue;
             };
-            let found = bs.iter().enumerate().filter(|(j, _)| *j != i).find_map(|(_, c)| {
-                let (a, bb) = (back(&c.place, wa).ok()?, back(&c.place, wb).ok()?);
-                c.floors.iter().find_map(|(&f, (_, patch))| {
-                    // The heights of the floor's pieces within a step of the step's, in that building's frame.
-                    let ys: BTreeSet<i32> = patch
-                        .pieces
-                        .iter()
-                        .filter_map(|pc| pc.vertices.first().map(|v| v[1]))
-                        .filter(|&y| (i64::from(y) * 1000 - a.y).abs() <= crate::ground::STEP * 1000)
-                        .collect();
-                    ys.into_iter().find_map(|y| {
-                        let at = |p: Vec3| Vec3::new(p.x, i64::from(y) * 1000, p.z);
-                        let e = End {
-                            floor: f,
-                            a: at(a),
-                            b: at(bb),
-                        };
-                        on_patch(patch, e.middle(), MEET_ON).then_some((e, c.place))
+            let found = bs
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .find_map(|(_, c)| {
+                    let (a, bb) = (back(&c.place, wa).ok()?, back(&c.place, wb).ok()?);
+                    c.floors.iter().find_map(|(&f, (_, patch))| {
+                        // The heights of the floor's pieces within a step of the step's, in that building's frame.
+                        let ys: BTreeSet<i32> = patch
+                            .pieces
+                            .iter()
+                            .filter_map(|pc| pc.vertices.first().map(|v| v[1]))
+                            .filter(|&y| {
+                                (i64::from(y) * 1000 - a.y).abs() <= crate::ground::STEP * 1000
+                            })
+                            .collect();
+                        ys.into_iter().find_map(|y| {
+                            let at = |p: Vec3| Vec3::new(p.x, i64::from(y) * 1000, p.z);
+                            let e = End {
+                                floor: f,
+                                a: at(a),
+                                b: at(bb),
+                            };
+                            on_patch(patch, e.middle(), MEET_ON).then_some((e, c.place))
+                        })
                     })
-                })
-            });
+                });
             if let Some((far, place)) = found {
                 let there = place.point(far.middle()).and_then(|p| back(&b.place, p));
                 let Ok(there) = there else {

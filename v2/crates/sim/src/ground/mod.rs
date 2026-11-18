@@ -39,6 +39,12 @@
 //!   corner or its middle over water (ground cover: a pier, a shore) keeps 0, the cover's height as before. Cutting
 //!   through every 1 m sample instead made Eden's open ground 24 times the triangles and slowed N15's thousand
 //!   walkers past real time; heights on the vertices made the routes' one level many.
+//! - **Things on the terrain.** What stands on the open ground is measured from the ground under it, not from the
+//!   plan's 0 (#3227; `scene::Terrain::ground`: the terrain's height there, or 0 where that is nearer, as over water
+//!   under a pier): a floor is ground cover within [`STEP`] of it, a footprint below [`BODY_HIGH`] above it, a
+//!   doorway or a step meets the open ground's plan from its height above it, and an outline step steps down to it.
+//!   So Eden's 94 floors of buildings on its hills (a cottage 10.3 m up) are joined to the open ground like the
+//!   town's. Boxes on the open ground still span the body from the plan's 0.
 //! - **Steep cells.** A 1 m cell whose slope is above [`STEEP`] (a rise over run of 0.5774, today's) is taken from
 //!   the open ground before its cover is added back: no centre stands on it, so the mover slides along its edge and
 //!   a route goes round it. Cells are taken as they are, not grown by the radius: a body's edge may hang over one.
