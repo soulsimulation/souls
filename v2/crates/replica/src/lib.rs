@@ -22,6 +22,7 @@ pub mod query;
 pub mod read;
 pub mod rules;
 pub mod time;
+pub mod timed;
 pub mod tree;
 pub mod views;
 // R1's bindings import wasm-bindgen's glue, so the checker (T10, no imports) leaves them out.

@@ -14,6 +14,7 @@ pub mod mover;
 pub mod moves;
 pub mod routes;
 pub mod spots;
+pub mod timed;
 pub mod timers;
 pub mod unstick;
 pub mod walk;

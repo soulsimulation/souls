@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `frozen`: K8, #2671; `timers`: K9, #2672; `moves`: B2, #2681; `view-tier`: R3, #2697."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `frozen`: K8, #2671; `timers`: K9, #2672; `moves`: B2, #2681; `view-tier`: R3, #2697; `timed`: F5, #2770."
 
 [[bin]]
 name = "tree"
@@ -39,6 +39,11 @@ path = "walkers/main.rs"
 [[bin]]
 name = "forms"
 path = "src/forms.rs"
+
+# F5, #2770: a tick's time with 5,000 timed values and none due.
+[[bin]]
+name = "timed"
+path = "src/timed.rs"
 
 [dependencies]
 replica = { path = "../../crates/replica" }
