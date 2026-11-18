@@ -31,6 +31,7 @@ import { ApiError } from '../souls.ts';
 import type { GodMode } from './god.ts';
 import { FOOTPRINT_BYTES, godBodyLimit } from './ingestion.ts';
 import { godTokenLimiter } from './rate-limit.ts';
+import { refuseWhenDiskLow } from '../load/disk-headroom.ts';
 import { intakeUpload, recordIntake } from '../moderation/intake.ts';
 import { defaultSiteLog, moderationFor } from '../moderation/store.ts';
 import { assetPolicy, UploadRejected, validateUpload } from '../moderation/validate.ts';
@@ -593,6 +594,7 @@ export function mountAssetRoutes(app: Hono, d: AssetDeps): AssetStore {
 
   app.post('/v1/god/assets', godBodyLimit(budget), async (c) => {
     limitGod(c, 'asset-upload', L.assetUploadsPerMinute);
+    refuseWhenDiskLow(c, (...a) => new ApiError(...a));   // #2538
     const ct = c.req.header('content-type') ?? '';
     const q = (k: string) => c.req.query(k);
     let bytes: Uint8Array | null = null, footprint: Uint8Array | null = null;
@@ -695,6 +697,7 @@ export function mountAssetRoutes(app: Hono, d: AssetDeps): AssetStore {
   });
   app.post('/v1/god/defs/*', async (c) => {
     limitGod(c, 'thumbnail-upload', L.thumbnailUploadsPerMinute);
+    refuseWhenDiskLow(c, (...a) => new ApiError(...a));   // #2538
     const rest = decodeURIComponent(c.req.path.replace(/^.*\/v1\/god\/defs\//, ''));
     if (!rest.endsWith('/thumb.png')) throw new ApiError(404, 'not-found', 'POST /v1/god/defs/<ref>/thumb.png with a PNG body');
     const def = findDef(rest.slice(0, -'/thumb.png'.length));

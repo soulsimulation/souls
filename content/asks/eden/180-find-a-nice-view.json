@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":180,"group":"getting-around","words":"find a nice view","obvious":2,"things":{"hill":"eden:hill"},"chain":[{"this":"me","form":"go_to","args":{"place":"hill"}},{"this":"me","form":"look_around"}]}

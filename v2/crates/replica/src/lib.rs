@@ -7,6 +7,7 @@ pub mod effects;
 pub mod encode;
 pub mod hash;
 pub mod ids;
+pub mod kinds;
 pub mod pose;
 pub mod query;
 pub mod rules;
