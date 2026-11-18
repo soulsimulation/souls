@@ -8,6 +8,7 @@
 //   souls.mjs find <words...> [--limit n]     one search over the copy
 //   souls.mjs act <verb> [<verb>...]          a ranked list: the first is the act, the rest its fallbacks
 //   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened, or at the timeout
+//   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop                            ends the daemon
 //   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
 //   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
@@ -23,7 +24,7 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
 import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 
-export const OPS = ['status', 'look', 'find', 'act', 'wait', 'stop'];
+export const OPS = ['status', 'look', 'find', 'act', 'wait', 'stats', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = ['digest', 'consolidate'];
 

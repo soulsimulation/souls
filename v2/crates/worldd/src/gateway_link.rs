@@ -4,7 +4,7 @@
 //!
 //! Each intent goes to the world (`worldd::answers`, I4 #2687): checked, committed at the next tick, logged, and
 //! answered after that tick's sync. A repeat gets the answer it had, across restarts too, since the world rebuilds
-//! its sequences from the log. The world here is I3's lamps world (`checkers::lamps`), `--rooms` rooms of `--bodies`
+//! its sequences from the log. The world here is I3's toggles world (`checkers::toggles`), `--rooms` rooms of `--bodies`
 //! bodies, each with a toggle, and `--items` items in each room; its log is `--log` (default: the socket's path and
 //! `.log`).
 //!
@@ -21,50 +21,15 @@
 //! actor over the place (`worldd::answers`).
 
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
-use std::sync::mpsc::channel;
 use std::time::Duration;
 
 use replica::encode::from_hex;
 use replica::ids::Scope;
-use replica::intents::INTENT_MOST;
 use sim::log::FileStore;
-use worldd::answers::{self, Config, Door, Event};
+use worldd::answers::{self, Config, Event};
 use worldd::checkers::toggles;
-
-fn serve(world: Door, mut stream: UnixStream) {
-    let Ok(mut out) = stream.try_clone() else {
-        return;
-    };
-    let (reply, answers) = channel::<Vec<u8>>();
-    std::thread::spawn(move || {
-        for frame in answers {
-            let len = u32::try_from(frame.len()).unwrap_or(u32::MAX).to_be_bytes();
-            if out.write_all(&len).is_err() || out.write_all(&frame).is_err() {
-                return;
-            }
-        }
-    });
-    loop {
-        let mut len = [0u8; 4];
-        if stream.read_exact(&mut len).is_err() {
-            return;
-        }
-        let len = u32::from_be_bytes(len) as usize;
-        if len > INTENT_MOST as usize {
-            return;
-        }
-        let mut bytes = vec![0u8; len];
-        if stream.read_exact(&mut bytes).is_err() {
-            return;
-        }
-        if !world.arrive(bytes, reply.clone()) {
-            return;
-        }
-    }
-}
 
 /// `worldd gateway-link ...`: listens for the gateway until killed.
 pub fn run(args: &[String]) -> i32 {
@@ -146,7 +111,7 @@ pub fn run(args: &[String]) -> i32 {
     }
     for stream in listener.incoming().flatten() {
         let door = world.door();
-        std::thread::spawn(move || serve(door, stream));
+        std::thread::spawn(move || answers::serve(door, stream));
     }
     0
 }

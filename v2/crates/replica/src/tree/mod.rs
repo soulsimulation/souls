@@ -474,6 +474,11 @@ impl Tree {
         &self.moving
     }
 
+    /// The pending timers by id (T6 rule 15), each with the node that owns it.
+    pub fn timers(&self) -> &BTreeMap<Id, TimerState> {
+        &self.timers
+    }
+
     /// The time effects applied, in order (T5).
     pub fn time(&self) -> &[TimeEffect] {
         &self.time
