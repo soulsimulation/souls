@@ -12,6 +12,7 @@ pub mod durability;
 pub mod effects;
 pub mod encode;
 pub mod hash;
+pub mod history;
 pub mod host;
 pub mod ids;
 pub mod intents;
