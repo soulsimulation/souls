@@ -14,6 +14,7 @@ pub mod encode;
 pub mod hash;
 pub mod host;
 pub mod ids;
+pub mod index;
 pub mod intent_decode;
 pub mod intents;
 pub mod kinds;

@@ -8,3 +8,7 @@ description = "The world process (Engine v2, #2635): its clock and watchdog (K7,
 [dependencies]
 replica = { path = "../replica" }
 sim = { path = "../sim" }
+
+[dev-dependencies]
+# E1's Eden measures (tests/index.rs) load Eden 2026's imported tree (N1, #2649).
+import-eden = { path = "../../tools/import-eden" }
