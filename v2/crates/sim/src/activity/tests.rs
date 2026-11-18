@@ -119,6 +119,7 @@ fn rules(souls: &[Id]) -> Rules {
         owner: owner.into(),
         children: children.iter().map(|c| (*c).to_owned()).collect(),
         slots: BTreeMap::new(),
+        hands: None,
     };
     Rules {
         kinds: BTreeMap::from([
