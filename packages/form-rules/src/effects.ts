@@ -9,7 +9,8 @@
 //   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not. An amount
 //   moved between two fields of one thing (`into_field`: a stock into a well) is two sets on that thing, and balances
 //   the same way.
-// - Holding is a parent: take and put are `reparent` into or out of a hand or a slot.
+// - Holding is a parent: take and put are `reparent` into or out of a hand, a slot or the actor's place (`here`).
+//   What is moved is the actor, this thing, a thing argument of the form, or the one thing at the end of a link.
 // - A made thing appears where its form names: a slot, the actor's hand, or `here`, loose in the actor's
 //   place (the spot is Engine v2's set-down, E4, and is not chosen here). Its id comes from the receipt.
 // - Effects are worked out in order on a copy, so a later effect sees an earlier one, and a form whose
@@ -158,9 +159,14 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     }
     return slotPlace(into);
   };
+  // The node an effect moves or removes: the actor, this thing, a thing argument of the form (a body's pick_up), or
   // `{link}`: the one thing at the end of that link of this node (what a give hands over, SA-G4); never a body.
   const subject = (what: unknown): string | null => {
     if (what === 'actor' || what === 'this') return what === 'actor' ? actor : self;
+    if (has(what, 'arg')) {
+      const id = args[(what as { arg: string }).arg];
+      return typeof id === 'string' && has(work, id) ? id : null;
+    }
     const link = what && typeof what === 'object' ? (what as { link?: unknown }).link : undefined;
     const ends = typeof link === 'string' ? ((work[self].links?.[link] ?? []) as string[]) : [];
     return ends.length === 1 && has(work, ends[0]) && !has(work[ends[0]], 'hands') ? ends[0] : null;

@@ -1,0 +1,700 @@
+//! Links: doors that must be opened, stairs and ladders (Engine v2 N4, #2652). A link joins two ends, each a segment
+//! on a patch (N3's walkable ground, `crate::ground`), and names the move that crosses it (contract T4). A body
+//! crosses a link only by that move, from one end to the other; nothing else takes it from one patch to another.
+//!
+//! - **What a link is here.** Its id, its kind (a doorway, a stair, a ramp or a ladder: the T2 link's type), the two
+//!   nodes it joins, its owning node (T1), its width, the abilities its move needs, and the line a body's centre
+//!   follows from one end to the other, in the building's frame, in micrometres. A doorway's ends are where the
+//!   passage through it meets the floor's patch on each side (N3's [`Meet`]). A stair's or ladder's ends are its
+//!   path's ends, each carried along the floor to the first point of that floor's patch (its apron: the band a floor
+//!   is shrunk by at its edge is part of the crossing, as the grown doorway is). Its line is the path in three
+//!   dimensions, rising evenly from `y0` to `y1` along its run: a body on it is the path at a distance.
+//! - **Doors.** A door is a node standing in its doorway (N1's door thing); open or shut is a field on it
+//!   ([`F_OPEN`]), never on the link, and its frame and leaf belong to the link, not to the room's solids (N3 cuts no
+//!   obstacle for it). Crossing a shut door is stand, open, cross: the opening is part of the walk order the agent
+//!   wrote ([`Leg::Cross`]), and it is an effect in the stream, a set of the door's field with the named event
+//!   [`DOOR_OPENED`]. Opening needs hands: a body without them is refused at a shut door as `door-needs-hands`, and
+//!   the door stays shut. No kind says "close behind" yet, so a door crossed stays open.
+//! - **What a link that cannot be crossed is.** A doorway with no width left for the centre (N3's four hall back
+//!   doors blocked by content) is `link-too-narrow`. A doorway whose far side has no ground at its height (an upper
+//!   storey's door marked "outside") joins nothing walkable: it is not crossable (`link-end-off-ground`), never a
+//!   drop. A link is never a way to fall, so a door never strands a body on the far side of nothing.
+//! - **Two bodies at one door.** State is read a tick late (T1), so two bodies may both ask to open a shut door in
+//!   one tick. The door's own writer takes the asks of a tick together and writes one opening ([`Doors`]).
+//!
+//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
+//! locked door (no stored field says a door is locked yet), the durable log (K4). The doorways that open to the open
+//! ground are read here with one end only: their other end is the open ground's patch, in the world's frame.
+
+use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR};
+use crate::ground::{HUMAN_RADIUS, MARGIN, Meet, Patch, Scene, Turn, cut_floor};
+use replica::effects::{
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Header, Part, Refusal, Rest,
+    read_id,
+};
+use replica::encode::{Name, Value, encode};
+use replica::ids::Id;
+use replica::pose::Vec3;
+use replica::tree::{Rules, Tree};
+use replica::world_model::plain;
+use std::collections::BTreeMap;
+
+/// A door's field: 1 open, 0 shut (N1's `F_OPEN`).
+pub const F_OPEN: u64 = 6;
+/// A floor's stairs, ramps and ladders (N1's `F_STAIRS`): `[[link, kind, to, width, y0, y1, [[x, z] …]] …]` mm.
+pub const F_STAIRS: u64 = 21;
+/// A floor's level (N1's `F_LEVEL`).
+pub const F_LEVEL: u64 = 5;
+/// The named event an opening carries; its field 1 is the doorway link.
+pub const DOOR_OPENED: &str = "souls:door-opened";
+
+/// A link's kind: its T2 type, and the move that crosses it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Doorway,
+    Stairs,
+    Ramp,
+    Ladder,
+}
+
+impl Kind {
+    fn of(ty: &str) -> Option<Kind> {
+        Some(match ty {
+            DOORWAY => Kind::Doorway,
+            "eden:stairs" => Kind::Stairs,
+            "eden:ramp" => Kind::Ramp,
+            "eden:ladder" => Kind::Ladder,
+            _ => return None,
+        })
+    }
+
+    /// The move that crosses it (contract T4).
+    pub fn move_name(self) -> &'static str {
+        match self {
+            Kind::Doorway | Kind::Ramp => "souls:walk",
+            Kind::Stairs => "souls:stairs",
+            Kind::Ladder => "souls:climb",
+        }
+    }
+
+    /// What its move needs of a body. Opening a shut door needs hands besides.
+    pub fn needs(self) -> Abilities {
+        Abilities {
+            legs: true,
+            hands: self == Kind::Ladder,
+        }
+    }
+}
+
+/// What a body has, as far as a link asks (its family's resources, T9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Abilities {
+    pub legs: bool,
+    pub hands: bool,
+}
+
+/// One end of a link: the segment where it meets a patch (µm, the building's frame), and that patch's floor node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct End {
+    pub floor: Id,
+    pub a: Vec3,
+    pub b: Vec3,
+}
+
+impl End {
+    /// The segment's middle: where a crossing starts or ends.
+    pub fn middle(&self) -> Vec3 {
+        Vec3::new(
+            (self.a.x + self.b.x) / 2,
+            (self.a.y + self.b.y) / 2,
+            (self.a.z + self.b.z) / 2,
+        )
+    }
+}
+
+/// A link as a body crosses it.
+#[derive(Clone, Debug)]
+pub struct Link {
+    pub id: Id,
+    pub kind: Kind,
+    /// The nodes it joins (rooms, floors, or a room and the open ground), as the T2 link holds them.
+    pub nodes: [Id; 2],
+    pub owner: Id,
+    /// The doorway's or the flight's width, µm.
+    pub width: i64,
+    /// Its two ends on patches, when each has one.
+    pub ends: [Option<End>; 2],
+    /// The line a body's centre follows from end 0 to end 1, µm (empty when it cannot be crossed).
+    pub line: Vec<Vec3>,
+    /// The door standing in a doorway, if it has one.
+    pub door: Option<Id>,
+    /// Why it cannot be crossed, if it cannot.
+    pub blocked: Option<&'static str>,
+}
+
+/// The links of one building, with the patch of each of its floors, all in the building's frame.
+pub struct Building {
+    pub thing: Id,
+    pub links: Vec<Link>,
+    /// Each floor node's patch for today's walking body, and its level.
+    pub floors: BTreeMap<Id, (i64, Patch)>,
+}
+
+fn int(v: &Value) -> Option<i64> {
+    match v {
+        Value::Uint(u) => i64::try_from(*u).ok(),
+        Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+        _ => None,
+    }
+}
+
+fn row(v: &Value) -> &[Value] {
+    match v {
+        Value::Array(a) => a,
+        _ => &[],
+    }
+}
+
+fn um(p: [i32; 3]) -> Vec3 {
+    Vec3::new(
+        i64::from(p[0]) * 1000,
+        i64::from(p[1]) * 1000,
+        i64::from(p[2]) * 1000,
+    )
+}
+
+fn sq(v: i64) -> i128 {
+    i128::from(v) * i128::from(v)
+}
+
+/// The squared length of `b − a`, µm².
+fn dist2(a: Vec3, b: Vec3) -> i128 {
+    sq(b.x - a.x) + sq(b.y - a.y) + sq(b.z - a.z)
+}
+
+/// The squared distance from `p` to the segment `a`–`b` on the ground plane, compared with `tol` (all mm): within?
+fn near_segment(p: [i64; 2], a: [i64; 2], b: [i64; 2], tol: i64) -> bool {
+    let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+    let (px, pz) = (i128::from(p[0] - a[0]), i128::from(p[1] - a[1]));
+    let l2 = ex * ex + ez * ez;
+    let dot = px * ex + pz * ez;
+    let t2 = i128::from(tol) * i128::from(tol);
+    if l2 == 0 || dot <= 0 {
+        return px * px + pz * pz <= t2;
+    }
+    if dot >= l2 {
+        let (qx, qz) = (i128::from(p[0] - b[0]), i128::from(p[1] - b[1]));
+        return qx * qx + qz * qz <= t2;
+    }
+    let cross = px * ez - pz * ex;
+    cross * cross <= t2 * l2
+}
+
+/// Whether the point `p` (µm) stands on the patch: inside a triangle of a piece at its height, or within `tol` mm of
+/// one (a point the grid put on a piece's edge).
+pub fn on_patch(patch: &Patch, p: Vec3, tol: i64) -> bool {
+    let (x, y, z) = (
+        (p.x + 500 * p.x.signum()) / 1000,
+        (p.y + 500 * p.y.signum()) / 1000,
+        (p.z + 500 * p.z.signum()) / 1000,
+    );
+    patch.pieces.iter().any(|pc| {
+        pc.vertices.first().is_some_and(|v| i64::from(v[1]) == y)
+            && pc.triangles.iter().any(|t| {
+                let v = |k: usize| {
+                    let w = pc.vertices[t[k] as usize];
+                    [i64::from(w[0]), i64::from(w[2])]
+                };
+                let (a, b, c) = (v(0), v(1), v(2));
+                let side = |a: [i64; 2], b: [i64; 2]| {
+                    (b[0] - a[0]) * (z - a[1]) - (b[1] - a[1]) * (x - a[0])
+                };
+                let (s0, s1, s2) = (side(a, b), side(b, c), side(c, a));
+                let inside = (s0 >= 0 && s1 >= 0 && s2 >= 0) || (s0 <= 0 && s1 <= 0 && s2 <= 0);
+                inside
+                    || (tol > 0
+                        && [(a, b), (b, c), (c, a)]
+                            .iter()
+                            .any(|(a, b)| near_segment([x, z], *a, *b, tol)))
+            })
+    })
+}
+
+/// How far a stair's end is carried along the floor, at most, to reach its patch (the clearance and then some), mm.
+const APRON_MAX: i64 = 1_000;
+
+/// The first point of the patch from `end` (µm) along the unit `dir` (µm per metre, on the ground plane).
+fn apron(patch: &Patch, end: Vec3, dir: [i64; 2]) -> Option<Vec3> {
+    (0..=APRON_MAX).find_map(|k| {
+        let q = Vec3::new(end.x + dir[0] * k / 1000, end.y, end.z + dir[1] * k / 1000);
+        on_patch(patch, q, 0).then_some(q)
+    })
+}
+
+/// The unit (µm per metre) from `a` to `b` on the ground plane.
+fn unit(a: Vec3, b: Vec3) -> [i64; 2] {
+    let (dx, dz) = (b.x - a.x, b.z - a.z);
+    let l = (sq(dx) + sq(dz)).isqrt().max(1) as i64;
+    [dx * 1_000_000 / l, dz * 1_000_000 / l]
+}
+
+impl Building {
+    /// Reads the links of the building `thing` from the tree: its floors' patches (N3), its doorways from where they
+    /// meet those patches, its stairs and ladders from its floors' rows, and the doors standing in its doorways.
+    pub fn read(tree: &Tree, thing: Id) -> Result<Building, String> {
+        let th = tree.handle(thing).ok_or("no such thing")?;
+        let mut floors = BTreeMap::new();
+        let mut doors: BTreeMap<Id, Id> = BTreeMap::new();
+        let mut widths: BTreeMap<Id, i64> = BTreeMap::new();
+        let mut all_floors = Vec::new();
+        for &c in tree.children(th).ok_or("a node that is gone")? {
+            let n = tree.node(c).ok_or("a node that is gone")?;
+            if plain(n.kind().as_str()) == FLOOR {
+                all_floors.push(n.id());
+                let level = n.fields().get(&F_LEVEL).and_then(int).unwrap_or(0);
+                // A floor that does not cut (N3 lists a stair's floor with no surfaces) has no patch: no link's end
+                // is on it.
+                let Ok(scene) = Scene::of(tree, n.id()) else {
+                    continue;
+                };
+                for d in &scene.doorways {
+                    widths.insert(d.link, d.width);
+                }
+                if let Ok(patch) = cut_floor(&scene, HUMAN_RADIUS, Turn::NONE) {
+                    floors.insert(n.id(), (level, patch));
+                }
+            } else if let Some(l) = n.fields().get(&F_OPEN_DOOR_LINK) {
+                doors.insert(read_id(l).map_err(|e| e.detail)?, n.id());
+            }
+        }
+        let mut links = Vec::new();
+        // Doorways: where each meets its floor's patch, on each side.
+        let mut seen = std::collections::BTreeSet::new();
+        for (&floor, (_, patch)) in &floors {
+            let mut by_link: BTreeMap<Id, Vec<&Meet>> = BTreeMap::new();
+            for m in &patch.meets {
+                by_link.entry(m.link).or_default().push(m);
+            }
+            for (id, ms) in by_link {
+                if !seen.insert(id) {
+                    continue;
+                }
+                let (ty, nodes, owning, _) = tree.link(id).ok_or("a doorway that is gone")?;
+                let owner = nodes[usize::from(owning == replica::world_model::End::Second)];
+                let side = |s: i8| {
+                    ms.iter().find(|m| m.side == s).map(|m| End {
+                        floor,
+                        a: um(m.a),
+                        b: um(m.b),
+                    })
+                };
+                let ends = [side(-1), side(1)];
+                let width_left = ms.iter().map(|m| m.width_left).max().unwrap_or(0);
+                let blocked = if ends.iter().any(Option::is_none) {
+                    Some("link-end-off-ground")
+                } else if width_left <= 0 || !ms.iter().all(|m| m.through) {
+                    Some("link-too-narrow")
+                } else {
+                    None
+                };
+                let line = match (blocked, ends) {
+                    (None, [Some(a), Some(b)]) => vec![a.middle(), b.middle()],
+                    _ => Vec::new(),
+                };
+                let width = widths.get(&id).copied().unwrap_or(0);
+                links.push(Link {
+                    id,
+                    kind: Kind::of(ty.as_str()).unwrap_or(Kind::Doorway),
+                    nodes,
+                    owner,
+                    width,
+                    ends,
+                    line,
+                    door: doors.get(&id).copied(),
+                    blocked,
+                });
+            }
+        }
+        // Stairs, ramps and ladders: each floor's rows, owned by the lower floor.
+        for &floor in &all_floors {
+            let n = tree
+                .node(tree.handle(floor).ok_or("a floor that is gone")?)
+                .ok_or("a floor that is gone")?;
+            for r in n.fields().get(&F_STAIRS).map(row).unwrap_or(&[]) {
+                let r = row(r);
+                let id = r
+                    .first()
+                    .map(read_id)
+                    .transpose()
+                    .map_err(|e| e.detail)?
+                    .ok_or("a stair row's link")?;
+                let (ty, nodes, owning, _) = tree.link(id).ok_or("a stair that is gone")?;
+                let owner = nodes[usize::from(owning == replica::world_model::End::Second)];
+                let kind = Kind::of(ty.as_str()).ok_or("a stair of no known kind")?;
+                let n = |k: usize| r.get(k).and_then(int).ok_or("a stair row");
+                let (width, y0, y1) = (n(3)? * 1000, n(4)? * 1000, n(5)? * 1000);
+                let pts: Vec<[i64; 2]> = r
+                    .get(6)
+                    .map(row)
+                    .unwrap_or(&[])
+                    .iter()
+                    .map(|p| match row(p) {
+                        [x, z, ..] => Ok([
+                            int(x).ok_or("a point")? * 1000,
+                            int(z).ok_or("a point")? * 1000,
+                        ]),
+                        _ => Err("a point is [x, z]"),
+                    })
+                    .collect::<Result<_, _>>()?;
+                if pts.len() < 2 {
+                    return Err("a stair path of fewer than two points".into());
+                }
+                // Rising evenly along its run: each point's height by the run walked to it.
+                let mut run = vec![0i64];
+                for w in pts.windows(2) {
+                    let l = (sq(w[1][0] - w[0][0]) + sq(w[1][1] - w[0][1])).isqrt() as i64;
+                    run.push(run[run.len() - 1] + l);
+                }
+                let total = run[run.len() - 1].max(1);
+                let mut line: Vec<Vec3> = pts
+                    .iter()
+                    .zip(&run)
+                    .map(|(p, d)| {
+                        let y = y0
+                            + ((i128::from(y1 - y0) * i128::from(*d)) / i128::from(total)) as i64;
+                        Vec3::new(p[0], y, p[1])
+                    })
+                    .collect();
+                let k = line.len();
+                let patch = |f: Id| floors.get(&f).map(|(_, p)| p);
+                let lo = patch(nodes[0]).map(|p| apron(p, line[0], unit(line[1], line[0])));
+                let hi =
+                    patch(nodes[1]).map(|p| apron(p, line[k - 1], unit(line[k - 2], line[k - 1])));
+                let half = (width / 2 - (HUMAN_RADIUS + MARGIN) * 1000).max(0);
+                let end = |f: Id, at: Vec3, d: [i64; 2]| End {
+                    floor: f,
+                    a: Vec3::new(
+                        at.x - d[1] * half / 1_000_000,
+                        at.y,
+                        at.z + d[0] * half / 1_000_000,
+                    ),
+                    b: Vec3::new(
+                        at.x + d[1] * half / 1_000_000,
+                        at.y,
+                        at.z - d[0] * half / 1_000_000,
+                    ),
+                };
+                let (ends, blocked) = match (lo.flatten(), hi.flatten()) {
+                    (Some(a), Some(b)) => {
+                        let (da, db) = (unit(line[0], line[1]), unit(line[k - 2], line[k - 1]));
+                        if a != line[0] {
+                            line.insert(0, a);
+                        }
+                        if b != line[line.len() - 1] {
+                            line.push(b);
+                        }
+                        (
+                            [Some(end(nodes[0], a, da)), Some(end(nodes[1], b, db))],
+                            None,
+                        )
+                    }
+                    _ => {
+                        line.clear();
+                        ([None, None], Some("link-end-off-ground"))
+                    }
+                };
+                links.push(Link {
+                    id,
+                    kind,
+                    nodes,
+                    owner,
+                    width,
+                    ends,
+                    line,
+                    door: None,
+                    blocked,
+                });
+            }
+        }
+        Ok(Building {
+            thing,
+            links,
+            floors,
+        })
+    }
+
+    pub fn link(&self, id: Id) -> Option<&Link> {
+        self.links.iter().find(|l| l.id == id)
+    }
+}
+
+/// A door's writer: the asks to open made in one tick, written together as one opening per door.
+pub struct Doors {
+    pub header: Header,
+    pub rules: Rules,
+    /// The zone's next sequence.
+    pub next: u64,
+    /// Every effect written, in order: the stream.
+    pub stream: Vec<Effect>,
+    asks: BTreeMap<Id, (Id, Cause, Actor)>,
+}
+
+impl Doors {
+    pub fn new(header: Header, rules: Rules, next: u64) -> Doors {
+        Doors {
+            header,
+            rules,
+            next,
+            stream: Vec::new(),
+            asks: BTreeMap::new(),
+        }
+    }
+
+    /// Asks that `door` (standing in `link`) be opened, by `actor` for the order `cause`.
+    pub fn ask(&mut self, door: Id, link: Id, cause: Cause, actor: Actor) {
+        self.asks.entry(door).or_insert((link, cause, actor));
+    }
+
+    /// Writes the tick's openings at world time `at`: one effect per door still shut, committed to the tree.
+    pub fn flush(&mut self, tree: &mut Tree, at: i64) -> Result<(), Refusal> {
+        for (door, (link, cause, actor)) in std::mem::take(&mut self.asks) {
+            let n = tree
+                .node(tree.handle(door).ok_or_else(|| gone(door))?)
+                .ok_or_else(|| gone(door))?;
+            if n.fields().get(&F_OPEN) == Some(&Value::Uint(1)) {
+                continue;
+            }
+            let audience = n.audience();
+            let effect = Effect {
+                envelope: Envelope {
+                    sequence: self.next,
+                    at,
+                    cause,
+                    actor,
+                    audience,
+                    node: door,
+                },
+                body: Body::Changes(vec![ChangeRec {
+                    change: Change::Set {
+                        node: door,
+                        field: F_OPEN,
+                        to: Value::Uint(1),
+                        by: None,
+                    },
+                    rest: Rest::new(),
+                }]),
+                events: Some(vec![Event {
+                    name: Name::new(DOOR_OPENED).expect("a name"),
+                    fields: BTreeMap::from([(1, link.to_value())]),
+                    changes: vec![0],
+                    rest: Rest::new(),
+                }]),
+                rest: Rest::new(),
+            };
+            let bytes = encode(&Value::Map(BTreeMap::from([
+                (1, Value::Bytes(self.header.hash().to_bytes())),
+                (2, Value::Array(vec![effect.to_value()])),
+            ])))
+            .map_err(|e| refusal("encoding", e.to_string()))?;
+            tree.commit(&self.header, &Part::read(&bytes)?, &self.rules)?;
+            self.next += 1;
+            self.stream.push(effect);
+        }
+        Ok(())
+    }
+}
+
+fn gone(id: Id) -> Refusal {
+    Refusal {
+        name: "node-missing",
+        detail: replica::world_model::show(id),
+    }
+}
+
+fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
+    Refusal {
+        name,
+        detail: detail.into(),
+    }
+}
+
+/// One leg of a walk order the agent wrote.
+#[derive(Clone, Copy, Debug)]
+pub enum Leg {
+    /// Walk straight to this point (x, z µm) on the floor the body is on.
+    Walk([i64; 2]),
+    /// Go to the near end of this link and cross it by its move, opening its door first if it is shut.
+    Cross(Id),
+}
+
+/// A body run by a script: no route search and no walk skill, only the legs it is given, a fixed speed and a tick.
+pub struct Walker {
+    /// Its centre, µm, in the building's frame.
+    pub at: Vec3,
+    /// The floor node whose patch it stands on.
+    pub floor: Id,
+    pub abilities: Abilities,
+    /// µm a second.
+    pub speed: i64,
+    /// µs a tick.
+    pub tick: i64,
+    /// The world time, µs.
+    pub now: i64,
+    /// Every step's squared length, µm², in order.
+    pub steps: Vec<i128>,
+    /// Where each step ended, and the link it was crossing, if any.
+    pub trail: Vec<(Vec3, Option<Id>)>,
+    crossing: Option<Id>,
+    pub soul: Id,
+    pub order: Id,
+}
+
+impl Walker {
+    /// A body at `at` on `floor`'s patch, at world time 0, acting for `soul` under the order `order`.
+    pub fn new(
+        at: Vec3,
+        floor: Id,
+        abilities: Abilities,
+        speed: i64,
+        tick: i64,
+        soul: Id,
+        order: Id,
+    ) -> Walker {
+        Walker {
+            at,
+            floor,
+            abilities,
+            speed,
+            tick,
+            now: 0,
+            steps: Vec::new(),
+            trail: Vec::new(),
+            crossing: None,
+            soul,
+            order,
+        }
+    }
+
+    fn reach(&self) -> i64 {
+        self.speed * self.tick / 1_000_000
+    }
+
+    /// One tick toward `to`, never longer than speed times the tick. Returns whether it got there.
+    fn step(&mut self, to: Vec3) -> bool {
+        let d2 = dist2(self.at, to);
+        let r = self.reach();
+        let next = if d2 <= sq(r) {
+            to
+        } else {
+            let d = d2.isqrt();
+            let part = |a: i64, b: i64| a + ((i128::from(b - a) * i128::from(r)) / d) as i64;
+            Vec3::new(
+                part(self.at.x, to.x),
+                part(self.at.y, to.y),
+                part(self.at.z, to.z),
+            )
+        };
+        self.steps.push(dist2(self.at, next));
+        self.trail.push((next, self.crossing));
+        self.at = next;
+        self.now += self.tick;
+        next == to
+    }
+
+    /// Walks straight to `to` on its floor's patch; every step stands on it, or the walk is refused as `off-ground`.
+    fn walk(&mut self, b: &Building, to: Vec3) -> Result<(), Refusal> {
+        let patch = &b.floors.get(&self.floor).ok_or_else(|| gone(self.floor))?.1;
+        loop {
+            let done = self.step(to);
+            if !on_patch(patch, self.at, 2) {
+                return Err(refusal(
+                    "off-ground",
+                    format!("({}, {}, {}) µm", self.at.x, self.at.y, self.at.z),
+                ));
+            }
+            if done {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Carries out a walk order, leg by leg.
+    pub fn run(
+        &mut self,
+        b: &Building,
+        tree: &mut Tree,
+        doors: &mut Doors,
+        legs: &[Leg],
+    ) -> Result<(), Refusal> {
+        for leg in legs {
+            match *leg {
+                Leg::Walk([x, z]) => self.walk(b, Vec3::new(x, self.at.y, z))?,
+                Leg::Cross(id) => self.cross(b, tree, doors, id)?,
+            }
+        }
+        Ok(())
+    }
+
+    fn cross(
+        &mut self,
+        b: &Building,
+        tree: &mut Tree,
+        doors: &mut Doors,
+        id: Id,
+    ) -> Result<(), Refusal> {
+        let show = || replica::world_model::show(id);
+        let link = b.link(id).ok_or_else(|| refusal("link-missing", show()))?;
+        if let Some(why) = link.blocked {
+            return Err(refusal(why, show()));
+        }
+        let needs = link.kind.needs();
+        if needs.legs && !self.abilities.legs {
+            return Err(refusal("link-needs-legs", show()));
+        }
+        if needs.hands && !self.abilities.hands {
+            return Err(refusal("link-needs-hands", show()));
+        }
+        // The near end is the one on this floor nearest the body.
+        let near = (0..2)
+            .filter(|&k| link.ends[k].is_some_and(|e| e.floor == self.floor))
+            .min_by_key(|&k| link.ends[k].map_or(i128::MAX, |e| dist2(self.at, e.middle())))
+            .ok_or_else(|| refusal("link-not-here", show()))?;
+        let mut line = link.line.clone();
+        if near == 1 {
+            line.reverse();
+        }
+        self.walk(b, line[0])?;
+        if let Some(door) = link.door {
+            let shut = tree
+                .node(tree.handle(door).ok_or_else(|| gone(door))?)
+                .and_then(|n| n.fields().get(&F_OPEN).cloned())
+                != Some(Value::Uint(1));
+            if shut {
+                if !self.abilities.hands {
+                    return Err(refusal("door-needs-hands", show()));
+                }
+                // Stand, open: the opening is written at the end of this tick and read the next.
+                self.steps.push(0);
+                self.trail.push((self.at, None));
+                self.now += self.tick;
+                doors.ask(door, id, Cause::Intent(self.order), Actor::Soul(self.soul));
+                doors.flush(tree, self.now)?;
+            }
+        }
+        self.crossing = Some(id);
+        for &p in &line[1..] {
+            while !self.step(p) {}
+        }
+        self.crossing = None;
+        self.floor = link.ends[1 - near].map_or(self.floor, |e| e.floor);
+        Ok(())
+    }
+
+    /// The largest step taken, µm (rounded down), and the bar it is held to: speed times the tick.
+    pub fn largest_step(&self) -> (i64, i64) {
+        (
+            self.steps.iter().max().copied().unwrap_or(0).isqrt() as i64,
+            self.reach(),
+        )
+    }
+}

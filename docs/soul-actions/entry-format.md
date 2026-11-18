@@ -277,7 +277,8 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
 
 - **who** may: `anyone`, `holder`, `world` (a form a timer starts, and only such a form), or `{"link": <type>}`.
 - **starts**: `act` (a Soul's act) or `timer` (set by a `timer` change).
-- **takes**: named arguments, typed `slot`, `part`, `thing`, `text`, `duration` or `count`. A `slot` or `thing` may
+- **takes**: named arguments, typed `slot`, `part`, `thing`, `text`, `duration`, `count` or `placement` (one of the
+  placement words below, chosen when the form is done; a `put` step's `place.at` may be such an argument). A `slot` or `thing` may
   be described with `select`: a candidate set (`of`: `things` or `free_slots`, optional `kind`, `in`: `this`,
   `here` or `parent`), an `anchor` (`me`, `this`), an `order` (`nearest`, `furthest`) and a `rank` (1, 2, ... or
   `last`), the same closed list as Engine v2 E2 ([#2709](https://github.com/soulsimulation/souls/issues/2709)).
@@ -292,7 +293,10 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   (value, `along` or `across`). A refusal of a need compared with a value argument names as its fix the same act with
   another choice of that value (brush the other way); another choice of a field is another act, never a fix.
 - **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
-  a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
+  a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor` (this thing,
+  or `{"thing": {"arg": ...}}`), `moves` (`{"thing": {"arg": ...}, "by": "carry" | "push"}`: the thing's kind moves
+  that way by its section 18 `motion.how`; carrying takes as many free hands as it says, a push by one body is refused
+  for `two_souls`; refused as `moves_by`, `motion_unsaid`, `needs_souls` or `no_free_hand`), `hand`
   (`{"free": true}`, one hand free; `{"empty": true}`, every hand empty; or `{"holds": "<namespace:name>"}`, a kind
   the hash follows), `linked`, `unlinked` (whether the link has any end; with `"end": "actor"`, whether the actor is
   one of its ends, so "only its author takes a note down" refuses with the original's words), `most_per` (the actor is
@@ -323,11 +327,14 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   refuses to be smoothed ("The sand is already smooth.").
   Any need may name its refusal's words with `says`, a key of the `text` table (words by reference, SA-F6b), so a
   conversion keeps the original's wording: `{"need": "hand", "empty": true, "says": "put_down_first"}`.
-  SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
-  water comes from a thing in the world, never from a refill the kettle does by itself. Its effect is a `transfer` of
-  `water` (grams) out of the tap and into the kettle until it is full, so a need for water on the switch names `fill`
-  as its fix. Reach to another thing's point is not a need the rules can read yet, so `fill` holds the kettle and needs
-  it empty.
+  SA-F2 evaluates them. **Reach to another thing** is read in this order: (1) the walk, taken as done: entries store
+  no position for a loose thing (Engine v2 holds poses, and today's adapter walks first), so `within_reach` of a
+  `thing` argument that the form `walk_to`s is met when the thing is in the actor's place, and refused `out_of_reach`
+  when it is elsewhere; (2) else the measured pose: `"of": {"arg": ...}` names the thing whose point it is, placed by
+  that node's `at_mm` in the input; (3) else `unknown`. A kettle's `fill` takes the nearest `eden:tap` (a selector on a
+  kind) and moves toward it: the water comes from a thing in the world, never from a refill the kettle does by itself.
+  Its effect is a `transfer` of `water` (grams) out of the tap and into the kettle until it is full, so a need for water
+  on the switch names `fill` as its fix.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
@@ -336,12 +343,16 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   (Engine v2 T6 rule 15: the engine clears it, a clear being "fired or cancelled"; T5: it is due at a world time in
   microseconds). A crank lamp put out early and lit again goes dark at its new time, not by the earlier timer. The
   timer's form still checks its own needs when it fires.
-- **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor or this thing
-  into a slot or the actor's hand: holding is a change of parent), `link`, `unlink` (`from`: `actor`, or `all`, every end
-  of the link on this thing: anyone takes down an out-of-date poster; it writes only this thing's own links, Engine v2
-  T6's rule that an entry writes its own node), `create` (a kind, `here`, in a slot or in the hand; `set`, a list of
-  `{field, to}`, gives the made thing fields chosen at the bench, each a value or a value argument: a candle's shape and
-  colour; T6's create carries its fields, and the check gate checks them against the made kind), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
+- **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor, this thing or a
+  `thing` argument, into a slot, the actor's hand or `here`, loose in the actor's place: holding is a change of
+  parent), `link`, `unlink` (`from`: `actor`, or `all`, every end of the link on this thing: anyone takes down an
+  out-of-date poster; it writes only this thing's own links, Engine v2 T6's rule that an entry writes its own node),
+  `create` (a kind, `here`, in a slot or in the hand; `set`, a list of `{field, to}`, gives the made thing fields chosen at
+  the bench, each a value or a value argument: a candle's shape and colour; T6's create carries its fields, and the check
+  gate checks them against the made kind), `remove` (the actor, this thing or a `thing` argument), `timer`, `transfer`,
+  `draw`. The body's `pick_up` and `push` reparent a thing argument into a free hand (a push holds the thing while it
+  moves), and its `put` sets a held one down `here` by a placement word and an anchor described by a selector; another
+  body has no `motion`, so it is never picked up or pushed. `packages/form-rules/README.md` ("What a form does")
   defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
   per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
   boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
