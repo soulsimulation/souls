@@ -18,17 +18,22 @@
 //!   the meetup place within 2 s, replacing their orders. A walker whose order ended by name (the ladder's
 //!   `goal-unreachable`, or its walk's own) is given its next order as if it had arrived.
 //! - **The clock** is K7's [`Ticker`] on a real clock: absolute deadlines, catch-up after an overrun. `--fast` runs
-//!   the ticks back to back (for a quick look; never for the gate).
+//!   the ticks back to back: world time and every walker's path are the same, so it serves the progress bar and a
+//!   quick look, never the timing bars.
 //! - **Tick time** is the whole clock-thread tick: new orders, then the ladder's tick (the runner's tick inside it),
 //!   door openings written to memory. By phase: `orders` (new orders, their routing included), `corner` (the next
 //!   corner, timed by the town's [`Town::meter`]: `clear` its straight-walk checks and `search` its route searches)
 //!   and `step` (the rest of the ladder's and the runner's tick: skills, controller, turns, reroutes). Not in it: the
 //!   per-tick record, progress and the trace.
-//! - **Progress** (N15's 30 s, approximate on the host): under a live order, a walker progresses when it arrives,
-//!   when it is carried across a link, or when it stands 1 m nearer its order's goal than its best on the node it
-//!   stands on.
-//! - **Faults.** A tick whose runner refused something (a body's step or crossing) is counted with the first
-//!   refusal's name; the tick and every other walker went on.
+//! - **Progress** (the bar's 30 s): under a live order, a walker progresses when it arrives, when its leg advances (a
+//!   link crossed), or when it stands 1 m nearer its leg's end than at its last progress. A new route from the ladder
+//!   is not progress: the distance is measured again, from the new leg's end.
+//! - **Faults.** An engine refusal of one walker (`Runner::refused`: a step, a crossing's track or its landing) is a
+//!   fault of that walker alone: counted by name and link, and its order ends by name (`engine-fault`), so the clock
+//!   and the others go on.
+//! - **The log** (#3168): each walker that passes 30 s without progress is printed once per order with its state
+//!   (crossing, walking out, waiting for a link, or walking), and the faults and refused routes are listed by link and
+//!   by piece.
 //!
 //! Out: a summary line per measure on stdout; with `out-dir`, `ticks.csv` (one row per tick, µs by phase) and
 //! `run.trace` (V14's throwaway `birdseye/0` trace, for `v2/tools/birdseye/view.html`). Generated, never committed.
@@ -47,10 +52,10 @@ use replica::host::{F_HELD, Progress};
 use replica::ids::{Hash, Id, Purpose, Scope};
 use replica::pose::{Frame, Quat, Vec3};
 use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
-use replica::world_model::plain;
+use replica::world_model::{plain, show};
 use sim::clock::{Clock, Heartbeat, Ticker};
 use sim::ground::scene::{Xform, xform_to};
-use sim::host::Runner;
+use sim::host::{Runner, named, waiting};
 use sim::links::Doors;
 use sim::mover::Body;
 use sim::speech::Hearing;
@@ -73,6 +78,8 @@ const TOL: i64 = 1_500_000;
 const REACH: i64 = 320_000_000;
 /// Progress: this much nearer the leg's end, µm.
 const NEARER: i64 = 1_000_000;
+/// The bar: no walker under a live order without progress this long, µs.
+const BAR: Micros = 30_000_000;
 
 /// SplitMix64.
 struct Seed(u64);
@@ -266,15 +273,45 @@ struct Plan {
     run: u8,
     /// When it was ordered, µs.
     since: Micros,
-    /// Its order's goal (node and point), the node it stood on at its last progress, and whether it was carried.
-    goal: (Option<Id>, Vec3),
-    node: Option<Id>,
-    carried: bool,
+    /// The leg it walks as the ladder keeps it: index and end.
+    leg: usize,
+    to: Vec3,
     best: i64,
     progress: Micros,
     live: bool,
+    /// Logged past the bar in this order.
+    logged: bool,
     /// Its next order goes to the meetup place (a crowd moment).
     meet: bool,
+}
+
+/// Where a body stands, for the lists: its node and N5's piece there, or the point when no piece holds it.
+fn piece_of(t: &Town, b: &Body) -> String {
+    let node = node_of(b);
+    let p = b.pose.position;
+    let on = if node == t.ground {
+        "open ground".to_owned()
+    } else {
+        format!("floor {} {}", level_of(t, node), show(node))
+    };
+    match t.map.spot(node, p) {
+        Some(s) => format!("{on} piece {}", s.piece),
+        None => format!(
+            "{on} off every piece at ({} mm, {} mm)",
+            p.x / 1000,
+            p.z / 1000
+        ),
+    }
+}
+
+/// The most counted keys of `m`, at most `k`, as `count x key`.
+fn top(m: &BTreeMap<String, u64>, k: usize) -> Vec<String> {
+    let mut v: Vec<(&String, &u64)> = m.iter().collect();
+    v.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    v.into_iter()
+        .take(k)
+        .map(|(s, c)| format!("{c} x {s}"))
+        .collect()
 }
 
 fn pct(v: &mut [i64], q: usize) -> i64 {
@@ -442,7 +479,8 @@ fn main() {
         }
     };
     let mut refused_orders = 0u64;
-    let mut goals: Vec<(Option<Id>, Vec3)> = vec![(None, Vec3::ZERO); n];
+    // Refused routes by where they started and why (N5's list).
+    let mut refused_at: BTreeMap<String, u64> = BTreeMap::new();
     // A start the routes cannot leave (the jitter can land on a piece of its own) is drawn again: counted.
     let mut restarts = 0u64;
     for k in 0..n {
@@ -474,7 +512,6 @@ fn main() {
             loop {
                 let g = &places[draw(&mut seed)];
                 orders += 1;
-                goals[k] = (Some(g.node), g.at);
                 match order(
                     &mut runner,
                     &mut ladder,
@@ -485,10 +522,15 @@ fn main() {
                     g.at,
                 ) {
                     Ok(()) => break 'start,
-                    Err(_) if tries < 5 => tries += 1,
-                    Err(_) => {
-                        restarts += 1;
-                        continue 'start;
+                    Err(e) => {
+                        *refused_at
+                            .entry(format!("{} (a start): {}", piece_of(&w, &body), e.name))
+                            .or_default() += 1;
+                        if tries >= 5 {
+                            restarts += 1;
+                            continue 'start;
+                        }
+                        tries += 1;
                     }
                 }
                 refused_orders += 1;
@@ -502,7 +544,6 @@ fn main() {
             },
             live: true,
             best: i64::MAX,
-            goal: goals[k],
             ..Plan::default()
         };
     }
@@ -622,10 +663,15 @@ fn main() {
     let mut row = vec![0u8; 5 * n];
     let mut log_seen = 0usize;
     let mut rungs: BTreeMap<&'static str, u64> = BTreeMap::new();
+    // Past the bar: each order logged once, by state; the first lines printed.
+    let mut over: BTreeMap<String, u64> = BTreeMap::new();
+    let mut over_shown = 0;
+    let mut faults = 0u64;
     let mut fault_shown = 0;
     let mut fault_kinds: BTreeMap<String, u64> = BTreeMap::new();
+    let mut fault_at: BTreeMap<String, u64> = BTreeMap::new();
+    let mut faulted: std::collections::BTreeSet<Id> = std::collections::BTreeSet::new();
     let mut ended_names: BTreeMap<String, u64> = BTreeMap::new();
-    let mut faulty_ticks = 0u64;
     // #3231: the tick's hearing (`Hearing::update`, after the ladder's step), timed apart from the tick, ns.
     let (mut hearing, mut hear_ns) = (Hearing::new(), Vec::with_capacity(ticks as usize));
     while ticker.next_tick() < ticks {
@@ -635,6 +681,13 @@ fn main() {
                 return;
             }
             let at = start + TICK;
+            // Who is carried as the tick starts, to name a refusal's call (not timed).
+            let carried: std::collections::BTreeSet<Id> = runner
+                .controller
+                .bodies()
+                .filter(|b| runner.controller.carried(b.id))
+                .map(|b| b.id)
+                .collect();
             let s0 = w.spent.get();
             let a0 = Instant::now();
             // Orders due this tick: the next walk of each walker that waited, and the crowd moments.
@@ -677,7 +730,7 @@ fn main() {
                     };
                     let g = &places[gi];
                     orders += 1;
-                    if order(
+                    match order(
                         &mut runner,
                         &mut ladder,
                         &mut w,
@@ -685,14 +738,18 @@ fn main() {
                         order_id(orders),
                         g.node,
                         g.at,
-                    )
-                    .is_ok()
-                    {
-                        placed = true;
-                        plans[k].goal = (Some(g.node), g.at);
-                        break;
+                    ) {
+                        Ok(()) => {
+                            placed = true;
+                            break;
+                        }
+                        Err(e) => {
+                            refused_orders += 1;
+                            *refused_at
+                                .entry(format!("{}: {}", piece_of(&w, &b), e.name))
+                                .or_default() += 1;
+                        }
                     }
-                    refused_orders += 1;
                 }
                 if !placed {
                     // No route from where it stands: it stays where it is, and tries again in 10 s.
@@ -712,18 +769,16 @@ fn main() {
                         plans[k].run - 1
                     },
                     since: at,
-                    goal: plans[k].goal,
-                    node: None,
-                    carried: false,
                     best: i64::MAX,
                     progress: at,
                     live: true,
-                    meet: false,
+                    ..Plan::default()
                 };
             }
             let orders_ns = a0.elapsed().as_nanos() as i64;
             let s1 = w.spent.get();
-            let r = ladder.step(&mut runner, &mut w);
+            // The first refusal is in `runner.refused` with the rest: each is one walker's fault, taken below.
+            let _ = ladder.step(&mut runner, &mut w);
             let total = a0.elapsed().as_nanos() as i64;
             let s2 = w.spent.get();
             let ph = [
@@ -744,18 +799,41 @@ fn main() {
             ]);
 
             // Not timed: faults, rungs, ends, progress, the record and the trace.
-            if let Err(e) = r {
-                faulty_ticks += 1;
-                *fault_kinds.entry(e.name.to_owned()).or_default() += 1;
+            let refused = std::mem::take(&mut runner.refused);
+            for (who, e) in &refused {
+                faults += 1;
+                let call = if carried.contains(who) {
+                    "carry"
+                } else {
+                    "step"
+                };
+                *fault_kinds
+                    .entry(format!("{call}: {}", e.name))
+                    .or_default() += 1;
+                let link = ladder
+                    .leg(*who)
+                    .and_then(|(_, l)| l.link)
+                    .map_or("no link".to_owned(), show);
+                let b = runner.controller.body(*who).copied();
+                *fault_at
+                    .entry(format!(
+                        "{call}: {} at {link} from {}",
+                        e.name,
+                        b.map_or("?".to_owned(), |b| piece_of(&w, &b))
+                    ))
+                    .or_default() += 1;
+                faulted.insert(*who);
                 if fault_shown < 5 {
                     fault_shown += 1;
                     println!(
-                        "walkers: fault at {} ms: {}: {}",
+                        "walkers: fault at {} ms: walker {}: {call}: {}: {}",
                         at / 1000,
+                        index[who],
                         e.name,
                         e.detail
                     );
                 }
+                runner.end(*who, named("engine-fault"));
             }
             for r in &ladder.log[log_seen..] {
                 *rungs.entry(r.rung.name()).or_default() += 1;
@@ -795,29 +873,58 @@ fn main() {
                     continue;
                 }
                 walking += 1;
-                let Some(b) = runner.controller.body(who) else {
+                let Some(b) = runner.controller.body(who).copied() else {
                     continue;
                 };
-                let carried = runner.controller.carried(who);
-                let node = node_of(b);
-                let gap = if p.goal.0 == Some(node) {
-                    dist(xz(b.pose.position), xz(p.goal.1))
-                } else {
-                    i64::MAX
+                let Some((li, leg)) = ladder.leg(who) else {
+                    continue;
                 };
-                let crossed = p.carried && !carried;
-                p.carried = carried;
-                if carried
-                    || crossed
-                    || p.node != Some(node)
-                    || gap.saturating_add(NEARER) <= p.best
-                {
-                    p.node = Some(node);
+                let gap = dist(xz(b.pose.position), xz(leg.to));
+                if p.best == i64::MAX {
+                    (p.leg, p.to, p.best) = (li, leg.to, gap);
+                } else if (li, leg.to) != (p.leg, p.to) {
+                    if li > p.leg {
+                        p.progress = at;
+                    }
+                    (p.leg, p.to, p.best) = (li, leg.to, gap);
+                } else if gap + NEARER <= p.best {
                     p.best = gap;
                     p.progress = at;
                 }
-                if at - p.progress > worst.0 {
-                    worst = (at - p.progress, k);
+                let still = at - p.progress;
+                if still > worst.0 {
+                    worst = (still, k);
+                }
+                if still >= BAR && !p.logged {
+                    p.logged = true;
+                    let held = runner
+                        .fields
+                        .get(&who)
+                        .is_some_and(|f| f.contains_key(&F_HELD));
+                    let state = if let Some(l) = runner.controller.carrying(who) {
+                        format!("crossing {}", show(l))
+                    } else if runner.controller.carried(who) || held {
+                        "walking out".to_owned()
+                    } else if let Some((l, g)) = waiting(runner.fields.get(&who)) {
+                        format!("waiting for {} at {} mm", show(l), g / 1000)
+                    } else {
+                        "walking".to_owned()
+                    };
+                    *over
+                        .entry(state.split(' ').next().unwrap_or("").to_owned())
+                        .or_default() += 1;
+                    if over_shown < 25 {
+                        over_shown += 1;
+                        let v = b.linear;
+                        println!(
+                            "walkers: past 30 s at {} ms: walker {k}: {state}; on {}; leg {li} ({}) end {} mm away; speed {} mm/s",
+                            at / 1000,
+                            piece_of(&w, &b),
+                            leg.link.map_or("arrive".to_owned(), show),
+                            gap / 1000,
+                            dist([v.x, v.z], [0, 0]) / 1000
+                        );
+                    }
                 }
             }
             if let Some((f, c)) = trace.as_mut() {
@@ -909,21 +1016,26 @@ fn main() {
         s.ticks, s.overruns, s.max_tick_us, s.max_lag_us
     );
     println!(
-        "walkers: orders {orders} ({refused_orders} refused routes), trips finished {finished}, ended by name {ended}; route time median {} ms, p90 {} ms, max {} ms",
+        "walkers: orders {orders} ({refused_orders} refused routes), trips finished {finished}, ended by name {ended} {ended_names:?}; route time median {} ms, p90 {} ms, max {} ms",
         rm / 1000,
         r90 / 1000,
         rmax / 1000
     );
     println!(
-        "walkers: longest without progress under a live order {} ms (walker {}); rungs {:?}; ended by name {:?}",
+        "walkers: longest without progress under a live order {} ms (walker {}); orders past 30 s by state {over:?}; rungs {rungs:?}",
         worst.0 / 1000,
         worst.1,
-        rungs,
-        ended_names
     );
     println!(
-        "walkers: ticks with a refusal {faulty_ticks} (the first of each, by name): {fault_kinds:?}"
+        "walkers: walker faults {faults} on {} walkers (each order ended by name): {fault_kinds:?}",
+        faulted.len(),
     );
+    for l in top(&fault_at, 12) {
+        println!("walkers: fault at: {l}");
+    }
+    for l in top(&refused_at, 12) {
+        println!("walkers: refused route from: {l}");
+    }
     // The next corner's parts: straight-walk checks and route searches, a tick and in all.
     let sp = w.spent.get();
     let part = |i: usize| {
@@ -955,13 +1067,14 @@ fn main() {
     }
     let bar = |ok: bool| if ok { "pass" } else { "miss" };
     println!(
-        "walkers: bars: median <= 5 ms {}; p99 <= 15 ms {}; corner median < 1 ms {}; no walker without progress for 30 s {}",
+        "walkers: bars: median <= 5 ms {}; p99 <= 15 ms {}; corner median < 1 ms {}; no walker without progress for 30 s {}; walker faults 0 {}",
         bar(med <= 5_000),
         bar(p99 <= 15_000),
         bar({
             let mut v: Vec<i64> = phase_us.iter().map(|p| p[1]).collect();
             pct(&mut v, 50) < 1_000
         }),
-        bar(worst.0 < 30_000_000)
+        bar(worst.0 < BAR),
+        bar(faults == 0)
     );
 }

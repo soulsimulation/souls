@@ -94,6 +94,15 @@ step intents-goldens node --input-type=module -e '
   const got = r.intents_goldens(), want = readFileSync("crates/replica/fixtures/intents/goldens.txt", "utf8");
   console.log(`${got}intents-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
   if (got !== want) process.exit(1);'
+# The malformed intents (I2, #2689): the WASM build refuses each by the registry name beside it, as the native build
+# does in `cargo test` (crates/replica/tests/intent_decode.rs).
+step intent-decode node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
+  const rows = r.intent_decode_table().trim().split("\n"), wrong = rows.filter((l) => { const [, a, b] = l.split(" "); return a !== b; });
+  console.log(`intent-decode: WASM in Node ${process.version}, ${rows.length} malformed intents, ${wrong.length} refused by another name`, wrong);
+  if (wrong.length || rows.length < 60) process.exit(1);'
 # The checker a client loads by hash (T10, #2664): replica for wasm32 with no wasm-bindgen exports, so no imports.
 step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p replica --release \
     --target wasm32-unknown-unknown --locked --features checker &&

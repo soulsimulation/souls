@@ -17,7 +17,14 @@
 //! 6. **A gap ends the stream.** A subscriber that fell behind is handed a snapshot (R3 rule 6), which a numbered
 //!    stream cannot carry yet: the writer stops with `stream-gap` rather than write a stream that skips.
 //!
-//! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, and the words path (W4).
+//! 7. **The view's gaps are declared.** A view skips the entries it does not hold (another audience's, or outside its
+//!    node), so its records' sequences jump. Each jump is written in the part that holds the record after it
+//!    (`replica::stream` rule 6), and the writer's copy applies the part with those gaps and no others.
+//!
+//! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, the words path (W4), and a
+//! subtree carried in on an arrival whose leave the view did not hold (T7 rule 4): its record holds the subtree as it
+//! was in flight but not where it lands, so no reader could land it, and the writer refuses it as `stream-carried`.
+//! A view of a zone's root that starts with the zone holds every leave, so it never writes one.
 
 #[cfg(test)]
 mod tests;
@@ -81,6 +88,9 @@ pub struct Writer {
     quiet_until: Option<Micros>,
     window: Option<i64>,
     pending: Vec<Value>,
+    /// The open stretch's declared gaps (rule 7), and the sequence the view's next record would have with none.
+    gaps: Vec<(u64, u64)>,
+    expect: u64,
     last_to: Option<Micros>,
     written: Written,
 }
@@ -106,6 +116,8 @@ impl Writer {
             quiet_until: None,
             window: None,
             pending: Vec::new(),
+            gaps: Vec::new(),
+            expect: 0,
             last_to: None,
             written: Written::default(),
         };
@@ -140,7 +152,7 @@ impl Writer {
             if rm.contains_key(&0) {
                 return Err(fault(
                     "stream-carried",
-                    "a carried subtree (an arrival) is not written to a stream yet",
+                    "a carried subtree (an arrival) does not name where it lands (T7's record has no destination)",
                 ));
             }
             let at = match rm.get(&2) {
@@ -148,11 +160,26 @@ impl Writer {
                 Some(Value::Nint(n)) => -1 - i64::try_from(*n).unwrap_or(i64::MAX - 1),
                 _ => return Err(fault("stream-frame", "a record has no world time")),
             };
+            let Some(Value::Uint(seq)) = rm.get(&1) else {
+                return Err(fault("stream-frame", "a record has no sequence"));
+            };
+            let seq = *seq;
+            if seq < self.expect {
+                return Err(fault(
+                    "stream-frame",
+                    format!("record {seq} after {}", self.expect - 1),
+                ));
+            }
             let w = at.div_euclid(stream::PERIOD_US);
             if self.window.is_some_and(|x| x != w) {
                 self.cut()?;
             }
             self.window = Some(w);
+            if seq > self.expect {
+                // The view skipped these (rule 7): said in the part, never left for the reader to guess.
+                self.gaps.push((self.expect, seq - self.expect));
+            }
+            self.expect = seq + 1;
             self.pending.push(r);
         }
         Ok(())
@@ -187,6 +214,7 @@ impl Writer {
             return Ok(());
         };
         let records = std::mem::take(&mut self.pending);
+        let gaps = std::mem::take(&mut self.gaps);
         if records.is_empty() {
             return Ok(());
         }
@@ -208,7 +236,7 @@ impl Writer {
         .map_err(|e| fault("encoding", e.to_string()))?;
         // Decoded once, and applied to the view's copy, before it is published (rule 2).
         let part = Part::read(&raw)?;
-        self.copy.apply(&part)?;
+        self.copy.apply_gaps(&part, &gaps)?;
         let number = self.written.parts;
         let hash = if (number + 1).is_multiple_of(HASH_EVERY) {
             Some(replica::hash::state_hash(self.copy.tree())?.to_bytes())
@@ -224,6 +252,7 @@ impl Writer {
             entries,
             part: raw,
             hash,
+            gaps,
         };
         let bytes = sp.to_bytes()?;
         write_whole(&self.dir.join(number.to_string()), &bytes)?;

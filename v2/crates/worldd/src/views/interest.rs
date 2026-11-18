@@ -7,8 +7,9 @@
 //!   is removed. Its node is the surface it stands on, else its frame.
 //! - **Hysteresis.** A body enters the set closer than [`ENTER`] and leaves it only at [`LEAVE`] or farther, so a body
 //!   standing at the edge does not flicker in and out. The subscriber's own body is in its set.
-//! - **Counts by cell.** The other bodies of a node are summed by N16's cells ([`sim::index::Cell`]), once a world
-//!   second for every node however many subscribers read them ([`Places::cells`]).
+//! - **Counts by cell.** The other bodies of a node are summed by N16's cells ([`sim::index::Cell`]), or a grid a
+//!   whole number of times coarser, once a world second for every node however many subscribers read them
+//!   ([`Places::cells`]).
 //!
 //! Not here: what a level sends of the set, and the budget (`subscription.rs`); speech and its reach (B11, E13).
 
@@ -93,21 +94,25 @@ impl Places {
         }
     }
 
-    /// Every node's bodies counted by cell, `(i, j, bodies)` in grid order: what a subscriber is sent of the bodies
-    /// of its scope's nodes, once a world second, built once for all of them.
-    pub fn cells(&self) -> BTreeMap<Id, Vec<(i64, i64, u32)>> {
-        let mut by: BTreeMap<Id, BTreeMap<(i64, i64), u32>> = BTreeMap::new();
+    /// Every node's bodies counted by cell, `(i, j, bodies)` in grid order, on a grid `factor` times N16's for the
+    /// node (1: N16's own cells), and that grid's size, µm: what a subscriber is sent of the bodies of its scope's
+    /// nodes, once a world second, built once for all of them.
+    pub fn cells(&self, factor: i64) -> BTreeMap<Id, (i64, Table)> {
+        let mut by: BTreeMap<Id, (i64, Table)> = BTreeMap::new();
         for id in &self.bodies {
             if let Some((node, p)) = self.index.body(*id) {
-                let c = self.index.cell_of(node, p);
-                *by.entry(node).or_default().entry((c.i, c.j)).or_default() += 1;
+                let size = self.index.sizes(node).0 * factor.max(1);
+                let (_, t) = by.entry(node).or_insert_with(|| (size, Table::new()));
+                *t.entry((p[0].div_euclid(size), p[1].div_euclid(size)))
+                    .or_default() += 1;
             }
         }
-        by.into_iter()
-            .map(|(n, m)| (n, m.into_iter().map(|((i, j), c)| (i, j, c)).collect()))
-            .collect()
+        by
     }
 }
+
+/// A node's bodies by cell: grid coordinates (x, z) and how many, nonempty cells only.
+pub type Table = BTreeMap<(i64, i64), u32>;
 
 /// One subscriber's interest set: the bodies near its own body.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
