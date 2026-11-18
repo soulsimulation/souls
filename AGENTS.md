@@ -48,10 +48,15 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
 
 ## Gates every change keeps green
 
-- **Walk (V3-walk):** `node tools/test-harness/walk/walk.mjs`. A deliberate change updates the baseline with
-  `--write`, in its own reviewed commit. [docs/testing.md](docs/testing.md#walk-gate)
-- **Bundle (V3-bundle):** `node tools/test-harness/bundle-budget/budget.mjs --build --check`. The baseline changes only
-  in its own commit (`--write`); the gate never writes it. [docs/testing.md](docs/testing.md#bundle-gate)
+Startup mode (Gene, 18 Nov): per change the light set; the full battery daily and before release; a red daily run
+gets a same-day fix. [docs/testing.md](docs/testing.md#ci-window)
+
+- **Walk (V3-walk):** `node tools/test-harness/walk/walk.mjs`. CI runs it in the heavy `packages` leg: in the daily
+  full battery on main (06:23 UTC), on manual dispatch and in the release gate, not per change. A deliberate change
+  updates the baseline with `--write`, in its own reviewed commit. [docs/testing.md](docs/testing.md#walk-gate)
+- **Bundle (V3-bundle):** `node tools/test-harness/bundle-budget/budget.mjs --build --check`, per change (the light
+  `types-web` leg). The baseline changes only in its own commit (`--write`); the gate never writes it.
+  [docs/testing.md](docs/testing.md#bundle-gate)
 - **Conformance pins:** a changed library def revision needs a new supplement in
   `packages/conformance/conformance/`, in the same change, with its reason. Never edit older supplements.
 - **Full gate:** the [remote gate](docs/testing/remote-gate.md) runs the complete suite for a release head: 0 new
@@ -111,7 +116,8 @@ contract; fresh sessions recover its dated agenda and assignments before dispatc
   report files. No scheduled agents: the maintainer or authorized development owner starts bounded work within
   the agreed agenda.
 - Never edit shared append-only files: changelog fragments go in `changes/`, conformance changes in a new supplement,
-  generated output is built in CI, baselines are regenerated in their own commit.
+  generated output is built in CI, baselines are regenerated in their own commit. `eden.mjs` is built in CI and
+  synced on main by a bot PR; PRs don't commit its rebuilt blocks (#3118).
 - Ready PRs get `merge:ready`; the merge train merges them (T0–T2 on green, as is when they merge cleanly and touch no
   engine or other strict path; T3–T4 rebased, re-tested and after the maintainer).
   [docs/process/agent-workflow.md](docs/process/agent-workflow.md)

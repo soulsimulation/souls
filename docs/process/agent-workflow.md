@@ -33,7 +33,7 @@ Two PRs that both append to one shared file conflict every time. So nothing a PR
 |---|---|
 | editing `CHANGELOG.md` | add one fragment, `changes/<pr-or-slug>.md` ([format](../../changes/README.md)); the `release` workflow compiles the fragments into `CHANGELOG.md` |
 | editing an existing conformance record | add a new supplement for your change in `packages/conformance/conformance/` ([conformance](../../packages/conformance/conformance/README.md)); older supplements are never edited |
-| committing generated output | let CI build it: the changelog, the web build and gate receipts are produced by workflows, not committed by PRs |
+| committing generated output | let CI build it: the changelog, the web build and gate receipts are produced by workflows, not committed by PRs; `tools/world-launcher/soul/eden.mjs` is built in CI and synced on main by a bot PR, so PRs don't commit its rebuilt blocks (#3118) |
 | re-pinning a baseline inside a feature commit | regenerate the walk or bundle baseline (`--write`) in its own commit, with the reason in the message, after rebasing |
 
 ## The merge train
@@ -51,11 +51,9 @@ see the header of `merge-train.yml`): `merge:ready` enqueues the PR through auto
 green at its head, and the queue re-tests the combination with what is ahead of it (`merge_group` runs) and lands it.
 `proof-ok` is a required check, so T3–T4 still wait for approval. Removing `merge:ready` takes a PR out; a PR the
 queue drops loses the label with a comment giving the reason. A PR with any file outside the low-risk paths (`LOW_RISK`
-in `.github/scripts/ci-scope.mjs`) waits, keeping its label, while four such PRs are queued or set to auto-merge;
-low-risk PRs enqueue up to the queue's own limit, and every queue exit starts the train again. PRs that regenerate
-`tools/world-launcher/soul/eden.mjs` (or change an input `inline.mjs` builds it from) enter one at a time: the next
-waits, keeping the label, skipped as `inline-serial`, until the one ahead leaves the queue. The non-strict and strict landing below apply only
-when the ruleset does not require the queue.
+in `.github/scripts/ci-scope.mjs`) waits, keeping its label, while eight such PRs are queued or set to auto-merge
+(`MIXED_CAP`); low-risk PRs enqueue up to the queue's own limit, and every queue exit starts the train again. The
+non-strict and strict landing below apply only when the ruleset does not require the queue.
 
 - **Non-strict**: a T0–T2 PR that touches no strict path, whose required checks are green on its current head, which
   GitHub reports mergeable without conflict, and while `main`'s CI is green, is squash-merged as is, even when it is
