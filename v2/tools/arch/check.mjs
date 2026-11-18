@@ -53,6 +53,9 @@ export const ALLOWED = {
   gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util'],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
   skills: ['replica'],
+  // Uploads (G6, #2747): PNG pixel data inflated with a bound on its output; the child's rlimits on Linux; G1's commit
+  // and K4's log in its tests.
+  assets: ['replica', 'miniz_oxide', 'libc', 'sim'],
 };
 
 const rsFiles = dir => readdirSync(dir, { recursive: true }).filter(f => /\.rs$/.test(f)).map(f => join(dir, f));
