@@ -571,7 +571,7 @@ fn io(e: std::io::Error) -> Refusal {
 mod tests {
     //! I4 (#2687): each `aN_` test is one acceptance box (A1 and A2 are the `act-latency` bench).
     use super::*;
-    use crate::checkers::lamps;
+    use crate::checkers::toggles;
     use replica::intents::Fallback;
     use replica::world_model::Audience;
     use sim::log::{Mem, recover};
@@ -625,23 +625,23 @@ mod tests {
     }
 
     fn world(store: Held, checkers: usize, deadline: Micros) -> (World, Vec<(Id, Id)>) {
-        let w = lamps::World::build(1, 4, 0);
+        let w = toggles::World::build(1, 4, 0);
         let pairs = w.pairs.clone();
         let mut cfg = Config::new(LINEAGE, 1);
         cfg.tick = Duration::from_millis(10);
         cfg.checkers = checkers;
         cfg.deadline = deadline;
-        let world = start(w.replica, lamps::rules(), store, cfg).expect("the world starts");
+        let world = start(w.replica, toggles::rules(), store, cfg).expect("the world starts");
         (world, pairs)
     }
 
-    /// A toggle of the body's lamp: switch it on, or else off (a fallback).
-    fn toggle(body: Id, lamp: Id, sequence: u64, expiry: Micros) -> Intent {
+    /// A toggle of the body's own: switch it on, or else off (a fallback).
+    fn toggle(body: Id, thing: Id, sequence: u64, expiry: Micros) -> Intent {
         let n = |s: &str| Name::new(s).unwrap();
         Intent {
             actor: Actor::Soul(body),
             verb: n("r2:switch_on"),
-            target: Some(Target::Node(lamp)),
+            target: Some(Target::Node(thing)),
             parameters: BTreeMap::new(),
             sequence,
             basis: Version {
@@ -655,7 +655,7 @@ mod tests {
             resources: Vec::new(),
             fallbacks: vec![Fallback {
                 verb: n("r2:switch_off"),
-                target: Some(Target::Node(lamp)),
+                target: Some(Target::Node(thing)),
                 parameters: BTreeMap::new(),
                 resources: Vec::new(),
             }],
@@ -745,29 +745,29 @@ mod tests {
     fn a4_a_repeat_gets_its_answer_an_old_one_is_stale_and_an_expiry_leaves_a_gap() {
         let store = Held::new(Vec::new());
         let (w, pairs) = world(store.clone(), 2, 10_000_000);
-        let (body, lamp) = pairs[1];
+        let (body, thing) = pairs[1];
         let later = now() + 60_000_000;
-        let first = answer(&send(&w, &toggle(body, lamp, 1, later)));
+        let first = answer(&send(&w, &toggle(body, thing, 1, later)));
         assert_eq!(read(&first).0, 1);
-        let again = answer(&send(&w, &toggle(body, lamp, 1, later)));
+        let again = answer(&send(&w, &toggle(body, thing, 1, later)));
         assert_eq!(again, first, "the kept answer");
-        let gone = answer(&send(&w, &toggle(body, lamp, 2, 1)));
+        let gone = answer(&send(&w, &toggle(body, thing, 2, 1)));
         assert_eq!(reason(&gone), "intent.expired");
-        let next = answer(&send(&w, &toggle(body, lamp, 3, later)));
+        let next = answer(&send(&w, &toggle(body, thing, 3, later)));
         assert_eq!(read(&next).0, 1, "the gap is accepted");
         for s in 4..=(4 + sim::commit::acts::KEPT as u64) {
-            answer(&send(&w, &toggle(body, lamp, s, later)));
+            answer(&send(&w, &toggle(body, thing, s, later)));
         }
-        let old = answer(&send(&w, &toggle(body, lamp, 3, later)));
+        let old = answer(&send(&w, &toggle(body, thing, 3, later)));
         assert_eq!(reason(&old), "intent.stale-seq");
-        let kept = answer(&send(&w, &toggle(body, lamp, 20, later)));
+        let kept = answer(&send(&w, &toggle(body, thing, 20, later)));
         w.stop();
 
         // A restart replays the log: the repeat gets the same answer, and a new intent a new id.
         let (w, _) = world(Held::new(store.bytes()), 2, 10_000_000);
-        let again = answer(&send(&w, &toggle(body, lamp, 20, later)));
+        let again = answer(&send(&w, &toggle(body, thing, 20, later)));
         assert_eq!(again, kept, "kept across a restart");
-        let (k, id, _) = read(&answer(&send(&w, &toggle(body, lamp, 21, later))));
+        let (k, id, _) = read(&answer(&send(&w, &toggle(body, thing, 21, later))));
         assert_eq!(k, 1);
         assert_ne!(id, read(&kept).1, "an id is never minted twice");
         w.stop();
@@ -777,7 +777,7 @@ mod tests {
     fn a5_words_never_reach_the_log() {
         let store = Held::new(Vec::new());
         let (w, pairs) = world(store.clone(), 2, 10_000_000);
-        let words = "meet me by the lamp at noon";
+        let words = "meet me by the well at noon";
         let mut i = toggle(pairs[2].0, pairs[2].1, 1, now() + 60_000_000);
         let said = Value::Map([(23, Value::Bytes(words.as_bytes().to_vec()))].into());
         i.parameters.insert(1, said);
