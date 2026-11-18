@@ -44,6 +44,8 @@ use crate::moves::{Instance, Moves, Reach};
 use crate::structure::Structure;
 use crate::timers::{DueList, Timer};
 
+pub mod carry;
+
 type R<T> = Result<T, Refusal>;
 
 fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
