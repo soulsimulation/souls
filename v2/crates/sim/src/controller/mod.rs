@@ -16,7 +16,7 @@
 //! - **Logged when it changes.** A body's input enters the log only when it differs from the last one logged, so a
 //!   body walking a straight line adds no record ([`Logged`]). The log holds inputs, not motion: the mover's motion
 //!   samples are its own output.
-//! - **In a slot (B3).** [`Controller::seat`] hands a body from its surface into a slot and [`Controller::stand`]
+//! - **In a slot (B3).** [`Controller::slot_in`] hands a body from its surface into a slot and [`Controller::stand`]
 //!   back, for the driver holding its legs. A body in a slot is kept apart from those the tick steps, so it costs a
 //!   tick nothing; it is visited only to log an input that changed.
 //!
@@ -423,7 +423,7 @@ impl Controller {
     /// Hands `body` from its surface into `frame`, a slot, at `at`, for the driver holding all its locomotion
     /// (`resource-not-held`): its motion's owner becomes the slot (T4 rule 10), it is at the slot's point, and a tick
     /// no longer steps it. `support-not-surface` when it is in a slot already.
-    pub fn seat(&mut self, body: Id, driver: Driver, frame: Frame, at: Micros) -> R<HandOff> {
+    pub fn slot_in(&mut self, body: Id, driver: Driver, frame: Frame, at: Micros) -> R<HandOff> {
         let pose = Pose {
             frame,
             position: Vec3::ZERO,
@@ -435,7 +435,7 @@ impl Controller {
         Ok(h)
     }
 
-    /// The reverse of [`Controller::seat`]: hands `body` from its slot to `placed`, a surface's placement of it (its
+    /// The reverse of [`Controller::slot_in`]: hands `body` from its slot to `placed`, a surface's placement of it (its
     /// seat's stand point), at rest. `support-not-slot` when it is in no slot.
     pub fn stand(&mut self, body: Id, driver: Driver, placed: Moved, at: Micros) -> R<HandOff> {
         let h = hand(

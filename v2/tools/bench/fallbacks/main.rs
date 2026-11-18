@@ -35,7 +35,7 @@ use body_script::{TICK, humanoid};
 use replica::effects::fixture_bytes;
 use replica::encode::{Name, decode};
 use replica::ids::{Id, Minter, Scope};
-use replica::moves::{Effector, Move, Seat};
+use replica::moves::{Effector, Move, Place};
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::selector::{Rule, Selector};
 use sim::commit::bind::{Bound, Slot, bind};
@@ -44,13 +44,13 @@ use sim::controller::{Controller, Stance};
 use sim::ground::Piece;
 use sim::mover::Surface;
 use sim::moves::{Moves, Reach, load};
-use sim::slots::{Request, SeatAt, Slots};
+use sim::slots::{PlaceAt, Request, Slots};
 use sim::timers::DueList;
 use testworld::{
     BACK_ROW_Z, CENTRE_AISLE, HALL_DEPTH, HALL_ROWS, HALL_WIDTH, ROW_PITCH, SEAT_PITCH,
     SEATS_PER_ROW,
 };
-use worldd::checkers::seats::{SeatRow, SeatsSeen, Wanted, resolve};
+use worldd::checkers::places::{PlaceRow, PlacesSeen, Wanted, resolve};
 
 const SOULS: usize = 120;
 const ARRIVALS_US: i64 = 30_000_000;
@@ -110,7 +110,7 @@ struct Hall {
     slots: Slots,
     floors: BTreeMap<Id, Surface>,
     chairs: Vec<Id>,
-    rows: Arc<Vec<SeatRow>>,
+    rows: Arc<Vec<PlaceRow>>,
     at: BTreeMap<Id, Vec3>,
 }
 
@@ -119,7 +119,7 @@ fn chair_kind() -> Name {
 }
 
 /// The hall's chairs in rows `rows`, and a body at each of `points`.
-fn hall(seat: &Seat, rows: std::ops::Range<i64>, points: &[Vec3]) -> Hall {
+fn hall(place: &Place, rows: std::ops::Range<i64>, points: &[Vec3]) -> Hall {
     let floors = BTreeMap::from([(floor_id(), floor())]);
     let mut mint = Minter::new(Scope([0xb5; 16]));
     let mut slots = Slots::new();
@@ -130,18 +130,18 @@ fn hall(seat: &Seat, rows: std::ops::Range<i64>, points: &[Vec3]) -> Hall {
             let x = CENTRE_AISLE / 2 + SEAT_PITCH / 2 + k % (SEATS_PER_ROW / 2) * SEAT_PITCH;
             let x = if k < SEATS_PER_ROW / 2 { -x } else { x };
             let thing = mint.mint().expect("an id");
-            let point = Vec3::new(x * 1000, seat.height, (BACK_ROW_Z + r * ROW_PITCH) * 1000);
+            let point = Vec3::new(x * 1000, place.height, (BACK_ROW_Z + r * ROW_PITCH) * 1000);
             slots
-                .add(SeatAt {
+                .add(PlaceAt {
                     thing,
-                    seat: seat.clone(),
+                    place: place.clone(),
                     point,
                     facing: Quat::IDENTITY,
                     floor: floor_id(),
                 })
-                .expect("a seat");
+                .expect("a place");
             chairs.push(thing);
-            table.push(SeatRow {
+            table.push(PlaceRow {
                 thing,
                 room: floor_id(),
                 kind: chair_kind(),
@@ -238,7 +238,7 @@ impl Hall {
     }
 }
 
-fn hall_seat() -> (Seat, Move) {
+fn hall_seat() -> (Place, Move) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/replica/fixtures");
     let sit = load(&dir.join("moves"))
         .expect("the fixture moves")
@@ -246,13 +246,13 @@ fn hall_seat() -> (Seat, Move) {
         .find(|m| m.name.as_str() == "souls:sit")
         .expect("the sit move");
     let text = std::fs::read_to_string(dir.join("seats/chair.diag")).expect("the chair");
-    let seat = Seat::from_value(
+    let place = Place::from_value(
         &decode(&fixture_bytes(&text).expect("bytes"))
             .expect("decodes")
             .value,
     )
-    .expect("a seat");
-    (seat, sit)
+    .expect("a place");
+    (place, sit)
 }
 
 fn any_chair(rule: Rule) -> Selector {
@@ -283,7 +283,7 @@ struct Crowd {
 }
 
 /// One arm of the crowd: thinking delay `delay` µs, with or without the selector as the last candidate.
-fn crowd(seat: &Seat, sit: &Move, delay: i64, fallbacks: bool, seed: u64) -> Crowd {
+fn crowd(place: &Place, sit: &Move, delay: i64, fallbacks: bool, seed: u64) -> Crowd {
     let mut rng = Rng(seed);
     let points: Vec<Vec3> = (0..SOULS)
         .map(|_| {
@@ -291,7 +291,7 @@ fn crowd(seat: &Seat, sit: &Move, delay: i64, fallbacks: bool, seed: u64) -> Cro
             Vec3::new(x * 1000, 0, DOOR_Z * 1000)
         })
         .collect();
-    let mut h = hall(seat, HALL_ROWS - 3..HALL_ROWS, &points);
+    let mut h = hall(place, HALL_ROWS - 3..HALL_ROWS, &points);
     let bodies: Vec<Id> = h.at.keys().copied().collect();
     let mut came: Vec<(i64, Id)> = bodies
         .iter()
@@ -367,9 +367,9 @@ fn crowd(seat: &Seat, sit: &Move, delay: i64, fallbacks: bool, seed: u64) -> Cro
         h.step(now);
         copies.push(Arc::new(h.held()));
         // Sends that arrived in this tick, and re-checks, are resolved on the copy at its end and bound at the next.
-        let copy = SeatsSeen {
+        let copy = PlacesSeen {
             version: version + 1,
-            seats: Arc::clone(&h.rows),
+            places: Arc::clone(&h.rows),
             held: Arc::clone(&copies[copies.len() - 1]),
         };
         for r in ready.iter_mut().filter(|r| r.4.is_empty()) {
@@ -408,7 +408,7 @@ type Waiting = (i64, usize, Id, Vec<Wanted>, Vec<Slot>, u64, bool);
 type Job = (usize, Id, bool, u64);
 
 /// The clock arm: 600 sends of the selector alone in the 300-chair hall; `even` sends 100 a second, else all at once.
-fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, usize, u64) {
+fn clock(place: &Place, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, usize, u64) {
     const N: usize = 600;
     const CHECKERS: usize = 4;
     let mut rng = Rng(seed);
@@ -419,13 +419,13 @@ fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, us
             Vec3::new(x * 1000, 0, z * 1000)
         })
         .collect();
-    let mut h = hall(seat, 0..HALL_ROWS, &points);
+    let mut h = hall(place, 0..HALL_ROWS, &points);
     let bodies: Vec<Id> = h.at.keys().copied().collect();
     let at = Arc::new(h.at.clone());
     let want = Arc::new(vec![Wanted::Select(any_chair(Rule::Nearest))]);
-    let copy = Arc::new(RwLock::new(SeatsSeen {
+    let copy = Arc::new(RwLock::new(PlacesSeen {
         version: 0,
-        seats: Arc::clone(&h.rows),
+        places: Arc::clone(&h.rows),
         held: Arc::new(HashSet::new()),
     }));
     let (jobs, rx): (Sender<Job>, Receiver<Job>) = channel();
@@ -498,9 +498,9 @@ fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, us
         }
         h.step(now);
         k += 1;
-        *copy.write().expect("the copy") = SeatsSeen {
+        *copy.write().expect("the copy") = PlacesSeen {
             version: k,
-            seats: Arc::clone(&h.rows),
+            places: Arc::clone(&h.rows),
             held: Arc::new(h.held()),
         };
         deadline += tick;
@@ -515,7 +515,7 @@ fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, us
 }
 
 fn main() {
-    let (seat, sit) = hall_seat();
+    let (place, sit) = hall_seat();
     println!(
         "crowd: {SOULS} Souls, 60 chairs (rows {}..{} of the test hall), arrivals over {} s, tick {} ms",
         HALL_ROWS - 3,
@@ -524,21 +524,21 @@ fn main() {
         TICK / 1000
     );
     println!(
-        "| delay | fallbacks | repeat | seated (by selector) | seat.none-free | seat-taken | stale | named end | \
+        "| delay | fallbacks | repeat | seated (by selector) | place.none-free | place-taken | stale | named end | \
          chairs taken | held twice | sits done | re-checks | ticks with 2+ binds (arrival != bind order) |"
     );
     println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     for delay in [1_000_000, 8_000_000] {
         for fallbacks in [true, false] {
             for repeat in 1..=2u64 {
-                let c = crowd(&seat, &sit, delay, fallbacks, 0x1_5eed + repeat);
+                let c = crowd(&place, &sit, delay, fallbacks, 0x1_5eed + repeat);
                 let get = |n: &str| c.causes.get(n).copied().unwrap_or(0);
-                let named = get("seated") + get("seat.none-free");
+                let named = get("seated") + get("place.none-free");
                 let others: usize = c
                     .causes
                     .iter()
                     .filter(|(n, _)| {
-                        !["seated", "seat.none-free", "seat-taken", "stale"].contains(&n.as_str())
+                        !["seated", "place.none-free", "place-taken", "stale"].contains(&n.as_str())
                     })
                     .map(|(_, v)| v)
                     .sum();
@@ -549,8 +549,8 @@ fn main() {
                     if fallbacks { "with" } else { "without" },
                     get("seated"),
                     c.by_selector,
-                    get("seat.none-free"),
-                    get("seat-taken"),
+                    get("place.none-free"),
+                    get("place-taken"),
                     get("stale"),
                     100.0 * named as f64 / SOULS as f64,
                     c.taken,
@@ -570,7 +570,7 @@ fn main() {
     println!("|---|---|---|---|---|---|---|");
     for (arm, even) in [("even 100/s", true), ("burst 600", false)] {
         for repeat in 1..=2u64 {
-            let (mean, p99, seated, rechecks, on) = clock(&seat, &sit, even, 0xc10c + repeat);
+            let (mean, p99, seated, rechecks, on) = clock(&place, &sit, even, 0xc10c + repeat);
             println!(
                 "| {arm} | {repeat} | {mean:.4} | {p99:.4} | {seated} | {rechecks} | {on} | {}",
                 if p99 <= 0.05 { "met" } else { "UNMET" }

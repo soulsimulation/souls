@@ -59,11 +59,11 @@ fn queries(r: &impl Read) {
     for (id, v) in stamps {
         assert_eq!(r.stamp(id), v, "{id:?}");
     }
-    let Some(Value::Map(cup)) = r.node(ee(4)) else {
-        panic!("the cup is a record")
+    let Some(Value::Map(node)) = r.node(ee(4)) else {
+        panic!("node ee(4) is a record")
     };
     assert_eq!(
-        cup.get(&10),
+        node.get(&10),
         Some(&Value::Uint(2)),
         "its stamp, as field 10"
     );

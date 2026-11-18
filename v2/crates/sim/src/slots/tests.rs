@@ -10,11 +10,11 @@ use replica::bodies::{Class, Family};
 use replica::effects::fixture_bytes;
 use replica::encode::{Name, Value, decode};
 use replica::ids::{Id, Minter, Scope};
-use replica::moves::{Effector, Move, Seat};
+use replica::moves::{Effector, Move, Place};
 use replica::pose::{Frame, Quat, Support, Vec3, fixture};
 use replica::world_model::show;
 
-use super::{Request, SeatAt, Slots, clear_spot, seated_shape};
+use super::{PlaceAt, Request, Slots, clear_spot, seated_shape};
 use crate::controller::{Controller, Part, Stance};
 use crate::ground::Piece;
 use crate::mover::Surface;
@@ -80,7 +80,7 @@ struct World {
 
 const FLOOR: i64 = 5_000_000;
 
-fn world(seat: Seat) -> World {
+fn world(place: Place) -> World {
     let floor = fixture(1);
     let corners = vec![
         [-5_000, 0, -5_000],
@@ -115,14 +115,14 @@ fn world(seat: Seat) -> World {
     }
     let mut slots = Slots::new();
     slots
-        .add(SeatAt {
+        .add(PlaceAt {
             thing: chair,
-            point: Vec3::new(0, seat.height, 0),
-            seat,
+            point: Vec3::new(0, place.height, 0),
+            place,
             facing: Quat::IDENTITY,
             floor,
         })
-        .expect("a seat");
+        .expect("a place");
     World {
         c,
         due: DueList::new(),
@@ -137,9 +137,9 @@ fn world(seat: Seat) -> World {
 
 impl World {
     fn geo(&self) -> Geo {
-        let at = self.slots.seat(self.chair).expect("the chair");
+        let at = self.slots.place(self.chair).expect("the chair");
         let stand = at.stand().expect("a stand point");
-        let points = BTreeMap::from([("souls:seat", at.point), ("souls:stand", stand)]);
+        let points = BTreeMap::from([("souls:slot", at.point), ("souls:stand", stand)]);
         let bodies = self
             .bodies
             .iter()
@@ -205,8 +205,8 @@ impl World {
     }
 }
 
-fn chair() -> Seat {
-    Seat::from_value(&value(CHAIR)).expect("the chair's seat")
+fn chair() -> Place {
+    Place::from_value(&value(CHAIR)).expect("the chair's place")
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn a_seat_takes_one_body_whatever_the_order() {
         assert_eq!(out[0].0, first, "the stable key, not arrival");
         assert!(out[0].1.is_ok());
         let r = out[1].1.as_ref().expect_err("the second is refused");
-        assert_eq!(r.name, "seat-taken");
+        assert_eq!(r.name, "place-taken");
         assert!(r.detail.contains(&show(first)), "names the holder: {r}");
         w.run(i64::MAX);
         let p = w.c.body(first).expect("a body").pose;
@@ -257,18 +257,18 @@ fn a_sit_cancelled_before_contact_frees_the_seat() {
             height: 0
         }
     );
-    assert!(w.sit(&[1], &sit)[0].1.is_ok(), "the seat is free again");
+    assert!(w.sit(&[1], &sit)[0].1.is_ok(), "the place is free again");
 }
 
 #[test]
 fn a_seat_above_standing_reach_is_refused_by_name() {
     let sit = mv("souls:sit");
-    let mut w = world(Seat {
+    let mut w = world(Place {
         height: sit.reach + 1,
         ..chair()
     });
     let r = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
-    assert_eq!(r.name, "seat-out-of-reach");
+    assert_eq!(r.name, "place-out-of-reach");
     assert!(w.moves.is_empty() && w.slots.is_empty());
 }
 
@@ -303,7 +303,7 @@ fn rising_hands_the_body_back_at_the_stand_point() {
     let p = w.c.body(b).expect("a body").pose;
     let stand = w
         .slots
-        .seat(w.chair)
+        .place(w.chair)
         .expect("the chair")
         .stand()
         .expect("a point");
@@ -344,7 +344,7 @@ fn walks_away(w: &mut World, b: Id, driver: u64) {
     assert_eq!(
         (w.slots.held_by(b), w.slots.holder(w.chair)),
         (None, None),
-        "the seat is free"
+        "the place is free"
     );
     let v = Vec3::new(0, 0, 1_000_000);
     w.c.set(b, driver, Part::Velocity(v, replica::pose::Mode::Surface))
