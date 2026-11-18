@@ -73,6 +73,7 @@ dependencies = [
  "import-eden",
  "replica",
  "sim",
+ "skills",
  "testworld",
  "tokio",
  "tokio-tungstenite",

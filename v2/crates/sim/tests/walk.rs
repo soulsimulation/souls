@@ -96,6 +96,24 @@ fn a3_a_walker_routed_through_three_shut_doors_arrives() {
         show(node_of(&w))
     );
     assert_eq!(node_of(&w), f1);
+    // The next corner at a fixed cost (#3167): the line is kept from its search, so lines are searched for a few
+    // times a leg, never once a tick.
+    let s = t.spent.get();
+    let lines = s.lines_new + s.lines_off + s.lines_end + s.lines_blocked;
+    println!(
+        "A3 corners: {} calls, {lines} lines searched for ({} new, {} off, {} at a piece's end, {} refused), {} route searches",
+        s.corners, s.lines_new, s.lines_off, s.lines_end, s.lines_blocked, s.searches
+    );
+    assert!(
+        lines >= legs.len() as u64 && lines <= 3 * legs.len() as u64,
+        "{lines} lines for {} legs",
+        legs.len()
+    );
+    assert!(
+        s.corners >= 10 * lines,
+        "{} corner calls for {lines} lines",
+        s.corners
+    );
     // Each door crossed opened once, by the world for this walker, in the order crossed.
     let doors: Vec<Id> = legs
         .iter()

@@ -62,6 +62,11 @@ path = "subscription/main.rs"
 name = "measures"
 path = "measures/main.rs"
 
+# N15, #2660 and #3167: the walker scene, a thousand walkers in Eden on the clock.
+[[bin]]
+name = "walkers"
+path = "walkers/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 gatewayd = { path = "../../crates/gatewayd" }
@@ -75,3 +80,5 @@ testworld = { path = "../testworld" }
 import-eden = { path = "../import-eden" }
 # The `moves` bench places its bodies with the script driver's helpers (B2, #2681).
 body-script = { path = "../body-script" }
+# N15, #2660: the walker scene drives bodies through the walk skill.
+skills = { path = "../../crates/skills" }

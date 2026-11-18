@@ -630,6 +630,10 @@ impl Runner {
     /// Runs `skill` on `body`, under a new driver claiming what the skill's shape claims.
     pub fn start(&mut self, body: Id, skill: Box<dyn Skill>) -> Result<(), Refusal> {
         let driver = self.controller.claim(body, &skill.shape())?;
+        // A route the world gave an earlier walk is not this one's (#3167: a new walk took it, and ended at once).
+        if let Some(f) = self.fields.get_mut(&body) {
+            f.remove(&F_ROUTE);
+        }
         self.ended.remove(&body);
         self.asks.remove(&body);
         self.granted.remove(&body);
