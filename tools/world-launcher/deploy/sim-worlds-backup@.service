@@ -18,7 +18,8 @@ Group=simworlds
 Nice=10
 IOSchedulingClass=idle
 EnvironmentFile=-/etc/sim-worlds/backup.env
-ExecStart=/usr/bin/node --no-warnings /srv/sim-worlds/%i/tools/world-launcher/deploy/backup-restic.mjs backup %i
+# the hourly run (sim-worlds-backup-hourly@.service) shares the staging mirror: one at a time, under this lock (#2542)
+ExecStart=/usr/bin/flock -w 3600 /srv/sim-worlds-backups/.lock-%i /usr/bin/node --no-warnings /srv/sim-worlds/%i/tools/world-launcher/deploy/backup-restic.mjs backup %i
 TimeoutStartSec=2h
 NoNewPrivileges=true
 ProtectSystem=strict
