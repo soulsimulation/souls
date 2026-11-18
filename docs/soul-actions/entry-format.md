@@ -68,6 +68,10 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
+A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
+thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
+chain with a wake entry of its own; the world never waits for a time or a condition.
+
 Not defined yet, and refused with the name of the task that adds it: `reactions` (SA-F15, section 12).
 
 **How it moves and how long it lasts loose** (sections 18 and 19, SA-F10, [#2882](https://github.com/soulsimulation/souls/issues/2882)).
@@ -290,6 +294,33 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
 
+## An activity (proposed: `roles`)
+
+A group activity (a lecture, a supper, later a handshake, a dance or a bout) is a node Souls enter (SA-G1a,
+[#2872](https://github.com/soulsimulation/souls/issues/2872); Engine v2 B5, [#2724](https://github.com/soulsimulation/souls/issues/2724)).
+Its kind is an ordinary entry plus a `roles` section, which the validator does not take yet: it is proposed on
+[#2842](https://github.com/soulsimulation/souls/issues/2842), and until then the examples are test kinds
+(`packages/form-rules/cases/kinds/test/lecture_activity.json`, `supper.json`).
+
+```json
+"roles": {
+  "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
+  "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } }
+}
+```
+
+- A **role** is one of the kind's link types; membership is that link to the body, and the link's `most` is how many
+  the role takes. `need` is `required` (the activity cannot start without it), `replaceable` (required, and another
+  may take it while it runs) or `optional`. Starting, leaving and ending are SA-G1b's and Engine v2 B5's.
+- **places** say where a member of the role may be, in a fixed order. `in: "this"`: the activity's own `slots`, in
+  the order listed, so a body becomes the activity's child. `in: "here"`: the slots of things in the same place as
+  the activity whose origin is within `within_mm` of the activity's, nearest first, then by node id, then in the
+  thing's slot order. Only a slot that admits a body counts, and, if `posture` is given, only one with that posture.
+  The first slot with room is the place. If no slot has room, the answer is `no_free_place`, naming the role.
+- **Entering is a form** of the kind. It links the role to the actor and moves the actor into a slot argument
+  (`reparent`), and the role's places fill that argument. Who may enter a role is that form's `who`.
+- The world moves no body. Each Soul walks and sits by its own steps; the form's effects only link and set the parent.
+  Anything that needs another Soul's yes is an offer with an expiry (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)).
 ## A move
 
 A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
@@ -332,6 +363,16 @@ is a role of the model (the closed list of roles of the shape language), not the
 only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
 function that turns a table, a state and the time since it changed into each part's placement, in whole numbers; its
 cases are `packages/form-rules/cases/looks/`. Collision shapes never follow looks.
+
+A `sound` row says what is heard (SA-D7). `sound` is one of the page's own synthesised set (`sound-plan.ts`: water, bell, hum,
+chime, kettle and the rest) or `tune`; there are no audio files. `mode` is `loop` (default) or `once`. `reach_mm`, how far it
+carries, is required on every sound row. It is driven by a `field` (`at` or `range` + `to` give the loudness in permille, 0 is
+silent, so the sound stops when the field says so) or by a named `event` (with `level`, permille; played once from the record).
+A `tune` row names a tune by id (`tune`) or a mood tag (`mood`, which picks one from `content/tunes/tunes.json` by hashing the
+thing's id). A thing that carries sound to another place names the `link`. The function answers with what is heard
+(`sounds` on the part, or on `@self` when the row has no part): which sound, loud how, reaching how far, and the microseconds
+since the state began. A tune is notes, `[midi, start step, steps long]` over steps of `step_us`, repeating; which notes sound in
+a window of world time is `tuneNotes`, a pure function of time, so every viewer, live or in replay, is at the same point of it.
 
 ```json
 "table": [
