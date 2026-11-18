@@ -18,7 +18,8 @@
 // instances share CPUs, so the start gate is the soft mutex between them (docs/testing.md, "Wide runner").
 // `v2-bench` runs an Engine v2 bench (a [[bin]] of the ref's v2/tools/bench/Cargo.toml) in release from v2/, `repeats`
 // times, on the runner's own cores as walk does; its stdout goes to the job summary. The Rust toolchain the ref's
-// v2/rust-toolchain.toml pins is installed in the per-run directory by the workflow.
+// v2/rust-toolchain.toml pins is installed in the per-run directory by the workflow. `--prep <name>` (#3185) first writes
+// named inputs into the per-run directory with the ref's own code, untimed; the bench's args name them `@<output>`.
 //
 //   node timed-run.mjs inputs                                        validate INPUT_* env; write step outputs (`target`)
 //   node timed-run.mjs load   --record <file>                        starting load; refuse to start above the gate
@@ -90,15 +91,31 @@ export const ARG_ALLOW = {
 /** v2-bench: the bench crate's manifest in the ref, and what may follow `--`: plain tokens only, never shell syntax. */
 export const V2_BENCH = 'v2/tools/bench/Cargo.toml';
 const BENCH_BIN = /^[a-z0-9][a-z0-9_-]{0,40}$/, BENCH_TOKEN = /^[A-Za-z0-9._=/-]{1,200}$/;
-/** v2-bench `args`: `--bin <name>`, then optionally `--` and up to 20 plain tokens for the bench. The name is checked
- *  against the ref's manifest when the run starts (benchBins). */
+/** #3185: the inputs a v2-bench may have prepared before its build (untimed), each written into the per-run directory
+ *  by the ref's own code and named in the bench's arguments as `@<output>`. `eden-facts`: N1's export of Eden 2026 (the
+ *  ref's v2/tools/import-eden/export/export.ts) and N18's labels of today's engine (v2-prep/eden-labels.ts, from this
+ *  workflow's commit, run against the ref), which N15's walkers read. Only these need pnpm install and media. */
+export const V2_PREPS = { 'eden-facts': { facts: 'eden-2026.facts.json', labels: 'labels.json' } };
+/** v2-bench `args`: `--bin <name>`, optionally `--prep <name>` (V2_PREPS), then optionally `--` and up to 20 plain
+ *  tokens for the bench; with a prep, a token may also be `@<output>` of it. The name is checked against the ref's
+ *  manifest when the run starts (benchBins). */
 export function checkBenchArgs(args) {
-  const t = String(args ?? '').trim().split(/\s+/).filter(Boolean), pass = t.slice(3);
+  const t = String(args ?? '').trim().split(/\s+/).filter(Boolean);
   if (t[0] !== '--bin' || !BENCH_BIN.test(t[1] ?? '')) throw new Error(`input args: v2-bench needs --bin <name> first (a [[bin]] of ${V2_BENCH})`);
-  if (t.length > 2 && t[2] !== '--') throw new Error(`input args: ${JSON.stringify(t[2])}: the bench's own arguments follow --`);
+  const prep = t[2] === '--prep' ? t[3] : null, at = prep === null ? 2 : 4, pass = t.slice(at + 1);
+  if (prep !== null && !Object.hasOwn(V2_PREPS, prep ?? '')) throw new Error(`input args: --prep ${JSON.stringify(prep ?? '')} is not a prep (${Object.keys(V2_PREPS).join(', ')})`);
+  if (t.length > at && t[at] !== '--') throw new Error(`input args: ${JSON.stringify(t[at])}: the bench's own arguments follow --`);
   if (pass.length > 20) throw new Error('input args: at most 20 arguments for the bench');
-  for (const x of pass) if (!BENCH_TOKEN.test(x)) throw new Error(`input args: ${JSON.stringify(x)} is not a plain token (letters, digits, . _ = / -)`);
-  return ['--bin', t[1], ...(t.length > 2 ? ['--', ...pass] : [])];
+  for (const x of pass) {
+    if (x.startsWith('@')) { if (prep === null || !Object.hasOwn(V2_PREPS[prep], x.slice(1))) throw new Error(`input args: ${JSON.stringify(x)} names no output of --prep ${prep ?? '(none)'}`); continue; }
+    if (!BENCH_TOKEN.test(x)) throw new Error(`input args: ${JSON.stringify(x)} is not a plain token (letters, digits, . _ = / -)`);
+  }
+  return ['--bin', t[1], ...(prep === null ? [] : ['--prep', prep]), ...(t.length > at ? ['--', ...pass] : [])];
+}
+/** The parts of checked v2-bench args. */
+export function benchParts(args) {
+  const prep = args[2] === '--prep' ? args[3] : null;
+  return { bin: args[1], prep, pass: args.slice(prep === null ? 2 : 4) };
 }
 /** The binaries a Cargo.toml declares: the name of each [[bin]] table. */
 export function benchBins(toml) {
@@ -112,10 +129,12 @@ export function benchBins(toml) {
   }
   return bins;
 }
-/** v2-bench: cargo's arguments for the build (untimed) and for each timed repeat (cwd: the ref's v2/). */
-export function benchLines(inp) {
-  const bin = inp.args[1], pass = inp.args.slice(2);
-  return { build: ['build', '-p', 'bench', '--release', '--locked', '--bin', bin], run: ['run', '-p', 'bench', '--release', '--locked', '--bin', bin, ...pass] };
+/** v2-bench: cargo's arguments for the build (untimed) and for each timed repeat (cwd: the ref's v2/). `prepDir` turns
+ *  each `@<output>` into its file there; without it they stay as written (for the logs). */
+export function benchLines(inp, prepDir = null) {
+  const { bin, prep, pass } = benchParts(inp.args), files = prep === null ? {} : V2_PREPS[prep];
+  const fill = (x) => (prepDir && x.startsWith('@') ? join(prepDir, files[x.slice(1)]) : x);
+  return { build: ['build', '-p', 'bench', '--release', '--locked', '--bin', bin], run: ['run', '-p', 'bench', '--release', '--locked', '--bin', bin, ...pass.map(fill)] };
 }
 
 /** `args` → a checked argument list for `command`: whitespace-separated `--flag value` pairs (or bare flags) from its
@@ -307,7 +326,7 @@ export const PUBLISH = {
   // the clip, its sidecar (scrubbed) and a still of a page that never arrived; the world's data and the Soul folders stay
   clip: ['clip/*.mp4', 'clip/*.webm', 'clip/*.json', 'clip/*.open-failed.png', 'clip.log'],
   page: ['page/results.json', 'page/REPORT.md', 'page/*.png', 'page/world.log', 'page.log'],
-  'v2-bench': ['v2-bench-build.log', ...[1, 2, 3].map((k) => `v2-bench-r${k}.log`)],
+  'v2-bench': ['v2-bench-prep.log', 'v2-bench-build.log', ...[1, 2, 3].map((k) => `v2-bench-r${k}.log`)],
 };
 /** Media a timed run publishes byte for byte (never scrubbed as text). */
 export const BINARY = /\.(mp4|webm|png)$/;
@@ -504,19 +523,44 @@ async function cargo(args, { env, log }) {
 /** An Engine v2 bench of the ref (cwd: its checkout): the binary must be a [[bin]] of its v2/tools/bench/Cargo.toml; it is
  *  built in release (untimed), then run `repeats` times on the runner's own cores. Each repeat's stdout (the bench's
  *  table) goes to the job summary, scrubbed; HOME is inside the per-run directory. */
+/** #3185: a v2-bench prep (V2_PREPS), before the build and untimed: each step a node process of the ref (cwd: its root),
+ *  writing into `dir` in the per-run directory. Its output goes to v2-bench-prep.log and, scrubbed, to the job log.
+ *  Returns each output's bytes and SHA-256 for the record. */
+async function prepV2(prep, dir, { env, log, sw }) {
+  mkdirSync(dir, { recursive: true });
+  const f = V2_PREPS[prep], ws = createWriteStream(log), steps = prep === 'eden-facts' ? [
+    ['facts', ['v2/tools/import-eden/export/export.ts', '--out', join(dir, f.facts)], {}],
+    ['labels', [join(import.meta.dirname, 'v2-prep/eden-labels.ts'), '--out', join(dir, f.labels)], { DATA_DIR: join(dir, 'data') }],
+  ] : [];
+  const t0 = Date.now();
+  for (const [what, args, extra] of steps) {
+    console.log(`v2-bench prep ${prep}: ${what}`);
+    const child = spawn(process.execPath, args, { env: { ...env, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
+    for (const s of [child.stdout, child.stderr]) s.on('data', (b) => { ws.write(b); process.stdout.write(scrub(b.toString('utf8'), sw)); });
+    const code = await new Promise((r) => { child.on('error', () => r(127)); child.on('close', (c) => r(c ?? 1)); });
+    if (code !== 0) { ws.end(); throw new Error(`v2-bench: prep ${prep}, ${what}, exited ${code}`); }
+  }
+  ws.end();
+  const outputs = Object.fromEntries(Object.entries(f).map(([k, name]) => { const b = readFileSync(join(dir, name)); return [k, { bytes: b.length, sha256: createHash('sha256').update(b).digest('hex') }]; }));
+  for (const [k, o] of Object.entries(outputs)) console.log(`v2-bench prep ${prep}: @${k} ${o.bytes} bytes, sha256 ${o.sha256}`);
+  return { prep, wallMs: Date.now() - t0, outputs };
+}
 async function runV2Bench(inp, rec, out, env) {
-  const bins = existsSync(V2_BENCH) ? benchBins(readFileSync(V2_BENCH, 'utf8')) : [], lines = benchLines(inp), bin = inp.args[1];
+  const bins = existsSync(V2_BENCH) ? benchBins(readFileSync(V2_BENCH, 'utf8')) : [], { bin, prep } = benchParts(inp.args);
   if (!bins.includes(bin)) throw new Error(`v2-bench: ${bin} is not a [[bin]] of ${V2_BENCH} in the ref (${bins.join(', ') || 'no manifest or no [[bin]]'})`);
   env.HOME = join(env.PER_RUN, 'home'); mkdirSync(env.HOME, { recursive: true });
   const sw = scrubWith(), summary = (t) => { if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, t); };
+  const prepDir = prep === null ? null : join(env.PER_RUN, 'prep'), shown = benchLines(inp), lines = benchLines(inp, prepDir);
+  const prepped = prep === null ? null : await prepV2(prep, prepDir, { env, log: join(out, 'v2-bench-prep.log'), sw });
+  if (prepped) rec = { ...rec, prep: prepped };
   console.log(`v2-bench: cargo ${lines.build.join(' ')}`);
   const t0 = Date.now(), b = await cargo(lines.build, { env, log: join(out, 'v2-bench-build.log') }), build = { exitCode: b.code, wallMs: Date.now() - t0 };
   const runs = [];
   if (b.code === 0) for (let k = 1; k <= inp.repeats; k++) {
-    console.log(`v2-bench ${k}/${inp.repeats}: cargo ${lines.run.join(' ')}`);
+    console.log(`v2-bench ${k}/${inp.repeats}: cargo ${shown.run.join(' ')}`);
     const load = la(), t = Date.now(), r = await cargo(lines.run, { env, log: join(out, logName('v2-bench', k)) });
     runs.push({ repeat: k, exitCode: r.code, wallMs: Date.now() - t, load: { start: load, end: la() }, cpus: ownCpus().length });
-    summary(`### v2-bench ${bin}, repeat ${k} of ${inp.repeats} (exit ${r.code})\n\n\`cargo ${lines.run.join(' ')}\` from \`v2/\` at ${String(env.REF_COMMIT ?? '').slice(0, 12)}, 1- and 5-min load ${load.join(' ')}\n\n\`\`\`text\n${scrub(r.stdout, sw).slice(-60_000)}\n\`\`\`\n\n`);
+    summary(`### v2-bench ${bin}, repeat ${k} of ${inp.repeats} (exit ${r.code})\n\n\`cargo ${shown.run.join(' ')}\` from \`v2/\` at ${String(env.REF_COMMIT ?? '').slice(0, 12)}, 1- and 5-min load ${load.join(' ')}\n\n\`\`\`text\n${scrub(r.stdout, sw).slice(-60_000)}\n\`\`\`\n\n`);
   }
   writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, build, runs }, null, 1));
   if (b.code !== 0) throw new Error(`v2-bench: the release build exited ${b.code}`);
