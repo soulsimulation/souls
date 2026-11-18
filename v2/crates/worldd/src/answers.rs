@@ -817,7 +817,7 @@ mod tests {
     /// forged to have read `reads` at stamp 0 and already re-checked, so the commit refuses it `stale`. Returns the
     /// answer record as it came off the wire.
     fn stale_act(
-        w: lamps::World,
+        w: toggles::World,
         body: Id,
         thing: Id,
         basis: u64,
@@ -826,8 +826,8 @@ mod tests {
         let mut cfg = Config::new(LINEAGE, 1);
         cfg.tick = Duration::from_millis(10);
         cfg.checkers = 0;
-        let world =
-            start(w.replica, lamps::rules(), Held::new(Vec::new()), cfg).expect("the world starts");
+        let world = start(w.replica, toggles::rules(), Held::new(Vec::new()), cfg)
+            .expect("the world starts");
         let mut i = toggle(body, thing, 1, now() + 60_000_000);
         if let Value::Array(a) = &mut i.basis {
             a[3] = Value::Uint(basis);
@@ -886,13 +886,13 @@ mod tests {
     /// outside the actor's audience is named or carried.
     #[test]
     fn a_stale_refusal_on_the_wire_repairs_the_copy_within_the_audience() {
-        let mut w = lamps::World::build(1, 2, 0);
+        let mut w = toggles::World::build(1, 2, 0);
         let (body, thing) = w.pairs[0];
         let room = w.replica.path(body).unwrap_or_default()[1];
         let other = Id::new(body.scope(), 1 << 40).unwrap();
         let basis = w.replica.version();
-        let theirs = w.lamp_of(room, Audience::Of(other));
-        let mine = w.lamp_of(room, Audience::Of(body));
+        let theirs = w.toggle_of(room, Audience::Of(other));
+        let mine = w.toggle_of(room, Audience::Of(body));
         w.set(theirs, 3, 777_777, Audience::Of(other));
         w.dim(thing, 555_555);
         let r = stale_act(w, body, thing, basis, &[theirs, mine, thing, body]);
@@ -924,7 +924,7 @@ mod tests {
     /// Over 2,048 bytes of states, the refusal on the wire carries 9 (ids, stamps and hashes) and no 8.
     #[test]
     fn a_stale_refusal_over_the_limit_carries_hashes_only() {
-        let mut w = lamps::World::build(1, 40, 0);
+        let mut w = toggles::World::build(1, 40, 0);
         let basis = w.replica.version();
         let pairs = w.pairs.clone();
         for (k, (_, t)) in pairs.iter().enumerate() {
