@@ -18,7 +18,7 @@
 //!   client's next cursor. An answer the gateway gives itself (`world.restarting`, a refusal before the world) is
 //!   `{2: answer}`: it has no version and is not kept for a resume.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use replica::encode::Value;
@@ -57,7 +57,7 @@ pub struct Gateway {
 struct Hub {
     next_session: u64,
     /// Per grant (by its actor's bytes): its kept frames and its socket, if one is signed in.
-    grants: HashMap<Vec<u8>, Held>,
+    grants: BTreeMap<Vec<u8>, Held>,
 }
 
 #[derive(Default)]

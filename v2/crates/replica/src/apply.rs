@@ -16,7 +16,7 @@ use crate::encode::{Name, Value, encode};
 use crate::hash::{Chain, state_hash, step_hash};
 use crate::ids::Id;
 use crate::tree::Tree;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 type R<T> = Result<T, Refusal>;
 
@@ -33,7 +33,7 @@ pub struct Replica {
     header: Header,
     version: u64,
     /// The version each node last changed at, removed nodes included. Lookup only: never walked.
-    pub(crate) changed_at: HashMap<Id, u64>,
+    pub(crate) changed_at: BTreeMap<Id, u64>,
     /// The same, ordered by version and then id, so that what changed since a version is a range.
     pub(crate) by_version: BTreeSet<(u64, Id)>,
 }
@@ -92,7 +92,7 @@ impl Replica {
             tree,
             header,
             version: 0,
-            changed_at: HashMap::new(),
+            changed_at: BTreeMap::new(),
             by_version: BTreeSet::new(),
         })
     }
@@ -103,6 +103,12 @@ impl Replica {
 
     pub fn tree(&self) -> &Tree {
         &self.tree
+    }
+
+    /// The tree for K5's checkpoint to seal (it hashes the nodes marked changed and clears the marks; it changes no
+    /// node). Nothing else writes through it (K18, #3160).
+    pub fn tree_for_seal(&mut self) -> &mut Tree {
+        &mut self.tree
     }
 
     /// The version the copy stands at: the number of log entries applied.
@@ -199,7 +205,7 @@ impl Replica {
     /// records, the node that writes it and the subtree that leaves; T5's and timers', the node that writes them.
     fn touched(&self, e: &Effect) -> Vec<Id> {
         let mut out = vec![e.envelope.node];
-        let mut new_links: HashMap<Id, [Id; 2]> = HashMap::new();
+        let mut new_links: BTreeMap<Id, [Id; 2]> = BTreeMap::new();
         match &e.body {
             Body::Changes(changes) => {
                 for c in changes {

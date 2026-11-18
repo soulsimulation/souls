@@ -4,7 +4,7 @@
 //! The gateway stores only each token's SHA-256, compares in constant time, and can revoke a token. A token is never
 //! printed: [`Token`]'s `Debug` and `Display` show its grant alone.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt;
 
 use replica::effects::Actor;
@@ -126,7 +126,7 @@ pub const REFUSED: &str = "token.refused";
 /// The stored tokens: per grant (by its text), the SHA-256 of each live token.
 #[derive(Default)]
 pub struct Tokens {
-    by_grant: HashMap<String, (Grant, Vec<[u8; 32]>)>,
+    by_grant: BTreeMap<String, (Grant, Vec<[u8; 32]>)>,
 }
 
 impl Tokens {

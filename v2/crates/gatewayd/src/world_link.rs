@@ -9,7 +9,7 @@
 //! answered a repeat) is dropped, so each intent is answered once. Keeping intents across a restart of the gateway
 //! itself, and the world's repeats across its own restart, are I4's durable half.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -50,7 +50,7 @@ struct State {
     next: u64,
     /// Unanswered intents in the order they were first sent: (actor's bytes, sequence, the intent's bytes).
     pending: BTreeMap<u64, (Vec<u8>, u64, Vec<u8>)>,
-    index: HashMap<(Vec<u8>, u64), u64>,
+    index: BTreeMap<(Vec<u8>, u64), u64>,
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
     /// The newest version the world sent: the "version now" of a refusal the gateway gives itself.
     now: Option<Value>,

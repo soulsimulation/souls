@@ -25,6 +25,9 @@
 //! Not here: subscriptions (R4), perception rules, parallel cells (N17), choosing among candidates (E2), whether a
 //! set-down is allowed (E4, G2). An outline is its box: an exact polygon test is the caller's, on what this returns.
 
+// The tiles' map has a fixed hasher (`Mix`) and is never walked, so its order cannot reach a result (K12's
+// repeat rule, K18 merge).
+#[allow(clippy::disallowed_types)]
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -192,6 +195,7 @@ fn tile_of(i: i64, j: i64) -> ((i64, i64), usize) {
     )
 }
 
+#[allow(clippy::disallowed_types)]
 type Tiles<E> = HashMap<(i64, i64), Tile<E>, BuildHasherDefault<Mix>>;
 
 /// One layer of a node's grid.
