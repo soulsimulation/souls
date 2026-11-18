@@ -1,0 +1,146 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:wall_board (SA-X34, #2924): write on a clean whiteboard, wipe it clean to write again.",
+  "cases": [
+    {
+      "name": "wall_board_write_clean",
+      "act": {
+        "this": "t1",
+        "form": "write",
+        "args": {
+          "words": "w_menu"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:wall_board"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "wall_board_write_over_words",
+      "act": {
+        "this": "t1",
+        "form": "write",
+        "args": {
+          "words": "w_menu"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:wall_board",
+            "fields": {
+              "words": {
+                "text": "w_old"
+              }
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "wipe"
+        }
+      }
+    },
+    {
+      "name": "wall_board_wipe_written",
+      "act": {
+        "this": "t1",
+        "form": "wipe"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:wall_board",
+            "fields": {
+              "words": {
+                "text": "w_old"
+              }
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "wall_board_wipe_clean",
+      "act": {
+        "this": "t1",
+        "form": "wipe"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:wall_board"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": null
+      }
+    }
+  ]
+}

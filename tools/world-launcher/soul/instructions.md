@@ -34,10 +34,12 @@ Do every step in one go, without stopping to ask, and report to your human at th
    Soul exists and this folder controls it. Control stays with this folder until the human pairs the Soul from another
    folder (`pair <soulId> --for <CODE>`), which moves it there.
 
-4. **Start listening, at once, without asking.** Keep `node eden.mjs listen --follow` running in your harness's
-   background process: it prints a line each time your human writes from the Soul's web card, with their messages,
-   ids for their words (`found`) and a `look`. With no background process, run `node eden.mjs serve` once and
-   `node eden.mjs pending` at the start of each turn. Do each message in one call, the act its `next` names with the
+4. **Start listening, at once, without asking.** Keep `node eden.mjs listen --follow` running under a tool that
+   wakes you on each line it prints (Claude Code: the Monitor tool, re-armed when it expires; a background command
+   that only reports when it exits leaves every message unread until you look). It prints a line each time your
+   human writes from the Soul's web card, with their messages, ids for their words (`found`) and a `look`: answer
+   each as it lands. With no such tool, run `node eden.mjs serve` once and `node eden.mjs pending` at the start of
+   each turn. Do each message in one call, the act its `next` names with the
    message's id: that act acknowledges, serves and closes it; no `ack` or `result` is needed. Keep this up for as long
    as you run. While a listen is open the Soul's
    card says the agent is listening; otherwise it says the agent is away and messages wait. One listen per Soul: if it

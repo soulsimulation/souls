@@ -1,0 +1,200 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The television in turn: switched on (the garden), the sea, the stars, the test card and the garden again, then switched off.",
+ "cases": [
+  {
+   "name": "switch_on_every_channel_switch_off",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:television"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "switch_on"
+     },
+     "now_us": 0,
+     "receipt": "rt1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "showing",
+        "n": 1,
+        "to": "garden"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_on",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "watch_sea"
+     },
+     "now_us": 10000000,
+     "receipt": "rt2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "showing",
+        "n": 1,
+        "to": "sea"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:channel_changed",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "watch_stars"
+     },
+     "now_us": 20000000,
+     "receipt": "rt3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "showing",
+        "n": 1,
+        "to": "stars"
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "watch_test_card"
+     },
+     "now_us": 30000000,
+     "receipt": "rt4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "showing",
+        "n": 1,
+        "to": "test_card"
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "watch_garden"
+     },
+     "now_us": 40000000,
+     "receipt": "rt5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "showing",
+        "n": 1,
+        "to": "garden"
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "switch_off"
+     },
+     "now_us": 50000000,
+     "receipt": "rt6",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "showing",
+        "n": 1,
+        "to": "off"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_off",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:television",
+     "fields": {
+      "showing": "off"
+     }
+    }
+   }
+  }
+ ]
+}

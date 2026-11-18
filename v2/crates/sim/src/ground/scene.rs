@@ -23,6 +23,8 @@ pub const F_LINE_WIDTH: u64 = 17;
 pub const F_WATER_LEVEL: u64 = 18;
 pub const F_PLACE_OF: u64 = 20;
 pub const F_DOORWAYS: u64 = 22;
+pub const F_TILE_SIZE: u64 = 24;
+pub const F_TILES: u64 = 25;
 
 pub const GROUND: &str = "eden:ground";
 pub const FLOOR: &str = "eden:floor";
@@ -90,6 +92,153 @@ pub struct Scene {
     /// The outlines of the open ground's other named places (a square, a park): open ground, which they only widen
     /// the extent of, so an empty square is cut as well as one with things on it.
     pub areas: Vec<Vec<Xz>>,
+}
+
+/// The open ground's terrain (N1b, #3197), read from its node's `F_TILE_SIZE` and `F_TILES` (N1's import, byte for
+/// byte as exported): square tiles of `side` µm, each with (n + 1)² heights at side / n spacing, sampled bilinearly,
+/// and n² cells, each with a class byte (today's media codes, which the engine does not name). Read on demand, so a
+/// [`Scene`] that has no use for the heights does not copy them. A point off every tile has no terrain (`None`).
+#[derive(Clone, Default)]
+pub struct Terrain {
+    pub side: i64,
+    tiles: std::collections::HashMap<(i64, i64), Tile>,
+}
+
+#[derive(Clone)]
+struct Tile {
+    /// Samples a side, n + 1.
+    n: usize,
+    /// (n + 1)² heights, µm: a row of x for each z.
+    heights: Vec<i64>,
+    /// n² class bytes, the same order.
+    classes: Vec<u8>,
+}
+
+impl std::fmt::Debug for Terrain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Terrain({} tiles of {} µm)", self.tiles.len(), self.side)
+    }
+}
+
+/// The cell of a tile holding a point: the tile, the cell's column and row, and the point's offset into the cell (µm).
+struct At<'a> {
+    tile: &'a Tile,
+    i: usize,
+    j: usize,
+    u: i64,
+    v: i64,
+}
+
+impl Terrain {
+    /// The terrain of node `id` (the open ground), or `None` when it holds none.
+    pub fn of(tree: &Tree, id: Id) -> Result<Option<Terrain>, String> {
+        let n = tree
+            .node(tree.handle(id).ok_or("no such node")?)
+            .ok_or("no such node")?;
+        let (Some(side), Some(rows)) = (
+            n.fields().get(&F_TILE_SIZE).and_then(int),
+            n.fields().get(&F_TILES),
+        ) else {
+            return Ok(None);
+        };
+        let side = side * 1000;
+        if side <= 0 {
+            return Err("a terrain tile of no size".into());
+        }
+        let mut tiles = std::collections::HashMap::new();
+        for r in row(rows) {
+            let [tx, tz, Value::Bytes(h), Value::Bytes(c)] = row(r) else {
+                return Err("a terrain tile is [tx, tz, heights, classes]".into());
+            };
+            let k = (int(tx).ok_or("a tile's tx")?, int(tz).ok_or("a tile's tz")?);
+            let n = c.len().isqrt();
+            if n == 0 || n * n != c.len() || h.len() != (n + 1) * (n + 1) * 4 {
+                return Err("a terrain tile's heights and classes do not agree".into());
+            }
+            let heights = h
+                .chunks_exact(4)
+                .map(|b| i64::from(i32::from_le_bytes([b[0], b[1], b[2], b[3]])) * 1000)
+                .collect();
+            let tile = Tile {
+                n,
+                heights,
+                classes: c.clone(),
+            };
+            tiles.insert(k, tile);
+        }
+        Ok(Some(Terrain { side, tiles }))
+    }
+
+    /// The cell holding (x, z), µm. A point on a tile's far edge, with no tile beyond, is on the tile's last cell.
+    fn at(&self, x: i64, z: i64) -> Option<At<'_>> {
+        let key = |p: i64| p.div_euclid(self.side);
+        let (mut tx, mut tz) = (key(x), key(z));
+        if !self.tiles.contains_key(&(tx, tz)) && x.rem_euclid(self.side) == 0 {
+            tx -= 1;
+        }
+        if !self.tiles.contains_key(&(tx, tz)) && z.rem_euclid(self.side) == 0 {
+            tz -= 1;
+        }
+        let tile = self.tiles.get(&(tx, tz))?;
+        let cell = self.side / tile.n as i64;
+        let (fx, fz) = (x - tx * self.side, z - tz * self.side);
+        let last = tile.n as i64 - 1;
+        let (i, j) = ((fx / cell).min(last), (fz / cell).min(last));
+        Some(At {
+            tile,
+            i: i as usize,
+            j: j as usize,
+            u: fx - i * cell,
+            v: fz - j * cell,
+        })
+    }
+
+    /// The heights at a cell's four corners, µm: (i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1).
+    fn corners(a: &At) -> [i64; 4] {
+        let w = a.tile.n + 1;
+        let h = |i: usize, j: usize| a.tile.heights[j * w + i];
+        [
+            h(a.i, a.j),
+            h(a.i + 1, a.j),
+            h(a.i, a.j + 1),
+            h(a.i + 1, a.j + 1),
+        ]
+    }
+
+    /// The ground's height at (x, z), µm: bilinear between the four samples of the cell holding it, as today's
+    /// `Terrain.sample` reads a tile, rounded to the nearest micrometre.
+    pub fn height_at(&self, x: i64, z: i64) -> Option<i64> {
+        let a = self.at(x, z)?;
+        let s = i128::from(self.side / a.tile.n as i64);
+        let [h00, h10, h01, h11] = Self::corners(&a).map(i128::from);
+        let (u, v) = (i128::from(a.u), i128::from(a.v));
+        let sum = h00 * (s - u) * (s - v) + h10 * u * (s - v) + h01 * (s - u) * v + h11 * u * v;
+        let d = s * s;
+        i64::try_from((sum + d / 2).div_euclid(d)).ok()
+    }
+
+    /// The slope of the cell holding (x, z): its mean rise across x and across z, combined, in parts per million
+    /// (1,000,000 is a rise of a metre over a metre).
+    pub fn slope_at(&self, x: i64, z: i64) -> Option<i64> {
+        let a = self.at(x, z)?;
+        let s = self.side / a.tile.n as i64;
+        let [h00, h10, h01, h11] = Self::corners(&a);
+        // Twice the mean rise over the cell's width, scaled to parts per million.
+        let gx = i128::from(h10 - h00 + h11 - h01) * 500_000 / i128::from(s);
+        let gz = i128::from(h01 - h00 + h11 - h10) * 500_000 / i128::from(s);
+        i64::try_from((gx * gx + gz * gz).isqrt()).ok()
+    }
+
+    /// The class byte of the cell holding (x, z).
+    pub fn class_at(&self, x: i64, z: i64) -> Option<u8> {
+        let a = self.at(x, z)?;
+        a.tile.classes.get(a.j * a.tile.n + a.i).copied()
+    }
+
+    /// The tiles held.
+    pub fn tiles(&self) -> usize {
+        self.tiles.len()
+    }
 }
 
 /// A rigid move from one frame to another, micrometres (T4's integer arithmetic).
