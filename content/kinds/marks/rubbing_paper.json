@@ -1,0 +1,547 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:rubbing_paper",
+  "owner": "thing",
+  "state": {
+    "charcoal": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "rings": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "grain": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        6,
+        200
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      560,
+      20,
+      460
+    ]
+  },
+  "forms": {
+    "rub_stone": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "source": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:rubbing_stone",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "charcoal",
+          "at_least": 1
+        },
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "source"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "source"
+          }
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "toward": {
+            "arg": "source"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "charcoal",
+          "by": -1,
+          "event": "charcoal_used"
+        },
+        {
+          "change": "set",
+          "field": "rings",
+          "by": 1,
+          "event": "rings_rubbed"
+        }
+      ]
+    },
+    "rub_wood": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "source": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:rubbing_wood",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "charcoal",
+          "at_least": 1
+        },
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "source"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "source"
+          }
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "toward": {
+            "arg": "source"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "charcoal",
+          "by": -1,
+          "event": "charcoal_used"
+        },
+        {
+          "change": "set",
+          "field": "grain",
+          "by": 1,
+          "event": "grain_rubbed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:rubbing_paper",
+    "table": [
+      {
+        "part": "fill",
+        "field": "charcoal",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          0,
+          4
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      },
+      {
+        "part": "knob",
+        "field": "rings",
+        "do": "show",
+        "range": [
+          0,
+          1
+        ],
+        "to": [
+          0,
+          1
+        ]
+      },
+      {
+        "part": "needle",
+        "field": "grain",
+        "do": "show",
+        "range": [
+          0,
+          1
+        ],
+        "to": [
+          0,
+          1
+        ]
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            3,
+            0
+          ],
+          "size": [
+            560,
+            6,
+            460
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -210,
+            13,
+            -205
+          ],
+          "size": [
+            38,
+            12,
+            18
+          ],
+          "tint": "charcoal",
+          "role": "fill",
+          "pivot": [
+            -240,
+            13,
+            -205
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -155,
+            13,
+            -205
+          ],
+          "size": [
+            38,
+            12,
+            18
+          ],
+          "tint": "charcoal",
+          "role": "fill",
+          "pivot": [
+            -240,
+            13,
+            -205
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -100,
+            13,
+            -205
+          ],
+          "size": [
+            38,
+            12,
+            18
+          ],
+          "tint": "charcoal",
+          "role": "fill",
+          "pivot": [
+            -240,
+            13,
+            -205
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -45,
+            13,
+            -205
+          ],
+          "size": [
+            38,
+            12,
+            18
+          ],
+          "tint": "charcoal",
+          "role": "fill",
+          "pivot": [
+            -240,
+            13,
+            -205
+          ]
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            -110,
+            6,
+            40
+          ],
+          "profile": [
+            [
+              22,
+              0
+            ],
+            [
+              30,
+              0
+            ],
+            [
+              30,
+              3
+            ],
+            [
+              22,
+              3
+            ]
+          ],
+          "segments": 16,
+          "tint": "mark",
+          "role": "knob"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            -110,
+            6,
+            40
+          ],
+          "profile": [
+            [
+              47,
+              0
+            ],
+            [
+              55,
+              0
+            ],
+            [
+              55,
+              3
+            ],
+            [
+              47,
+              3
+            ]
+          ],
+          "segments": 16,
+          "tint": "mark",
+          "role": "knob"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            -110,
+            6,
+            40
+          ],
+          "profile": [
+            [
+              72,
+              0
+            ],
+            [
+              80,
+              0
+            ],
+            [
+              80,
+              3
+            ],
+            [
+              72,
+              3
+            ]
+          ],
+          "segments": 16,
+          "tint": "mark",
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            60,
+            7,
+            40
+          ],
+          "size": [
+            10,
+            2,
+            220
+          ],
+          "tint": "mark",
+          "role": "needle"
+        },
+        {
+          "kind": "box",
+          "at": [
+            100,
+            7,
+            40
+          ],
+          "size": [
+            10,
+            2,
+            220
+          ],
+          "tint": "mark",
+          "role": "needle"
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            7,
+            40
+          ],
+          "size": [
+            10,
+            2,
+            220
+          ],
+          "tint": "mark",
+          "role": "needle"
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            7,
+            40
+          ],
+          "size": [
+            10,
+            2,
+            220
+          ],
+          "tint": "mark",
+          "role": "needle"
+        },
+        {
+          "kind": "box",
+          "at": [
+            220,
+            7,
+            40
+          ],
+          "size": [
+            10,
+            2,
+            220
+          ],
+          "tint": "mark",
+          "role": "needle"
+        }
+      ],
+      "palette": {
+        "paper": "#e9ddba",
+        "charcoal": "#303432",
+        "mark": "#3c3f3d"
+      },
+      "tags": [
+        "art",
+        "paper",
+        "rubbing",
+        "item"
+      ]
+    }
+  },
+  "text": {
+    "card": "A sheet with four sticks of charcoal: rub a stone or wood relief onto it.",
+    "art": "art",
+    "rubbing": "rubbing",
+    "paper": "paper",
+    "howto_rub": "Hold the sheet, go to a rubbing stone or wood block, and rub: one charcoal stick becomes one lasting print."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "rubbing",
+      "paper"
+    ]
+  },
+  "howtos": {
+    "rub": {
+      "text": "howto_rub",
+      "steps": [
+        {
+          "form": "rub_stone"
+        }
+      ]
+    }
+  }
+}
