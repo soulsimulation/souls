@@ -7,6 +7,7 @@
 //! - `cargo run -p archive --release -- count`: the write count of a busy hour and a quiet day, scaled to a month
 //!   with O3's shipping, at R2's price (in memory; `v2/docs/archive.md`).
 //! - `cargo run -p archive --release -- corpus <dir>`: writes entry one of V18's corpus.
+//! - `cargo run -p archive --release -- seek [hours]`: V4's seek table and index sizes (`seek_bench.rs`).
 //! - `ship`, `rebuild` and `ship-count`: O3's drill and count (#2732), in `drill.rs`.
 //!
 //! `record` and `restore` use the S3-compatible store named by `ARCHIVE_STORE_ENDPOINT`, `_BUCKET`, `_REGION`
@@ -14,6 +15,7 @@
 //! never production's.
 
 mod drill;
+mod seek_bench;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -318,6 +320,7 @@ fn main() {
         "restore" => restore_cmd(&arg(2)),
         "count" => count(),
         "corpus" => corpus(Path::new(&arg(2))),
+        "seek" => seek_bench::run(arg(2).parse().unwrap_or(24)),
         "ship" => store().and_then(|s| {
             drill::ship(
                 s,
@@ -332,8 +335,8 @@ fn main() {
         "ship-count" => drill::count(Path::new(&arg(2))),
         _ => refuse(
             "usage",
-            "record <dir> | restore <hash> | count | corpus <dir> | ship <dir> <receipts> <even|uneven|still> \
-             <seconds> [seed] | rebuild <receipts> [kill] | ship-count <dir>",
+            "record <dir> | restore <hash> | count | corpus <dir> | seek [hours] | ship <dir> <receipts> \
+             <even|uneven|still> <seconds> [seed] | rebuild <receipts> [kill] | ship-count <dir>",
         ),
     };
     if let Err(e) = out {
