@@ -1,0 +1,293 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:tomato (from #1729): a ripe tomato prepared from a harvest basket. Anyone with a free hand takes it; its holder bites it (two bites to a tomato) or eats it at once. Refused: no free hand to take it, not held, and nothing left to bite or eat. Only the green calyx is left of an eaten tomato.",
+  "cases": [
+    {
+      "name": "take_every_need_met",
+      "act": {
+        "this": "t1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "x1": {
+            "kind": "eden:kindling_bundle"
+          },
+          "x2": {
+            "kind": "eden:kindling_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "bite_every_need_met",
+      "act": {
+        "this": "t1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bite_not_held",
+      "act": {
+        "this": "t1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "take",
+          "thing": "t1"
+        }
+      }
+    },
+    {
+      "name": "bite_nothing_left",
+      "act": {
+        "this": "t1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tomato",
+            "fields": {
+              "bites_left": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "bites_left",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "eat_every_need_met",
+      "act": {
+        "this": "t1",
+        "form": "eat"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tomato",
+            "fields": {
+              "bites_left": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "t1"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "eat_not_held",
+      "act": {
+        "this": "t1",
+        "form": "eat"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "take",
+          "thing": "t1"
+        }
+      }
+    },
+    {
+      "name": "eat_nothing_left",
+      "act": {
+        "this": "t1",
+        "form": "eat"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tomato",
+            "fields": {
+              "bites_left": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "bites_left",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null
+      }
+    }
+  ]
+}
