@@ -1,0 +1,180 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:tower",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      5000,
+      11000,
+      5000
+    ]
+  },
+  "areas": {
+    "entrance": {
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "radius_mm": 2280
+    },
+    "room": {
+      "at_mm": [
+        0,
+        3100,
+        0
+      ],
+      "radius_mm": 2280
+    },
+    "top": {
+      "at_mm": [
+        0,
+        6100,
+        0
+      ],
+      "radius_mm": 2280
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "climb": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "top"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:tower",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            4500,
+            0
+          ],
+          "size": [
+            5000,
+            9000,
+            5000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            10698,
+            0
+          ],
+          "r": 3735,
+          "h": 3396,
+          "segments": 4,
+          "yaw": 45000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1150,
+            2520
+          ],
+          "size": [
+            1200,
+            2100,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            4550,
+            2515
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            7550,
+            2515
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#c9c1b1",
+        "trim": "#8f877a",
+        "roof": "#4f5a60",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "tower"
+      ]
+    }
+  },
+  "text": {
+    "card": "A square stone tower with a spiral stair up to its top room.",
+    "building": "building",
+    "lookout": "lookout",
+    "keep": "keep"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "lookout",
+      "keep"
+    ]
+  }
+}

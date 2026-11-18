@@ -177,6 +177,8 @@ pub enum Purpose {
     View,
     /// A redaction list: the references removed so far (contracts T7 and T8).
     Redactions,
+    /// A stored model of a kind's picture: the binary glTF a page fetches (V17, #2717).
+    Model,
 }
 
 impl Purpose {
@@ -192,6 +194,7 @@ impl Purpose {
             Purpose::Fixture => "souls/fixture/1",
             Purpose::View => "souls/view/1",
             Purpose::Redactions => "souls/redactions/1",
+            Purpose::Model => "souls/model/1",
         }
     }
 }
