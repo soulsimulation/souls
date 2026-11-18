@@ -14,7 +14,8 @@ use axum::response::Response;
 use axum::routing::get;
 use replica::effects::Actor;
 use replica::encode::{Name, Value, decode, encode, from_hex};
-use replica::intents::{Answer, INTENT_MOST, Intent, PROTOCOL, answer_hello};
+use replica::intent_decode::{LIMITS, decode as decode_intent};
+use replica::intents::{Answer, PROTOCOL, answer_hello};
 
 use crate::Gateway;
 use crate::token::{self, Grant, Token};
@@ -26,8 +27,9 @@ pub const PATH: &str = "/v2/ws";
 /// tungstenite's read buffer per socket. Its default is 128 KiB; one benchmark's peak went from 106 to 908 MB between
 /// two releases (tungstenite-rs#480), so it is set small and measured (the idle-socket memory in I1's table).
 const READ_BUFFER: usize = 4096;
-/// The largest message a client may send: an intent's limit (T10 rule 11) and room for a sign-in.
-const MESSAGE_MOST: usize = INTENT_MOST as usize + 512;
+/// The largest message a client may send: an intent's frame limit, from the limits file (I2, #2689). A sign-in is far
+/// smaller. tungstenite refuses a longer frame from its header's length, before reading or reserving its payload.
+const MESSAGE_MOST: usize = LIMITS.frame_bytes as usize;
 /// How long a socket has to send its first frame and to sign in.
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
 
@@ -186,7 +188,7 @@ async fn serve(
 
 /// Reads an intent and hands it to the world; the gateway's own answer, if it gives one.
 fn take_intent(gw: &Gateway, actor: Actor, grant: Grant, bytes: Vec<u8>) -> Option<Vec<u8>> {
-    let intent = match Intent::read(&bytes) {
+    let intent = match decode_intent(&bytes) {
         Ok(i) => i,
         Err(r) => {
             let reason = Name::new(r.name).unwrap_or_else(|| unreachable!("a refusal's name"));
