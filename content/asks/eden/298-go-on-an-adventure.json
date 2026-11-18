@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":298,"group":"open-ended","words":"go on an adventure","obvious":2,"things":{"woods":"eden:woodland","boat":"eden:rowing_boat"},"chain":[{"this":"me","form":"go_to","args":{"place":"woods"}},{"this":"boat","form":"ride"}]}

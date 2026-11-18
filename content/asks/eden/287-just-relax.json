@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":287,"group":"open-ended","words":"just relax","obvious":3,"things":{"sofa":"eden:sofa","hammock":"eden:hammock","armchair":"eden:armchair"},"chain":[{"any":[[{"this":"me","form":"lie_down","args":{"spot":"sofa"}}],[{"this":"me","form":"lie_down","args":{"spot":"hammock"}}],[{"this":"me","form":"sit_down","args":{"spot":"armchair"}}]]}]}
