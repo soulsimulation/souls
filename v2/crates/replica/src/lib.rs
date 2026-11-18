@@ -4,31 +4,23 @@
 // No float in a verdict (K14, #2648; v2/tools/arch/README.md): a module of drawing helpers allows it by name.
 #![deny(clippy::float_arithmetic)]
 
-<<<<<<< HEAD
+pub mod apply;
 pub mod audience;
 pub mod bodies;
 pub mod durability;
 pub mod effects;
 pub mod encode;
-pub mod host;
-=======
-pub mod apply;
-pub mod effects;
-pub mod encode;
 pub mod hash;
->>>>>>> 5c95136b842229fa985d36323f0d7f316bc71b53
+pub mod host;
 pub mod ids;
 pub mod intents;
 pub mod pose;
 pub mod query;
 pub mod time;
 pub mod tree;
-<<<<<<< HEAD
 pub mod views;
-=======
 #[cfg(target_arch = "wasm32")]
 mod wasm;
->>>>>>> 5c95136b842229fa985d36323f0d7f316bc71b53
 pub mod world_model;
 pub mod zones;
 
