@@ -20,6 +20,11 @@ export type BakedModel = {
   lods: THREE.BufferGeometry[];
   bake: THREE.DataTexture;
   bones: number;
+  /** Per bone, for V7's pose (`../pose/pose.ts`): its name, its parent's index (-1 for none) and its origin in bind pose,
+   *  in the model's space (three numbers a bone). */
+  names: string[];
+  parents: Int16Array;
+  joints: Float32Array;
   clips: BakedClip[];
   /** What the source held, for the premise count: triangles and materials per body. */
   triangles: number[];
@@ -140,8 +145,11 @@ export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationC
   const levels = [mesh, ...LOD_CELLS.map((c) => cluster(mesh, c))];
   let lo = Infinity, hi = -Infinity;
   for (let i = 1; i < mesh.position.length; i += 3) (lo = Math.min(lo, mesh.position[i])), (hi = Math.max(hi, mesh.position[i]));
+  const joints = new Float32Array(bones * 3);
+  skeleton.boneInverses.forEach((b, i) => joints.set(new THREE.Vector3().setFromMatrixPosition(m.copy(b).invert()).toArray(), i * 3));
   return {
-    name, lods: levels.map(geometry), bake, bones, clips, materials,
+    name, lods: levels.map(geometry), bake, bones, clips, materials, joints,
+    names: skeleton.bones.map((b) => b.name), parents: Int16Array.from(skeleton.bones, (b) => skeleton.bones.indexOf(b.parent as THREE.Bone)),
     triangles: levels.map((l) => l.index.length / 3), height: hi - lo,
   };
 }
