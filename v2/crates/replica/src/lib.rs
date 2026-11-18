@@ -9,6 +9,7 @@ pub mod audience;
 pub mod bodies;
 pub mod effects;
 pub mod encode;
+pub mod group;
 pub mod host;
 pub mod ids;
 pub mod moves;
