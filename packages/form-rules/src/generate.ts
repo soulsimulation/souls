@@ -39,6 +39,7 @@ export function generate(kinds: Record<string, Entry>, count: number, seed: numb
       if (def.type === 'bool') self.fields![name] = g.chance(50);
       else if (def.type === 'enum') self.fields![name] = g.pick(def.values as string[]);
       else if (def.type === 'int' || def.type === 'duration') self.fields![name] = g.chance(3) ? 0.5 : g.int(0, 2000);
+      else if (def.type === 'timed') self.fields![name] = timedValue(g);
       else self.fields![name] = g.chance(50) ? null : 't_words';
     }
     for (const name of Object.keys(entry.links ?? {})) {
@@ -76,7 +77,27 @@ export function generate(kinds: Record<string, Entry>, count: number, seed: numb
       else args[name] = g.int(0, 10);
     }
     const sees = g.chance(30) ? 'all' : AUDIENCES.filter((a) => a === 'public' || g.chance(30));
-    out.push({ act: { this: 'n1', form: formName, args }, state: { actor: 'b1', nodes, moves }, asker: { sees } });
+    const now_us = g.chance(95) ? g.int(0, 400000000) : undefined;
+    out.push({ act: { this: 'n1', form: formName, args }, state: { actor: 'b1', nodes, moves, now_us }, asker: { sees } });
+  }
+  return out;
+}
+
+const timedValue = (g: ReturnType<typeof generator>) => ({ value: g.int(0, 120000), per_s: g.int(-2000, 2000), set_us: g.int(0, 200000000) });
+
+export type TimedInput = { def: { min?: number; max?: number }; stored: unknown; at_us: number; level: { at_least: number } | { at_most: number } };
+
+/** `count` timed values with a time and a level, from a seeded generator (SA-F5a): for comparing builds. */
+export function generateTimed(count: number, seed: number): TimedInput[] {
+  const g = generator(seed);
+  const out: TimedInput[] = [];
+  for (let c = 0; c < count; c++) {
+    const def: TimedInput['def'] = {};
+    if (g.chance(80)) def.min = g.int(0, 30000);
+    if (g.chance(80)) def.max = g.int(60000, 110000);
+    const stored = timedValue(g);
+    const level = g.chance(50) ? { at_least: g.int(0, 120000) } : { at_most: g.int(0, 120000) };
+    out.push({ def, stored, at_us: stored.set_us + g.int(g.chance(2) ? -10 : 0, 400000000), level });
   }
   return out;
 }

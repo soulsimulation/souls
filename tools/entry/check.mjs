@@ -65,7 +65,9 @@ function classify({path, reason: r}) {
 }
 
 function finding(e) {
-  return {rule: classify(e), ...where(e.path), path: e.path, reason: e.reason, fix: e.reason.includes("; ") ? e.reason.split("; ")[1] : `make it ${e.reason}`};
+  const not = /^not a value of field "([^"]+)"/.exec(e.reason);
+  const fix = e.reason.includes("; ") ? e.reason.split("; ")[1] : not ? `use a value that field "${not[1]}" declares, or add it to the field's values` : `make it ${e.reason}`;
+  return {rule: classify(e), ...where(e.path), path: e.path, reason: e.reason, fix};
 }
 
 /** Findings of rules the format cannot see, from a parsed and format-valid entry. */
@@ -93,10 +95,13 @@ function rules(entry) {
       if (a.select && wantOf && a.select.of !== wantOf) add('targets', `${p}.takes.${an}.select.of`, `argument "${an}" is a ${a.type} but its selector picks ${a.select.of}`, `set select.of to "${wantOf}"`);
       if (!used.has(an)) add('targets', `${p}.takes.${an}`, `argument "${an}" is taken but nothing in the form uses it`, `use {"arg": "${an}"} in a need, step or effect, or remove it`);
     }
-    // makes: a create is paid for in its own form (something is removed, or a field the form needed is spent).
+    // makes: a create is paid for in its own form (something is removed, or a field the form needed is spent). A stock's
+    // take form is paid by its count, which the engine lowers by one in the same batch (SA-F12): the format forbids it
+    // setting the count itself.
     (f.effects ?? []).forEach((e, i) => {
       if (e.change !== 'create') return;
-      const spent = f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && n.field === x.field));
+      const spent = Object.values(isObj(entry.stock) ? entry.stock : {}).some(s => isObj(s) && s.take === fn && s.kind === e.kind)
+        || f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && n.field === x.field));
       if (!spent) add('makes', `${p}.effects.${i}`, `creates ${e.kind} and pays for nothing`, 'add a remove effect for what it is made from, or a set of a field the form needs (spending it)');
     });
     // no-waiting: a timer that arms its own form again waits on a condition by polling; a name that counts a time of day.
@@ -235,7 +240,10 @@ export function checkFiles(files, all = files) {
   return rows;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// `entry prove <family>` runs every gate that needs no engine (prove.mjs, SA-P8).
+if (isMain && process.argv[2] === 'prove') import('./prove.mjs').then(m => { process.exitCode = m.main(process.argv.slice(3)); });
+else if (isMain) {
   const args = process.argv.slice(2).filter((a, i) => !(i === 0 && a === 'check'));
   const all = F.loadDir(KINDS_DIR);
   const resolve = a => existsSync(a) ? F.loadDir(a) : existsSync(join(KINDS_DIR, a)) ? F.loadDir(join(KINDS_DIR, a)) : null;
