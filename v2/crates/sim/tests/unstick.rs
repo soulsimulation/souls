@@ -2,21 +2,22 @@
 //!
 //! `cargo test -p sim --release --locked --test unstick -- --include-ignored --nocapture` runs Step 0 (the eight
 //! scenes on N7 and N8 as they are, no ladder) and A1 (the same scenes with the ladder), printing how and when each
-//! walker's order ends.
+//! walker's order ends. The walkers run N7's walk skill through the host, and the ladder reaches them through it
+//! (T9c #3127).
 
-use import_eden::Import;
-use replica::effects::{Header, schema_hash};
-use replica::encode::{Value, encode};
-use replica::ids::{Hash, Id, Purpose, Scope};
-use replica::pose::{Frame, Quat, Vec3};
+mod common;
+
+use common::{arrived, dist, id, stand, walk};
+use replica::host::Progress;
+use replica::ids::Id;
+use replica::pose::{Quat, Vec3};
 use sim::ground::exits;
 use sim::ground::{
     HUMAN_RADIUS, Patch, Scene as GroundScene, Solid, Turn as GroundTurn, cut_floor,
 };
-use sim::links::Doors;
+use sim::host::Runner;
 use sim::mover::{Body, Surface};
 use sim::unstick::{Ladder, Rung};
-use sim::walk::Crowd;
 use sim::walk::town::Town;
 use std::collections::BTreeMap;
 
@@ -25,55 +26,19 @@ const TICK: i64 = 50_000; // µs
 /// How long a scene runs before it is called stuck, µs.
 const LIMIT: i64 = 60_000_000;
 
-fn id(n: u64) -> Id {
-    Id::new(Scope([7; 16]), n).unwrap()
-}
-
 fn town() -> (Town, BTreeMap<String, Id>) {
-    let w = testworld::generate(1, 0).expect("the test world");
-    let Import {
-        tree, rules, nodes, ..
-    } = import_eden::load(&w.text).expect("the test world loads");
-    let root = nodes["world"];
-    let v = Value::Map(BTreeMap::from([
-        (
-            1,
-            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/unstick-test/1").to_bytes()),
-        ),
-        (2, Value::Bytes(schema_hash().to_bytes())),
-        (3, Value::Bytes(root.scope().0.to_vec())),
-        (4, root.to_value()),
-        (5, Value::Uint(0)),
-        (6, Value::Array(Vec::new())),
-        (7, Value::Array(Vec::new())),
-    ]));
-    let header = Header::read(&encode(&v).unwrap()).unwrap();
-    let next = tree.to_state().next;
-    let ground = nodes["ground"];
-    let t = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
-    (t, nodes)
-}
-
-fn stand(t: &Town, who: Id, node: Id, at: Vec3) -> Body {
-    t.surfaces[&node]
-        .place(who, Frame { node, slot: None }, at, Quat::IDENTITY)
-        .unwrap_or_else(|e| panic!("{}: {}", e.name, e.detail))
-}
-
-fn dist(a: Vec3, b: Vec3) -> i64 {
-    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-    (d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)).isqrt() as i64
+    common::town(b"souls/unstick-test/1")
 }
 
 fn v(x: i64, z: i64) -> Vec3 {
     Vec3::new(x, 0, z)
 }
 
-/// One scene: the town, its crowd, the walkers' ids, and the orders refused before a step (by name).
+/// One scene: the town, its runner, the walkers' ids, and the orders refused before a step (by name).
 struct Scene {
     name: &'static str,
     t: Town,
-    c: Crowd,
+    c: Runner,
     l: Ladder,
     walkers: Vec<Id>,
     refused: Vec<(Id, &'static str)>,
@@ -86,7 +51,7 @@ impl Scene {
             Scene {
                 name,
                 t,
-                c: Crowd::new(TICK),
+                c: Runner::new(TICK),
                 l: Ladder::new(),
                 walkers: Vec::new(),
                 refused: Vec::new(),
@@ -98,11 +63,11 @@ impl Scene {
     /// A walker `n` on `node` at `from`, going to `goal` on `to`.
     fn walker(&mut self, n: u64, node: Id, from: Vec3, to: Id, goal: Vec3) {
         let b = stand(&self.t, id(n), node, from);
-        match self
-            .l
-            .add(&mut self.c, &mut self.t, b, SPEED, id(10_000 + n), to, goal)
-        {
-            Ok(()) => self.walkers.push(id(n)),
+        match walk(&mut self.c, &mut self.t, b, SPEED, to, goal) {
+            Ok(legs) => {
+                self.l.add(id(n), id(10_000 + n), SPEED, to, goal, legs);
+                self.walkers.push(id(n));
+            }
             Err(e) => self.refused.push((id(n), e.name)),
         }
     }
@@ -111,9 +76,8 @@ impl Scene {
     fn still(&mut self, n: u64, node: Id, at: Vec3) {
         let b = stand(&self.t, id(n), node, at);
         let p = b.pose.position;
-        self.l
-            .add(&mut self.c, &mut self.t, b, SPEED, id(10_000 + n), node, p)
-            .expect("a still body");
+        let legs = walk(&mut self.c, &mut self.t, b, SPEED, node, p).expect("a still body");
+        self.l.add(id(n), id(10_000 + n), SPEED, node, p, legs);
     }
 }
 
@@ -299,7 +263,7 @@ fn narrow_door(t: &Town) -> Id {
 #[derive(Debug)]
 enum End {
     Arrived(i64),
-    Named(i64, &'static str),
+    Named(i64, String),
     Stuck,
 }
 
@@ -309,24 +273,32 @@ fn run(s: &mut Scene, ladder: bool) -> (Vec<(Id, End)>, i64) {
         let r = if ladder {
             s.l.step(&mut s.c, &mut s.t)
         } else {
-            s.c.step(&mut s.t)
+            s.c.tick(&mut s.t)
         };
         r.unwrap_or_else(|e| panic!("{}: refused: {}: {}", s.name, e.name, e.detail));
     }
     let mut ends: Vec<(Id, End)> = s
         .refused
         .iter()
-        .map(|&(w, n)| (w, End::Named(0, n)))
+        .map(|&(w, n)| (w, End::Named(0, n.to_owned())))
         .collect();
     for w in &s.walkers {
-        let x = s.c.walkers.iter().find(|x| x.body.id == *w).unwrap();
         let named = s.l.log.iter().find_map(|r| match r.rung {
-            Rung::Ended { name, .. } if r.who == *w => Some(End::Named(r.at, name)),
+            Rung::Ended { name, .. } if r.who == *w => Some(End::Named(r.at, name.to_owned())),
             _ => None,
         });
+        // A walk that failed by its own name (none is expected).
+        let failed = match s.c.ended.get(w) {
+            Some((at, Progress::Failed(n))) => Some(End::Named(*at, n.as_str().to_owned())),
+            _ => None,
+        };
         ends.push((
             *w,
-            x.arrived.map(End::Arrived).or(named).unwrap_or(End::Stuck),
+            arrived(&s.c, *w)
+                .map(End::Arrived)
+                .or(named)
+                .or(failed)
+                .unwrap_or(End::Stuck),
         ));
     }
     let last = ends
@@ -347,8 +319,8 @@ fn report(name: &str, ends: &[(Id, End)], last: i64) -> String {
         .count();
     let named: Vec<&str> = ends
         .iter()
-        .filter_map(|e| match e.1 {
-            End::Named(_, n) => Some(n),
+        .filter_map(|e| match &e.1 {
+            End::Named(_, n) => Some(n.as_str()),
             _ => None,
         })
         .collect();
@@ -413,8 +385,8 @@ fn rebuilt(t: &Town, floor: Id, boxes: &[Solid]) -> Patch {
     cut_floor(&s, HUMAN_RADIUS, GroundTurn::NONE).expect("the new patch")
 }
 
-fn body_of(s: &Scene, who: Id) -> &sim::walk::Walker {
-    s.c.walkers.iter().find(|w| w.body.id == who).unwrap()
+fn body_of(s: &Scene, who: Id) -> &Body {
+    s.c.controller.body(who).unwrap()
 }
 
 /// A2 and A3 (off-ground): a box dropped on a body standing in the south room. The check names the body before the
@@ -433,9 +405,9 @@ fn a2_a3_a_body_on_illegal_ground_is_named_and_walks_out() {
     );
     s.l.step(&mut s.c, &mut s.t).expect("a tick");
     let bodies: Vec<(Id, Vec3)> =
-        s.c.walkers
-            .iter()
-            .map(|w| (w.body.id, w.body.pose.position))
+        s.c.controller
+            .bodies()
+            .map(|b| (b.id, b.pose.position))
             .collect();
     let patch = rebuilt(
         &s.t,
@@ -447,7 +419,7 @@ fn a2_a3_a_body_on_illegal_ground_is_named_and_walks_out() {
     assert_eq!(found.len(), 1, "one body listed");
     assert_eq!((found[0].body, found[0].why), (id(800), "off-ground"));
     // Not applied yet: the body still stands on the old ground.
-    let b = body_of(&s, id(800)).body;
+    let b = *body_of(&s, id(800));
     let on_old = s.t.surfaces[&f0].place(id(800), b.pose.frame, b.pose.position, Quat::IDENTITY);
     assert!(on_old.is_ok());
     // The rebuild applied, then the last rung.
@@ -455,10 +427,11 @@ fn a2_a3_a_body_on_illegal_ground_is_named_and_walks_out() {
         .insert(f0, Surface::new(f0, patch.pieces.clone()));
     let before = b.pose.position;
     s.l.walk_out(&mut s.c, &s.t, id(800)).expect("a walk-out");
+    let held = |s: &Scene| s.c.controller.carried(id(800));
     let (mut was, mut ticks, mut largest) = (before, 0, 0);
     while !s.l.done(&s.c) && ticks < 400 {
         s.l.step(&mut s.c, &mut s.t).expect("a tick");
-        let p = body_of(&s, id(800)).body.pose.position;
+        let p = body_of(&s, id(800)).pose.position;
         let step = dist(was, p);
         largest = largest.max(step);
         assert!(
@@ -468,14 +441,9 @@ fn a2_a3_a_body_on_illegal_ground_is_named_and_walks_out() {
         was = p;
         ticks += 1;
     }
-    let w = body_of(&s, id(800));
-    assert_eq!(w.held, None, "walked out");
-    let on_new = s.t.surfaces[&f0].place(
-        id(800),
-        w.body.pose.frame,
-        w.body.pose.position,
-        Quat::IDENTITY,
-    );
+    let w = *body_of(&s, id(800));
+    assert!(!held(&s), "walked out");
+    let on_new = s.t.surfaces[&f0].place(id(800), w.pose.frame, w.pose.position, Quat::IDENTITY);
     assert!(on_new.is_ok(), "on legal ground");
     let outs: Vec<_> = s.l.log.iter().filter(|r| r.who == id(800)).collect();
     for r in &outs {
@@ -487,10 +455,10 @@ fn a2_a3_a_body_on_illegal_ground_is_named_and_walks_out() {
         );
     }
     assert!(matches!(outs[0].rung, Rung::WalkOut { from, .. } if from == before));
-    assert!(matches!(outs[1].rung, Rung::WalkedOut { at } if at == w.body.pose.position));
+    assert!(matches!(outs[1].rung, Rung::WalkedOut { at } if at == w.pose.position));
     println!(
         "walked {} um out in {} ms; largest move in a tick {} um (its speed allows {} um)",
-        dist(before, w.body.pose.position),
+        dist(before, w.pose.position),
         (outs[1].at - outs[0].at) / 1000,
         largest,
         SPEED * TICK / 1_000_000
@@ -506,9 +474,9 @@ fn a3_a_body_in_a_piece_with_no_way_out_is_named() {
     s.still(900, f0, v(500_000, 3_000_000));
     s.still(901, f0, v(-5_000_000, 3_000_000));
     let bodies: Vec<(Id, Vec3)> =
-        s.c.walkers
-            .iter()
-            .map(|w| (w.body.id, w.body.pose.position))
+        s.c.controller
+            .bodies()
+            .map(|b| (b.id, b.pose.position))
             .collect();
     let before = exits::check(&rebuilt(&s.t, f0, &[]), false, &[], &bodies);
     assert!(before.is_empty(), "nothing listed before: {before:?}");
@@ -533,10 +501,9 @@ fn a4_make_way_goes_only_to_a_still_body_with_no_order_to_stay() {
     for staying in [false, true] {
         let mut s = scenes().remove(2);
         if staying {
-            let w = s.c.walkers.iter_mut().find(|w| w.body.id == id(200));
-            w.unwrap().staying = true;
+            s.c.stay(id(200));
         }
-        let at = body_of(&s, id(200)).body.pose.position;
+        let at = body_of(&s, id(200)).pose.position;
         let (ends, last) = run(&mut s, true);
         let name = if staying {
             "staying"
@@ -552,7 +519,7 @@ fn a4_make_way_goes_only_to_a_still_body_with_no_order_to_stay() {
                     _ => None,
                 })
                 .collect();
-        assert_eq!(body_of(&s, id(200)).body.pose.position, at, "never moved");
+        assert_eq!(body_of(&s, id(200)).pose.position, at, "never moved");
         if staying {
             assert!(asked.is_empty(), "sent nothing: {asked:?}");
             assert!(
@@ -570,8 +537,7 @@ fn a4_make_way_goes_only_to_a_still_body_with_no_order_to_stay() {
     let mut sent = 0;
     for r in &s.l.log {
         if let Rung::MakeWay { to } = r.rung {
-            let w = body_of(&s, to);
-            assert!(w.arrived.is_some_and(|a| a <= r.at) && !w.staying);
+            assert!(arrived(&s.c, to).is_some_and(|a| a <= r.at) && !s.c.staying.contains(&to));
             sent += 1;
         }
     }

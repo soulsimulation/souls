@@ -16,6 +16,7 @@ dependencies = [
  "import-eden",
  "replica",
  "sim",
+ "skills",
  "testworld",
  "worldd",
 ]
