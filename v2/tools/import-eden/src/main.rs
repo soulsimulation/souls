@@ -2,6 +2,9 @@
 //! the exporter wrote into a tree (K2) through commit, and prints the count table, load time and memory, the ids the
 //! issue asks for, and, given today's catalog, the difference list by id.
 
+// Times its own runs: the wall-clock rule (K7) binds the engine, not this tool.
+#![allow(clippy::disallowed_methods)]
+
 use import_eden::json::{self, Json};
 use import_eden::{
     F_DEF, F_NAME, F_ORIGIN, F_PLACE_KIND, F_PLACE_OF, Import, PLACE, WINDOW, count, load,
