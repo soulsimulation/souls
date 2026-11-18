@@ -13,6 +13,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 # Constant-time compare of token hashes; a token's 32 bytes from the operating system's random source.
 subtle = "2.6"
 getrandom = "0.3"
+rustix = { version = "1", default-features = false, features = ["time", "std"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"
