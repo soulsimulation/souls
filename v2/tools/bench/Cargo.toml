@@ -1,0 +1,13 @@
+[package]
+name = "bench"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646."
+
+[[bin]]
+name = "tree"
+path = "src/tree.rs"
+
+[dependencies]
+replica = { path = "../../crates/replica" }

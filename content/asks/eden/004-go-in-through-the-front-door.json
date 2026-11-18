@@ -1,1 +1,1 @@
-{"format":"souls-ask/1","n":4,"group":"object","words":"go in through the front door","obvious":3,"things":{"door":"eden:door","cottage":"eden:cottage"},"chain":[{"this":"me","form":"go_to","args":{"place":"cottage"}},{"this":"door","form":"open"},{"this":"door","form":"go_through"}]}
+{"format":"souls-ask/1","n":4,"group":"object","words":"go in through the front door","obvious":3,"things":{"door":"eden:door","cottage":"eden:cottage"},"chain":[{"this":"door","form":"open"},{"this":"me","form":"go_to","args":{"place":"cottage"}}]}

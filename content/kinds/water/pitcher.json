@@ -36,6 +36,8 @@
       "effects": [{ "change": "transfer", "field": "water", "from": "this", "into": { "arg": "into" }, "amount": { "arg": "amount" }, "event": "poured" }]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:pitcher",
     "table": [
