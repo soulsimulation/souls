@@ -1,0 +1,12 @@
+{
+  "about": "Slot cases (SA-D3, #2855): data the entry tools and the new engine read unchanged. A case names an entry file, a slot, a kind offered, and whether the slot takes it.",
+  "admits": [
+    { "entry": "content/kinds/kitchen/saucer.json", "slot": "cup", "offered": "eden:cup", "ok": true },
+    { "entry": "content/kinds/kitchen/saucer.json", "slot": "cup", "offered": "eden:kettle", "ok": false, "reason_has": "eden:kettle" },
+    { "entry": "content/kinds/seating/bench.json", "slot": "left", "offered": "eden:cup", "ok": false, "reason_has": "a body" }
+  ],
+  "rows": [
+    { "entry": "content/kinds/seating/theatre_seats.json", "row": "front", "slots": ["front_1", "front_2", "front_3"], "first": "front_1", "last": "front_3" },
+    { "entry": "content/kinds/seating/theatre_seats.json", "row": "back", "slots": ["back_1", "back_2", "back_3"], "first": "back_1", "last": "back_3" }
+  ]
+}
