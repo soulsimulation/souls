@@ -1,0 +1,183 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:rabbit_feed (from #1797). A box of three feed portions (feed, a count). Anyone with a free hand offers one to the nearest garden rabbit (an argument): one portion moves out of the box and into the rabbit, whose own feed goes 0 to 1 (fed; it rests). Refused, as the original refused: no free hand ('Empty your hands before offering rabbit feed.'), no portion left ('No supplied rabbit-feed portion remains.') and a rabbit that has eaten ('This rabbit has already eaten its supplied portion; choose another unfed rabbit.'). Nothing refills the box.",
+  "cases": [
+    {
+      "name": "feed_rabbit_every_need_met",
+      "act": {
+        "this": "f1",
+        "form": "feed_rabbit",
+        "args": {
+          "rabbit": "r1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:rabbit_feed"
+          },
+          "r1": {
+            "kind": "eden:garden_rabbit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "feed_rabbit_hands_full",
+      "act": {
+        "this": "f1",
+        "form": "feed_rabbit",
+        "args": {
+          "rabbit": "r1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:rabbit_feed"
+          },
+          "r1": {
+            "kind": "eden:garden_rabbit"
+          },
+          "x1": {
+            "kind": "eden:kindling_bundle"
+          },
+          "x2": {
+            "kind": "eden:kindling_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "feed_rabbit_no_portion_left",
+      "act": {
+        "this": "f1",
+        "form": "feed_rabbit",
+        "args": {
+          "rabbit": "r1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:rabbit_feed",
+            "fields": {
+              "feed": 0
+            }
+          },
+          "r1": {
+            "kind": "eden:garden_rabbit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "feed",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "feed_rabbit_already_fed",
+      "act": {
+        "this": "f1",
+        "form": "feed_rabbit",
+        "args": {
+          "rabbit": "r1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:rabbit_feed"
+          },
+          "r1": {
+            "kind": "eden:garden_rabbit",
+            "fields": {
+              "feed": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 2,
+        "detail": {
+          "node": "r1",
+          "field": "feed",
+          "room": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    }
+  ]
+}

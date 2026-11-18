@@ -1,0 +1,540 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Eden's buildings (SA-X35, #2925): going to a named room, a tower's top and a house's back. The walk is the engine's; no state changes.",
+  "cases": [
+    {
+      "name": "hall_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:hall"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "hall"
+            }
+          },
+          "receipt": "rc_hall_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:hall"
+        }
+      }
+    },
+    {
+      "name": "cottage_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cottage"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "bedroom"
+            }
+          },
+          "receipt": "rc_cottage_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:cottage"
+        }
+      }
+    },
+    {
+      "name": "townhouse_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:townhouse"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "bedroom_3"
+            }
+          },
+          "receipt": "rc_townhouse_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:townhouse"
+        }
+      }
+    },
+    {
+      "name": "shop_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:shop"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "living"
+            }
+          },
+          "receipt": "rc_shop_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:shop"
+        }
+      }
+    },
+    {
+      "name": "house_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:house"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "bedroom_2"
+            }
+          },
+          "receipt": "rc_house_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:house"
+        }
+      }
+    },
+    {
+      "name": "house_go_round_back_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:house"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_round_back"
+          },
+          "receipt": "rc_house_go_round_back",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:house"
+        }
+      }
+    },
+    {
+      "name": "shed_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:shed"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "shed"
+            }
+          },
+          "receipt": "rc_shed_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:shed"
+        }
+      }
+    },
+    {
+      "name": "tower_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:tower"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "top"
+            }
+          },
+          "receipt": "rc_tower_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:tower"
+        }
+      }
+    },
+    {
+      "name": "tower_climb_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:tower"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "climb"
+          },
+          "receipt": "rc_tower_climb",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:tower"
+        }
+      }
+    },
+    {
+      "name": "pavilion_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:pavilion"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "pavilion"
+            }
+          },
+          "receipt": "rc_pavilion_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:pavilion"
+        }
+      }
+    },
+    {
+      "name": "barn_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:barn"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "barn"
+            }
+          },
+          "receipt": "rc_barn_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:barn"
+        }
+      }
+    },
+    {
+      "name": "cabin_go_to_room_walks_and_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "here": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cabin"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_room",
+            "args": {
+              "room": "cabin"
+            }
+          },
+          "receipt": "rc_cabin_go_to_room",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:cabin"
+        }
+      }
+    }
+  ]
+}

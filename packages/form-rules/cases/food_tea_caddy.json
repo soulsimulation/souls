@@ -1,0 +1,104 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:tea_caddy (from #1878). Eight portions each of green tea and mint; a mixing well that holds four portions across its two fields (well_green, well_mint) and a mixed reserve that holds eight (reserve_green, reserve_mint). Blending moves the chosen whole portions of each from its stock into the well, a transfer between two fields of the one caddy; recovering moves the whole well into the reserve, keeping its composition; restoring moves the reserve back into the well. Each needs both hands empty ('Put down held items before working the tea caddy'). Refused as the original refused: additions above the stock ('The chosen additions exceed the actual remaining leaf stocks; choose smaller amounts', the enough need), a well that would hold more than four ('The mixing well holds four portions; recover its current mixture or choose fewer additions', a need on the sum of the well's two fields as the form's transfers leave them), recovering an empty well or into a reserve that would pass eight ('Recovery needs a nonempty well and enough room in the eight-portion mixed reserve'), restoring an empty reserve or one that does not fit the well ('Restore needs an actual mixed reserve that fits in the four-portion well').",
+  "cases": [
+    {
+      "name": "tea_caddy_take_every_need_met",
+      "act": {"this": "c1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "tea_caddy_take_hands_full",
+      "act": {"this": "c1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
+    },
+    {
+      "name": "tea_caddy_blend_every_need_met",
+      "act": {"this": "c1", "form": "blend", "args": {"green": 2, "mint": 2}},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "tea_caddy_blend_holding_something",
+      "act": {"this": "c1", "form": "blend", "args": {"green": 1, "mint": 1}},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy"}, "b1": {"hands": {"left": "x1", "right": null}}, "x1": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "hand_not_empty", "need": 0, "detail": {"holding": 1}, "fix": {"step": "put"}, "says": "put_down_first"}
+    },
+    {
+      "name": "tea_caddy_blend_not_enough_green",
+      "act": {"this": "c1", "form": "blend", "args": {"green": 2, "mint": 0}},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy", "fields": {"green": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_enough", "need": 1, "detail": {"node": "c1", "field": "green", "has": 1, "amount": 2}, "fix": null, "says": "not_enough_leaves"}
+    },
+    {
+      "name": "tea_caddy_blend_well_would_overflow",
+      "act": {"this": "c1", "form": "blend", "args": {"green": 1, "mint": 1}},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy", "fields": {"well_green": 2, "well_mint": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 2, "detail": {"fields": ["well_green", "well_mint"], "found": 5, "wanted": {"at_most": 4}, "after_moves": true}, "fix": null, "says": "well_full"}
+    },
+    {
+      "name": "tea_caddy_recover_every_need_met",
+      "act": {"this": "c1", "form": "recover"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy", "fields": {"well_green": 2, "well_mint": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "tea_caddy_recover_holding_something",
+      "act": {"this": "c1", "form": "recover"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy", "fields": {"well_green": 2}}, "b1": {"hands": {"left": "x1", "right": null}}, "x1": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "hand_not_empty", "need": 0, "detail": {"holding": 1}, "fix": {"step": "put"}, "says": "put_down_first"}
+    },
+    {
+      "name": "tea_caddy_recover_well_empty",
+      "act": {"this": "c1", "form": "recover"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"fields": ["well_green", "well_mint"], "found": 0, "wanted": {"at_least": 1}}, "fix": null, "says": "recover_needs"}
+    },
+    {
+      "name": "tea_caddy_recover_reserve_would_overflow",
+      "act": {"this": "c1", "form": "recover"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy", "fields": {"well_green": 3, "well_mint": 1, "reserve_green": 4, "reserve_mint": 2}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 2, "detail": {"fields": ["reserve_green", "reserve_mint"], "found": 10, "wanted": {"at_most": 8}, "after_moves": true}, "fix": null, "says": "recover_needs"}
+    },
+    {
+      "name": "tea_caddy_restore_every_need_met",
+      "act": {"this": "c1", "form": "restore"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy", "fields": {"reserve_green": 2, "reserve_mint": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "tea_caddy_restore_holding_something",
+      "act": {"this": "c1", "form": "restore"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy", "fields": {"reserve_green": 2}}, "b1": {"hands": {"left": "x1", "right": null}}, "x1": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "hand_not_empty", "need": 0, "detail": {"holding": 1}, "fix": {"step": "put"}, "says": "put_down_first"}
+    },
+    {
+      "name": "tea_caddy_restore_reserve_empty",
+      "act": {"this": "c1", "form": "restore"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"fields": ["reserve_green", "reserve_mint"], "found": 0, "wanted": {"at_least": 1}}, "fix": null, "says": "restore_needs"}
+    },
+    {
+      "name": "tea_caddy_restore_does_not_fit_the_well",
+      "act": {"this": "c1", "form": "restore"},
+      "state": {"actor": "b1", "nodes": {"c1": {"kind": "eden:tea_caddy", "fields": {"well_green": 2, "reserve_green": 2, "reserve_mint": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 2, "detail": {"fields": ["well_green", "well_mint"], "found": 5, "wanted": {"at_most": 4}, "after_moves": true}, "fix": null, "says": "restore_needs"}
+    }
+  ]
+}

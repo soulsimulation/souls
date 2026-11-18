@@ -10,7 +10,7 @@
 //! Run from `v2/`: `cargo run -p bench --release --bin replica-equal -- <out dir> [seed] [effects]`, then
 //! `node tools/bench/replica-equal/node.mjs <wasm pkg dir> <out dir>`. v2/tools/ci.sh runs both.
 
-// Times its own runs: the wall-clock rule (K7) binds the engine, not this bench.
+// A bench times runs with the wall clock; the wall-clock rule (K7, v2/clippy.toml) is for the engine, not a bench.
 #![allow(clippy::disallowed_methods)]
 
 use replica::apply::Replica;

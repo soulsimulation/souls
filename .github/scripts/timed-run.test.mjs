@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, isLauncher, parseCorePlan, groupBusy, SPLIT, LOAD_GATE, COUNTED, target, countedSteps } from './timed-run.mjs';
+import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, isLauncher, parseCorePlan, groupBusy, SPLIT, WIDE, LOAD_GATE, WIDE_MAX_GATE, COUNTED, target, countedSteps, checkBenchArgs, benchBins, benchLines, allowlist, V2_PREPS } from './timed-run.mjs';
 
 const ENV = { INPUT_REF: 'main', INPUT_COMMAND: 'walk', INPUT_REPEATS: '1', INPUT_ARGS: '' };
 
@@ -202,6 +202,44 @@ test('core plan (#2507): cores is accepted for the split commands, validated, re
   assert.deepEqual(groupBusy(a, b, { world: '0,1', load: '2' }), { world: 0.3, load: 1 });
 });
 
+const CNT_WIDE = { INPUT_REF: 'agent/1367-x', INPUT_COMMAND: 'counted', INPUT_REPEATS: '1', INPUT_ARGS: '--scenario stair-foot', INPUT_BASE: 'main', INPUT_CELL: 'cand-1', INPUT_CORES: '' };
+test('wide runner (D5): souls-wide takes the split commands with a core plan and settled; 5,000 and 10,000 viewers run there only', () => {
+  const W = { ...ENV, INPUT_RUNNER: 'souls-wide', INPUT_CORES: 'world=6,launcher=1' };
+  assert.deepEqual(parseInputs({ ...W, INPUT_COMMAND: 'viewers', INPUT_ARGS: '--viewers 5000,10000' }), { ref: 'main', command: 'viewers', repeats: 1, args: ['--viewers', '5000,10000'], cores: { world: 6, launcher: 1 }, runner: 'souls-wide' });
+  assert.equal(parseInputs({ ...W, INPUT_COMMAND: 'eval-load', INPUT_ARGS: '--souls 500 --raw-from 20' }).runner, 'souls-wide');
+  assert.equal(parseInputs({ ...W, INPUT_COMMAND: 'settled', INPUT_CORES: '' }).runner, 'souls-wide', 'settled is not split: no plan');
+  assert.deepEqual(WIDE, [...SPLIT, 'settled']);
+  for (const command of ['walk', 'eval-scripted', 'load', 'hundred', 'colocate', 'clip'])
+    assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: command, INPUT_CORES: '' }), /input runner="souls-wide": souls-wide runs eval-load, .*viewers, page, settled only/, command);
+  assert.throws(() => parseInputs({ ...W, ...CNT_WIDE }), /input runner="souls-wide"/, 'counted');
+  assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: 'viewers', INPUT_CORES: '' }), /input cores="": souls-wide needs a core plan/);
+  for (const v of ['5000', '200,10000']) {
+    assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'viewers', INPUT_ARGS: `--viewers ${v}` }), /input runner="souls-timed": viewer arms above 2000 run on souls-wide only/, v);
+    assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'viewers', INPUT_ARGS: `--viewers ${v}`, INPUT_CORES: 'world=1,launcher=1' }), /souls-wide only/, `${v} with a plan`);
+  }
+  assert.deepEqual(parseInputs({ ...ENV, INPUT_COMMAND: 'viewers', INPUT_ARGS: '--viewers 0,2000' }).args, ['--viewers', '0,2000'], 'up to 2,000 stays on souls-timed');
+  for (const a of ['--viewers 10001', '--viewers 05000']) assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: 'viewers', INPUT_ARGS: a }), /input args/, a);
+  // the union of four timed instances' CPUs: 12 physical cores (SMT pairs c, c+24), and a 16-core one
+  const smt = (c) => [c % 24, (c % 24) + 24], twelve = [...parseCpuList('6-17'), ...parseCpuList('30-41')];
+  assert.deepEqual(splitCores(twelve, smt, { world: 6, launcher: 1 }), { physicalCores: 12, plan: 'world=6,launcher=1', layout: '6+1+5',
+    world: '6,30,7,31,8,32,9,33,10,34,11,35', launcher: '12,36', load: '13,37,14,38,15,39,16,40,17,41' });
+  assert.equal(splitCores(parseCpuList('0-15'), (c) => [c], { world: 6, launcher: 1 }).layout, '6+1+9');
+  assert.throws(() => splitCores(twelve, smt), /12 physical core\(s\).*needs 3 or 4/, 'no plan: refused, as parseInputs says first');
+  assert.throws(() => splitCores(twelve, smt, { world: 8, launcher: 4 }), /needs 13 physical cores/);
+});
+
+test('wide runner (D5): the start gate also refuses while any one of its CPUs is busy (a narrow job on shared cores)', () => {
+  const s = (rows) => parseProcStat(rows.map(([b, i], c) => `cpu${c} ${b} 0 0 ${i} 0 0 0 0 0 0`).join('\n'));
+  const a = s(Array.from({ length: 24 }, () => [0, 0]));
+  // a narrow job busy on 4 of the wide runner's 24 CPUs: the mean (0.15) passes, the busiest CPU (0.9) does not
+  const b = s(Array.from({ length: 24 }, (_, c) => (c < 4 ? [90, 10] : [0, 100])));
+  const own = Array.from({ length: 24 }, (_, c) => c);
+  assert.deepEqual([loadFacts(a, b, own).ownBusy, loadFacts(a, b, own).overGate], [0.15, false], 'the narrow gate alone lets it start');
+  const wide = loadFacts(a, b, own, LOAD_GATE, WIDE_MAX_GATE);
+  assert.deepEqual([wide.ownBusy, wide.ownBusyMax, wide.maxGate, wide.overGate], [0.15, 0.9, 0.5, true]);
+  assert.equal(loadFacts(a, s(Array.from({ length: 24 }, () => [20, 80])), own, LOAD_GATE, WIDE_MAX_GATE).overGate, false, 'quiet: every CPU at 0.2');
+});
+
 test('world pinning: only world servers under the run\'s own process tree', () => {
   assert.deepEqual(descendants([[10, 1], [11, 10], [12, 11], [13, 1], [14, 12]], 10).sort(), [11, 12, 14]);
   assert.deepEqual(descendants([[10, 1]], 99), []);
@@ -258,5 +296,40 @@ test('stage, counted: the record, log, score, class and probe log only; world da
     rmSync(dest, { recursive: true });
     put('counted/cand-2/run.json', '{"err":"tok-FAKE-fixture-counted"}');
     assert.throws(() => stage({ out, dest, command: 'counted', scrubWith: sw }), /run\.json holds a Soul token/);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
+test('v2-bench: --bin and plain tokens after --; the bin must be a [[bin]] of the ref\'s bench manifest; build, then cargo run per repeat', () => {
+  const inp = parseInputs({ ...ENV, INPUT_REF: 'agent/2697-view-tier', INPUT_COMMAND: 'v2-bench', INPUT_REPEATS: '2', INPUT_ARGS: '--bin view-tier -- 400 2' });
+  assert.deepEqual(inp, { ref: 'agent/2697-view-tier', command: 'v2-bench', repeats: 2, args: ['--bin', 'view-tier', '--', '400', '2'], runner: 'souls-timed' });
+  assert.deepEqual(benchLines(inp), { build: ['build', '-p', 'bench', '--release', '--locked', '--bin', 'view-tier'], run: ['run', '-p', 'bench', '--release', '--locked', '--bin', 'view-tier', '--', '400', '2'] });
+  assert.deepEqual(benchLines(parseInputs({ ...ENV, INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin tree' })).run, ['run', '-p', 'bench', '--release', '--locked', '--bin', 'tree']);
+  assert.deepEqual(checkBenchArgs('--bin tree -- --rows=10 target/x a.b_c'), ['--bin', 'tree', '--', '--rows=10', 'target/x', 'a.b_c']);
+  for (const a of ['', '400 2', '--bin', '--bin ../x', '--bin View', '--bin a;b', '--bin tree 400', '--bin tree -- $(id)', '--bin tree -- a;b', '--bin tree -- `id`', '--bin tree -- a|b',
+    '--bin tree -- "x"', '--bin tree -- a&&b', '--bin tree -- a~b', '--bin tree -- a>b',`--bin tree -- ${Array(21).fill('1').join(' ')}`])
+    assert.throws(() => checkBenchArgs(a), /input args/, a);
+  assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin tree', INPUT_RUNNER: 'hosted' }), /input runner=/);
+  assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin tree', INPUT_RUNNER: 'souls-wide' }), /input runner=/);
+  const toml = '[package]\nname = "bench"\n\n[[bin]]\nname = "tree"\npath = "src/tree.rs"\n\n[[bin]] # R3\nname="view-tier"\n\n[dependencies]\nname = "not-a-bin"\n[[example]]\nname = "ex"\n';
+  assert.deepEqual(benchBins(toml), ['tree', 'view-tier']);
+  assert.deepEqual(benchBins('[package]\nname = "bench"\n'), []);
+});
+
+test('v2-bench --prep: an allowlisted prep; @<output> only of that prep, filled with its file in the per-run directory, shown as written', () => {
+  const inp = parseInputs({ ...ENV, INPUT_REF: 'agent/3167-corner-cost', INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin walkers --prep eden-facts -- @facts @labels uniform 1 1000 600' });
+  assert.deepEqual(inp.args, ['--bin', 'walkers', '--prep', 'eden-facts', '--', '@facts', '@labels', 'uniform', '1', '1000', '600']);
+  assert.deepEqual(benchLines(inp).build, ['build', '-p', 'bench', '--release', '--locked', '--bin', 'walkers']);
+  assert.deepEqual(benchLines(inp).run.slice(7), ['--', '@facts', '@labels', 'uniform', '1', '1000', '600']);
+  assert.deepEqual(benchLines(inp, join('/p', 'prep')).run.slice(7), ['--', join('/p', 'prep', V2_PREPS['eden-facts'].facts), join('/p', 'prep', V2_PREPS['eden-facts'].labels), 'uniform', '1', '1000', '600']);
+  assert.deepEqual(checkBenchArgs('--bin walkers --prep eden-facts'), ['--bin', 'walkers', '--prep', 'eden-facts']);
+  for (const a of ['--bin walkers --prep', '--bin walkers --prep other -- @facts', '--bin walkers -- @facts', '--bin walkers --prep eden-facts -- @nope', '--bin walkers --prep eden-facts @facts', '--bin walkers --prep eden-facts -- @facts;id', '--prep eden-facts --bin walkers'])
+    assert.throws(() => checkBenchArgs(a), /input args/, a);
+});
+
+test('stage, v2-bench: the record, the build log and each repeat\'s log; the target dir and the bench\'s own files stay', () => {
+  const d = mkdtempSync(join(tmpdir(), 'timed-')), out = join(d, 'out'), put = (f, t) => { mkdirSync(join(out, f, '..'), { recursive: true }); writeFileSync(join(out, f), t); };
+  try {
+    for (const f of ['timed-run.json', 'v2-bench-prep.log', 'v2-bench-build.log', 'v2-bench-r1.log', 'v2-bench-r2.log', 'target/release/view-tier', 'view-tier/log.bin', 'prep/labels.json']) put(f, 'x');
+    assert.deepEqual(allowlist(out, 'v2-bench'), ['timed-run.json', 'v2-bench-prep.log', 'v2-bench-build.log', 'v2-bench-r1.log', 'v2-bench-r2.log']);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });

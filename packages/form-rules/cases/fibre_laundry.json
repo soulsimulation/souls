@@ -1,0 +1,90 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:camp_linen (from #1707), worked at the nearest eden:laundry_board with one soap charge and one of water: washed (dirty to wet; the soap and water move from the board into the linen), wrung (wet to damp), folded (damp to folded; it stays damp). Ten seconds each with empty hands. Refused with the original's words: washing linen that is not dirty ('This operation needs dirty linen.'), no soap or water ('Washing needs one unused soap charge and one water charge.'), wringing before washing ('Wash the dirty linen first; then wring the wet linen.'), folding before wringing ('Wring the wet linen first; then fold the damp linen.') and a hand holding something ('Put down what you are holding before laundry.'). The linen is taken with a free hand.",
+  "cases": [
+    {
+      "name": "camp_linen_take_every_need_met",
+      "act": {"this":"n1","form":"take"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "camp_linen_take_hands_full",
+      "act": {"this":"n1","form":"take"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen"},"b1":{"hands":{"left":"x1","right":"x2"}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "linen_wash_every_need_met",
+      "act": {"this":"n1","form":"wash","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen"},"w1":{"kind":"eden:laundry_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "linen_wash_not_dirty",
+      "act": {"this":"n1","form":"wash","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen","fields":{"stage":"wet","soap":1,"water":1}},"w1":{"kind":"eden:laundry_board","fields":{"soap":0,"water":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"stage","found":"wet","wanted":{"is":"dirty"}},"fix":null,"says":"needs_dirty"}
+    },
+    {
+      "name": "linen_wash_no_soap",
+      "act": {"this":"n1","form":"wash","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen"},"w1":{"kind":"eden:laundry_board","fields":{"soap":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"w1","field":"soap","has":0,"amount":1},"fix":null,"says":"needs_soap_water"}
+    },
+    {
+      "name": "linen_wash_holding_something",
+      "act": {"this":"n1","form":"wash","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen"},"w1":{"kind":"eden:laundry_board"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "linen_wring_every_need_met",
+      "act": {"this":"n1","form":"wring","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen","fields":{"stage":"wet"}},"w1":{"kind":"eden:laundry_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "linen_wring_out_of_order",
+      "act": {"this":"n1","form":"wring","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen"},"w1":{"kind":"eden:laundry_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"stage","found":"dirty","wanted":{"is":"wet"}},"fix":{"form":"wash"},"says":"wash_first"}
+    },
+    {
+      "name": "linen_wring_holding_something",
+      "act": {"this":"n1","form":"wring","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen","fields":{"stage":"wet"}},"w1":{"kind":"eden:laundry_board"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":1,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "linen_fold_every_need_met",
+      "act": {"this":"n1","form":"fold","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen","fields":{"stage":"damp"}},"w1":{"kind":"eden:laundry_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "linen_fold_out_of_order",
+      "act": {"this":"n1","form":"fold","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen"},"w1":{"kind":"eden:laundry_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"stage","found":"dirty","wanted":{"is":"damp"}},"fix":null,"says":"wring_first"}
+    },
+    {
+      "name": "linen_fold_holding_something",
+      "act": {"this":"n1","form":"fold","args":{"board":"w1"}},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:camp_linen","fields":{"stage":"damp"}},"w1":{"kind":"eden:laundry_board"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":1,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    }
+  ]
+}
