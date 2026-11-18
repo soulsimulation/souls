@@ -40,6 +40,10 @@ export const localId = (grant) => `s_${grant.slice('soul-'.length)}`;
  */
 export async function pair({ home, directory, world, gateway, device, label, soul, force = false, onAsk, unit = 1000, sleep, onPoll }) {
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  // The token comes back in the poll's answer: over https, or plain http to this machine only.
+  const at = new URL(directory);
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(at.hostname) || at.hostname.endsWith('.localhost');
+  if (at.protocol !== 'https:' && !(at.protocol === 'http:' && loopback)) throw new Refused('directory-not-https', 'the directory must be https, or http on this machine');
   const post = async (path, body) => {
     const r = await fetch(new URL(path, directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     return r.json();

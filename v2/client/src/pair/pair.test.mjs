@@ -153,6 +153,12 @@ test('A1, A2, A3: from an empty folder the owner approves once, the daemon acts,
   assert.ok(db.includes(hash), 'the store holds its hash');
 });
 
+test('a directory that is not https is refused, unless it is on this machine', async () => {
+  const args = { home: join(dir, 'never', '.souls'), world: 'w', gateway: 'ws://x', device: 'd', label: 'l' };
+  await assert.rejects(pair({ ...args, directory: 'http://directory.example.test' }), { code: 'directory-not-https' });
+  await assert.rejects(pair({ ...args, directory: 'ftp://127.0.0.1' }), { code: 'directory-not-https' });
+});
+
 test('A5: the daemon polls every interval and adds 5 s on "slow_down"', async () => {
   const answers = ['authorization_pending', 'slow_down', 'authorization_pending', 'slow_down', 'approved'];
   const server = createServer((req, res) => {

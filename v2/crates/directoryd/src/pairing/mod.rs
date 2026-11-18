@@ -149,6 +149,7 @@ type PollRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    bool,
 );
 
 impl Pairing {
@@ -247,18 +248,27 @@ impl Pairing {
 
     /// Counts a wrong code against `account`; refuses every code while the account is over its limit.
     fn guess(&self, account: &str, code: &str, now: u64) -> Result<Row, &'static str> {
-        let mut guesses = self.guesses.lock().expect("guesses");
-        let mine = guesses.entry(account.to_string()).or_default();
-        mine.retain(|&t| t + GUESS_WINDOW > now);
-        if mine.len() >= GUESSES_MOST {
+        // The guesses lock is held only to count, never while a code is read or the store is asked.
+        let over = {
+            let mut guesses = self.guesses.lock().unwrap_or_else(|e| e.into_inner());
+            let mine = guesses.entry(account.to_string()).or_default();
+            mine.retain(|&t| t + GUESS_WINDOW > now);
+            mine.len() >= GUESSES_MOST
+        };
+        if over {
             return Err("code-guesses");
         }
-        let code = plain(code);
-        let code = if code.len() == 8 {
-            format!("{}-{}", &code[..4], &code[4..])
-        } else {
-            code
+        let wrong = || {
+            let mut guesses = self.guesses.lock().unwrap_or_else(|e| e.into_inner());
+            guesses.entry(account.to_string()).or_default().push(now);
+            Err("unknown-code")
         };
+        // Exactly 8 of the code's ASCII letters, checked before any slicing; anything else is a wrong guess.
+        let code = plain(code);
+        if code.len() != 8 || !code.bytes().all(|b| LETTERS.contains(&b)) {
+            return wrong();
+        }
+        let code = format!("{}-{}", &code[..4], &code[4..]);
         let found = self
             .db
             .lock()
@@ -283,10 +293,7 @@ impl Pairing {
             .map_err(|_| "store")?;
         match found {
             Some(row) => Ok(row),
-            None => {
-                mine.push(now);
-                Err("unknown-code")
-            }
+            None => wrong(),
         }
     }
 
@@ -333,12 +340,18 @@ impl Pairing {
     ) -> Result<String, (&'static str, Option<String>)> {
         let (code, _, soul, _, force, _, _) =
             self.guess(account, code, now).map_err(|e| (e, None))?;
+        // Each change is made only to a request still pending: of two approvals at once, one finds it gone.
         let refuse = |name: &'static str, device: Option<String>| {
-            let _ = self.db.lock().expect("the store").execute(
-                "UPDATE pair_requests_v1 SET state = 'refused', refusal = ?2, refusal_device = ?3 WHERE code = ?1",
+            let changed = self.db.lock().expect("the store").execute(
+                "UPDATE pair_requests_v1 SET state = 'refused', refusal = ?2, refusal_device = ?3
+                 WHERE code = ?1 AND state = 'pending'",
                 params![code, name, device],
             );
-            Err((name, device))
+            match changed {
+                Ok(0) => Err(("unknown-code", None)),
+                Ok(_) => Err((name, device)),
+                Err(_) => Err(("store", None)),
+            }
         };
         let grant = match soul {
             Some(g) => match self.soul_of(&g).map_err(|e| (e, None))? {
@@ -355,14 +368,19 @@ impl Pairing {
                 g
             }
         };
-        self.db
+        let changed = self
+            .db
             .lock()
             .expect("the store")
             .execute(
-                "UPDATE pair_requests_v1 SET state = 'approved', account = ?2, grant_text = ?3 WHERE code = ?1",
+                "UPDATE pair_requests_v1 SET state = 'approved', account = ?2, grant_text = ?3
+                 WHERE code = ?1 AND state = 'pending'",
                 params![code, account, grant],
             )
             .map_err(|_| ("store", None))?;
+        if changed == 0 {
+            return Err(("unknown-code", None));
+        }
         Ok(grant)
     }
 
@@ -376,14 +394,14 @@ impl Pairing {
         let mut db = self.db.lock().expect("the store");
         let row: Option<PollRow> = db
             .query_row(
-                "SELECT state, device, grant_text, refusal, refusal_device FROM pair_requests_v1
+                "SELECT state, device, grant_text, refusal, refusal_device, force FROM pair_requests_v1
                  WHERE secret_hash = ?1",
                 params![to_hex(&hash)],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
             )
             .optional()
             .unwrap_or(None);
-        let Some((state, device, grant, refusal, refusal_device)) = row else {
+        let Some((state, device, grant, refusal, refusal_device, force)) = row else {
             return refused("unknown-request");
         };
         {
@@ -402,8 +420,27 @@ impl Pairing {
             ("approved", Some(grant)) => {
                 let token = format!("{grant}.{}", to_hex(&random::<32>()));
                 let token_hash = to_hex(&sha256(token.as_bytes()));
-                let stored = (|| {
+                let stored = (|| -> Result<Result<(), String>, rusqlite::Error> {
                     let tx = db.transaction()?;
+                    // An approval made while the Soul was free does not take it from a device that connected since,
+                    // unless the request was forced.
+                    let now_on: Option<String> = tx
+                        .query_row(
+                            "SELECT device FROM paired_souls_v1 WHERE grant_text = ?1 AND token_hash IS NOT NULL",
+                            params![grant],
+                            |r| r.get(0),
+                        )
+                        .optional()?
+                        .flatten();
+                    if let Some(other) = now_on.filter(|d| !force && *d != device) {
+                        tx.execute(
+                            "UPDATE pair_requests_v1 SET state = 'refused', refusal = 'soul-connected',
+                               refusal_device = ?2 WHERE secret_hash = ?1 AND state = 'approved'",
+                            params![to_hex(&hash), other],
+                        )?;
+                        tx.commit()?;
+                        return Ok(Err(other));
+                    }
                     tx.execute(
                         "UPDATE paired_souls_v1 SET device = ?2, token_hash = ?3 WHERE grant_text = ?1",
                         params![grant, device, token_hash],
@@ -412,10 +449,13 @@ impl Pairing {
                         "UPDATE pair_requests_v1 SET state = 'delivered' WHERE secret_hash = ?1",
                         params![to_hex(&hash)],
                     )?;
-                    tx.commit()
+                    tx.commit()?;
+                    Ok(Ok(()))
                 })();
-                if stored.is_err() {
-                    return refused("store");
+                match stored {
+                    Err(_) => return refused("store"),
+                    Ok(Err(other)) => return Poll::Refused("soul-connected".into(), Some(other)),
+                    Ok(Ok(())) => {}
                 }
                 if self.write_tokens(&db).is_err() {
                     return refused("tokens-file");

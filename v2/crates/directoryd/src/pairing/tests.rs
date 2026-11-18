@@ -194,3 +194,52 @@ fn a_request_is_checked_before_it_is_kept() {
     assert!(p.ask(&a, T0).is_ok());
     assert_eq!(p.ask(&a, T0), Err("secret-used"));
 }
+
+#[test]
+fn a_code_that_is_not_ascii_is_a_wrong_guess_and_breaks_nothing() {
+    let (p, _) = store();
+    let (_, code) = ask(&p, "studio laptop", None, false, T0);
+    // 8 bytes, not 8 letters: sliced by bytes, it panicked inside the guesses lock.
+    for bad in ["abcédef", "ÉÉÉÉ", "BCDF-GHJ1", "BCDFGHJKL"] {
+        assert_eq!(p.show("acct_owner", bad, T0), Err("unknown-code"), "{bad}");
+    }
+    assert!(p.show("acct_owner", &code, T0).is_ok());
+    assert!(p.approve("acct_owner", &code, T0).is_ok());
+}
+
+#[test]
+fn an_old_approval_does_not_take_a_soul_connected_since() {
+    let (p, _) = store();
+    let free = "soul-0123456789abcdef0123456789abcdef-5";
+    p.register(free, "acct_owner").expect("registered");
+    // Approved while the Soul was free, not yet collected...
+    let (late, late_code) = ask(&p, "garage mini", Some(free), false, T0);
+    assert!(p.approve("acct_owner", &late_code, T0).is_ok());
+    // ...then another device pairs it and collects first.
+    assert!(matches!(
+        pair(&p, "acct_owner", "studio laptop", Some(free), false, T0 + 1),
+        Poll::Token { .. }
+    ));
+    assert_eq!(
+        p.poll(&late, T0 + 10),
+        Poll::Refused("soul-connected".into(), Some("studio laptop".into()))
+    );
+    assert_eq!(p.stored_hashes().len(), 1);
+}
+
+#[test]
+fn a_request_is_approved_once() {
+    let (p, _) = store();
+    let (secret, code) = ask(&p, "studio laptop", None, false, T0);
+    assert!(p.approve("acct_owner", &code, T0).is_ok());
+    // A second approval finds no pending request and changes nothing.
+    assert_eq!(
+        p.approve("acct_owner", &code, T0),
+        Err(("unknown-code", None))
+    );
+    assert!(matches!(p.poll(&secret, T0 + INTERVAL), Poll::Token { .. }));
+    assert_eq!(
+        p.poll(&secret, T0 + 2 * INTERVAL),
+        Poll::Refused("delivered".into(), None)
+    );
+}
