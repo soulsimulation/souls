@@ -1,0 +1,22 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:dumbbell_6kg",
+  "owner": "thing",
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 120, 0] }
+  },
+  "geometry": { "bounds_mm": [480, 240, 240] },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:dumbbell_6kg",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,120,0],"size":[480,35,35],"tint":"steel"},{"kind":"box","at":[-190,120,0],"size":[45,180,180],"tint":"plate"},{"kind":"box","at":[190,120,0],"size":[45,180,180],"tint":"plate"}],"palette":{"steel":"#b7b8be","plate":"#3f5669"},"tags":["exercise","dumbbell","item"]}
+  },
+  "text": {
+    "card": "A 6 kg dumbbell: the kit's handle with a 2 kg plate on each end.",
+    "exercise": "exercise",
+    "dumbbell": "dumbbell",
+    "weight": "weight"
+  },
+  "card": { "text": "card", "category": "exercise", "synonyms": ["dumbbell", "weight"] }
+}

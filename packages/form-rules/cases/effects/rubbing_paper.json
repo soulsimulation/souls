@@ -1,0 +1,162 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:rubbing_paper (SA-X7, #2902; from #1830): four sticks of charcoal, each rubbed into one lasting print of a stone (rings) or a wood block (grain).",
+  "cases": [
+    {
+      "name": "rub_rings_and_grain_until_the_charcoal_is_gone",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1",
+              "w1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "r1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:rubbing_stone"
+          },
+          "w1": {
+            "kind": "eden:rubbing_wood"
+          },
+          "r1": {
+            "kind": "eden:rubbing_paper",
+            "fields": {
+              "charcoal": 2
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "r1",
+            "form": "rub_stone",
+            "args": {
+              "source": "s1"
+            }
+          },
+          "receipt": "rr1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "charcoal",
+                "n": 1,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "rings",
+                "n": 2,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:charcoal_used",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:rings_rubbed",
+                "node": "r1",
+                "changes": [
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "rub_wood",
+            "args": {
+              "source": "w1"
+            }
+          },
+          "receipt": "rr2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "charcoal",
+                "n": 1,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "grain",
+                "n": 3,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:charcoal_used",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:grain_rubbed",
+                "node": "r1",
+                "changes": [
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "rub_stone",
+            "args": {
+              "source": "s1"
+            }
+          },
+          "receipt": "rr3",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        }
+      ],
+      "after": {
+        "r1": {
+          "kind": "eden:rubbing_paper",
+          "fields": {
+            "charcoal": 0,
+            "rings": 1,
+            "grain": 1
+          }
+        },
+        "s1": {
+          "kind": "eden:rubbing_stone"
+        },
+        "w1": {
+          "kind": "eden:rubbing_wood"
+        }
+      }
+    }
+  ]
+}
