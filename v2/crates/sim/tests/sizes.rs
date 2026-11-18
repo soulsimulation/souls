@@ -179,10 +179,7 @@ fn a3_a_change_to_a_larger_size_that_does_not_fit_or_has_no_exit_is_refused() {
         let before = body;
         let no =
             change_size(&im.tree, ground, node, who, um(at), &mut body, Size::Large).unwrap_err();
-        println!(
-            "A3 standard to large, {place}: {}: {}",
-            no.name, no.detail
-        );
+        println!("A3 standard to large, {place}: {}: {}", no.name, no.detail);
         assert_eq!(no.name, name);
         assert_eq!(body, before, "the old body is kept");
         let mut small = before;
