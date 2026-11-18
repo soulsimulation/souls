@@ -21,6 +21,11 @@
 //!    It brings back what the log holds: nodes, parents, links, holds, motion, timers, transfers and time. A skill in
 //!    progress is not stored; handing each active intent back to its skill is K13's.
 //! 6. **A failed write is final** for this process, as the log's sync is (`log` rule 6): the writer stops and says so.
+//! 7. **Where to resume** (K4b, #3136), two more root fields when the writer gives them ([`Checkpoints::take_at`]):
+//!    `6: [record, byte, checksum]`, the log's durable place when it was taken, so a restart opens the log from
+//!    there (`log` rule 8) and its open time does not grow with the log; and `7: [scope, next]`, the writer's
+//!    minter. [`resume_minter`] moves it past the ids of its scope in the log after the checkpoint, so a restarted
+//!    writer never mints an id twice.
 //!
 //! Not here: forks (K6), handing intents back (K13), client sync by hash (R5), shipping (O3).
 
@@ -34,12 +39,13 @@ use std::thread::JoinHandle;
 
 use replica::effects::{Header, Part, Refusal, read_id};
 use replica::encode::{Value, decode, encode, to_hex};
-use replica::ids::{Scope, Version};
+use replica::ids::{Minter, Scope, Version};
 use replica::tree::Tree;
 use replica::world_model::Audience;
 
-use crate::log::crc32c;
+use crate::log::{At, crc32c};
 
+pub mod fork;
 #[cfg(test)]
 mod tests;
 
@@ -151,6 +157,86 @@ pub struct Root {
     pub seed: Vec<u8>,
     /// Each audience's state hash, the public audience first.
     pub audiences: Vec<(Audience, Vec<u8>)>,
+    /// The log's durable place when it was taken, at or before `record` (rule 7): the log is opened from there.
+    pub log: Option<At>,
+    /// The writer's minter when it was taken (rule 7).
+    pub minter: Option<Minter>,
+}
+
+fn read_at(v: &Value) -> R<At> {
+    match v {
+        Value::Array(a) => match a.as_slice() {
+            [Value::Uint(record), Value::Uint(offset), Value::Uint(crc)] => Ok(At {
+                record: *record,
+                offset: *offset,
+                crc: u32::try_from(*crc)
+                    .or_else(|_| refuse("checkpoint-root-bad", "a checksum over 32 bits"))?,
+            }),
+            _ => refuse(
+                "checkpoint-root-bad",
+                "a log place is [record, byte, checksum]",
+            ),
+        },
+        _ => refuse(
+            "checkpoint-root-bad",
+            "a log place is [record, byte, checksum]",
+        ),
+    }
+}
+
+fn read_minter(v: &Value) -> R<Minter> {
+    match v {
+        Value::Array(a) => match a.as_slice() {
+            [Value::Bytes(s), Value::Uint(next)] if s.len() == 16 => Ok(Minter::at(
+                Scope(s.as_slice().try_into().expect("16 bytes")),
+                *next,
+            )),
+            _ => refuse("checkpoint-root-bad", "a minter is [scope, next]"),
+        },
+        _ => refuse("checkpoint-root-bad", "a minter is [scope, next]"),
+    }
+}
+
+/// A restarted writer's minter (rule 7): the checkpoint's, moved past every id of its scope in the log records after
+/// it (`records`, from the root's record on), since those were minted after it was taken. `None` if the checkpoint
+/// holds none. The records are read as bytes: an id is the array `[16-byte scope, counter]` (T6), and its two heads
+/// with the scope's 16 bytes are looked for. A chance match only moves the counter further on, never back.
+pub fn resume_minter(root: &Root, records: &[Vec<u8>]) -> Option<Minter> {
+    let mut m = root.minter.clone()?;
+    let mut pat = vec![0x82, 0x50];
+    pat.extend_from_slice(&m.scope().0);
+    for r in records {
+        let mut i = 0;
+        while i + pat.len() < r.len() {
+            if r[i] == 0x82 && r[i..i + pat.len()] == pat[..] {
+                if let Some(c) = uint_at(&r[i + pat.len()..]) {
+                    m.past(c);
+                }
+                i += pat.len();
+            } else {
+                i += 1;
+            }
+        }
+    }
+    Some(m)
+}
+
+/// The unsigned integer whose head starts `b` (T6: major type 0, shortest form), if it is one.
+fn uint_at(b: &[u8]) -> Option<u64> {
+    let (&h, rest) = b.split_first()?;
+    if h >> 5 != 0 {
+        return None;
+    }
+    let n = match h & 0x1f {
+        v @ 0..=23 => return Some(v as u64),
+        24 => 1,
+        25 => 2,
+        26 => 4,
+        27 => 8,
+        _ => return None,
+    };
+    let bytes = rest.get(..n)?;
+    Some(bytes.iter().fold(0u64, |a, &x| (a << 8) | x as u64))
 }
 
 /// The tree read back, where the log resumes, what was rejected on the way, and the records for the writer.
@@ -244,6 +330,8 @@ fn read_one(bytes: &[u8]) -> R<(Tree, Root, Blobs)> {
         record,
         seed,
         audiences,
+        log: m.remove(&6).as_ref().map(read_at).transpose()?,
+        minter: m.remove(&7).as_ref().map(read_minter).transpose()?,
     };
     Ok((tree, root, blobs))
 }
@@ -382,6 +470,19 @@ impl Checkpoints {
     /// Takes a checkpoint between ticks, on the clock thread: seals the tree and hands what is new to the writer.
     /// `version` and `record` say where the log stands (every change up to it is in the tree).
     pub fn take(&mut self, tree: &mut Tree, version: Version, record: u64, seed: &[u8]) -> R<()> {
+        self.take_at(tree, version, record, None, seed)
+    }
+
+    /// As [`Checkpoints::take`], keeping where the log stands for a restart (rule 7): its durable place (at or
+    /// before `record`; [`crate::log::Log::durable_at`]) and the writer's minter.
+    pub fn take_at(
+        &mut self,
+        tree: &mut Tree,
+        version: Version,
+        record: u64,
+        resume: Option<(At, &Minter)>,
+        seed: &[u8],
+    ) -> R<()> {
         if let Some(f) = &self.shared.stats().failed {
             return refuse("checkpoint-failed", f.to_string());
         }
@@ -402,6 +503,8 @@ impl Checkpoints {
             record,
             seed: seed.to_vec(),
             audiences,
+            log: resume.map(|(at, _)| at).filter(|at| at.record <= record),
+            minter: resume.map(|(_, m)| m.clone()),
         };
         self.shared.stats().taken += 1;
         let tx = self.tx.as_ref().expect("open until closed");
@@ -515,7 +618,27 @@ fn write_one(dir: &Path, job: Job, blobs: &mut Blobs) -> R<(u64, u64)> {
                 ),
             ),
         ]
-        .into(),
+        .into_iter()
+        .chain(r.log.map(|at| {
+            (
+                6,
+                Value::Array(vec![
+                    Value::Uint(at.record),
+                    Value::Uint(at.offset),
+                    Value::Uint(at.crc as u64),
+                ]),
+            )
+        }))
+        .chain(r.minter.as_ref().map(|m| {
+            (
+                7,
+                Value::Array(vec![
+                    Value::Bytes(m.scope().0.to_vec()),
+                    Value::Uint(m.next()),
+                ]),
+            )
+        }))
+        .collect(),
     );
     let mut bytes = encode(&v).or_else(|e| refuse("encoding", e.to_string()))?;
     bytes.extend_from_slice(&crc32c(0, &bytes).to_le_bytes());
