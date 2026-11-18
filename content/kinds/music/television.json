@@ -1,0 +1,332 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:television",
+  "owner": "thing",
+  "state": {
+    "showing": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "off",
+        "garden",
+        "sea",
+        "stars",
+        "test_card"
+      ],
+      "default": "off",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1200
+      ]
+    },
+    "power": {
+      "role": "contact",
+      "at_mm": [
+        260,
+        680,
+        245
+      ]
+    },
+    "channel": {
+      "role": "contact",
+      "at_mm": [
+        260,
+        560,
+        245
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      716,
+      1128,
+      465
+    ]
+  },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "showing",
+          "is": "off"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "power"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "showing",
+          "to": "garden",
+          "event": "switched_on"
+        }
+      ]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "showing",
+          "not": "off"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "power"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "showing",
+          "to": "off",
+          "event": "switched_off"
+        }
+      ]
+    },
+    "watch_garden": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "showing",
+          "not": "off"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "channel"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "showing",
+          "to": "garden",
+          "event": "channel_changed"
+        }
+      ]
+    },
+    "watch_sea": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "showing",
+          "not": "off"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "channel"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "showing",
+          "to": "sea",
+          "event": "channel_changed"
+        }
+      ]
+    },
+    "watch_stars": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "showing",
+          "not": "off"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "channel"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "showing",
+          "to": "stars",
+          "event": "channel_changed"
+        }
+      ]
+    },
+    "watch_test_card": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "showing",
+          "not": "off"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "channel"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "showing",
+          "to": "test_card",
+          "event": "channel_changed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:television",
+    "shape": {"round":0,"shapes":[
+        {"kind":"cyl","at":[-315,160,-176],"r":20,"h":323,"segments":5,"tint":"wood","pitch":7792,"yaw":43144},
+        {"kind":"cyl","at":[315,160,-176],"r":20,"h":323,"segments":5,"tint":"wood","pitch":7792,"yaw":-43144},
+        {"kind":"cyl","at":[-315,160,176],"r":20,"h":323,"segments":5,"tint":"wood","pitch":7792,"yaw":136822},
+        {"kind":"cyl","at":[315,160,176],"r":20,"h":323,"segments":5,"tint":"wood","pitch":7792,"yaw":-136822},
+        {"kind":"extrude","at":[0,350,0],"polygon":[[-345,-190],[345,-190],[345,190],[-345,190]],"h":460,"tint":"wood"},
+        {"kind":"box","at":[-80,600,215],"size":[500,400,20],"tint":"frame"},
+        {"kind":"box","at":[-80,600,228],"size":[440,340,10],"tint":"glass","role":"screen","when":"@showing=off"},
+        {"kind":"cyl","at":[260,680,230],"r":30,"h":30,"segments":6,"tint":"knob","pitch":90000},
+        {"kind":"cyl","at":[260,560,230],"r":30,"h":30,"segments":6,"tint":"knob","pitch":90000,"role":"knob"},
+        {"kind":"box","at":[260,450,225],"size":[100,60,10],"tint":"frame"},
+        {"kind":"cyl","at":[-65,980,-65],"r":8,"h":364,"segments":4,"tint":"knob","pitch":39649,"yaw":-97403},
+        {"kind":"cyl","at":[155,970,-75],"r":8,"h":338,"segments":4,"tint":"knob","pitch":39706,"yaw":103419},
+        {"kind":"sphere","at":[50,860,-50],"r":40,"segments":5,"tint":"knob"},
+        {"kind":"box","at":[-80,668,234],"size":[440,204,2],"tint":"p0","glow":900,"role":"screen","when":"@showing=garden"},
+        {"kind":"box","at":[-80,498,235],"size":[440,136,2],"tint":"p1","glow":900,"role":"screen","when":"@showing=garden"},
+        {"kind":"box","at":[17,573,236],"size":[246,41,2],"tint":"p2","glow":900,"role":"screen","when":"@showing=garden"},
+        {"kind":"cyl","at":[-194,682,237],"r":34,"h":2,"segments":8,"pitch":90000,"tint":"p3","glow":900,"role":"screen","when":"@showing=garden"},
+        {"kind":"box","at":[-80,675,234],"size":[440,190,2],"tint":"p4","glow":900,"role":"screen","when":"@showing=sea"},
+        {"kind":"box","at":[-80,505,235],"size":[440,150,2],"tint":"p5","glow":900,"role":"screen","when":"@showing=sea"},
+        {"kind":"cyl","at":[-80,593,236],"r":44,"h":2,"segments":8,"pitch":90000,"tint":"p6","glow":900,"role":"screen","when":"@showing=sea"},
+        {"kind":"box","at":[-80,512,237],"size":[26,122,2],"tint":"p7","glow":900,"role":"screen","when":"@showing=sea"},
+        {"kind":"box","at":[-80,600,234],"size":[440,340,2],"tint":"p8","glow":900,"role":"screen","when":"@showing=stars"},
+        {"kind":"cyl","at":[43,668,235],"r":40,"h":2,"segments":8,"pitch":90000,"tint":"p9","glow":900,"role":"screen","when":"@showing=stars"},
+        {"kind":"box","at":[-247,709,236],"size":[11,12,2],"tint":"p10","glow":900,"role":"screen","when":"@showing=stars"},
+        {"kind":"box","at":[-133,627,237],"size":[11,12,2],"tint":"p11","glow":900,"role":"screen","when":"@showing=stars"},
+        {"kind":"box","at":[-212,512,238],"size":[11,12,2],"tint":"p12","glow":900,"role":"screen","when":"@showing=stars"},
+        {"kind":"box","at":[70,505,239],"size":[11,12,2],"tint":"p13","glow":900,"role":"screen","when":"@showing=stars"},
+        {"kind":"box","at":[-269,600,234],"size":[63,340,2],"tint":"p14","glow":900,"role":"screen","when":"@showing=test_card"},
+        {"kind":"box","at":[-206,600,235],"size":[63,340,2],"tint":"p15","glow":900,"role":"screen","when":"@showing=test_card"},
+        {"kind":"box","at":[-143,600,236],"size":[63,340,2],"tint":"p16","glow":900,"role":"screen","when":"@showing=test_card"},
+        {"kind":"box","at":[-80,600,237],"size":[63,340,2],"tint":"p17","glow":900,"role":"screen","when":"@showing=test_card"},
+        {"kind":"box","at":[-17,600,238],"size":[63,340,2],"tint":"p18","glow":900,"role":"screen","when":"@showing=test_card"},
+        {"kind":"box","at":[46,600,239],"size":[63,340,2],"tint":"p19","glow":900,"role":"screen","when":"@showing=test_card"},
+        {"kind":"box","at":[109,600,240],"size":[63,340,2],"tint":"p20","glow":900,"role":"screen","when":"@showing=test_card"}
+      ],
+      "palette":{"wood":"#5e3d27","frame":"#2a2826","glass":"#0d1114","knob":"#b8913f","p0":"#8fc9ef","p1":"#4f9a45","p2":"#7bb35a","p3":"#ffd75e","p4":"#f4b37a","p5":"#2a5d8f","p6":"#ffe08a","p7":"#f7c873","p8":"#0d1636","p9":"#f2efd8","p10":"#ffffff","p11":"#ffffff","p12":"#ffffff","p13":"#ffffff","p14":"#f2f2f2","p15":"#f2e14a","p16":"#4ad7e0","p17":"#52c24a","p18":"#d24ad6","p19":"#e0453a","p20":"#3a4ee0"},"tags":["furniture", "television", "object"]},
+    "table": [
+      {
+        "part": "screen",
+        "field": "showing",
+        "do": "glow",
+        "at": {
+          "off": 0,
+          "garden": 900,
+          "sea": 900,
+          "stars": 900,
+          "test_card": 900
+        }
+      }
+    ]
+  },
+  "text": {
+    "card": "A television: switch it on to watch one of four pictures, then change channel.",
+    "media": "media",
+    "tv": "tv",
+    "telly": "telly",
+    "garden": "garden",
+    "sea": "sea",
+    "stars": "stars",
+    "test_card": "test card",
+    "howto_watch": "Switch it on (it shows the garden), then watch the sea, the stars or the test card."
+  },
+  "card": {
+    "text": "card",
+    "category": "media",
+    "synonyms": [
+      "tv",
+      "telly"
+    ]
+  },
+  "howtos": {
+    "watch": {
+      "text": "howto_watch",
+      "steps": [
+        {
+          "form": "switch_on"
+        },
+        {
+          "form": "watch_stars"
+        },
+        {
+          "form": "switch_off"
+        }
+      ]
+    }
+  }
+}

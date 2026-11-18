@@ -1,0 +1,147 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wind_chime",
+  "owner": "thing",
+  "state": {
+    "rings": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1000000000,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        550
+      ]
+    },
+    "pendant": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1150,
+        0
+      ]
+    }
+  },
+  "slots": {
+    "hook": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        0,
+        2000,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      240,
+      2317,
+      530
+    ]
+  },
+  "forms": {
+    "ring": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "rings",
+          "at_most": 999999999
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "pendant"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "rings",
+          "by": 1,
+          "event": "rang"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:wind_chime",
+    "shape": {"round":0,"shapes":[
+        {"kind":"cyl","at":[0,1100,-350],"r":20,"h":2200,"segments":5,"tint":"iron"},
+        {"kind":"cyl","at":[0,2250,-235],"r":18,"h":251,"segments":4,"tint":"iron","pitch":66520},
+        {"kind":"cyl","at":[0,2150,-60],"r":18,"h":323,"segments":4,"tint":"iron","pitch":158194},
+        {"kind":"cyl","at":[0,1800,0],"r":12,"h":400,"segments":3,"tint":"cord"},
+        {"kind":"cyl","at":[0,1600,0],"r":120,"h":30,"segments":10,"tint":"wood"},
+        {"kind":"cyl","at":[0,1300,90],"r":12,"h":420,"segments":5,"tint":"brass"},
+        {"kind":"cyl","at":[86,1250,28],"r":12,"h":380,"segments":5,"tint":"brass"},
+        {"kind":"cyl","at":[52,1200,-73],"r":12,"h":340,"segments":5,"tint":"brass"},
+        {"kind":"cyl","at":[-54,1300,-72],"r":12,"h":300,"segments":5,"tint":"brass"},
+        {"kind":"cyl","at":[-85,1250,29],"r":12,"h":260,"segments":5,"tint":"brass"},
+        {"kind":"sphere","at":[0,1250,0],"r":30,"segments":5,"tint":"wood","role":"rope","pivot":[0,1600,0]},
+        {"kind":"cyl","at":[0,1375,0],"r":4,"h":450,"segments":3,"tint":"cord","role":"rope","pivot":[0,1600,0]},
+        {"kind":"box","at":[0,1150,0],"size":[80,100,5],"tint":"wood","role":"rope","pivot":[0,1600,0]},
+        {"kind":"cyl","at":[0,20,-350],"r":60,"h":40,"segments":5,"tint":"iron"}
+      ],
+      "palette":{"cord":"#c9b48a","wood":"#8a6a48","brass":"#c9a85a","iron":"#3b3d40"},"tags":["sound", "garden", "object"]},
+    "table": [
+      {
+        "do": "sound",
+        "sound": "chime",
+        "mode": "once",
+        "event": "rang",
+        "level": 350,
+        "reach_mm": 10000
+      }
+    ]
+  },
+  "text": {
+    "card": "Wind chimes on a garden hook: pull the pendant once to ring them.",
+    "music": "music",
+    "chimes": "chimes",
+    "wind_bell": "wind bell",
+    "howto_ring": "Pull the wooden pendant once; the chimes ring and the pendant swings back."
+  },
+  "card": {
+    "text": "card",
+    "category": "music",
+    "synonyms": [
+      "chimes",
+      "wind_bell"
+    ]
+  },
+  "howtos": {
+    "ring": {
+      "text": "howto_ring",
+      "steps": [
+        {
+          "form": "ring"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:workbench",
+  "owner": "thing",
+  "links": {
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"} }
+  },
+  "forms": {
+    "use": {
+      "who": { "link": "owner" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": []
+    }
+  },
+  "text": { "card": "A test private workbench for who may: only its owner may use it." },
+  "card": { "text": "card" }
+}

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":151,"group":"two-things","words":"put the book on the lectern","obvious":2,"things":{"book":"eden:book","lectern":"eden:lectern"},"chain":[{"this":"me","form":"pick_up","carry":"book","args":{"thing":"book"}},{"this":"me","form":"put","place":{"at":"on","thing":"book","anchor":"lectern"},"args":{"thing":"book"}}]}

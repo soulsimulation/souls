@@ -1,0 +1,22 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:reach_kettle",
+  "owner": "thing",
+  "state": {
+    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 0, "max": 1700, "audience": {"rule": "everyone"} }
+  },
+  "geometry": { "bounds_mm": [310, 300, 240] },
+  "forms": {
+    "fill": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "tap": { "type": "thing", "select": { "of": "things", "kind": "test:reach_tap", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [{ "need": "within_reach", "point": "outlet", "of": { "arg": "tap" } }],
+      "steps": [{ "step": "move", "move": "hold_under", "toward": { "arg": "tap" } }]
+    }
+  },
+  "text": { "card": "A test kettle whose fill needs a tap within reach of its hand." },
+  "card": { "text": "card" }
+}

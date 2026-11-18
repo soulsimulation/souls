@@ -7,6 +7,7 @@ name = "bench"
 version = "0.0.0"
 dependencies = [
  "replica",
+ "sim",
 ]
 
 [[package]]

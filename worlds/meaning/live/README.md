@@ -12,7 +12,7 @@ preserved. These are descriptions only; they do not reconcile geometry.
   layout; the others have different settled heights at the same horizontal positions. Every named room and seat anchor
   was checked against the live model.
 
-The Mars pond and Eden pier bench are absent here: they belong to the common physical fixtures
+The Eden pier bench is absent here: it belongs to the common physical fixture
 (`tools/meaning/fixtures.mjs`) and the ordinary template overlay. The pier description stays in the ordinary overlay
 because its bench anchor needs that fixture first.
 
