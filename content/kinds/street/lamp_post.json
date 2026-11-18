@@ -1,0 +1,13 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lamp_post",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [300, 4500, 300] },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:lamp_post" },
+  "text": {
+    "card": "A lamp post, with no forms of its own."
+  },
+  "card": { "text": "card" }
+}

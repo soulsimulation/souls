@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":126,"group":"two-things","words":"move the bench under the tree","obvious":2,"things":{"bench":"eden:bench","tree":"eden:tree"},"chain":[{"this":"me","form":"push","push":"bench","args":{"thing":"bench"}},{"this":"me","form":"put","place":{"at":"next_to","thing":"bench","anchor":"tree"},"args":{"thing":"bench"}}]}

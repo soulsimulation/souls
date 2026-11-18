@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":170,"group":"getting-around","words":"follow the path and see where it goes","obvious":3,"things":{"path":"eden:footpath","signpost":"eden:signpost"},"chain":[{"this":"me","form":"go_to","args":{"place":"path"}},{"read":"signpost","field":"points_to"},{"this":"me","form":"go_to","args":{"place":"signpost"}}]}
