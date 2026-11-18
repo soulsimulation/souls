@@ -58,6 +58,10 @@ step load-browser node tools/wasm-load/browser.mjs target/wasm-load/pkg "$input"
 step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit --no-fund &&
   node tools/encoding-vectors/run.mjs target/wasm-load/pkg crates/replica/fixtures/encoding'
 
+# The page's pose (V7, #2716): a body's bones as a function of its record and time, the same at 30 and 144 frames a
+# second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
+step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts'
+
 # The ids goldens (T3, #2640): the same WASM build in Node gives fixtures/ids/goldens.txt exactly, as the native build
 # does in `cargo test` (crates/replica/tests/ids.rs).
 step ids-goldens node --input-type=module -e '

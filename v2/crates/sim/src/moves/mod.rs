@@ -128,6 +128,11 @@ impl Moves {
         self.live.get(&instance).map(|l| &l.record)
     }
 
+    /// The move a timer the due list handed back belongs to, before [`Moves::fire`] runs it.
+    pub fn instance_of(&self, t: &Timer) -> Option<Instance> {
+        self.by_timer.get(&t.id).copied()
+    }
+
     /// The controller driver move `instance` in progress holds its resources under.
     pub fn driver(&self, instance: Instance) -> Option<Driver> {
         self.live.get(&instance).map(|l| l.driver)
