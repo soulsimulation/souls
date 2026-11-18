@@ -120,7 +120,7 @@ test('main compares the merge base with the head in git, reads the head lists, a
   const g = (...a) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' }).trim();
   const put = (path, text) => { mkdirSync(dirname(join(dir, path)), { recursive: true }); writeFileSync(join(dir, path), text); };
   const commit = m => { g('add', '-A'); g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', m); return g('rev-parse', 'HEAD'); };
-  g('init', '-q', '-b', 'main');
+  g('init', '-q'); g('symbolic-ref', 'HEAD', 'refs/heads/main'); // no `init -b`: the self-hosted runners' git predates 2.28
   put(WEB, src("test('old name', () => {});")); put('tools/test-harness/quarantine.json', JSON.stringify(Q));
   const base = commit('base');
   put(WEB, src("test('new name', () => {});")); const bare = commit('rename');

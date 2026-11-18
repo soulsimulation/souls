@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":78,"group":"object","words":"curl up in the armchair","obvious":3,"things":{"armchair":"eden:armchair"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"armchair"}},{"this":"me","form":"curl_up"}]}

@@ -2,7 +2,8 @@
 // Versioned, deduplicated nightly backups of one launcher stage (lane BK, 2026-10-20; replaces backup.mjs's dated full copies).
 //
 //   node backup-restic.mjs backup <stage>                         nightly (sim-worlds-backup@<stage>.service, as simworlds)
-//   node backup-restic.mjs restore <stage> <when> <dir>           when = latest | YYYY-MM-DD (UTC night) | snapshot id
+//   node backup-restic.mjs backup-hourly <stage>                  hourly (sim-worlds-backup-hourly@<stage>.service; #2542)
+//   node backup-restic.mjs restore <stage> <when> <dir>           when = latest | YYYY-MM-DD (that UTC day's newest, hourly or nightly) | snapshot id
 //   node backup-restic.mjs list [<stage>]                         the snapshots kept
 //
 // backup: every SQLite database of the stage (accounts.sqlite, forks/accounts.sqlite, worlds/<slug>/sim.db) is copied with
@@ -13,6 +14,12 @@
 // /etc/sim-worlds/<stage>.conf, memory drop-in, the Caddy site + blobs snippet). The copies sit in a staging mirror of the data dir
 // (<staging>/<stage>/...), restic snapshots that mirror (tag <stage>), then forget+prune keeps SIM_BACKUP_KEEP (default 7 daily,
 // 4 weekly, 6 monthly = at most 17 snapshots) and check reads a seventh of the data (all of it once a week).
+// backup-hourly (#2542): the same mirror and snapshot, but a database whose file and write-ahead log are no newer than its
+// mirror copy is skipped (each copy's mtime is set to the moment its copy began, so a write during the copy is caught next
+// hour); the snapshot is tagged <stage>,hourly and copied off-site, with no forget, prune or check (those stay nightly). Each
+// snapshot still holds every database, so any one restores the whole stage. The nightly run keeps the newest 24 hourly
+// snapshots (SIM_BACKUP_KEEP_HOURLY) and its own rule applies to the nightly ones only (forget --group-by tags --keep-tag hourly).
+// The nightly and hourly units share the mirror, so each runs under the same flock (deploy/sim-worlds-backup*@.service).
 // Off-box copy: set SIM_BACKUP_OFFSITE (e.g. an R2 bucket, s3:https://<account>.r2.cloudflarestorage.com/<bucket>) and its
 // credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) in the env file; each night then copies the new snapshots there
 // (initialising it on first use with the same chunker, so it deduplicates the same way) and applies the same retention.
@@ -27,6 +34,7 @@
 //   RESTIC_CACHE_DIR       /srv/sim-worlds-backups/.cache        SIM_BACKUP_DATA_ROOT  /srv/sim-worlds-data
 //   SIM_BACKUP_STAGING     /srv/sim-worlds-backups/staging       SIM_BACKUP_KEEP       "--keep-daily 7 --keep-weekly 4 --keep-monthly 6"
 //                                                                (off = never forget/prune: nothing is ever deleted)
+//   SIM_BACKUP_KEEP_HOURLY "--keep-hourly 24" (the hourly snapshots, applied by the nightly run)
 //   SIM_BACKUP_OFFSITE     (unset = local only)                  RESTIC_BIN            restic
 //   SIM_BACKUP_DATED_ROOT  /srv/sim-worlds-backups (backup.mjs fallback until restic is set up)
 //   SIM_BACKUP_TIME        (tests only: the snapshot's time, "YYYY-MM-DD HH:MM:SS")
@@ -46,6 +54,7 @@ const BIN = env.RESTIC_BIN || 'restic';
 const DATA_ROOT = env.SIM_BACKUP_DATA_ROOT || '/srv/sim-worlds-data';
 const STAGING = env.SIM_BACKUP_STAGING || '/srv/sim-worlds-backups/staging';
 const KEEP = (env.SIM_BACKUP_KEEP || '--keep-daily 7 --keep-weekly 4 --keep-monthly 6').split(/\s+/).filter(Boolean);
+const KEEP_HOURLY = (env.SIM_BACKUP_KEEP_HOURLY || '--keep-hourly 24').split(/\s+/).filter(Boolean);
 const HOST = hostname().split('.')[0];
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STAGE_RE = /^[a-z][a-z0-9-]{0,31}$/;
@@ -106,14 +115,19 @@ function setupMissing() {
 
 /** Lane DASH: the last night's result for the owner's health page, <data dir>/backup-last.json (no paths outside the stage,
  *  no secrets): written after every restic run, ok or not. */
-function writeLast(stage, rec) {
-  const file = join(DATA_ROOT, stage, 'backup-last.json');
+function writeLast(stage, rec, name = 'backup-last.json') {
+  const file = join(DATA_ROOT, stage, name);
   try { writeFileSync(`${file}.tmp`, `${JSON.stringify({ stage, at: new Date().toISOString(), ...rec })}\n`); renameSync(`${file}.tmp`, file); } catch { /* the backup itself matters more */ }
 }
 
-async function runBackup(stage) {
+/** #2542: the mirror copy covers the live database: its mtime (the moment its copy began) is no older than the file and its log. */
+const mtimeMs = (f) => { try { return statSync(f).mtimeMs; } catch { return 0; } };
+const unchanged = (src, dest) => existsSync(dest) && mtimeMs(dest) >= Math.max(mtimeMs(src), mtimeMs(`${src}-wal`));
+
+async function runBackup(stage, { hourly = false } = {}) {
   const data = join(DATA_ROOT, stage), out = join(STAGING, stage), t0 = Date.now();
   if (!existsSync(data)) throw new Error(`no data dir ${data}`);
+  if (hourly && setupMissing()) throw new Error(`restic not set up (${setupMissing()}); the hourly run has no fallback`);
   // Not set up yet (no restic, no password file, or no repository): take the old dated copy (backup.mjs, newest 3 nights)
   // instead, so shipping this before the one-time setup never costs a night. Never inits a repository on its own.
   const notReady = setupMissing();
@@ -134,17 +148,21 @@ async function runBackup(stage) {
   for (const slug of existsSync(worldsDir) ? readdirSync(worldsDir).sort() : []) {
     if (existsSync(join(worldsDir, slug, 'sim.db'))) dbs.push(join('worlds', slug, 'sim.db'));
   }
-  let ok = 0; const failed = [];
+  let ok = 0, skipped = 0; const failed = [];
   for (const rel of dbs) {
     const src = join(data, rel), dest = join(out, rel);
+    if (hourly && unchanged(src, dest)) { skipped++; continue; }
     mkdirSync(dirname(dest), { recursive: true });
     const db = new DatabaseSync(src);
     try {
+      // 2 s early: file timestamps can be coarser than the clock, so a write just after the copy began is never skipped
+      // (a database written in the 2 s before is copied again next hour, which costs one copy)
+      const began = (Date.now() - 2000) / 1000;
       // one complete step: the default 100-page steps restart whenever a live world writes in between (2026-10-19)
       await sqliteBackup(db, `${dest}.tmp`, { rate: 0x7fffffff });
       const check = quickCheck(`${dest}.tmp`);
       if (check !== 'ok') throw new Error(`quick_check: ${check.slice(0, 200)}`);
-      renameSync(`${dest}.tmp`, dest); ok++;
+      utimesSync(`${dest}.tmp`, began, began); renameSync(`${dest}.tmp`, dest); ok++;
     } catch (e) { failed.push(`${rel}: ${e.message}`); rmSync(`${dest}.tmp`, { force: true }); }
     finally { db.close(); }
   }
@@ -179,17 +197,20 @@ async function runBackup(stage) {
     if (statSync(p).isDirectory() && readdirSync(p).length === 0) rmSync(p, { recursive: true, force: true });
   }
 
-  // 4. snapshot, retention, check
+  // 4. snapshot, retention, check (retention and check nightly only)
   const before = repoBytes(env.RESTIC_REPOSITORY);
   const time = env.SIM_BACKUP_TIME ? ['--time', env.SIM_BACKUP_TIME] : [];
-  const summary = restic(['backup', '--json', '--host', HOST, '--tag', stage, ...time, out]).split('\n')
+  const tag = hourly ? `${stage},hourly` : stage;
+  const summary = restic(['backup', '--json', '--host', HOST, '--tag', tag, ...time, out]).split('\n')
     .map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((m) => m?.message_type === 'summary');
   if (!summary?.snapshot_id) throw new Error('restic backup: no snapshot id in its summary');
-  const forget = ['forget', '--host', HOST, '--tag', stage, ...KEEP, '--prune'];
-  if (KEEP[0] !== 'off') restic(forget, { quiet: true });
-  const day = Number(new Date().getUTCDay());
-  restic(['check', '--read-data-subset', `${day + 1}/7`], { quiet: true });
-  const kept = JSON.parse(restic(['snapshots', '--json', '--host', HOST, '--tag', stage], { quiet: true }) || '[]').length;
+  // two rules, one group each (by tags): the hourly snapshots keep their newest 24; the nightly rule never removes an hourly one
+  const forgets = [['forget', '--host', HOST, '--tag', `${stage},hourly`, '--group-by', 'host,paths,tags', ...KEEP_HOURLY],
+    ['forget', '--host', HOST, '--tag', stage, '--group-by', 'host,paths,tags', '--keep-tag', 'hourly', ...KEEP, '--prune']];
+  const retain = !hourly && KEEP[0] !== 'off';
+  if (retain) for (const f of forgets) restic(f, { quiet: true });
+  if (!hourly) restic(['check', '--read-data-subset', `${Number(new Date().getUTCDay()) + 1}/7`], { quiet: true });
+  const kept = JSON.parse(restic(['snapshots', '--json', '--host', HOST, '--tag', tag], { quiet: true }) || '[]').length;
   const after = repoBytes(env.RESTIC_REPOSITORY);
 
   // 5. off-box copy (one config line: SIM_BACKUP_OFFSITE)
@@ -199,20 +220,22 @@ async function runBackup(stage) {
     try {
       const inited = spawnSync(BIN, ['-r', off, 'cat', 'config'], { env, encoding: 'utf8' }).status === 0;
       if (!inited) restic(['init', ...from, '--copy-chunker-params'], { repo: off, quiet: true });
-      restic(['copy', ...from, '--host', HOST, '--tag', stage], { repo: off, quiet: true });
-      if (KEEP[0] !== 'off') restic(forget, { repo: off, quiet: true });
+      restic(['copy', ...from, '--host', HOST, '--tag', tag], { repo: off, quiet: true });
+      if (retain) for (const f of forgets) restic(f, { repo: off, quiet: true });
       offsite = `; offsite ${inited ? 'copied' : 'initialised + copied'}`;
     } catch (e) { failed.push(`offsite: ${e.message}`); offsite = '; offsite FAILED'; }
   }
 
   const growth = before != null && after != null ? `, repo ${mb(after)} MB (${after >= before ? '+' : ''}${mb(after - before)} MB)` : '';
-  console.log(`backup ${stage}: snapshot ${summary.snapshot_id.slice(0, 8)}, ${ok}/${dbs.length} databases ok (quick_check), ${files.length} files, ` +
-    `${assets} new assets, ${forkFiles} new fork files, ${hostCopied}/${hostFiles.length} host settings, ${mb(summary.total_bytes_processed ?? 0)} MB staged${growth}; ${kept} snapshots kept${KEEP[0] === 'off' ? ' (retention off)' : ''}${offsite}`);
+  const dbLine = hourly ? `${ok}/${dbs.length - skipped} changed databases ok (quick_check), ${skipped} unchanged skipped` : `${ok}/${dbs.length} databases ok (quick_check)`;
+  console.log(`backup${hourly ? '-hourly' : ''} ${stage}: snapshot ${summary.snapshot_id.slice(0, 8)}, ${dbLine}, ${files.length} files, ` +
+    `${assets} new assets, ${forkFiles} new fork files, ${hostCopied}/${hostFiles.length} host settings, ${mb(summary.total_bytes_processed ?? 0)} MB staged${growth}; ${kept} ${hourly ? 'hourly ' : ''}snapshots kept${KEEP[0] === 'off' ? ' (retention off)' : ''}${offsite}`);
   for (const f of failed) console.error(`FAILED ${f}`);
   if (failed.length) process.exitCode = 1;
-  writeLast(stage, { ok: failed.length === 0, snapshot: summary.snapshot_id.slice(0, 8), dbsOk: ok, dbs: dbs.length, files: files.length, newAssets: assets,
+  writeLast(stage, { ok: failed.length === 0, snapshot: summary.snapshot_id.slice(0, 8), dbsOk: ok, dbs: dbs.length, ...(hourly ? { dbsSkipped: skipped } : {}), files: files.length, newAssets: assets,
     stagedMb: +mb(summary.total_bytes_processed ?? 0), addedMb: +mb(summary.data_added ?? 0), repoMb: after == null ? null : +mb(after), kept,
-    offsite: env.SIM_BACKUP_OFFSITE ? !offsite.includes('FAILED') : null, seconds: Math.round((Date.now() - t0) / 1000), failed: failed.map((f) => f.slice(0, 160)) });
+    offsite: env.SIM_BACKUP_OFFSITE ? !offsite.includes('FAILED') : null, seconds: Math.round((Date.now() - t0) / 1000), failed: failed.map((f) => f.slice(0, 160)) },
+  hourly ? 'backup-hourly-last.json' : undefined);
 }
 
 function snapshots(stage) {
@@ -242,11 +265,12 @@ function runRestore(stage, when, dir) {
 }
 
 const [cmd, stage, ...rest] = process.argv.slice(2);
-const usage = () => { console.error('usage: backup-restic.mjs backup <stage> | restore <stage> <latest|YYYY-MM-DD|snapshot> <dir> | list [<stage>]'); process.exit(2); };
+const usage = () => { console.error('usage: backup-restic.mjs backup <stage> | backup-hourly <stage> | restore <stage> <latest|YYYY-MM-DD|snapshot> <dir> | list [<stage>]'); process.exit(2); };
 if (stage && !STAGE_RE.test(stage)) usage();
 try {
   if (cmd === 'backup' && stage) await runBackup(stage);
+  else if (cmd === 'backup-hourly' && stage) await runBackup(stage, { hourly: true });
   else if (cmd === 'restore' && stage && rest.length === 2) runRestore(stage, rest[0], rest[1]);
   else if (cmd === 'list') for (const s of snapshots(stage)) console.log(`${s.short_id}  ${new Date(s.time).toISOString().slice(0, 16)}Z  ${s.hostname}  ${(s.tags ?? []).join(',')}  ${s.paths.join(' ')}`);
   else usage();
-} catch (e) { console.error(`${cmd} ${stage ?? ''}: ${e.message}`); process.exitCode = 1; if (cmd === 'backup' && stage) writeLast(stage, { ok: false, error: e.message.slice(0, 200) }); }
+} catch (e) { console.error(`${cmd} ${stage ?? ''}: ${e.message}`); process.exitCode = 1; if (cmd?.startsWith('backup') && stage) writeLast(stage, { ok: false, error: e.message.slice(0, 200) }, cmd === 'backup-hourly' ? 'backup-hourly-last.json' : undefined); }

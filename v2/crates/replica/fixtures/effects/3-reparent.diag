@@ -1,5 +1,5 @@
 # Reparent: Soul 100 moves the cup from the body's right hand (slot 2, the old frame) to its left (slot 1): one parent,
-# so the cup's own entry. Putting it down on the crate is a new parent: a leave and an arrive (9-transfer.diag)
+# so the cup's own entry. Putting it down on the floor is a new parent: a leave and an arrive (9-transfer.diag)
 # (Engine v2 T6, #2645), applied to the base. Layout as in 0-base.diag.
 {
   1: h'12201b6152bdcb78adacbc5eb70d3aff3ee1fff947060db15527395c3c0706158db5',
