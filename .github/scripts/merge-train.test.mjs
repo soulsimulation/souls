@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
+import { awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, MIXED_CAP, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
 import { JOBS } from './ci-scope.mjs';
 
 const M = 'owner';
@@ -261,6 +261,7 @@ test('mainCiState: a later narrow green run does not clear a failure; a full-sco
   assert.deepEqual(mainCiState([run(5, 'success'), run(8, 'success'), run(10, 'success')], isFull), { conclusion: 'success', since: null });
   assert.deepEqual(mainCiState([], isFull), { conclusion: 'unproven', since: 'unproven' });
   assert.equal(fullScope(run(3, 'success', { event: 'workflow_dispatch' }), []), true);
+  assert.equal(fullScope(run(3, 'success', { event: 'schedule' }), []), true, 'the daily run is full scope');
   assert.equal(fullScope(run(3, 'success'), ALL_JOBS), true);
   assert.equal(fullScope(run(3, 'success'), ALL_JOBS.slice(1)), false);
   assert.equal(fullScope(run(3, 'success'), ALL_JOBS.map((j, i) => i ? j : { ...j, conclusion: 'skipped' })), false);
@@ -275,6 +276,9 @@ test('mainCiState: a later narrow green run does not clear a failure; a full-sco
   assert.equal(n.mode_why, 'main CI unproven');
   assert.equal(narrow.comments.length, 1);
   assert.match(narrow.comments[0].body, /is unproven/);
+  // 18 Nov: pushes run light, so the daily run is what proves main; a red light push after it still counts.
+  assert.equal(train({ files: ['docs/a.md'], mainRuns: [run(11, 'success'), run(10, 'success', { event: 'schedule' }), run(9, 'failure')], full: [] }).run().mode, 'nonstrict');
+  assert.equal(train({ files: ['docs/a.md'], mainRuns: [run(11, 'failure'), run(10, 'success', { event: 'schedule' })], full: [] }).run().mode, 'strict');
   // A manual run after the failure is full scope and clears it.
   assert.equal(train({ files: ['docs/a.md'], mainRuns: [run(11, 'success', { event: 'workflow_dispatch' }), run(10, 'success'), run(9, 'failure')], full: [] }).run().mode, 'nonstrict');
 });
@@ -345,8 +349,9 @@ test('landing: pending head checks (merge:ready re-runs proof-ok) wait, not stri
   assert.equal(strictAnyway.pauses(), 0); // main red: strict regardless, no wait
 });
 
-// A queue-mode next(): `prs` maps number -> overrides; `state` maps number -> the PR's queue state.
-function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type: 'merge_queue' }], files = ['docs/a.md'], approved = [], freeze = null }) {
+// A queue-mode next(): `prs` maps number -> overrides; `state` maps number -> the PR's queue state; `filesFor` maps
+// number -> that PR's files, or 'unreadable' for a files read that fails.
+function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type: 'merge_queue' }], files = ['docs/a.md'], filesFor = {}, approved = [], freeze = null }) {
   const pr = n => ({ number: n, title: 't', labels: [{ name: 'merge:ready' }], head: { ref: `agent/${n}-x`, sha: `h${n}`, repo: { full_name: 'o/r' } }, base: { ref: 'main' }, mergeable: true, mergeable_state: 'clean', ...prs[n] });
   const reads = { pr: {}, checks: 0, comments: [], held: [] };
   const api = {
@@ -360,7 +365,11 @@ function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type
       if (path.startsWith('repos/o/r/rules/branches/main')) return rules;
       if (path.startsWith('repos/o/r/issues?')) return Object.keys(prs).map(number => ({ number: Number(number), pull_request: {} }));
       if (path.includes('/check-runs') || path.includes('/actions/')) { reads.checks++; return []; }
-      if (path.includes('/files')) return files.map(filename => ({ filename }));
+      if (path.includes('/files')) {
+        const own = filesFor[Number(path.split('/')[4])] ?? files;
+        if (own === 'unreadable') throw new Error('HTTP 502');
+        return own.map(filename => ({ filename }));
+      }
       if (path.includes('/reviews')) return approved.includes(Number(path.split('/')[4])) ? [{ user: { login: M }, state: 'APPROVED' }] : [];
       return [];
     },
@@ -369,7 +378,7 @@ function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type
     hold: s => { const a = holdAction(s); if (a) reads.held.push(s.number); return a?.[0] ?? null; },
     pause: () => {},
   };
-  return { run: () => next({ repo: 'o/r', maintainer: M, notifyIssue: '755', freeze, api }), reads };
+  return { run: () => next({ repo: 'o/r', maintainer: M, notifyIssue: '755', freeze, api }), reads, api };
 }
 
 test('queue: the rule is read from the branch rules; without it the train picks as before', () => {
@@ -402,6 +411,57 @@ test('queue: a queued PR is skipped, so the self-dispatch ends', () => {
   assert.equal(r.more, false);
   assert.deepEqual(r.skipped.map(s => [s.pr, s.why]), [[20, 'queued'], [21, 'queued']]);
   assert.equal(queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: state[20] } }).run().pr, 21);
+});
+
+// 18 Nov: merge groups run no heavy leg, so the cap is 8. PRs 20.. are numbered in pick order.
+const ids = (n, from = 20) => Array.from({ length: n }, (_, i) => from + i);
+const inQueue = list => Object.fromEntries(list.map((n, i) => [n, i % 2 ? { autoMergeRequest: { enabledAt: 'x' } } : { isInMergeQueue: true }]));
+const prsOf = list => Object.fromEntries(list.map(n => [n, {}]));
+
+test('queue: mixed cap: with 8 mixed PRs queued, a 9th mixed PR waits and a low-risk one is enqueued', () => {
+  assert.equal(MIXED_CAP, 8);
+  const mixed = ['apps/server/src/x.ts'], low = ['tools/entry/a.mjs', 'changes/a.md'];
+  // 20-27 are mixed and queued, 28 is low-risk and queued (it does not count), 29 is mixed, 30 low-risk.
+  const state = inQueue(ids(9));
+  const t = queueTrain({ prs: prsOf(ids(11)), state, files: mixed, filesFor: { 28: low, 30: low } });
+  const r = t.run();
+  assert.deepEqual([r.pr, r.mode], [30, 'queue']);
+  assert.deepEqual(r.skipped.at(-1), { pr: 29, tier: r.skipped.at(-1).tier, why: 'mixed-cap', mixed_queued: 8 });
+  assert.deepEqual([t.reads.held, t.reads.comments], [[], []], 'held back: not taken out of anything, not ejected, no comment');
+  // The waiting PR keeps merge:ready and goes on a later pass, once one of the eight has left the queue.
+  const after = queueTrain({ prs: prsOf([...ids(7, 21), 29]), state, files: mixed }).run();
+  assert.deepEqual([after.pr, after.mode], [29, 'queue']);
+});
+
+test('queue: mixed cap: with 7 mixed PRs queued, an 8th mixed PR is enqueued', () => {
+  const r = queueTrain({ prs: prsOf(ids(8)), state: inQueue(ids(7)), files: ['apps/web/src/x.ts'] }).run();
+  assert.deepEqual([r.pr, r.mode], [27, 'queue']);
+});
+
+test('queue: mixed cap: a PR whose file list cannot be read counts as not low-risk', () => {
+  const state = Object.fromEntries(ids(8).map(n => [n, { isInMergeQueue: true }]));
+  // 20-26 are mixed; 27 is queued but its files cannot be read, so it is the eighth mixed one and 28 waits.
+  const t = queueTrain({ prs: prsOf(ids(9)), state, files: ['apps/server/src/x.ts'], filesFor: { 27: 'unreadable' } });
+  const r = t.run();
+  assert.equal(r.pr, '');
+  assert.deepEqual(r.skipped.map(s => [s.pr, s.why]), [...ids(7).map(n => [n, 'queued']), [27, 'files-unreadable'], [28, 'mixed-cap']]);
+  // With 27 readable and low-risk, only seven mixed PRs are queued and 28 goes.
+  assert.equal(queueTrain({ prs: prsOf(ids(9)), state, files: ['apps/server/src/x.ts'], filesFor: { 27: ['docs/a.md'] } }).run().pr, 28);
+  // A candidate whose own files cannot be read waits too: not picked, not ejected.
+  const own = queueTrain({ prs: { 20: {} }, filesFor: { 20: 'unreadable' } }).run();
+  assert.deepEqual([own.pr, own.skipped], ['', [{ pr: 20, why: 'files-unreadable' }]]);
+});
+
+test('queue: a PR with auto-merge on and a failed required check is reported, once, not skipped silently', () => {
+  const failing = path => path.startsWith('repos/o/r/issues/755/comments') ? t.reads.comments : path.includes('/check-runs') ? [{ check_runs: DEFAULT_CHECKS.map((name, id) => ({ id, name, status: 'completed', conclusion: name === 'proof-ok' ? 'failure' : 'success' })) }] : null;
+  const t = queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: { autoMergeRequest: { enabledAt: 'x' } }, 21: { isInMergeQueue: true } } });
+  const ghAll = t.api.ghAll; t.api.ghAll = path => failing(path) ?? ghAll(path);
+  const r = t.run();
+  assert.deepEqual(r.skipped.map(s => [s.pr, s.why, s.failed]), [[20, 'queued', ['proof-ok (failure)']], [21, 'queued', undefined]]);
+  assert.equal(t.reads.comments.length, 1);
+  assert.match(t.reads.comments[0].body, /#20 has auto-merge on.*proof-ok/);
+  t.run(); // the notice is not repeated for the same head
+  assert.equal(t.reads.comments.length, 1);
 });
 
 test('queue: a conflict takes the strict steps, then enqueues; unknown mergeability is asked again', () => {
@@ -441,7 +501,8 @@ test('workflow: every required check reports on merge_group, and queue entries n
   const proof = read('proof-check.yml');
   assert.match(proof, /group: proof-check-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
   assert.match(proof, /cancel-in-progress: \$\{\{ github\.event_name != 'merge_group' \}\}/);
-  assert.match(proof, /if: github\.event_name == 'merge_group' \|\| \(?github\.event\.pull_request\.draft == false/);
+  // On a merge group proof-ok reports as skipped (a job skipped by its `if` counts as passing) and takes no runner.
+  assert.match(proof, /if: github\.event_name != 'merge_group' && github\.event\.pull_request\.draft == false/);
 });
 
 test('workflow: only a label being added starts the train or the kick; removing one does not', async () => {

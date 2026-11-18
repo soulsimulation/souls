@@ -1,0 +1,734 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:street_cabinet (content/kinds/locks/, from core/street-cabinet@1, whose lock today is anyone's): open, close, lock and unlock, each with every need met and each need unmet. A locked cabinet refuses to open and points to unlock; an open one refuses to lock and points to close.",
+ "cases": [
+  {
+   "name": "open_a_shut_unlocked_cabinet",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "open_an_open_cabinet_is_refused_and_told_to_close",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": true,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "open",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "close"
+    }
+   }
+  },
+  {
+   "name": "open_a_locked_cabinet_is_refused_and_told_to_unlock",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "locked",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "unlock"
+    }
+   }
+  },
+  {
+   "name": "open_out_of_reach_of_the_handle_walks_to_it",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       1600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "detail": {
+     "point": "handle",
+     "move": "swing"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "handle"
+    }
+   }
+  },
+  {
+   "name": "close_an_open_cabinet",
+   "act": {
+    "this": "t1",
+    "form": "close"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": true,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "close_a_shut_cabinet_is_refused_and_told_to_open",
+   "act": {
+    "this": "t1",
+    "form": "close"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "open",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "open"
+    }
+   }
+  },
+  {
+   "name": "close_out_of_reach_of_the_hinge_side_walks_to_it",
+   "act": {
+    "this": "t1",
+    "form": "close"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": true,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       1600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "hinge_side",
+     "move": "swing"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "hinge_side"
+    }
+   }
+  },
+  {
+   "name": "lock_a_shut_cabinet",
+   "act": {
+    "this": "t1",
+    "form": "lock"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "lock_a_locked_cabinet_is_refused",
+   "act": {
+    "this": "t1",
+    "form": "lock"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "locked",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "unlock"
+    }
+   }
+  },
+  {
+   "name": "lock_an_open_cabinet_is_refused_and_told_to_close",
+   "act": {
+    "this": "t1",
+    "form": "lock"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": true,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "open",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "close"
+    }
+   }
+  },
+  {
+   "name": "lock_out_of_reach_of_the_keyhole_walks_to_it",
+   "act": {
+    "this": "t1",
+    "form": "lock"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       1600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "detail": {
+     "point": "keyhole",
+     "move": "lock"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "keyhole"
+    }
+   }
+  },
+  {
+   "name": "unlock_a_locked_cabinet",
+   "act": {
+    "this": "t1",
+    "form": "unlock"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "unlock_an_unlocked_cabinet_is_refused_and_told_to_lock",
+   "act": {
+    "this": "t1",
+    "form": "unlock"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "locked",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "lock"
+    }
+   }
+  },
+  {
+   "name": "unlock_out_of_reach_of_the_keyhole_walks_to_it",
+   "act": {
+    "this": "t1",
+    "form": "unlock"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:street_cabinet",
+      "fields": {
+       "open": false,
+       "locked": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       300,
+       900,
+       1600
+      ]
+     }
+    },
+    "moves": {
+     "swing": {
+      "reach_mm": 600
+     },
+     "lock": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "keyhole",
+     "move": "lock"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "keyhole"
+    }
+   }
+  }
+ ]
+}
