@@ -1667,7 +1667,8 @@ export class WorldEntityLayer {
     // Entry 34: a growing planter's plants, eased from how they were last drawn to what the state now asks for; a can
     // carried by its handle (a `carry` slot) is posed from the hand every frame, so never instanced
     if (isGrowingDef(def as never) || built.userData.lookGrowth !== undefined) {   // SA-D2: or a looks-table grow row
-      const look = plantLookOf(e.state, def as never); if (built.userData.lookGrowth !== undefined) look.g = Math.min(4, (built.userData.lookGrowth as number) / 1000); const shown = this.plantShown.get(e.id) ?? look;
+      // a table plant (SA-D2) wilts only by its wilt row and keeps its soil part whole
+      const look = plantLookOf(e.state, def as never); if (built.userData.lookGrowth !== undefined) { look.g = Math.min(4, (built.userData.lookGrowth as number) / 1000); look.w = Math.min(1, ((built.userData.lookWilt as number | undefined) ?? 0) / 1000); look.m = 1; } const shown = this.plantShown.get(e.id) ?? look;
       built.add(plantGroup(seedOf(e.id), shown)); delete built.userData.instanceKey; setPatch(built, shown.m); this.growing.add(e.id);
       if (!sameLook(shown, look)) this.plantTweens.set(e.id, { from: shown, to: look, t0: this.now, dur: lookSeconds(shown, look) * 1000 }); else this.plantTweens.delete(e.id);
       this.plantShown.set(e.id, shown);

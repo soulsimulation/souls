@@ -1,0 +1,85 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:birch",
+  "owner": "thing",
+  "points": {
+    "trunk": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1200,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3350,
+      7490,
+      2520
+    ]
+  },
+  "forms": {
+    "go_to_shade": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "shade"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "areas": {
+    "shade": {
+      "at_mm": [
+        0,
+        0,
+        1500
+      ],
+      "radius_mm": 1800,
+      "allows": {
+        "sit": "on",
+        "lie": "on"
+      }
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:birch",
+    "shape": {"round":20,"shapes":[{"kind":"cyl","at":[0,2200,0],"r":150,"h":4400,"segments":6,"r2":90,"tint":"bark"},{"kind":"cyl","at":[0,1200,0],"r":152,"h":60,"segments":6,"tint":"mark"},{"kind":"cyl","at":[0,2000,0],"r":140,"h":60,"segments":6,"tint":"mark"},{"kind":"cyl","at":[0,2900,0],"r":128,"h":60,"segments":6,"tint":"mark"},{"kind":"cyl","at":[0,3600,0],"r":116,"h":60,"segments":6,"tint":"mark"},{"kind":"cyl","at":[300,4000,50],"r":60,"h":1345,"segments":4,"r2":30,"tint":"bark","pitch":26872,"yaw":80558},{"kind":"sphere","at":[0,5600,0],"r":1400,"segments":8,"tint":"leaf","scale":[900,1350,900]},{"kind":"sphere","at":[800,4900,300],"r":900,"segments":6,"tint":"leaf2","scale":[1000,1200,1000]},{"kind":"sphere","at":[-700,5000,-300],"r":950,"segments":6,"tint":"leaf2","scale":[1000,1200,1000]}],"palette":{"bark":"#ece8df","mark":"#2e2b28","leaf":"#8db45a","leaf2":"#a3c46a"},"tags":["plant","tree","birch","broadleaf"]}
+  },
+  "text": {
+    "card": "A slender white birch about 7 m tall, with light shade to rest in.",
+    "plant": "plant",
+    "silver_birch": "silver birch",
+    "shade": "shade",
+    "howto_rest": "Go to the shade, then sit or lie down under the branches."
+  },
+  "card": {
+    "text": "card",
+    "category": "plant",
+    "synonyms": [
+      "silver_birch",
+      "shade"
+    ]
+  },
+  "howtos": {
+    "rest": {
+      "text": "howto_rest",
+      "steps": [
+        {
+          "form": "go_to_shade"
+        }
+      ]
+    }
+  }
+}
