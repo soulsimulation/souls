@@ -15,8 +15,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::thread;
 use std::time::{Duration, Instant};
-use worldd::checkers::lamps::{World, rules, toggle};
 use worldd::checkers::start;
+use worldd::checkers::toggles::{World, rules, toggle};
 
 const TICK: Duration = Duration::from_millis(50);
 const CHECKERS: usize = 4;
