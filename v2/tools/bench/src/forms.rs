@@ -27,7 +27,7 @@ use replica::rules::json::{self, parse};
 use replica::tree::Tree;
 use replica::world_model::{parse_kinds, parse_world};
 use sim::controller::Controller;
-use sim::forms::{Forms, World};
+use sim::forms::{Forms, Intent, World};
 use sim::host::Geometry;
 use sim::mover::Surface;
 use sim::moves::{Moves, Reach, load};
@@ -177,8 +177,16 @@ impl Bench {
         let runs = std::mem::take(&mut self.runs);
         for (body, thing, steps) in &runs {
             let (mut w, forms) = self.world();
+            // No effects: the bench times the steps. Each body is its own intent, never expiring.
+            let intent = Intent {
+                id: *body,
+                expiry: i64::MAX,
+                actor: replica::effects::Actor::Soul(*body),
+                digest: [0; 32],
+            };
+            let (s, l) = (steps.clone(), Limits::default());
             forms
-                .start(&mut w, *body, *thing, steps.clone(), Limits::default(), now)
+                .start(&mut w, *body, *thing, intent, s, Vec::new(), l, now)
                 .expect("started");
         }
         self.runs = runs;
