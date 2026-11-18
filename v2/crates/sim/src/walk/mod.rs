@@ -21,6 +21,13 @@
 //! - **One trait.** Everything the skill reads of the world or asks of it (the route's legs, the next corner, a step
 //!   of the mover, a tick of crossing a link, the marks read and the leave to enter) goes through [`World`], so K13
 //!   can re-link it. [`town::Town`] is the trait over N5's map, N6's mover and N4's links, doors and turns.
+//! - **Changed ground** (G3, #2760). A walk records the ground its legs were planned on, each node with its version
+//!   ([`World::planned`]). At the start of each tick, a body whose node's ground changed is found again on it
+//!   ([`World::relocate`]), or marked off the ground ([`Walker::off_ground`]): this skill then never moves it, and the
+//!   ladder's last rung walks it out by name (N10). A walk planned on a node whose version moved is planned again from
+//!   where the body stands: those on a changed node at once, the rest by how soon their route reaches the change,
+//!   spread over [`REPLAN_WITHIN`]. A walk with no plan now ends by the plan's refusal (`destination-gone`, …); the
+//!   engine chooses no other goal.
 //! - **Integers.** Positions in µm, velocities in µm a second, time in µs; square roots by `isqrt`. Nothing is hashed
 //!   or decided by a float.
 //!
@@ -54,6 +61,8 @@ pub const MARK: i64 = 3_000_000;
 pub const QUEUE: i64 = 1_200_000;
 /// A walker without leave stands behind a waiting walker for the same link this near and nearer the end, µm.
 pub const BEHIND: i64 = 700_000;
+/// The walks planned on changed ground are all planned again within this, µs (G3's bar is 2 s).
+pub const REPLAN_WITHIN: Micros = 1_000_000;
 
 /// May a walker enter a link now?
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,6 +130,19 @@ pub trait World {
     fn pass(&self, _link: Id, _who: Id) -> Pass {
         Pass::Free
     }
+    /// The version of node `node`'s ground now (G3, `crate::ground::Versions`). A world whose ground never changes: 0.
+    fn version(&self, _node: Id) -> u64 {
+        0
+    }
+    /// The ground the last [`World::plan`] crossed, in order: each node with its ground's version then.
+    fn planned(&mut self) -> Vec<(Id, u64)> {
+        Vec::new()
+    }
+    /// `body` found again on its node's ground as it is now (its piece and triangle), where it stands; refused when it
+    /// stands on none (`off-ground`).
+    fn relocate(&self, _body: &mut Body) -> Result<(), Refusal> {
+        Ok(())
+    }
 }
 
 /// The node a body stands on.
@@ -152,6 +174,15 @@ pub struct Walker {
     pub shoulder: bool,
     /// The ladder holds it, so this skill never moves it: its order ended by this name, or `walk-out` (N10).
     pub held: Option<&'static str>,
+    /// Where its walk ends: the node and the point there (µm), for planning again.
+    pub goal: (Id, Vec3),
+    /// The ground its legs were planned on: each node with its version then (G3).
+    pub ground: Vec<(Id, u64)>,
+    /// The node it stands on and that node's ground version, as of its last step.
+    pub stood: (Id, u64),
+    /// Its node's ground changed under it and it stands on none now: this skill never moves it (the ladder's last
+    /// rung walks it out, N10; G2 refuses such an edit).
+    pub off_ground: bool,
 }
 
 /// What a neighbour is, as of the previous tick.
@@ -293,6 +324,11 @@ pub struct Crowd {
     pub walked: u64,
     /// Of those, the ones with another centre closer than [`CLOSE`] on the same node.
     pub close: u64,
+    /// Each walk planned again on changed ground: who, when (µs of world time), and the name it ended by when no
+    /// plan was found.
+    pub replans: Vec<(Id, Micros, Option<&'static str>)>,
+    /// Plans a tick for the stale walks of the ground change under way (0: none under way).
+    spread: usize,
 }
 
 impl Crowd {
@@ -303,6 +339,8 @@ impl Crowd {
             now: 0,
             walked: 0,
             close: 0,
+            replans: Vec::new(),
+            spread: 0,
         }
     }
 
@@ -317,7 +355,12 @@ impl Crowd {
         goal: Vec3,
     ) -> Result<(), Refusal> {
         let legs = world.plan(&body, node, goal)?;
+        let here = node_of(&body);
         let w = Walker {
+            goal: (node, goal),
+            ground: world.planned(),
+            stood: (here, world.version(here)),
+            off_ground: false,
             body,
             speed,
             order,
@@ -342,8 +385,81 @@ impl Crowd {
             .all(|w| w.arrived.is_some() || w.held.is_some())
     }
 
+    /// Changed ground (G3), at the start of a tick: each body whose node's ground changed is found again on it, or
+    /// marked off the ground; then the walks planned on changed ground are planned again from where they stand,
+    /// those on a changed node at once, the rest nearest the change first (by how soon the route reaches it), spread
+    /// over [`REPLAN_WITHIN`]. A walk with no plan now ends by the plan's refusal (`destination-gone`, `no-route`, …).
+    /// A walker crossing a link finishes the crossing first.
+    fn ground_changed(&mut self, world: &mut impl World) {
+        for w in self.walkers.iter_mut() {
+            if w.crossing || w.held.is_some() {
+                continue;
+            }
+            let n = node_of(&w.body);
+            let v = world.version(n);
+            if w.stood.0 == n && w.stood.1 == v && !w.off_ground {
+                continue;
+            }
+            if w.stood.0 == n {
+                let mut b = w.body;
+                if world.relocate(&mut b).is_err() {
+                    w.off_ground = true;
+                    w.body.linear = Vec3::ZERO;
+                    continue;
+                }
+                w.body = b;
+            }
+            w.off_ground = false;
+            w.stood = (n, v);
+        }
+        let mut stale: Vec<(usize, Id, usize)> = Vec::new();
+        for (k, w) in self.walkers.iter().enumerate() {
+            if w.arrived.is_some() || w.held.is_some() || w.crossing || w.staying || w.off_ground {
+                continue;
+            }
+            if let Some(rank) = w.ground.iter().position(|&(n, v)| world.version(n) != v) {
+                stale.push((rank, w.body.id, k));
+            }
+        }
+        if stale.is_empty() {
+            self.spread = 0;
+            return;
+        }
+        if self.spread == 0 {
+            let ticks = (REPLAN_WITHIN / self.tick.max(1)).max(1) as usize;
+            self.spread = stale.len().div_ceil(ticks);
+        }
+        stale.sort();
+        let mut budget = self.spread;
+        for (rank, _, k) in stale {
+            if rank > 0 {
+                if budget == 0 {
+                    break;
+                }
+                budget -= 1;
+            }
+            let w = &mut self.walkers[k];
+            match world.plan(&w.body, w.goal.0, w.goal.1) {
+                Ok(legs) => {
+                    w.legs = legs;
+                    w.leg = 0;
+                    w.waiting = None;
+                    w.ground = world.planned();
+                    self.replans.push((w.body.id, self.now, None));
+                }
+                Err(e) => {
+                    w.held = Some(e.name);
+                    w.waiting = None;
+                    w.body.linear = Vec3::ZERO;
+                    self.replans.push((w.body.id, self.now, Some(e.name)));
+                }
+            }
+        }
+    }
+
     /// One tick for every walker, in id order, against its neighbours as they stood at the end of the last tick.
     pub fn step(&mut self, world: &mut impl World) -> Result<(), Refusal> {
+        self.ground_changed(world);
         let grid = Grid::of(&self.walkers);
         let (dt, at) = (self.tick, self.now + self.tick);
         // The marks as of the last tick, read by the owners of the links taken in turns.
@@ -361,7 +477,7 @@ impl Crowd {
             .collect();
         world.turns(&marks, at)?;
         for w in self.walkers.iter_mut() {
-            if w.arrived.is_some() || w.staying || w.held.is_some() {
+            if w.arrived.is_some() || w.staying || w.held.is_some() || w.off_ground {
                 continue;
             }
             if w.crossing {

@@ -12,6 +12,12 @@
 //!   at the line's end. The line is followed in the frame of the node the body stands on: a body coming in from the
 //!   open ground follows it placed on the ground by the building's frame, and stands at the far end on the floor; a
 //!   body going out follows it in the building's frame and stands at the far end on the open ground.
+//! - **Changed ground** (G3, #2760). [`Town::rebuild`] runs off the clock thread on a copy of the tree: it applies a
+//!   part as it will commit, finds the nodes whose ground it changes (`crate::ground::touched`), bumps their versions
+//!   and builds the ground, the links and the route map from the tree as the part leaves it. [`Town::install`] runs
+//!   on the tick the part commits: it commits the part through the zone's one write and swaps the ground in, in the
+//!   same call, so no tick sees new geometry over old ground. Routes carry the versions they were planned on
+//!   ([`World::planned`]); the walk skill plans again on a mismatch.
 //! - **Turns** (N8). A link under 1.2 m wide is taken in turns (`crate::links::turns`): at the start of each tick
 //!   the marks of the last are read into each such link's facts (who waits at which end and how far from it, who is
 //!   inside and how far along, whether each end has room to step out into), and its owning node writes who may
@@ -19,19 +25,19 @@
 
 use super::{Leg, Mark, Pass, World, node_of};
 use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, Scene};
+use crate::ground::{HUMAN_RADIUS, OpenGround, Scene, Versions, touched};
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map};
-use replica::effects::{Actor, Cause, Refusal};
-use replica::encode::Value;
+use replica::effects::{Actor, Cause, Header, Part, Refusal};
+use replica::encode::{Value, encode};
 use replica::ids::Id;
 use replica::pose::{ControllerInput, Frame, Mode, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
@@ -65,15 +71,94 @@ pub struct Town {
     pub doors: Doors,
     /// The turn states of the narrow links, written by their owners; `None` walks every link free.
     pub turns: Option<Turns>,
+    /// Each node's ground version (G3).
+    pub versions: Versions,
     crossings: BTreeMap<Id, Crossing>,
+    /// The ground the last plan crossed, each node with its version.
+    planned: Vec<(Id, u64)>,
 }
+
+/// The ground as a part will leave it, built off the clock thread ([`Town::rebuild`]) and installed on the tick the
+/// part commits ([`Town::install`]).
+pub struct Rebuilt {
+    /// The nodes whose ground the part changes.
+    pub touched: BTreeSet<Id>,
+    pub versions: Versions,
+    map: Map,
+    surfaces: BTreeMap<Id, Surface>,
+    buildings: Vec<Building>,
+}
+
+type Ground = (Map, BTreeMap<Id, Surface>, Vec<Building>);
 
 impl Town {
     /// Everything on the open ground `ground`; openings are written by `doors`.
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
-        let map = Map::build(&tree, ground, &|_| 0)?;
+        let versions = Versions::default();
+        let (map, surfaces, buildings) = Town::assemble(&tree, ground, &versions)?;
+        Ok(Town {
+            tree,
+            ground,
+            map,
+            surfaces,
+            buildings,
+            doors,
+            turns: Some(Turns::new()),
+            versions,
+            crossings: BTreeMap::new(),
+            planned: Vec::new(),
+        })
+    }
+
+    /// Off the clock thread: the ground as `part` leaves the tree `base` (a copy of this town's, as it stands when
+    /// the part is checked; `header` is the zone's), with the versions of the nodes it touches bumped from `versions`.
+    pub fn rebuild(
+        mut base: Tree,
+        header: &Header,
+        ground: Id,
+        versions: &Versions,
+        part: &Part,
+    ) -> Result<Rebuilt, String> {
+        let before = base.frozen();
+        base.apply(header, part)
+            .map_err(|e| format!("{}: {}", e.name, e.detail))?;
+        let touched = touched(&before, &base, part);
+        let mut versions = versions.clone();
+        versions.bump(&touched);
+        let (map, surfaces, buildings) = Town::assemble(&base, ground, &versions)?;
+        Ok(Rebuilt {
+            touched,
+            versions,
+            map,
+            surfaces,
+            buildings,
+        })
+    }
+
+    /// On the tick `part` commits: commits it through the zone's one write, its effects numbered from the zone's next
+    /// sequence (doors may have opened since it was checked), and installs the ground `r` built for it, in the same
+    /// call. A refused part installs nothing.
+    pub fn install(&mut self, r: Rebuilt, part: &Part) -> Result<(), Refusal> {
+        let mut p = part.clone();
+        for (k, e) in p.effects.iter_mut().enumerate() {
+            e.envelope.sequence = self.doors.next + k as u64;
+        }
+        let bytes = encode(&p.to_value()).map_err(|e| refusal("encoding", e.to_string()))?;
+        self.tree
+            .commit(&self.doors.header, &Part::read(&bytes)?, &self.doors.rules)?;
+        self.doors.next += part.effects.len() as u64;
+        self.map = r.map;
+        self.surfaces = r.surfaces;
+        self.buildings = r.buildings;
+        self.versions = r.versions;
+        Ok(())
+    }
+
+    /// The route map, each node's surface and the buildings, read from `tree` at `versions`.
+    fn assemble(tree: &Tree, ground: Id, versions: &Versions) -> Result<Ground, String> {
+        let map = Map::build(tree, ground, &|n| versions.of(n))?;
         let mut surfaces = BTreeMap::new();
-        let open = OpenGround::prepare(&Scene::of(&tree, ground)?, HUMAN_RADIUS)?;
+        let open = OpenGround::prepare(&Scene::of(tree, ground)?, HUMAN_RADIUS)?;
         let (mut pieces, mut meets) = (Vec::new(), Vec::new());
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
@@ -81,7 +166,7 @@ impl Town {
             meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
         }
         let gh = tree.handle(ground).ok_or("no such ground")?;
-        let gdoors = ground_doors(&tree, ground)?;
+        let gdoors = ground_doors(tree, ground)?;
         surfaces.insert(ground, Surface::new(ground, pieces));
         let mut buildings = Vec::new();
         let mut stack = vec![gh];
@@ -95,12 +180,12 @@ impl Town {
                 let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
                 let open = Open {
                     ground,
-                    place: crate::ground::scene::xform_to(&tree, h, gh)?,
+                    place: crate::ground::scene::xform_to(tree, h, gh)?,
                     meets: &meets,
                     on: &on,
                     doors: &gdoors,
                 };
-                if let Ok(b) = Building::read_on(&tree, id, Some(open)) {
+                if let Ok(b) = Building::read_on(tree, id, Some(open)) {
                     for (&floor, (_, patch)) in &b.floors {
                         surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
                     }
@@ -122,17 +207,8 @@ impl Town {
             on: &on,
             doors: &gdoors,
         };
-        buildings.push(Building::of_ground(&tree, open, &known)?);
-        Ok(Town {
-            tree,
-            ground,
-            map,
-            surfaces,
-            buildings,
-            doors,
-            turns: Some(Turns::new()),
-            crossings: BTreeMap::new(),
-        })
+        buildings.push(Building::of_ground(tree, open, &known)?);
+        Ok((map, surfaces, buildings))
     }
 
     fn surface(&self, node: Id) -> Result<&Surface, Refusal> {
@@ -230,6 +306,26 @@ impl World for Town {
         Ok(())
     }
 
+    fn version(&self, node: Id) -> u64 {
+        self.versions.of(node)
+    }
+
+    fn planned(&mut self) -> Vec<(Id, u64)> {
+        std::mem::take(&mut self.planned)
+    }
+
+    fn relocate(&self, body: &mut Body) -> Result<(), Refusal> {
+        let linear = body.linear;
+        *body = self.surface(node_of(body))?.place(
+            body.id,
+            body.pose.frame,
+            body.pose.position,
+            body.pose.orientation,
+        )?;
+        body.linear = linear;
+        Ok(())
+    }
+
     fn pass(&self, link: Id, who: Id) -> Pass {
         let (Some(turns), Some(l)) = (self.turns.as_ref(), self.link(link)) else {
             return Pass::Free;
@@ -252,8 +348,14 @@ impl World for Town {
         let to = self
             .map
             .spot(node, goal)
-            .ok_or_else(|| refusal("off-ground", show(node)))?;
+            .ok_or_else(|| refusal("destination-gone", show(node)))?;
         let route = self.map.route(&self.tree, from, to, HANDS)?;
+        self.planned.clear();
+        for p in route.patches() {
+            if self.planned.last().map(|l| l.0) != Some(p.node) {
+                self.planned.push((p.node, p.version));
+            }
+        }
         let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
         for h in &route.hops {
             let Hop::Link { id, .. } = h else { continue };

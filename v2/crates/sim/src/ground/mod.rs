@@ -34,6 +34,14 @@
 //! - **Where it lives.** Here in `sim`, native only. An agent's client never loads the ground: where a described spot
 //!   is a point, the server binds the legal standing spot (E2, #2709).
 //!
+//! - **Versions** (G3, #2760). Each node's ground has a version ([`Versions`]), bumped when a committed part changes
+//!   what its scene is read from ([`touched`]): a node's shape fields, its place, its parent, it coming or going, a
+//!   link at it. A change inside a building touches every floor of it; one not under a floor of a building (the
+//!   building itself, a floor's surfaces, a wall on the open ground) touches the open ground too. The would-be ground
+//!   of the touched nodes is cut off the clock thread from the tree as the part leaves it, and installed on the tick
+//!   the part commits (`crate::walk::town::Town::install`): no tick sees new geometry over old ground. A route
+//!   records the versions it was planned on, and the walk skill plans again on a mismatch (`crate::walk`).
+//!
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
 
@@ -46,12 +54,14 @@ use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::i_float::int::point::IntPoint;
 use i_overlay::i_shape::int::shape::{IntShape, IntShapes};
 use i_triangle::int::triangulatable::IntTriangulatable;
+use replica::effects::{Body, Change, Part};
 use replica::ids::Id;
 use replica::pose::{Quat, Vec3};
 use replica::tree::Tree;
+use replica::world_model::plain;
 pub use scene::{Doorway, Scene, Solid, Surface, Water};
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// The clearance kept beyond the body's radius, mm.
 pub const MARGIN: i64 = 60;
@@ -762,6 +772,101 @@ impl OpenGround {
             meets: meets_out,
         }
     }
+}
+
+/// Each node's ground version (G3, #2760): 0 until a committed part first touches it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Versions(BTreeMap<Id, u64>);
+
+impl Versions {
+    pub fn of(&self, node: Id) -> u64 {
+        self.0.get(&node).copied().unwrap_or(0)
+    }
+
+    /// One more for each node of `nodes`.
+    pub fn bump<'a>(&mut self, nodes: impl IntoIterator<Item = &'a Id>) {
+        for n in nodes {
+            *self.0.entry(*n).or_default() += 1;
+        }
+    }
+}
+
+/// The fields a scene is read from: a change to any other (a door's open field, a name) leaves the ground as it was.
+const SHAPE: [u64; 9] = [
+    scene::F_OPEN_DOOR_LINK,
+    scene::F_OUTLINE,
+    scene::F_SOLIDS,
+    scene::F_SURFACES,
+    scene::F_LINE,
+    scene::F_LINE_WIDTH,
+    scene::F_WATER_LEVEL,
+    scene::F_PLACE_OF,
+    scene::F_DOORWAYS,
+];
+
+/// The nodes whose ground a change at node `id` of `tree` changes (see the module's notes), added to `out`.
+fn grounds_of(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
+    let kind = |h| tree.node(h).map(|n| plain(n.kind().as_str()).to_owned());
+    let mut up = tree.handle(id);
+    let mut under_floor = false;
+    while let Some(h) = up {
+        let k = kind(h).unwrap_or_default();
+        if k == scene::GROUND {
+            out.insert(tree.node(h).map_or(id, |n| n.id()));
+            return;
+        }
+        let kids = tree.children(h).unwrap_or(&[]);
+        let floors: Vec<Id> = kids
+            .iter()
+            .filter(|&&c| kind(c).as_deref() == Some(scene::FLOOR))
+            .filter_map(|&c| tree.node(c).map(|n| n.id()))
+            .collect();
+        if !floors.is_empty() {
+            out.extend(floors);
+            if under_floor {
+                return;
+            }
+        }
+        if k == scene::FLOOR && tree.node(h).is_some_and(|n| n.id() != id) {
+            under_floor = true;
+        }
+        up = tree
+            .node(h)
+            .and_then(|n| n.parent())
+            .and_then(|p| tree.handle(p));
+    }
+}
+
+/// The nodes whose ground the committed part `part` changes: read in `before` (the tree it was applied to) for what
+/// it moves or removes, and in `after` for what it places or moves. Motion samples change no ground.
+pub fn touched(before: &Tree, after: &Tree, part: &Part) -> BTreeSet<Id> {
+    let mut ids = Vec::new();
+    for e in &part.effects {
+        let Body::Changes(changes) = &e.body else {
+            continue;
+        };
+        for c in changes {
+            match &c.change {
+                Change::Create { node, .. }
+                | Change::Remove { node }
+                | Change::Reparent { node, .. } => ids.push(*node),
+                Change::Set { node, field, .. } if SHAPE.contains(field) => ids.push(*node),
+                Change::Link { ends, .. } => ids.extend(ends),
+                Change::Unlink { link } => {
+                    if let Some((_, ends, ..)) = before.link(*link) {
+                        ids.extend(ends);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = BTreeSet::new();
+    for id in ids {
+        grounds_of(before, id, &mut out);
+        grounds_of(after, id, &mut out);
+    }
+    out
 }
 
 /// Patches kept per node, node version and radius (G3, #2760, rebuilds one on an edit by asking with the new version).
