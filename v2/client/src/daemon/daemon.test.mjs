@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -250,6 +250,62 @@ test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says
   assert.equal(st.firstSend.unanswered, 1);
   assert.equal(st.harness.startsWith('not opted in'), true);
   if (process.env.R10_REPORT) console.log(JSON.stringify({ firstSaidMs: Math.round(firstSaid), answers: seen, stats: { ...st, last: st.last.slice(-2) } }));
+});
+
+test('R8 A3, A4: checked on the copy and at send time; only a current copy refuses; unknown never blocks; basis is what was shown', async () => {
+  const ask = async (req) => { const a = await request(rt.socket, req, 10_000); outputs.push(JSON.stringify(a)); return a; };
+  // A kind entry for the stand-in's things: field 1 named, and a form that needs it unset.
+  mkdirSync(join(home, 'kinds'), { recursive: true });
+  writeFileSync(join(home, 'kinds', 'stand-in.json'), JSON.stringify({ format: 'souls-entry/1', kind: 'souls:cup', owner: 'thing',
+    state: { mark: { n: 1, type: 'int', default: 0, audience: { rule: 'everyone' } } },
+    forms: { fresh: { who: 'anyone', starts: 'act', needs: [{ need: 'state', field: 'mark', is: 0 }], effects: [] } } }));
+  await waitFor(async () => (await status()).connected);
+  const { found } = await ask({ op: 'find', words: 'cup', limit: 50 });
+  const verdicts = [];
+  for (const f of found) verdicts.push({ id: f.id, ...(await ask({ op: 'can', intent: { verb: 'eden:wave', this: f.id, form: 'fresh' } })) });
+  const marked = verdicts.find((v) => v.can === 'no'), unmarked = verdicts.find((v) => v.can === 'yes');
+  assert.ok(marked && unmarked, JSON.stringify(verdicts.slice(0, 3)));
+  assert.equal(marked.reason, 'field_differs');
+  assert.equal(marked.current, true);
+  assert.equal(typeof marked.age, 'number');
+  const cand = (v) => ({ verb: 'eden:wave', this: v.id, form: 'fresh' });
+  // A current `no`: stopped locally, with what changed, and nothing sent.
+  const before = (await status()).sent;
+  const stop = await ask({ op: 'act', verbs: [cand(marked)] });
+  assert.equal(stop.code, 'stopped-locally', JSON.stringify(stop));
+  assert.equal(stop.dropped[0].reason, 'field_differs');
+  assert.ok('changed' in stop);
+  assert.equal((await status()).sent, before);
+  // A ranked list: the dead candidate leaves, the live one goes.
+  const two = await ask({ op: 'act', verbs: [cand(marked), cand(unmarked)] });
+  assert.equal(two.ok, true, JSON.stringify(two));
+  assert.equal(two.checked, true);
+  assert.equal(two.dropped.length, 1);
+  // Unknown never blocks: a bare verb, a thing not in the copy, a kind with no entry held (the room).
+  const room = (await ask({ op: 'find', words: 'room' })).found[0];
+  const unknowns = [['eden:wave'], [{ verb: 'eden:wave', this: 'nowhere-1', form: 'fresh' }], ...(room ? [[{ verb: 'eden:wave', this: room.id, form: 'fresh' }]] : [])];
+  for (const verbs of unknowns) {
+    const a = await ask({ op: 'act', verbs });
+    assert.equal(a.ok, true, JSON.stringify(a));
+  }
+  // Not current (the gateway cut, every connection refused): the same dead candidate is sent; the world decides.
+  relay.refuse = true; relay.cut();
+  await waitFor(async () => !(await status()).connected);
+  const blind = await ask({ op: 'act', verbs: [cand(marked)] });
+  assert.equal(blind.ok, true, JSON.stringify(blind));
+  assert.equal(blind.checked, false);
+  assert.ok(blind.gap && blind.stale);
+  relay.refuse = false;
+  await waitFor(async () => { const s = await status(); return s.connected && s.queued === 0; }, 15_000);
+  // A4: the basis is the version the model was last shown, not the one the send-time check brought the copy to.
+  const shown = await ask({ op: 'look' });
+  const { answered } = await status();
+  await ask({ op: 'act', verb: 'eden:wave' }); // the world moves on
+  await waitFor(async () => (await status()).answered > answered);
+  const later = await ask({ op: 'act', verbs: [cand(unmarked)] });
+  assert.equal(later.basis, shown.at + 0, JSON.stringify(later));
+  assert.ok(later.at > shown.at, `${later.at} after ${shown.at}`);
+  if (process.env.R8_REPORT) console.log(JSON.stringify({ can: marked, stop, two, blind: { ok: blind.ok, checked: blind.checked, gap: blind.gap }, basis: later.basis, at: later.at }));
 });
 
 test('A4: the token is in no output, argument, environment variable or file but credentials.json', async () => {

@@ -103,6 +103,8 @@ step client-daemon bash -c 'cargo build -p gatewayd -p worldd --locked --quiet &
 step client-command node --test client/src/brief/ client/src/find/ client/src/cli/
 # The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
 step client-stats node --test client/src/stats/
+# The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
+step client-check node --test client/src/check/
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&

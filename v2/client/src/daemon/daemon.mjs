@@ -21,6 +21,12 @@
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
+//   and R8's (#2703), checking with R2's form rules on the copy (`../check/`), kind entries from `<home>/kinds/`:
+//     {"op":"can","intent":{"verb":"..","this":"<id>","form":".."}}   yes, no with the reason, or unknown, and `current`
+//     {"op":"act","verbs":[{"verb":"..","this":"<id>","form":".."}, "..."]}   each candidate with a form is checked
+//       again at send time on a copy brought current; a current `no` drops it; none left is `stopped-locally`, with
+//       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
+//       intent's basis is the version the model was last shown, not the send-time version.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it). Every frame is built and read by replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
@@ -43,6 +49,8 @@ import { find } from '../find/find.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
 import { ageOf } from './age.mjs';
+import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
+import { kindsIn, stateOf } from '../check/state.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 const EVENTS_KEPT = 1000;
@@ -118,6 +126,8 @@ const note = (e) => {
   if (e.kind !== 'synced') for (const w of wakers.splice(0)) w();
 };
 let copyVersion = null, shown = new Map(); // the copy's version, and the rows the last answer saw
+let shownVersion = null; // the version the last answer showed the model: an intent's basis (R8)
+let stopped = 0; // acts stopped locally, for the trace
 // R10: on the steady clock, when the copy was last confirmed current, when its version last changed, and since when
 // (and why) it has not been known current; null while it is.
 const startedAt = performance.now();
@@ -256,16 +266,28 @@ function refresh() {
  * Ends an answer with the copy's version and what changed since the answer before, the copy brought current first
  * unless `now` (an act answers at once, from the copy as it is).
  */
-async function closing(out, f, { now = false } = {}) {
+async function closing(out, f, { now = false, age = null } = {}) {
+  age ??= await ageAfter({ now });
+  const rows = rowsOf(copy), changes = changedBetween(shown, rows);
+  shown = rows;
+  shownVersion = copyVersion;
+  return { ...out, ...(f ? f(rows, changes) : {}), at: sequenceOf(copyVersion), ...age, changed: changedBlock(changes) };
+}
+
+/** The copy brought current unless `now`, and its age fields (R10). */
+async function ageAfter({ now = false } = {}) {
   // A gateway that does not answer leaves the copy as it is, and the answer says it is stale, since when and why.
   const asking = performance.now();
   const current = now ? signedIn && !syncing : await Promise.race([refresh(), new Promise((ok) => setTimeout(ok, REFRESH_WITHIN, false))]);
   if (!now && !current && cutAt === null) { cutAt = asking; cutWhy = signedIn ? 'no-answer' : 'not-connected'; }
-  let age = ageOf({ now: performance.now(), startedAt, confirmedAt, changedAt, cutAt, why: cutWhy, asked: !now });
-  if (!current && !age.gap) age = { ...age, stale: true, gap: { ms: 0, why: signedIn ? 'syncing' : 'not-connected' } };
-  const rows = rowsOf(copy), changes = changedBetween(shown, rows);
-  shown = rows;
-  return { ...out, ...(f ? f(rows, changes) : {}), at: sequenceOf(copyVersion), ...age, changed: changedBlock(changes) };
+  const age = ageOf({ now: performance.now(), startedAt, confirmedAt, changedAt, cutAt, why: cutWhy, asked: !now });
+  return !current && !age.gap ? { ...age, stale: true, gap: { ms: 0, why: signedIn ? 'syncing' : 'not-connected' } } : age;
+}
+
+/** R2's verdict on each candidate, on the copy as it is now (R8). */
+function verdicts(candidates) {
+  const kinds = kindsIn(join(home, 'kinds')), state = stateOf(copy, kinds, ME);
+  return candidates.map((c) => judge(wire.rules_decide, c, { kinds, state, asker: { sees: [] } }));
 }
 
 /** The age fields of an answer that does not ask the gateway first (status, read, stats, stop, a refusal). */
@@ -274,7 +296,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'act', 'read', 'stats', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'read', 'stats', 'stop']);
 
 async function answer(req) {
   switch (req.op) {
@@ -301,18 +323,38 @@ async function answer(req) {
       const got = events.splice(0);
       return closing({ ok: true, events: got, ...(got.some((e) => e.kind !== 'synced') ? {} : { timedOut: true }) });
     }
+    case 'can': {
+      const c = candidateOf(req.intent);
+      const age = await ageAfter();
+      const [v] = verdicts([c]);
+      return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
+    }
     case 'act': {
-      const ranked = (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(String);
-      if (ranked.length === 0 || ranked.length > ACT_MOST || ranked.some((v) => !v || /\s/.test(v))) {
+      const candidates = (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf);
+      if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
         return { ok: false, code: 'act-ranked-list', detail: `one to ${ACT_MOST} verbs, best first` };
       }
+      // The basis is what the model was shown (R8), taken before this act's own check brings the copy current.
+      const basis = shownVersion ?? state.cursor;
+      let age = null, keep = candidates, dropped = [];
+      if (candidates.some((c) => c.form)) {
+        age = await ageAfter();
+        const current = isCurrent(age, CURRENT_MS);
+        ({ keep, dropped } = sift(candidates, current ? verdicts(candidates) : [], current));
+      }
+      if (keep.length === 0) {
+        trace.write({ k: 'send', seq: `local-${++stopped}`, ranked: candidates.length, cause: 'stopped-locally' });
+        return closing({ ok: false, code: 'stopped-locally', sent: false, dropped, basis: sequenceOf(basis) }, null, { age });
+      }
+      const ranked = keep.map((c) => c.verb);
       state.sequence++;
       const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
-        state.cursor ? unhex(state.cursor) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER));
+        basis ? unhex(basis) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER));
       save();
       const sequence = state.sequence, sent = signedIn;
       if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
-      return closing({ ok: true, sequence, sent }, null, { now: true });
+      const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
+      return closing(out, null, age ? { age } : { now: true });
     }
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
