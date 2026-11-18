@@ -60,7 +60,7 @@ export class WorldRenderedVisibility {
   score(pose:CameraPose,ids:readonly string[],subjects:Record<string,SubjectPose>){
     if(!ids.length)return 1;return this.instances.withQuery(this.objects,()=>{this.eye.fromArray(pose.position);let clear=0,total=0;
     for(const id of ids){const subject=subjects[id];if(!subject)return 0;const points=subject.points??[[subject.p[0],subject.p[1]+(subject.height??1.75)*.6,subject.p[2]],[subject.p[0],subject.p[1]+(subject.height??1.75)*.95,subject.p[2]]];
-      for(const p of points){this.point.fromArray(p);this.direction.copy(this.eye).sub(this.point);const distance=this.direction.length();if(!Number.isFinite(distance)||distance<=.08)return 0;this.direction.multiplyScalar(1/distance);this.work++;this.ray.set(this.point,this.direction);this.ray.near=.06;this.ray.far=distance-.08;this.hits.length=0;let blocked=false;for(let o=0;o<this.objects.length;o++){const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++)if(this.opaque(this.hits[h])){blocked=true;break;}if(blocked)break;}total++;if(!blocked)clear++;}
+      for(const p of points){this.point.fromArray(p);this.direction.copy(this.eye).sub(this.point);const distance=this.direction.length();if(!Number.isFinite(distance)||distance<=.08)return 0;this.direction.multiplyScalar(1/distance);this.work++;this.ray.set(this.point,this.direction);this.ray.near=.06;this.ray.far=distance-.08;this.hits.length=0;let blocked=false;const along=this.instances.along(this.ray,this.along);for(let k=0;k<along.length;k++){const o=along[k];const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++)if(this.opaque(this.hits[h])){blocked=true;break;}if(blocked)break;}total++;if(!blocked)clear++;}
     }
     return total?clear/total:0;});
   }
@@ -105,7 +105,7 @@ export class WorldRenderedVisibility {
     const t=Math.tan(pose.fov*Math.PI/360);
     return this.instances.withQuery(this.objects,()=>{let hit=0;
       for(const [x,y] of FOREGROUND_GRID){this.work++;this.point.copy(forward).addScaledVector(right,x*t*aspect).addScaledVector(up,y*t).normalize();this.ray.set(eye,this.point);this.ray.near=.1;this.ray.far=.6*d;this.hits.length=0;
-        let wall=false;for(let o=0;o<this.objects.length&&!wall;o++){const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++){const q=this.hits[h];if(q.face&&this.opaque(q)&&Math.abs(this.worldNormal(q).y)<.7){wall=true;break;}}}
+        let wall=false;const along=this.instances.along(this.ray,this.along);for(let k=0;k<along.length&&!wall;k++){const o=along[k];const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++){const q=this.hits[h];if(q.face&&this.opaque(q)&&Math.abs(this.worldNormal(q).y)<.7){wall=true;break;}}}
         this.hits.length=0;if(wall)hit++;}
       return hit/FOREGROUND_GRID.length;});
   }
@@ -116,11 +116,13 @@ export class WorldRenderedVisibility {
     return n.transformDirection(hit.object.matrixWorld);
   }
   private nearby:number[]=[];
+  /** #2617: the objects a ray's segment can meet (WorldVisibilityInstances.along), reused per ray. */
+  private along:number[]=[];
   /** Any opaque hit on origin+direction*[near,far] among the listed objects. */
   private blocked(near:number,far:number,indices:readonly number[]|null){
     this.work++;this.ray.near=near;this.ray.far=far;this.hits.length=0;
-    const n=indices?indices.length:this.objects.length;
-    for(let k=0;k<n;k++){const o=indices?indices[k]:k;const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++)if(this.opaque(this.hits[h])){this.hits.length=0;return true;}}
+    const list=indices??this.instances.along(this.ray,this.along),n=list.length;
+    for(let k=0;k<n;k++){const o=list[k];const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++)if(this.opaque(this.hits[h])){this.hits.length=0;return true;}}
     this.hits.length=0;return false;
   }
   /** No opaque rendered surface, facing either way, within radius of p along
@@ -169,11 +171,11 @@ export class WorldRenderedVisibility {
     return this.instances.withQuery(this.objects,()=>{
       this.work+=REACH_WORK;this.direction.multiplyScalar(1/length);this.ray.set(this.point,this.direction);this.ray.near=.06;this.ray.far=length;this.hits.length=0;let nearest=Infinity;
       // Shrinking far lets later objects fail the bounds pre-test.
-      for(let o=0;o<this.objects.length;o++){const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++){const hit=this.hits[h];if(hit.distance<nearest&&this.opaque(hit)){nearest=hit.distance;this.ray.far=nearest;}}this.hits.length=0;}
+      const ahead=this.instances.along(this.ray,this.along);for(let k=0;k<ahead.length;k++){const o=ahead[k];const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++){const hit=this.hits[h];if(hit.distance<nearest&&this.opaque(hit)){nearest=hit.distance;this.ray.far=nearest;}}this.hits.length=0;}
       // Faces drawn toward b (single-sided shells) are met from b: the hit
       // nearest a on that reverse ray, limited to the part before `nearest`.
       const end=Math.min(nearest,length);this.eye.fromArray(b);this.direction.negate();this.ray.set(this.eye,this.direction);this.ray.near=Math.max(0,length-end);this.ray.far=length-.06;
-      if(this.ray.far>this.ray.near)for(let o=0;o<this.objects.length;o++){const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++){const hit=this.hits[h];if(this.opaque(hit)&&length-hit.distance<nearest){nearest=length-hit.distance;this.ray.near=hit.distance;}}this.hits.length=0;}
+      if(this.ray.far>this.ray.near){const back=this.instances.along(this.ray,this.along);for(let k=0;k<back.length;k++){const o=back[k];const from=this.hits.length;this.instances.intersect(this.objects[o],this.ray,this.hits,o);for(let h=from;h<this.hits.length;h++){const hit=this.hits[h];if(this.opaque(hit)&&length-hit.distance<nearest){nearest=length-hit.distance;this.ray.near=hit.distance;}}this.hits.length=0;}}
       return nearest;});
   }
 }

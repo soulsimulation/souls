@@ -1,0 +1,179 @@
+{
+  "format": "souls-activity-steps/1",
+  "about": "test:talk, a one-off talk: a speaker at the lectern (required), a chair beside it (replaceable), listeners in the bench seats near it (optional). Each Soul enters and leaves by its own act. The speaker leaving releases every member and removes the talk; the chair leaving re-opens its place; a listener leaving changes nothing; the last member leaving removes it. Its now line states when it ends: the first microsecond its countdown left_us reaches 0. A talk nobody entered is removed then by its own world form; one with a seated listener is not.",
+  "cases": [
+    {
+      "name": "the_speaker_leaves_every_member_is_released_and_the_talk_removed",
+      "activity": "t1",
+      "state": {
+        "nodes": {
+          "r1": { "loose": ["t1", "k1", "k2", "b1", "b2", "b3", "b4", "b5"] },
+          "t1": { "kind": "test:talk", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 3600000000, "per_s": -1000000, "set_us": 1000000 } } },
+          "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000] },
+          "k2": { "kind": "eden:bench", "at_mm": [1000, 0, 3000] },
+          "b1": { "hands": {} },
+          "b2": { "hands": {} },
+          "b3": { "hands": {} },
+          "b4": { "hands": {} },
+          "b5": { "hands": {} }
+        }
+      },
+      "steps": [
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": [], "stage": "proposed", "ends_us": 3601000000 }, "unseen": [] } },
+        { "do": "enter", "actor": "b1", "form": "take_the_lectern", "receipt": "e1", "expect": { "verdict": "yes", "role": "speaker", "place": { "node": "t1", "slot": "lectern" } } },
+        { "do": "enter", "actor": "b2", "form": "take_the_chair", "receipt": "e2", "expect": { "verdict": "yes", "role": "chair", "place": { "node": "t1", "slot": "chair" } } },
+        { "do": "enter", "actor": "b3", "form": "attend", "receipt": "e3", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k1", "slot": "left" } } },
+        { "do": "enter", "actor": "b4", "form": "attend", "receipt": "e4", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k1", "slot": "right" } } },
+        { "do": "enter", "actor": "b5", "form": "attend", "receipt": "e5", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k2", "slot": "left" } } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": ["b1"], "stage": "proposed", "ends_us": 3601000000 } } },
+        { "do": "leave", "actor": "b1", "form": "step_down", "receipt": "x1", "expect": { "verdict": "yes", "role": "speaker", "ended": 1 } }
+      ],
+      "after": {
+        "r1": { "loose": ["k1", "k2", "b1", "b2"] },
+        "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000], "slots": { "left": ["b3"], "right": ["b4"] } },
+        "k2": { "kind": "eden:bench", "at_mm": [1000, 0, 3000], "slots": { "left": ["b5"] } },
+        "b1": { "hands": {} },
+        "b2": { "hands": {} },
+        "b3": { "hands": {} },
+        "b4": { "hands": {} },
+        "b5": { "hands": {} }
+      },
+      "gone": ["t1"]
+    },
+    {
+      "name": "a_listener_leaves_and_the_talk_goes_on",
+      "activity": "t1",
+      "state": {
+        "nodes": {
+          "r1": { "loose": ["t1", "k1", "b1", "b3"] },
+          "t1": { "kind": "test:talk", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 3600000000, "per_s": -1000000, "set_us": 1000000 } } },
+          "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000] },
+          "b1": { "hands": {} },
+          "b3": { "hands": {} }
+        }
+      },
+      "steps": [
+        { "do": "enter", "actor": "b1", "form": "take_the_lectern", "receipt": "e1", "expect": { "verdict": "yes", "role": "speaker" } },
+        { "do": "enter", "actor": "b3", "form": "attend", "receipt": "e3", "expect": { "verdict": "yes", "role": "listener", "place": { "node": "k1", "slot": "left" } } },
+        { "do": "leave", "actor": "b3", "form": "leave", "receipt": "x3", "expect": { "verdict": "yes", "role": "listener", "ended": 0 } },
+        { "do": "leave", "actor": "b3", "form": "leave", "receipt": "x4", "expect": { "verdict": "no", "reason": "not_permitted", "detail": { "link": "listener", "ends": [] } } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": ["b1"], "stage": "proposed", "ends_us": 3601000000 } } }
+      ],
+      "after": {
+        "r1": { "loose": ["t1", "k1", "b3"] },
+        "t1": {
+          "kind": "test:talk",
+          "at_mm": [0, 0, 0],
+          "fields": { "left_us": { "value": 3600000000, "per_s": -1000000, "set_us": 1000000 } },
+          "links": { "speaker": ["b1"], "listener": [] },
+          "slots": { "lectern": ["b1"] }
+        },
+        "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000], "slots": { "left": [] } }
+      }
+    },
+    {
+      "name": "the_chair_leaves_its_place_reopens_and_another_takes_it",
+      "activity": "t1",
+      "state": {
+        "nodes": {
+          "r1": { "loose": ["t1", "b1", "b2", "b6"] },
+          "t1": { "kind": "test:talk", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 3600000000, "per_s": -1000000, "set_us": 1000000 } } },
+          "b1": { "hands": {} },
+          "b2": { "hands": {} },
+          "b6": { "hands": {} }
+        }
+      },
+      "steps": [
+        { "do": "enter", "actor": "b1", "form": "take_the_lectern", "receipt": "e1", "expect": { "verdict": "yes", "role": "speaker" } },
+        { "do": "enter", "actor": "b2", "form": "take_the_chair", "receipt": "e2", "expect": { "verdict": "yes", "role": "chair", "place": { "node": "t1", "slot": "chair" } } },
+        { "do": "enter", "actor": "b6", "form": "take_the_chair", "receipt": "e6", "expect": { "verdict": "no", "reason": "no_free_place", "role": "chair", "detail": { "places": 1 } } },
+        { "do": "leave", "actor": "b2", "form": "leave_the_chair", "receipt": "x2", "expect": { "verdict": "yes", "role": "chair", "ended": 0 } },
+        { "do": "enter", "actor": "b6", "form": "take_the_chair", "receipt": "e7", "expect": { "verdict": "yes", "role": "chair", "place": { "node": "t1", "slot": "chair" } } }
+      ],
+      "after": {
+        "r1": { "loose": ["t1", "b2"] },
+        "t1": {
+          "kind": "test:talk",
+          "at_mm": [0, 0, 0],
+          "fields": { "left_us": { "value": 3600000000, "per_s": -1000000, "set_us": 1000000 } },
+          "links": { "speaker": ["b1"], "chair": ["b6"] },
+          "slots": { "lectern": ["b1"], "chair": ["b6"] }
+        }
+      }
+    },
+    {
+      "name": "the_last_listener_leaves_and_the_empty_talk_is_removed",
+      "activity": "t1",
+      "state": {
+        "nodes": {
+          "r1": { "loose": ["t1", "k1", "b3"] },
+          "t1": { "kind": "test:talk", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 3600000000, "per_s": -1000000, "set_us": 1000000 } } },
+          "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000] },
+          "b3": { "hands": {} }
+        }
+      },
+      "steps": [
+        { "do": "enter", "actor": "b3", "form": "attend", "receipt": "e3", "expect": { "verdict": "yes", "role": "listener" } },
+        { "do": "leave", "actor": "b3", "form": "leave", "receipt": "x3", "expect": { "verdict": "yes", "role": "listener", "ended": 1 } }
+      ],
+      "after": {
+        "r1": { "loose": ["k1", "b3"] },
+        "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000], "slots": { "left": [] } },
+        "b3": { "hands": {} }
+      },
+      "gone": ["t1"]
+    },
+    {
+      "name": "nobody_entered_the_talk_is_removed_at_its_stated_time",
+      "activity": "t1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["t1", "k1"] },
+          "t1": { "kind": "test:talk", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 3600000000, "per_s": -1000000, "set_us": 1000000 } } },
+          "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000] }
+        }
+      },
+      "steps": [
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": [], "stage": "proposed", "ends_us": 3601000000 } } },
+        { "do": "world", "actor": "w", "form": "lapse", "now_us": 3600999999, "receipt": "w1", "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "left_us", "found": 1, "wanted": { "at_most": 0 } } } },
+        { "do": "world", "actor": "w", "form": "lapse", "now_us": 3601000000, "receipt": "w2", "expect": { "verdict": "yes" } }
+      ],
+      "after": {
+        "w": {},
+        "r1": { "loose": ["k1"] },
+        "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000] }
+      },
+      "gone": ["t1"]
+    },
+    {
+      "name": "a_seated_listener_is_never_removed_by_the_time_passing",
+      "activity": "t1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["t1", "k1", "b3"] },
+          "t1": { "kind": "test:talk", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 3600000000, "per_s": -1000000, "set_us": 1000000 } } },
+          "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000] },
+          "b3": { "hands": {} }
+        }
+      },
+      "steps": [
+        { "do": "enter", "actor": "b3", "form": "attend", "receipt": "e3", "expect": { "verdict": "yes", "role": "listener" } },
+        { "do": "world", "actor": "w", "form": "lapse", "now_us": 3601000000, "receipt": "w1", "expect": { "verdict": "no", "reason": "already_linked", "need": 3, "detail": { "link": "listener", "count": 1 } } },
+        { "do": "world", "actor": "w", "form": "lapse", "now_us": 86400000000, "receipt": "w2", "expect": { "verdict": "no", "reason": "already_linked", "need": 3 } },
+        { "do": "enter", "actor": "b3", "form": "lapse", "receipt": "e4", "expect": { "verdict": "no", "reason": "not_permitted", "who": "world" } }
+      ],
+      "after": {
+        "r1": { "loose": ["t1", "k1"] },
+        "t1": {
+          "kind": "test:talk",
+          "at_mm": [0, 0, 0],
+          "fields": { "left_us": { "value": 3600000000, "per_s": -1000000, "set_us": 1000000 } },
+          "links": { "listener": ["b3"] }
+        },
+        "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000], "slots": { "left": ["b3"] } }
+      }
+    }
+  ]
+}

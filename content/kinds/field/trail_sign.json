@@ -1,0 +1,43 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:trail_sign",
+  "owner": "thing",
+  "state": {
+    "words": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 700] },
+    "board": { "role": "contact", "at_mm": [0, 1300, 60] }
+  },
+  "geometry": { "bounds_mm": [1100, 1700, 300] },
+  "forms": {
+    "write": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "words": { "type": "text" } },
+      "needs": [
+        { "need": "hand", "free": true, "says": "a_hand_to_write" },
+        { "need": "within_reach", "point": "board" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "slide", "at": "board" }
+      ],
+      "effects": [{ "change": "set", "field": "words", "to": { "arg": "words" }, "event": "written" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:trail_sign",
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[-450,800,0],"size":[80,1600,80],"tint":"post"},{"kind":"box","at":[450,800,0],"size":[80,1600,80],"tint":"post"},{"kind":"box","at":[0,1300,0],"size":[1050,600,40],"tint":"board"},{"kind":"box","at":[0,1620,0],"size":[1100,40,120],"tint":"post"}],"palette":{"post":"#806045","board":"#c9a878"},"tags":["trail","sign","board","object"]}
+  },
+  "text": {
+    "card": "A wooden trail sign: write route guidance on it; anyone can read it.",
+    "field": "field",
+    "sign": "sign",
+    "write": "write",
+    "a_hand_to_write": "Free a hand to write on the sign."
+  },
+  "card": { "text": "card", "category": "field", "synonyms": ["sign", "write"] }
+}

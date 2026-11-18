@@ -1,0 +1,15 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:stove_kettle",
+  "owner": "thing",
+  "state": {
+    "heat": { "n": 1, "type": "timed", "unit": "mC", "default": { "value": 20000, "per_s": 0, "set_us": 0 }, "min": 20000, "max": 100000, "audience": {"rule": "everyone"} }
+  },
+  "geometry": { "bounds_mm": [310, 300, 240] },
+  "reactions": {
+    "heats_on_a_lit_stove": { "when": { "on": "support_changed", "field": "lit", "is": true }, "do": [{ "change": "rate", "field": "heat", "per_s": 800, "event": "heating" }] },
+    "cools_off_it": { "when": { "on": "support_changed", "field": "lit", "not": true }, "do": [{ "change": "rate", "field": "heat", "per_s": -200, "event": "cooling" }] }
+  },
+  "text": { "card": "A test kettle for reactions: it heats while it rests on a lit stove and cools when it does not." },
+  "card": { "text": "card" }
+}

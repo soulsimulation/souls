@@ -1,0 +1,407 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:water_filter (from #1828). Three cloudy portions (water, a count, 0 to 3), a cartridge good for two portions and one spare. With empty hands a Soul pumps one portion through into the nearest filter carafe: a transfer of water, so a filter with none left refuses with not_enough and a full carafe with no_room; each portion uses the cartridge, and a spent cartridge names replace_cartridge. The original's words: 'The installed cartridge is spent; replace it using a supplied spare.', 'Empty your hands and put the selected carafe on a fixed work surface beside the filter.', 'No supplied cloudy water remains; draining does not replenish it.', 'Empty this full carafe before filtering another portion.', 'Use the installed cartridge until spent before replacing it.', 'No spare cartridge remains; replacement cannot restore free capacity.'",
+ "cases": [
+  {
+   "name": "filter_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "filter",
+    "args": {
+     "carafe": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:water_filter"
+     },
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "filter_cartridge_spent_names_replace",
+   "act": {
+    "this": "f1",
+    "form": "filter",
+    "args": {
+     "carafe": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:water_filter",
+      "fields": {
+       "cartridge": 0
+      }
+     },
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cartridge",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": {
+     "form": "replace_cartridge"
+    },
+    "says": "cartridge_spent"
+   }
+  },
+  {
+   "name": "filter_holding_something",
+   "act": {
+    "this": "f1",
+    "form": "filter",
+    "args": {
+     "carafe": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:water_filter"
+     },
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "hands_and_table"
+   }
+  },
+  {
+   "name": "filter_no_cloudy_water",
+   "act": {
+    "this": "f1",
+    "form": "filter",
+    "args": {
+     "carafe": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:water_filter",
+      "fields": {
+       "water": 0
+      }
+     },
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 2,
+    "detail": {
+     "node": "f1",
+     "field": "water",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "no_cloudy_water"
+   }
+  },
+  {
+   "name": "filter_carafe_full",
+   "act": {
+    "this": "f1",
+    "form": "filter",
+    "args": {
+     "carafe": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:water_filter"
+     },
+     "c1": {
+      "kind": "eden:filter_carafe",
+      "fields": {
+       "water": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 3,
+    "detail": {
+     "node": "c1",
+     "field": "water",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "carafe_full"
+   }
+  },
+  {
+   "name": "replace_cartridge_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "replace_cartridge"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:water_filter",
+      "fields": {
+       "cartridge": 0
+      }
+     },
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "replace_cartridge_not_yet_spent",
+   "act": {
+    "this": "f1",
+    "form": "replace_cartridge"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:water_filter"
+     },
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "cartridge",
+     "found": 2,
+     "wanted": {
+      "at_most": 0
+     }
+    },
+    "fix": null,
+    "says": "not_yet_spent"
+   }
+  },
+  {
+   "name": "replace_cartridge_no_spare",
+   "act": {
+    "this": "f1",
+    "form": "replace_cartridge"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:water_filter",
+      "fields": {
+       "cartridge": 0,
+       "spares": 0
+      }
+     },
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "spares",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "no_spare"
+   }
+  },
+  {
+   "name": "replace_cartridge_holding_something",
+   "act": {
+    "this": "f1",
+    "form": "replace_cartridge"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:water_filter",
+      "fields": {
+       "cartridge": 0
+      }
+     },
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "hands_and_table"
+   }
+  }
+ ]
+}

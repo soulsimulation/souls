@@ -1,0 +1,813 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:sealed_letter (from #1685). One message, written once (words by reference), sealed in red wax, then opened once: blank, written, sealed, opened, and an opened seal is never sealed again. Each needs the Soul within reach of its face ('Walk up to the correspondence before composing or changing its seal.') and empty hands ('Set down what you are holding before composing or changing the seal.'). A seal on a blank letter names writing it as the fix; opening a written one names sealing it. The words are readable when sealed: no secrecy, as in the original.",
+  "cases": [
+    {
+      "name": "write_every_need_met",
+      "act": {
+        "this": "l1",
+        "form": "write",
+        "args": {
+          "words": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "blank"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "write_wrong_stage",
+      "act": {
+        "this": "l1",
+        "form": "write",
+        "args": {
+          "words": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "sealed",
+              "words": {
+                "text": "w1"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "stage",
+          "found": "sealed",
+          "wanted": {
+            "is": "blank"
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "write_out_of_reach",
+      "act": {
+        "this": "l1",
+        "form": "write",
+        "args": {
+          "words": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "blank"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              2000
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 1,
+        "detail": {
+          "point": "face",
+          "move": "slide"
+        },
+        "fix": {
+          "step": "walk_to",
+          "point": "face"
+        },
+        "says": "walk_up"
+      }
+    },
+    {
+      "name": "write_holding_something",
+      "act": {
+        "this": "l1",
+        "form": "write",
+        "args": {
+          "words": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "blank"
+            }
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "set_down_held"
+      }
+    },
+    {
+      "name": "seal_every_need_met",
+      "act": {
+        "this": "l1",
+        "form": "seal"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "written",
+              "words": {
+                "text": "w1"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "seal_wrong_stage",
+      "act": {
+        "this": "l1",
+        "form": "seal"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "blank"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "stage",
+          "found": "blank",
+          "wanted": {
+            "is": "written"
+          }
+        },
+        "fix": {
+          "form": "write"
+        }
+      }
+    },
+    {
+      "name": "seal_out_of_reach",
+      "act": {
+        "this": "l1",
+        "form": "seal"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "written",
+              "words": {
+                "text": "w1"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              2000
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 1,
+        "detail": {
+          "point": "face",
+          "move": "press"
+        },
+        "fix": {
+          "step": "walk_to",
+          "point": "face"
+        },
+        "says": "walk_up"
+      }
+    },
+    {
+      "name": "seal_holding_something",
+      "act": {
+        "this": "l1",
+        "form": "seal"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "written",
+              "words": {
+                "text": "w1"
+              }
+            }
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "set_down_held"
+      }
+    },
+    {
+      "name": "open_seal_every_need_met",
+      "act": {
+        "this": "l1",
+        "form": "open_seal"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "sealed",
+              "words": {
+                "text": "w1"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "open_seal_wrong_stage",
+      "act": {
+        "this": "l1",
+        "form": "open_seal"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "written",
+              "words": {
+                "text": "w1"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "stage",
+          "found": "written",
+          "wanted": {
+            "is": "sealed"
+          }
+        },
+        "fix": {
+          "form": "seal"
+        }
+      }
+    },
+    {
+      "name": "open_seal_out_of_reach",
+      "act": {
+        "this": "l1",
+        "form": "open_seal"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "sealed",
+              "words": {
+                "text": "w1"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              2000
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 1,
+        "detail": {
+          "point": "face",
+          "move": "press"
+        },
+        "fix": {
+          "step": "walk_to",
+          "point": "face"
+        },
+        "says": "walk_up"
+      }
+    },
+    {
+      "name": "open_seal_holding_something",
+      "act": {
+        "this": "l1",
+        "form": "open_seal"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "sealed",
+              "words": {
+                "text": "w1"
+              }
+            }
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "set_down_held"
+      }
+    },
+    {
+      "name": "open_seal_on_an_opened_letter",
+      "act": {
+        "this": "l1",
+        "form": "open_seal"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter",
+            "fields": {
+              "stage": "opened",
+              "words": {
+                "text": "w1"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "stage",
+          "found": "opened",
+          "wanted": {
+            "is": "sealed"
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "sealed_letter_take_every_need_met",
+      "act": {
+        "this": "l1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "sealed_letter_take_both_hands_full",
+      "act": {
+        "this": "l1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:sealed_letter"
+          },
+          "h1": {
+            "kind": "eden:sealed_letter"
+          },
+          "h2": {
+            "kind": "eden:sealed_letter"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

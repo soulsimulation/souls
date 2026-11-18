@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":27,"group":"object","words":"get changed, put on something from the wardrobe","obvious":2,"things":{"wardrobe":"eden:wardrobe"},"chain":[{"this":"wardrobe","form":"open"},{"this":"me","form":"change_clothes","args":{"from":"wardrobe"}}]}
