@@ -237,22 +237,55 @@ fn own_part(on: &dyn Fn((i32, i32), [i64; 2]) -> bool, (sq, m): &SquareMeet) -> 
     })
 }
 
-/// One segment holding every meet in `ms` (on one line): its two farthest points, on `node`'s patch.
+/// One segment for the meets in `ms` (on one line), on `node`'s patch: the longest unbroken stretch of them (meets
+/// that touch or overlap, within [`MEET_ON`]), from its two farthest points. A mouth broken by ground of another
+/// height (Eden's pond jetty, a deck 200 mm up, between the outer ends of the kerb's two gates, #3187) is never
+/// spanned: the end's middle is where a crossing starts or lands, so it must lie on the ground.
 fn joined(ms: &[&Meet], node: Id) -> Option<End> {
     let pts: Vec<[i32; 3]> = ms.iter().flat_map(|m| [m.a, m.b]).collect();
     let d2 = |p: [i32; 3], q: [i32; 3]| sq(i64::from(p[0] - q[0])) + sq(i64::from(p[2] - q[2]));
-    let mut best: Option<([i32; 3], [i32; 3])> = None;
+    let mut far: Option<([i32; 3], [i32; 3])> = None;
     for (u, &p) in pts.iter().enumerate() {
         for &q in &pts[u..] {
-            if best.is_none_or(|(a, b)| d2(p, q) > d2(a, b)) {
-                best = Some((p, q));
+            if far.is_none_or(|(a, b)| d2(p, q) > d2(a, b)) {
+                far = Some((p, q));
             }
         }
     }
-    best.map(|(a, b)| End {
+    let (o, f) = far?;
+    // Each meet as a span along the line from `o` to `f`, in mm (the projection of its ends).
+    let (dx, dz) = (i64::from(f[0] - o[0]), i64::from(f[2] - o[2]));
+    let len = (sq(dx) + sq(dz)).isqrt().max(1) as i64;
+    let along = |p: [i32; 3]| (i64::from(p[0] - o[0]) * dx + i64::from(p[2] - o[2]) * dz) / len;
+    let mut spans: Vec<(i64, i64, [i32; 3], [i32; 3])> = ms
+        .iter()
+        .map(|m| {
+            let (s, t) = (along(m.a), along(m.b));
+            if s <= t {
+                (s, t, m.a, m.b)
+            } else {
+                (t, s, m.b, m.a)
+            }
+        })
+        .collect();
+    spans.sort_by_key(|s| (s.0, s.1));
+    // Unbroken stretches, each as (start, end, its first point, its last point); the longest wins, the first on a tie.
+    let mut runs: Vec<(i64, i64, [i32; 3], [i32; 3])> = Vec::new();
+    for s in spans {
+        match runs.last_mut() {
+            Some(r) if s.0 <= r.1 + MEET_ON => {
+                if s.1 > r.1 {
+                    (r.1, r.3) = (s.1, s.3);
+                }
+            }
+            _ => runs.push(s),
+        }
+    }
+    let r = runs.iter().rev().max_by_key(|r| r.1 - r.0).copied()?;
+    Some(End {
         floor: node,
-        a: um(a),
-        b: um(b),
+        a: um(r.2),
+        b: um(r.3),
     })
 }
 

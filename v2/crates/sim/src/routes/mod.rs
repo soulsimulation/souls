@@ -9,11 +9,13 @@
 //!   open ground one of each square it crosses. A doorway to the open ground is such a link, one end on the
 //!   building's floor and the other on the ground's squares.
 //! - **Coarse.** A search (A*, the heuristic the straight distance in the ground's frame) over portals: within a
-//!   piece, from each portal to each other; across a link, from one end to the other. The distance between two
-//!   portals of one piece is its line inside the piece (below), computed on first use and cached with the piece.
+//!   piece, from each portal to each other; across a link, from one end to the other, never straight back across
+//!   the link just crossed. The distance between two portals of one piece is its line inside the piece (below),
+//!   computed on first use and cached with the piece.
 //! - **Fine.** Inside one piece, a search over its triangles and string pulling (the funnel), done as a walker
-//!   enters it. A route carries the first piece's line; the rest is cut as the body goes. String pulling treats the
-//!   body as a point, which is right here: the patch is the ground already shrunk by the body's radius.
+//!   enters it. A route carries the first piece's line, to the first portal's middle (for a body standing at a
+//!   portal between pieces, its point nearest what comes next); the rest is cut as the body goes. String pulling
+//!   treats the body as a point, which is right here: the patch is the ground already shrunk by the body's radius.
 //! - **Ability masks.** A link needs bits ([`HANDS`], [`CLIMB`], [`WADE`], [`SWIM`]) and a body has bits; a body
 //!   uses a link only when it has every bit the link needs. A ladder needs hands and climb. A shut door needs hands
 //!   besides, read from the door's field when the route is asked for (N4: open or shut is the door's, never the
@@ -79,6 +81,8 @@ const MEET_OFF: i64 = 20;
 const NONE: u32 = u32::MAX;
 /// In a search's `via`: reached across a link (its index below this bit), not across a piece.
 const LINK: u32 = 1 << 31;
+/// How near its first portal a body stands to be aimed across it where it goes on, not at its middle, mm.
+const AT_PORTAL: i64 = 300;
 
 /// A patch as a route carries it: its node, the open ground's square when it is one, and the version it was cut at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,6 +118,14 @@ struct Portal {
 impl Portal {
     fn mid(&self) -> [i64; 2] {
         [(self.a[0] + self.b[0]) / 2, (self.a[1] + self.b[1]) / 2]
+    }
+
+    /// Its point nearest `p` (mm, its frame).
+    fn nearest(&self, p: [i64; 2]) -> [i64; 2] {
+        let (a, e) = (self.a, [self.b[0] - self.a[0], self.b[1] - self.a[1]]);
+        let l2 = (sq(e[0]) + sq(e[1])).max(1);
+        let t = ((p[0] - a[0]) * e[0] + (p[1] - a[1]) * e[1]).clamp(0, l2);
+        [a[0] + e[0] * t / l2, a[1] + e[1] * t / l2]
     }
 }
 
@@ -987,7 +999,10 @@ impl Map {
                 }
             }
             let (l, side) = (self.portals[u as usize].link, self.portals[u as usize].side);
-            if l != NONE {
+            // Never straight back across the link just crossed: that lands on another portal of the end the body
+            // went in by, a doorway used as a bridge between two squares' pieces of the open ground, which no walk
+            // follows (#3187). Ground there is reached across the pieces.
+            if l != NONE && self.seen[u as usize].3 != LINK | l {
                 if let Some(why) = self.refuse(tree, l, has) {
                     let far = self.links[l as usize].ends[1 - side as usize]
                         .iter()
@@ -1106,10 +1121,32 @@ impl Map {
             .map(|(p, _)| self.portals[*p as usize].world)
             .collect();
         let length = u64::from(self.seen[goal as usize].1);
-        let target = chain
-            .first()
-            .filter(|(p, _)| *p != goal)
-            .map_or(goal_xz, |(p, _)| self.portals[*p as usize].mid());
+        // The first line ends on the first portal's middle, or, for a body at the portal (within [`AT_PORTAL`]) that
+        // walks on to another piece, at the portal's point nearest what comes next (the next portal's middle or the
+        // goal, on the same node). Aimed at the middle of a long stretch of a square's edge, a body standing on that
+        // edge walked along it to the middle, and the route from the far side sent it back: a corner that flipped
+        // (#3187). Away from the portal its middle stays the aim: the funnel spreads walkers better from there.
+        let target = match chain.first() {
+            Some(&(p, _)) if p != goal => {
+                let portal = &self.portals[p as usize];
+                match chain.get(1) {
+                    Some(&(r, via))
+                        if via & LINK == 0
+                            && via != NONE
+                            && len2(start_xz, portal.nearest(start_xz)) <= AT_PORTAL =>
+                    {
+                        let next = if r == goal {
+                            goal_xz
+                        } else {
+                            self.portals[r as usize].mid()
+                        };
+                        portal.nearest(next)
+                    }
+                    _ => portal.mid(),
+                }
+            }
+            _ => goal_xz,
+        };
         let first_line = self.line(from.piece, start_xz, target);
         Ok(Route {
             hops,

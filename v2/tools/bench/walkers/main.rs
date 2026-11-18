@@ -9,8 +9,8 @@
 //! - **The places** are the catalog places N18's labels (`v2/tools/compare-reach`) say today's engine reaches, that
 //!   the new ground holds within 1.5 m on the open ground or on a building's lowest floor, that lie within the trace's
 //!   ±320 m, and that N5 routes to from the arrival point. Every other place is left out and counted by reason.
-//! - **The walkers** stand on legal ground at seeded places from the first tick, each with an order to walk to a
-//!   seeded place, then another. Times and places follow `tools/bench/capacity/profiles/shapes.json` (read, never
+//! - **The walkers** stand on legal ground at seeded places from the first tick (never in a pocket of ground no walk
+//!   reaches from the arrival point, #3187), each with an order to walk to a seeded place, then another. Times and places follow `tools/bench/capacity/profiles/shapes.json` (read, never
 //!   edited): `uniform` waits `10 s x U(0.5, 1.5)` after each arrival and draws places evenly; `event` draws 60 % of
 //!   places within 30 m of the meetup place (the bandstand), waits in runs (1 to 4 walks, `U(2, 4)` s apart, then a
 //!   log-normal pause, median 30 s, sigma 1.25, at least 2 s), and every `U(45, 120)` s sends 30 % of the walkers to
@@ -54,6 +54,7 @@ use sim::ground::scene::{Xform, xform_to};
 use sim::host::{Runner, named, waiting};
 use sim::links::Doors;
 use sim::mover::Body;
+use sim::routes::HANDS;
 use sim::unstick::{Ladder, Unstick};
 use sim::walk::town::Town;
 use sim::walk::{World, node_of};
@@ -464,6 +465,16 @@ fn main() {
     let mut refused_at: BTreeMap<String, u64> = BTreeMap::new();
     // A start the routes cannot leave (the jitter can land on a piece of its own) is drawn again: counted.
     let mut restarts = 0u64;
+    // Pockets (#3187): ground no walk reaches from the arrival point, a part of N5's map of its own. Eden has them:
+    // the tennis courts, fenced on all four sides with no gate (today's engine finds them `nav.disconnected` too), and
+    // slivers of a floor pinched between furniture and walls. A start the jitter puts in one is drawn again.
+    let parts = town.map.parts(HANDS);
+    let main_part = town
+        .map
+        .spot(ground, start)
+        .map(|s| parts[s.piece as usize])
+        .expect("the arrival point on the map");
+    let mut pockets = 0u64;
     for k in 0..n {
         let who = walker_id(k as u64);
         'start: loop {
@@ -477,6 +488,14 @@ fn main() {
                 let Some(q) = town.nearest(p.node, j) else {
                     continue;
                 };
+                if town
+                    .map
+                    .spot(p.node, q)
+                    .is_none_or(|s| parts[s.piece as usize] != main_part)
+                {
+                    pockets += 1;
+                    continue;
+                }
                 if let Ok(b) = town.surfaces[&p.node].place(
                     who,
                     Frame {
@@ -528,7 +547,9 @@ fn main() {
             ..Plan::default()
         };
     }
-    println!("walkers: {n} placed; {restarts} starts drawn again (no route out of them)");
+    println!(
+        "walkers: {n} placed; {pockets} starts in a pocket and {restarts} with no route out drawn again"
+    );
     let index: BTreeMap<Id, usize> = (0..n).map(|k| (walker_id(k as u64), k)).collect();
 
     // The trace's header: the surfaces with their floors, the outlines of every room and named place.
