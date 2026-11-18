@@ -28,7 +28,8 @@
 //   a hand that was free now holds the cup); at the end the adapter checks that the thing is where the rules put it.
 // - Not here: no reservation (two Souls may both set off; the second fails at the end). A timer (a due list), create,
 //   remove, a put into a named slot and other placement words are new engine only or later tasks; a link has no field
-//   in today's def. Interruption and restart are today's: the receipt fails and nothing is applied.
+//   in today's def. Interruption and restart are today's: the receipt fails and nothing is applied. A thing removed
+//   before its form ends fails the receipt (`form.thing_removed`), where today's programme alone would report it completed.
 // - Pour and sip (SA-F4d, #2931): the moves `pour` and `consume` of a held thing are today's two verbs, reached by
 //   parameters for any held thing, not by code for cans and cups. A pour toward an argument is mars:watering_can_v1
 //   (stage pour, the right hand: today's pour is right-handed) from the entry's stand point by the target, the grip
@@ -48,7 +49,8 @@ import type { Entry, Form } from '../../../../packages/form-rules/src/rules.ts';
 type Vec2 = [number, number];
 type Vec3 = [number, number, number];
 type Step = { verb: string; params: Record<string, unknown> };
-type Refusal = { code: string; reason: string };
+/** A refusal; an entry's form adds `decided`, the rules library's own verdict (reason, detail, fix, read), for the client. */
+type Refusal = { code: string; reason: string; decided?: unknown };
 type Action = StoredDef['actions'][number];
 
 const ROOT = resolve(import.meta.dirname, '../../../..');
@@ -166,6 +168,10 @@ export function createFormsAdapter(h: FormsHost) {
     const kind = ref.split('@')[0];
     return kinds(kind)[kind] ?? null;
   }
+  /** The catalog's copy of an entry thing (SA-C3): its kind, from the def's `entry` param, and the entry itself; else null. */
+  function catalogEntry(def: StoredDef | undefined): { kind: string; body: Entry } | null {
+    const entry = entryOf(def); return entry ? { kind: entry.kind, body: entry } : null;
+  }
   /** The body's forms that change the parent of a thing argument named `thing` (its `put`), mapped here (SA-F4b). */
   function bodyForms(): [string, FormRef['form']][] {
     const body = kinds(BODY_KIND)[BODY_KIND]; if (!body) return [];
@@ -188,6 +194,8 @@ export function createFormsAdapter(h: FormsHost) {
   }
   const M = () => h.model, all = () => h.engine.world.entities, world = () => h.engine.world as never;
   const thing = (id: string) => { const e = M().entities.get(id), def = e && M().resolvedDef(e.def), entry = entryOf(def); return e && def && entry ? { e, def, entry } : null; };
+  /** Things with a form under way, by how many: a thing removed before its form ends fails that receipt, never completes it. */
+  const underWay = new Map<string, number>();
   const nameOf = (id: string) => { const e = M().entities.get(id); return e?.name ? M().pathOf(id) : 'it'; };
   /** SA-F4b: the rules' answer for a form that changes a parent. `latest`, by body: its last plan (menus plan too);
    *  `planned`, by body|capability: the plan its act started with (`begun`), checked and dropped at the end. */
@@ -235,6 +243,8 @@ export function createFormsAdapter(h: FormsHost) {
     const input = { kinds, act: { this: f.body ? bodyId : id, form: action, args }, state: { actor: bodyId, nodes, moves: moves() } };
     return Object.assign(effects({ ...input, receipt }), { input });
   }
+  /** The rules' own verdict for a refusal's `decided` (SA-C3), without the input `ask` keeps beside it. */
+  const verdictOf = (r: any) => { const { input: _input, ...v } = r; return v; };
   const fieldsOf = (x: NonNullable<ReturnType<typeof thing>>) => { const f: Record<string, unknown> = {}; for (const [k, d] of Object.entries(x.entry.state ?? {})) f[k] = x.e.state?.[k] ?? d.default; return f; };
   /** Today's free places on top of a thing (not inside it, not hooks). */
   const freeTops = (eid: string) => { const w = world(); return surfaceSlotsOf(w, eid).filter((x) => !x.inside && !x.hang && !slotOccupant(w, x.owner, x.slot)); };
@@ -269,7 +279,7 @@ export function createFormsAdapter(h: FormsHost) {
     const form = f.form, body = all()[soul.entityId]; if (!body?.pose?.p) return null;
     // the needs as they stand now, with the hand where the form's move puts it (its walk meets within_reach)
     const mv = (form.steps ?? []).find((s) => s.step === 'move'), now = ask(t, id, f, action, soul.entityId, (mv && t.entry.points?.[mv.at as string]?.at_mm) ?? [0, 0, 0], 'plan');
-    if (now.verdict !== 'yes') return { code: `form.${now.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), now)}.` };
+    if (now.verdict !== 'yes') return { code: `form.${now.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), now)}.`, decided: verdictOf(now) };
     const wp = M().worldPose(t.e), level = h.levelAt(wp.x, wp.z, wp.y), points = t.entry.points ?? {};
     const steps: Step[] = [{ verb: 'stand', params: {} }];
     let at: Vec2 = [body.pose.p[0], body.pose.p[2]];
@@ -364,6 +374,7 @@ export function createFormsAdapter(h: FormsHost) {
       walk(stand, hand);
       steps.push(LET_GO, { verb: 'mars:hand_actuator_v1', params: { target: id, at: hand.map(r3) } });
     }
+    underWay.set(id, (underWay.get(id) ?? 0) + 1);
     // a change of parent is made by today's motion: keep the rules' answer as it was now; the plan made when the act starts
     // (wrapAct, just before `begun`) is the one checked at the end, never a later menu's
     if ((now.changes as Change[]).some((c) => c.change === 'reparent')) latest.set(soul.entityId, { capability: `object:${id}:${action}`, answer: now });
@@ -373,9 +384,12 @@ export function createFormsAdapter(h: FormsHost) {
    *  anything that is not an entry thing's form, and for a programme that did not finish (today's failure stands). */
   function outcome(capability: string, bodyId: string, finished: boolean): 'done' | Refusal | null {
     const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability); if (!m) return null;
-    const [, id, action] = m, t = thing(id), f = t && formOf(t.entry, action);
+    const [, id, action] = m, t = thing(id), f = t && formOf(t.entry, action), n = underWay.get(id) ?? 0;
+    if (n) { if (n > 1) underWay.set(id, n - 1); else underWay.delete(id); }
+    const key = `${bodyId}|${capability}`, before = planned.get(key); planned.delete(key);
+    if (!t && n && !M().entities.get(id)) return finished ? { code: 'form.thing_removed', reason: 'The thing was removed before this was done; nothing changed.' } : null;
     if (!t || !f) return null;
-    const form = f.form, key = `${bodyId}|${capability}`, before = planned.get(key); planned.delete(key);
+    const form = f.form;
     if (!finished) return null;
     const body = all()[bodyId]; if (!body?.pose?.p) return { code: 'body.unavailable', reason: 'Your body is unavailable; nothing changed.' };
     if ((form.effects ?? []).some((e) => e.change === 'reparent')) {
@@ -402,7 +416,7 @@ export function createFormsAdapter(h: FormsHost) {
       else { const dx = body.pose.p[0] - wp.x, dz = body.pose.p[2] - wp.z, c = Math.cos(wp.yaw), s = Math.sin(wp.yaw); effector = [Math.round((dx * c - dz * s) * 1000), 0, Math.round((dx * s + dz * c) * 1000)]; }
     }
     const r = ask(t, id, f, action, bodyId, effector, `${capability}@${h.engine.world.tick}`);
-    if (r.verdict !== 'yes') return { code: `form.${r.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), r)}; nothing changed.` };
+    if (r.verdict !== 'yes') return { code: `form.${r.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), r)}; nothing changed.`, decided: verdictOf(r) };
     // every set, on any thing it names, checked by the rules' own apply (whole, balanced) and committed as one edit
     const checked = apply(r.input.state, r);
     if (!checked.ok) return { code: `form.${checked.reason}`, reason: `${nameOf(id)}: the change could not be applied (${checked.reason.replace(/_/g, ' ')}); nothing changed.` };
@@ -424,7 +438,7 @@ export function createFormsAdapter(h: FormsHost) {
   const owns = (capability: string) => { const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability), t = m && thing(m[1]); return !!t && (!!t.entry.forms?.[m![2]] || bodyForms().some(([n]) => n === m![2])); };
   /** The act has started (the ledger's expect, right after the plan wrapAct made for it): keep that plan's answer. */
   const begun = (body: string, capability: string) => { const l = latest.get(body); if (l?.capability === capability) planned.set(`${body}|${capability}`, l.answer); };
-  return { plan, outcome, owns, begun, actions };
+  return { plan, outcome, owns, begun, actions, catalogEntry };
 }
 export type FormsAdapter = ReturnType<typeof createFormsAdapter>;
 
