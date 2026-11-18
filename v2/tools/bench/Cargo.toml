@@ -9,5 +9,11 @@ description = "Engine v2 benches, run by hand and declared in their task's issue
 name = "tree"
 path = "src/tree.rs"
 
+[[bin]]
+name = "walkers"
+path = "walkers/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
+sim = { path = "../../crates/sim" }
+import-eden = { path = "../import-eden" }
