@@ -26,8 +26,10 @@
 //! 8. **A fault stays in the tier.** A tick that does not apply stops the tier and is named in [`Stats::fault`]; the
 //!    clock goes on.
 //!
-//! Not here: budgets and the interest set (R4), the viewer's files (V1), words beside references (delivery, K16).
+//! Budgets and the interest set are R4's (`subscription.rs`, `interest.rs`). Not here: the viewer's files (V1), words beside references (delivery, K16).
 
+pub mod interest;
+pub mod subscription;
 #[cfg(test)]
 mod tests;
 

@@ -3,6 +3,7 @@
 
 pub mod clock;
 pub mod controller;
+pub mod forms;
 pub mod frozen;
 pub mod ground;
 pub mod host;
@@ -12,6 +13,7 @@ pub mod log;
 pub mod mover;
 pub mod moves;
 pub mod routes;
+pub mod speech;
 pub mod spots;
 pub mod timers;
 pub mod unstick;

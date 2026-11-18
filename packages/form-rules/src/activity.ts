@@ -50,6 +50,10 @@ export type Now = { floor?: string; stage?: string; ends?: string };
 export const STANDING_PARTS = Object.freeze(['members', 'present', 'enough', 'stage', 'sitting', 'idle']);
 export type Standing = { members: string; present: string; enough: number; stage: string; sitting: string; idle: string };
 export type Activity = Entry & { roles?: Record<string, Role>; now?: Now; standing?: Standing };
+/** The now line: a member of the activity's own section (17, `roles.now`), or a top-level `now` in the test kinds. */
+const nowOf = (entry: Activity): Now | undefined => entry.now ?? ((entry.roles as Record<string, unknown> | undefined)?.now as Now | undefined);
+/** The role names of an activity: its roles section, less its now line. */
+const roleNames = (entry: Activity): string[] => Object.keys(entry.roles ?? {}).filter((k) => k !== 'now');
 export type SlotPlace = { node: string; slot: string };
 export type PlaceVerdict =
   | { verdict: 'yes'; role: string; place: SlotPlace; args: Record<string, unknown>; read: Read[] }
@@ -242,7 +246,7 @@ export function leave(input: Input & { receipt: string }): Left {
   const nodes = after.state.nodes;
   const self = nodes[act.this];
   const members: [string, string][] = [];
-  for (const role of Object.keys(entry.roles!)) for (const end of (self.links?.[role] ?? []) as string[]) members.push([role, end]);
+  for (const role of roleNames(entry)) for (const end of (self.links?.[role] ?? []) as string[]) members.push([role, end]);
   if (standing) {
     // A standing activity outlasts its members: it ends only by its required roles or its end date. The last one
     // present rising ends the sitting.
@@ -290,7 +294,7 @@ export function lapse(input: Omit<Input, 'asker'> & { receipt: string }): Lapsed
   const self = state.nodes[act.this];
   const entry = kinds[self.kind!] as Activity;
   const members: [string, string][] = [];
-  for (const role of Object.keys(entry.roles ?? {})) for (const end of (self.links?.[role] ?? []) as string[]) members.push([role, end]);
+  for (const role of roleNames(entry)) for (const end of (self.links?.[role] ?? []) as string[]) members.push([role, end]);
   if (!members.length) return { ...done, released: 0 };
   const releases: Change[] = members.map(([role, end]) => ({ change: 'unlink', node: act.this, link: role, n: entry.links![role].n, end }));
   // A body standing in the activity's own slots is moved out to the place the activity is in, as `leave`'s ending does,
@@ -329,7 +333,7 @@ export function nowLine(input: { kinds: Record<string, Entry>; state: { nodes: I
   const n = has(state.nodes, node) ? state.nodes[node] : undefined;
   const entry = n?.kind && has(kinds, n.kind) ? (kinds[n.kind] as Activity) : undefined;
   if (!n || !entry) return bad('no_such_kind');
-  const parts = entry.now;
+  const parts = nowOf(entry);
   if (!parts || typeof parts !== 'object') return bad('no_now');
   const extra = Object.keys(parts).filter((k) => !NOW_PARTS.includes(k));
   if (extra.length) return bad('malformed_now', { parts: extra });
