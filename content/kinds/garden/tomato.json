@@ -44,9 +44,9 @@
   "looks": {
     "model": "look:tomato",
     "table": [
-      { "part": "fill", "field": "bites_left", "do": "scale", "axis": "y", "range": [0, 2], "to": [0, 1000] }
+      { "part": "fruit", "field": "bites_left", "do": "scale", "axis": "y", "range": [0, 2], "to": [0, 1000] }
     ],
-    "shape": {"round":2,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,0],[30,2],[45,24],[40,60],[18,73],[0,70]],"segments":10,"tint":"skin","role":"fill","pivot":[0,0,0]},{"kind":"box","at":[0,5,0],"size":[35,6,12],"tint":"leaf"},{"kind":"box","at":[0,74,0],"size":[35,6,12],"tint":"leaf","role":"fill","pivot":[0,0,0]}],"palette":{"skin":"#dc3d25","leaf":"#487b33"},"tags":["garden","food","tomato","item","object"]}
+    "shape": {"round":2,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,0],[30,2],[45,24],[40,60],[18,73],[0,70]],"segments":10,"tint":"skin","role":"fruit","pivot":[0,0,0]},{"kind":"box","at":[0,5,0],"size":[35,6,12],"tint":"leaf"},{"kind":"box","at":[0,74,0],"size":[35,6,12],"tint":"leaf","role":"fruit","pivot":[0,0,0]}],"palette":{"skin":"#dc3d25","leaf":"#487b33"},"tags":["garden","food","tomato","item","object"]}
   },
   "text": {
     "card": "A ripe garden tomato: take it and eat it, in two bites or at once.",

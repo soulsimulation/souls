@@ -27,6 +27,10 @@ path = "src/timers.rs"
 name = "moves"
 path = "src/moves.rs"
 
+[[bin]]
+name = "walkers"
+path = "walkers/main.rs"
+
 # F1, #2766: the form runner's steps in progress, by B2's measure.
 [[bin]]
 name = "forms"

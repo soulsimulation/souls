@@ -1,0 +1,253 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:shop",
+  "owner": "thing",
+  "state": {
+    "open_times": {
+      "n": 1,
+      "type": "schedule",
+      "most": 14,
+      "default": [
+        {
+          "repeat": "weekly",
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat"
+          ],
+          "from_us": 32400000000,
+          "to_us": 64800000000
+        }
+      ],
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      8000,
+      7600,
+      9000
+    ]
+  },
+  "areas": {
+    "shop": {
+      "at_mm": [
+        0,
+        100,
+        1819
+      ],
+      "radius_mm": 2461
+    },
+    "storeroom": {
+      "at_mm": [
+        0,
+        100,
+        -2521
+      ],
+      "radius_mm": 1759
+    },
+    "landing": {
+      "at_mm": [
+        0,
+        2900,
+        -3335
+      ],
+      "radius_mm": 945
+    },
+    "bedroom": {
+      "at_mm": [
+        -1920,
+        2900,
+        1005
+      ],
+      "radius_mm": 1860
+    },
+    "living": {
+      "at_mm": [
+        1920,
+        2900,
+        1005
+      ],
+      "radius_mm": 1860
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:shop",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2800,
+            0
+          ],
+          "size": [
+            8000,
+            5600,
+            9000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            6959,
+            2300
+          ],
+          "size": [
+            8300,
+            2718,
+            4700
+          ],
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            6959,
+            -2300
+          ],
+          "size": [
+            8300,
+            2718,
+            4700
+          ],
+          "yaw": 180000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1150,
+            4520
+          ],
+          "size": [
+            1200,
+            2100,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2400,
+            1300,
+            4515
+          ],
+          "size": [
+            2600,
+            1700,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            2400,
+            1300,
+            4515
+          ],
+          "size": [
+            2600,
+            1700,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2400,
+            4350,
+            4515
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            2400,
+            4350,
+            4515
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#ecdcc0",
+        "trim": "#3f5f57",
+        "roof": "#7a3d2e",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "shop"
+      ]
+    }
+  },
+  "text": {
+    "card": "A corner shop with a storeroom and a flat above; its open times are posted.",
+    "building": "building",
+    "store": "store",
+    "corner_shop": "corner shop"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "store",
+      "corner_shop"
+    ]
+  }
+}
