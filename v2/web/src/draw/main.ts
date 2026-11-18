@@ -6,6 +6,7 @@ import { FreeCamera } from '../camera/camera.ts';
 import { PlaybackClock } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
+import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
 import { pageThings } from '../things/page.ts';
@@ -35,6 +36,8 @@ scene.add(world.group);
 const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
 Object.assign(globalThis, { v2: { renderer, scene, cam, world, things } }); // for V8's measure
+// Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
+loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 
 let pointer: Pointer | null = null;
 let newestTo: number | null = null;
@@ -53,7 +56,7 @@ if (!address) status.textContent = 'no stream: open this page with ?stream=<the 
 else new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
-    world.apply(p.nodes, p.removed);
+    world.apply(p.nodes, p.removed, p.samples);
     things.apply(p.nodes, p.removed);
     newestTo = p.to;
     played++;
@@ -79,7 +82,7 @@ renderer.setAnimationLoop((now) => {
   const t = worldNow === null ? null : clock.step(dt, worldNow, newestTo);
   let drawn = 0;
   if (t !== null) {
-    drawn = world.draw(t);
+    drawn = world.draw(t, cam.camera);
     if (!framed && drawn > 0) {
       framed = true;
       cam.setExtent(world.extent);

@@ -30,8 +30,11 @@ export type NodeRec = {
 /** Where the world is: its newest part's end, and world time against wall time. */
 export type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number };
 
-/** What one part changed, in the order played. */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; hash: boolean | null };
+/** One motion sample, as the part carried it: node, frame (parent node and slot), world time µs, position µm (V6). */
+export type SampleRec = [string, string, number | null, number, number, number, number];
+
+/** What one part changed, in the order played; `samples` is every motion sample in it, in entry order. */
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null };
 
 export type SourceEvents = {
   pointer(p: Pointer): void;

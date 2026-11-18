@@ -80,7 +80,8 @@ async function run(stream: URL) {
             removed.push(key(id));
           }
         }
-        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, hash: played.hash } }, transfer);
+        const samples = JSON.parse(player.samples());
+        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, samples, hash: played.hash } }, transfer);
       }
     } catch (e) {
       post({ t: 'error', message: String((e as Error)?.message ?? e) });
