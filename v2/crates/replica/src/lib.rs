@@ -21,7 +21,7 @@ pub mod read;
 pub mod time;
 pub mod tree;
 pub mod views;
-// Not built into the checker (`checker`), which has no imports (T10, `v2/docs/intents.md` rule 13).
+// R1's bindings import wasm-bindgen's glue, so the checker (T10, no imports) leaves them out.
 #[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
 mod wasm;
 pub mod world_model;
