@@ -164,7 +164,7 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
 
 - A **role** is one of the kind's link types; membership is that link to the body, and the link's `most` is how many
   the role takes. `need` is `required` (the activity cannot start without it), `replaceable` (required, and another
-  may take it while it runs) or `optional`. Starting, leaving and ending are SA-G1b's and Engine v2 B5's.
+  may take it while it runs) or `optional`. Starting is Engine v2 B5's; leaving and ending are below.
 - **places** say where a member of the role may be, in a fixed order. `in: "this"`: the activity's own `slots`, in
   the order listed, so a body becomes the activity's child. `in: "here"`: the slots of things in the same place as
   the activity whose origin is within `within_mm` of the activity's, nearest first, then by node id, then in the
@@ -174,6 +174,49 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   (`reparent`), and the role's places fill that argument. Who may enter a role is that form's `who`.
 - The world moves no body. Each Soul walks and sits by its own steps; the form's effects only link and set the parent.
   Anything that needs another Soul's yes is an offer with an expiry (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)).
+- **Leaving is a form** too: the one that unlinks one role from the actor, and moves the actor out of its place by
+  its own `reparent` (SA-G1b, [#2873](https://github.com/soulsimulation/souls/issues/2873)). The role's `need` is its
+  rule for leaving. A `required` role leaving ends the activity. A `replaceable` one re-opens its place: its link
+  and its slot are free for the next Soul. An `optional` one changes nothing. A one-off activity also ends when its
+  last member leaves.
+- **Ending** releases every member: each is unlinked from its role. A body seated in another thing's slot stays
+  seated. A body still in the activity's own slots is moved out to the place the activity is in, so removing the
+  activity removes no body. Then the activity is removed. The rules name the two events `released` and `ended`.
+  Nothing removes a member for being quiet.
+- **The "now" line** (proposed: a `now` section) names the parts of the activity's state that say what is happening
+  now. Souls read it as a fact and schedule themselves by it; the engine never waits on their behalf.
+
+  ```json
+  "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" }
+  ```
+
+  `floor` is the link type whose ends have the floor. `stage` is an enum field. `ends` is a timed field (SA-F5a)
+  counting down in microseconds; the activity ends at the first microsecond it reaches 0. A part the asker may not
+  see is left out and named as unseen.
+- **Unattended**, an activity is removed at that time by its own world form (`who: "world"`, `starts: "timer"`),
+  whose needs are the time (`ends` at most 0) and that no role is linked. The engine's timer runs it then. While
+  anyone is in it, the form is refused and nothing changes.
+  The example is `packages/form-rules/cases/kinds/test/talk.json`.
+
+- **A standing activity** (proposed: a `standing` section; SA-G2, [#2874](https://github.com/soulsimulation/souls/issues/2874))
+  outlasts a sitting: a course or a job. It names `members`, a link type for those who belong across days; `present`,
+  a link type (a role with places) for those at the sitting now; `enough`, how many present start a sitting; and
+  `stage`, an enum field with the values `sitting` and `idle`. The list is closed: `members`, `present`, `enough`,
+  `stage`, `sitting`, `idle`.
+
+  ```json
+  "standing": { "members": "member", "present": "present", "enough": 3, "stage": "phase", "sitting": "sitting", "idle": "idle" }
+  ```
+
+  Joining and parting are forms that link and unlink `members`, with no place. A standing activity does not end when
+  its last member parts, or when no one is present; it keeps its members, state and end date while empty. Whether a
+  sitting starts is checked when a member arrives (a role entered as above): once `enough` are present the rules set
+  the stage to `sitting` (event `sitting_began`), once. When the last one present rises the stage returns to `idle`
+  (event `sitting_ended`). Present is a subset of members: only a member may arrive (the form's `who`), and a member
+  who is present cannot part (`still_present`). At its end date (its `ends` field, as above) its world form removes it,
+  members or not: each member is unlinked first (event `released`) and no body moves. Nothing waits for a time: hours
+  are a schedule (SA-F16). The example is `packages/form-rules/cases/kinds/test/class.json`.
+
 ## A move
 
 A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
@@ -183,7 +226,10 @@ classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_o
 `effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
 `start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
 includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
-point and then to a second one. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
+point and then to a second one. Five more hand moves share that shape (SA-D4b, [#2857](https://github.com/soulsimulation/souls/issues/2857)):
+`swing` (a hinged leaf pushed through its arc), `stroke` (a hand drawn along a line), `tug` (a handle drawn down) and
+`knock` and `lock` (one contact, like `press`, with their own timing). The middle phase of the first three is named
+`slide_us` and is the same straight path; an arc or a rotation is the viewer's to draw. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
 `held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
 contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
 the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free. `strike` and `pump` (SA-D5b, [#2859](https://github.com/soulsimulation/souls/issues/2859)) are the same shape with the effector at the tool's head (a hammer's face, a pump's nozzle): a window `strike_us` per blow or `pump_us` per stroke, `count` of them in the record, claiming the hand only.
