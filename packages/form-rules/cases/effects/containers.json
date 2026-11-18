@@ -1,0 +1,987 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "content/kinds/containers (SA-X14, #2909): containers and carried furniture converted from the merged rules of #1054, #1060, #1598, #1592, #1602, #1257 and #1027. Step after step, each form done.",
+  "cases": [
+    {
+      "name": "swap_shelf_leave_then_take",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "x1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:swap_shelf",
+            "slots": {
+              "shelf": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "leave",
+            "args": {
+              "thing": "t1"
+            }
+          },
+          "receipt": "rswap_shelf1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "t1",
+                "to": {
+                  "node": "x1",
+                  "slot": "shelf"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "take",
+            "args": {
+              "thing": "t1"
+            }
+          },
+          "actor": "b2",
+          "receipt": "rswap_shelf2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "t1",
+                "to": {
+                  "node": "b2",
+                  "hand": "left"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "eden:swap_shelf",
+          "slots": {
+            "shelf": []
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": null,
+            "right": null
+          }
+        },
+        "b2": {
+          "hands": {
+            "left": "t1",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "hollow_stump_hide_then_search",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "x1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "hide",
+            "args": {
+              "thing": "t1"
+            }
+          },
+          "receipt": "rhollow_stump1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "t1",
+                "to": {
+                  "node": "x1",
+                  "slot": "inside"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "search",
+            "args": {
+              "thing": "t1"
+            }
+          },
+          "actor": "b2",
+          "receipt": "rhollow_stump2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "t1",
+                "to": {
+                  "node": "b2",
+                  "hand": "left"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "eden:hollow_stump",
+          "slots": {
+            "inside": []
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": null,
+            "right": null
+          }
+        },
+        "b2": {
+          "hands": {
+            "left": "t1",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "wall_niche_hide_then_search",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "x1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:wall_niche",
+            "slots": {
+              "inside": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "hide",
+            "args": {
+              "thing": "t1"
+            }
+          },
+          "receipt": "rwall_niche1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "t1",
+                "to": {
+                  "node": "x1",
+                  "slot": "inside"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "search",
+            "args": {
+              "thing": "t1"
+            }
+          },
+          "actor": "b2",
+          "receipt": "rwall_niche2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "t1",
+                "to": {
+                  "node": "b2",
+                  "hand": "left"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "eden:wall_niche",
+          "slots": {
+            "inside": []
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": null,
+            "right": null
+          }
+        },
+        "b2": {
+          "hands": {
+            "left": "t1",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "arranging_vase_put_in_then_take_out",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "v1"
+            ]
+          },
+          "v1": {
+            "kind": "eden:arranging_vase",
+            "slots": {}
+          },
+          "b1": {
+            "hands": {
+              "left": "s1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "v1",
+            "form": "put_in",
+            "args": {
+              "thing": "s1",
+              "place": "stem_3"
+            }
+          },
+          "receipt": "rv1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "s1",
+                "to": {
+                  "node": "v1",
+                  "slot": "stem_3"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "v1",
+            "form": "take_out",
+            "args": {
+              "thing": "s1"
+            }
+          },
+          "receipt": "rv2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "s1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "v1": {
+          "kind": "eden:arranging_vase",
+          "slots": {
+            "stem_3": []
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "s1",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "camp_bench_two_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "e1"
+            ]
+          },
+          "e1": {
+            "kind": "eden:camp_bench"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "e1",
+            "form": "sit",
+            "args": {
+              "seat": "left"
+            }
+          },
+          "receipt": "rcb1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "e1",
+                  "slot": "left"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "e1",
+            "form": "sit",
+            "args": {
+              "seat": "left"
+            }
+          },
+          "actor": "b2",
+          "receipt": "rcb2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "e1",
+            "form": "sit",
+            "args": {
+              "seat": "right"
+            }
+          },
+          "actor": "b2",
+          "receipt": "rcb3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "e1",
+                  "slot": "right"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "e1"
+          ]
+        },
+        "e1": {
+          "kind": "eden:camp_bench",
+          "slots": {
+            "left": [
+              "b1"
+            ],
+            "right": [
+              "b2"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "candle_stand_light_then_put_out",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "x1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:candle_stand"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "light",
+            "args": {}
+          },
+          "receipt": "rcandle_stand1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "lit",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:lit",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "put_out",
+            "args": {}
+          },
+          "receipt": "rcandle_stand2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "lit",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:put_out",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "eden:candle_stand",
+          "fields": {
+            "lit": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "parasol_close_then_open",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "x1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:parasol"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "close",
+            "args": {}
+          },
+          "receipt": "rparasol1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "open",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shut",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "open",
+            "args": {}
+          },
+          "receipt": "rparasol2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "open",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:opened",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "eden:parasol",
+          "fields": {
+            "open": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "tent_open_then_close",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "x1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:tent"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "open",
+            "args": {}
+          },
+          "receipt": "rtent1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "open",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:opened",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "close",
+            "args": {}
+          },
+          "receipt": "rtent2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "open",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shut",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "eden:tent",
+          "fields": {
+            "open": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "field_gate_open_then_close",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "x1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:field_gate"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "open",
+            "args": {
+              "side": "front"
+            }
+          },
+          "receipt": "rfield_gate1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "open",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:opened",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "close",
+            "args": {
+              "side": "front"
+            }
+          },
+          "receipt": "rfield_gate2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "open",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shut",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "eden:field_gate",
+          "fields": {
+            "open": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "garden_gate_open_then_close",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "x1"
+            ]
+          },
+          "x1": {
+            "kind": "eden:garden_gate"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "open",
+            "args": {
+              "side": "back"
+            }
+          },
+          "receipt": "rgarden_gate1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "open",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:opened",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "close",
+            "args": {
+              "side": "back"
+            }
+          },
+          "receipt": "rgarden_gate2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "open",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shut",
+                "node": "x1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "eden:garden_gate",
+          "fields": {
+            "open": 0
+          }
+        }
+      }
+    }
+  ]
+}
