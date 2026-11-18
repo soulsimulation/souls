@@ -34,7 +34,7 @@ use crate::ground::Piece;
 use crate::ground::exits::{self, Finding};
 use crate::links::turns::ROOM;
 use crate::mover::Body;
-use crate::routes::{Mask, SWIM, WADE};
+use crate::routes::Mask;
 use crate::walk::{self, Crowd, World, node_of};
 use replica::effects::Refusal;
 use replica::ids::Id;
@@ -54,15 +54,8 @@ pub const SHOULDER: Micros = 9_000_000;
 /// start inside 20 s of it.
 pub const END: Micros = 15_000_000;
 
-/// Whether a body with abilities `has` may stand on `ground`: dry ground always, wading ground with wading, water with
-/// swimming.
-pub fn may_stand(ground: Ground, has: Mask) -> bool {
-    match ground {
-        Ground::Dry => true,
-        Ground::Wading => has & WADE != 0,
-        Ground::Water => has & SWIM != 0,
-    }
-}
+/// Whether a body with abilities `has` may stand on `ground` (the routes' own rule, N11c #3218).
+pub use crate::routes::may_stand;
 
 /// Whether two pieces touch: a corner of either lies on an edge of the other, within [`exits::ON`].
 fn touch(a: &Piece, b: &Piece) -> bool {

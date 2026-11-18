@@ -45,8 +45,8 @@
 //!   whose bed at its middle lies more than [`crate::gaits::WADE_DEPTH`] under the water's level is swimming water,
 //!   a piece at the water's level ([`Ground::Water`]); the rest is wading ground, on the bed (its triangles lie on the
 //!   terrain, [`OpenGround::on_terrain`]). The line between the two is the cells' edge. With no terrain, a water is
-//!   all swimming water. Dry ground, wading ground and water meet edge to edge and are not joined: crossing between
-//!   them is a link naming its move (N11b's follow-up), so the mover slides along such an edge.
+//!   all swimming water. Dry ground, wading ground and water meet edge to edge: crossing between them is a shore link
+//!   naming its move (`crate::routes`, N11c, #3218), so the mover, on one ground, slides along such an edge.
 //! - **Where it lives.** Here in `sim`, native only. An agent's client never loads the ground: where a described spot
 //!   is a point, the server binds the legal standing spot (E2, #2709).
 //!

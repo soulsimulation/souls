@@ -35,6 +35,9 @@
 //! - **Steps.** A low floor's open edge (a porch's front, N3's steps) is a [`Kind::Step`] read with the open ground:
 //!   one end on the floor's patch, the other where its passage meets the ground's squares, walked. It is no link of
 //!   the tree (its id is derived, `ground::scene::step_id`), and an edge with nothing to step down to is no link.
+//! - **Shores** (N11c, #3218). Where dry ground meets wading ground, a [`Kind::Wade`] (`souls:wade`); where wading
+//!   ground or dry ground meets swimming water, a [`Kind::Swim`] (`souls:swim`). No link of the tree (its id is
+//!   derived, [`shore_id`]): the routes find them along the edges the open ground's pieces share (`crate::routes`).
 //!
 //! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
 //! locked door (the door's `locked` field is not read yet), the durable log (K4).
@@ -76,6 +79,18 @@ pub fn opened_event(kind: &str) -> &'static str {
     }
 }
 
+/// The id of the open ground `ground`'s shore link number `n` (N11c, #3218): derived, as a step's is
+/// (`ground::scene::step_id`), since a shore is no link of the tree.
+pub fn shore_id(ground: Id, n: u64) -> Id {
+    let mut input = b"souls:shore\0".to_vec();
+    input.extend_from_slice(&ground.scope().0);
+    input.extend_from_slice(&ground.counter().to_be_bytes());
+    let h = replica::ids::sha256(&input);
+    let mut scope = [0u8; 16];
+    scope.copy_from_slice(&h[..16]);
+    Id::new(replica::ids::Scope(scope), n).expect("a shore's number is below 2^53")
+}
+
 /// A link's kind: its T2 type, and the move that crosses it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -85,6 +100,10 @@ pub enum Kind {
     Ladder,
     /// A low floor's open edge stepped down to the open ground (N3's steps): no link of the tree, walked.
     Step,
+    /// A shore between dry ground and wading ground (N11c, #3218): no link of the tree ([`shore_id`]), waded.
+    Wade,
+    /// A shore between wading ground, or dry ground, and swimming water (N11c, #3218): no link of the tree, swum.
+    Swim,
 }
 
 impl Kind {
@@ -104,13 +123,15 @@ impl Kind {
             Kind::Doorway | Kind::Ramp | Kind::Step => "souls:walk",
             Kind::Stairs => "souls:stairs",
             Kind::Ladder => "souls:climb",
+            Kind::Wade => "souls:wade",
+            Kind::Swim => "souls:swim",
         }
     }
 
     /// What its move needs of a body. Opening a shut door needs hands besides.
     pub fn needs(self) -> Abilities {
         Abilities {
-            legs: true,
+            legs: self != Kind::Swim,
             hands: self == Kind::Ladder,
         }
     }
