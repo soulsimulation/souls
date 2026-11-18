@@ -1,0 +1,30 @@
+{
+  "about": "Body cases (SA-G3, #2875): data the entry tools and the new engine read unchanged. The body's own entry is content/kinds/body/humanoid.json; its gestures are the moves it names.",
+  "entry": "content/kinds/body/humanoid.json",
+  "kind": "eden:humanoid",
+  "family": {
+    "gestures": ["wave", "wave_at", "bow", "bow_to", "clap", "cheer", "shrug", "stretch", "jump", "dance", "slump", "look_around", "point"],
+    "postures": ["stand", "sit_down", "kneel", "lie_down", "lean_on"],
+    "any_thing": ["go_to", "look_at", "point", "touch", "lean_on", "wait_by"]
+  },
+  "sit": [
+    {
+      "say": "sit on the ground here",
+      "form": "sit_down",
+      "args": {},
+      "scene": { "things": [{ "id": "ground_here", "from_me_mm": 0 }, { "id": "rug", "from_me_mm": 4000 }] },
+      "spot": "ground_here"
+    },
+    {
+      "say": "sit on the rug",
+      "form": "sit_down",
+      "args": { "spot": "rug" },
+      "scene": { "things": [{ "id": "ground_here", "from_me_mm": 0 }, { "id": "rug", "from_me_mm": 4000 }] },
+      "spot": "rug"
+    }
+  ],
+  "refused": [
+    { "say": "sit down while sitting", "form": "sit_down", "posture": "sit", "needs_fail": "posture" },
+    { "say": "jump while lying down", "form": "jump", "posture": "lie", "needs_fail": "posture" }
+  ]
+}

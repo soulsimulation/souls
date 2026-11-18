@@ -1,0 +1,140 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:barn",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      10000,
+      6200,
+      14000
+    ]
+  },
+  "areas": {
+    "barn": {
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "radius_mm": 4780
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:barn",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2100,
+            0
+          ],
+          "size": [
+            10000,
+            4200,
+            14000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            6445,
+            3550
+          ],
+          "size": [
+            10300,
+            4489,
+            7200
+          ],
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            6445,
+            -3550
+          ],
+          "size": [
+            10300,
+            4489,
+            7200
+          ],
+          "yaw": 180000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1700,
+            7020
+          ],
+          "size": [
+            3000,
+            3200,
+            60
+          ],
+          "tint": "doorway"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#9b3b2c",
+        "trim": "#f2ece0",
+        "roof": "#4a4a48",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "barn"
+      ]
+    }
+  },
+  "text": {
+    "card": "A timber barn with a wide door.",
+    "building": "building",
+    "hay_barn": "hay barn",
+    "farm_building": "farm building"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "hay_barn",
+      "farm_building"
+    ]
+  }
+}

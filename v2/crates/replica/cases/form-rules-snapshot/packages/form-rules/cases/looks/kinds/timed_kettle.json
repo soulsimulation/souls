@@ -1,0 +1,33 @@
+{
+  "format": "souls-entry/1",
+  "kind": "looks:timed_kettle",
+  "owner": "thing",
+  "state": {
+    "level": { "n": 1, "type": "timed", "unit": "permille", "default": { "value": 0, "per_s": 0, "set_us": 0 }, "min": 0, "max": 1000, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [260, 240, 180] },
+  "looks": {
+    "model": "look:looks_timed_kettle",
+    "shape": {
+      "make": { "kind": "gen", "gen": "kit/2", "args": { "shapes": [
+        { "kind": "box", "at": [0, 0.006, 0], "size": [0.16, 0.012, 0.16], "round": 0, "tint": "steel" },
+        { "kind": "box", "at": [0, 0.1, 0.075], "size": [0.16, 0.18, 0.008], "round": 0, "tint": "glass", "material": "glass" },
+        { "kind": "box", "at": [0, 0.1, -0.075], "size": [0.16, 0.18, 0.008], "round": 0, "tint": "glass", "material": "glass" },
+        { "kind": "box", "at": [-0.076, 0.1, 0], "size": [0.008, 0.18, 0.142], "round": 0, "tint": "glass", "material": "glass" },
+        { "kind": "box", "at": [0.076, 0.1, 0], "size": [0.008, 0.18, 0.142], "round": 0, "tint": "glass", "material": "glass" },
+        { "kind": "box", "at": [0, 0.195, 0], "size": [0.17, 0.014, 0.17], "round": 0, "tint": "steel" },
+        { "kind": "box", "at": [0.105, 0.16, 0], "size": [0.05, 0.016, 0.022], "round": 0, "tint": "steel" },
+        { "kind": "box", "at": [-0.1, 0.11, 0], "size": [0.02, 0.15, 0.03], "round": 0, "tint": "handle" },
+        { "kind": "box", "at": [0, 0.096, 0], "size": [0.142, 0.168, 0.142], "round": 0, "tint": "water", "role": "fill", "pivot": [0, 0.012, 0] }
+      ] } },
+      "palette": { "steel": "#aeb6bd", "glass": "#d8ecf2", "handle": "#2b2b2b", "water": "#3f8fd0" },
+      "tags": ["kettle"]
+    },
+    "table": [
+      { "part": "fill", "field": "level", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "fill", "field": "level", "do": "scale", "axis": "y", "range": [0, 1000], "to": [1, 1000] }
+    ]
+  },
+  "text": { "card": "A glass kettle whose water level is a timed value: it fills or empties at a rate, drawn at the viewer's world time." },
+  "card": { "text": "card" }
+}

@@ -1,0 +1,311 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "The games family (SA-X16, #2911): a chess game from taking sides to leaving, and a hand of cards at the card table.",
+  "cases": [
+    {
+      "name": "chess_take_sides_begin_move_resign_leave",
+      "about": "Two Souls take the sides, begin, play one move each (the hatch's verdict is taken as yes: Engine v2 runs it), black resigns, a second game begins and white resigns, and both leave.",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "c1"]},
+          "c1": {"kind": "eden:chess_table"},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this": "c1", "form": "play_white"},
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "link", "node": "c1", "link": "white", "n": 1, "end": "b1"},
+              {"change": "reparent", "node": "b1", "to": {"node": "c1", "slot": "white_seat"}}
+            ],
+            "events": [
+              {"event": "eden:took_white", "node": "c1", "changes": [0]},
+              {"event": "eden:sat_down", "node": "c1", "changes": [1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {"this": "c1", "form": "play_black"},
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "link", "node": "c1", "link": "black", "n": 2, "end": "b2"},
+              {"change": "reparent", "node": "b2", "to": {"node": "c1", "slot": "black_seat"}}
+            ],
+            "events": [
+              {"event": "eden:took_black", "node": "c1", "changes": [0]},
+              {"event": "eden:sat_down", "node": "c1", "changes": [1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "c1", "form": "begin"},
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "set", "node": "c1", "field": "phase", "n": 2, "to": "playing"},
+              {"change": "set", "node": "c1", "field": "turn", "n": 1, "to": "white"},
+              {"change": "set", "node": "c1", "field": "winner", "n": 3, "to": "none"},
+              {"change": "set", "node": "c1", "field": "castling", "n": 5, "to": 15},
+              {"change": "set", "node": "c1", "field": "en_passant", "n": 6, "to": 64}
+            ],
+            "events": [
+              {"event": "eden:game_began", "node": "c1", "changes": [0]},
+              {"event": "eden:white_to_move", "node": "c1", "changes": [1]},
+              {"event": "eden:no_winner_yet", "node": "c1", "changes": [2]},
+              {"event": "eden:castling_restored", "node": "c1", "changes": [3]},
+              {"event": "eden:no_en_passant", "node": "c1", "changes": [4]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "c1", "form": "move_white", "args": {"from": 12, "to": 28, "promotion": 5}},
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change": "set", "node": "c1", "field": "turn", "n": 1, "to": "black"}],
+            "events": [{"event": "eden:moved", "node": "c1", "changes": [0]}],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {"this": "c1", "form": "move_black", "args": {"from": 52, "to": 36, "promotion": 5}},
+          "receipt": "rc5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change": "set", "node": "c1", "field": "turn", "n": 1, "to": "white"}],
+            "events": [{"event": "eden:moved", "node": "c1", "changes": [0]}],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {"this": "c1", "form": "resign_black"},
+          "receipt": "rc6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "set", "node": "c1", "field": "phase", "n": 2, "to": "resigned"},
+              {"change": "set", "node": "c1", "field": "winner", "n": 3, "to": "white"}
+            ],
+            "events": [
+              {"event": "eden:resigned", "node": "c1", "changes": [0]},
+              {"event": "eden:white_won", "node": "c1", "changes": [1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "c1", "form": "begin"},
+          "receipt": "rc7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "set", "node": "c1", "field": "phase", "n": 2, "to": "playing"},
+              {"change": "set", "node": "c1", "field": "turn", "n": 1, "to": "white"},
+              {"change": "set", "node": "c1", "field": "winner", "n": 3, "to": "none"},
+              {"change": "set", "node": "c1", "field": "castling", "n": 5, "to": 15},
+              {"change": "set", "node": "c1", "field": "en_passant", "n": 6, "to": 64}
+            ],
+            "events": [
+              {"event": "eden:game_began", "node": "c1", "changes": [0]},
+              {"event": "eden:white_to_move", "node": "c1", "changes": [1]},
+              {"event": "eden:no_winner_yet", "node": "c1", "changes": [2]},
+              {"event": "eden:castling_restored", "node": "c1", "changes": [3]},
+              {"event": "eden:no_en_passant", "node": "c1", "changes": [4]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "c1", "form": "resign_white"},
+          "receipt": "rc8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "set", "node": "c1", "field": "phase", "n": 2, "to": "resigned"},
+              {"change": "set", "node": "c1", "field": "winner", "n": 3, "to": "black"}
+            ],
+            "events": [
+              {"event": "eden:resigned", "node": "c1", "changes": [0]},
+              {"event": "eden:black_won", "node": "c1", "changes": [1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "c1", "form": "leave_white"},
+          "receipt": "rc9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "unlink", "node": "c1", "link": "white", "n": 1, "end": "b1"},
+              {"change": "reparent", "node": "b1", "to": {"node": "room"}}
+            ],
+            "events": [
+              {"event": "eden:left_white", "node": "c1", "changes": [0]},
+              {"event": "eden:stood_up", "node": "c1", "changes": [1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {"this": "c1", "form": "leave_black"},
+          "receipt": "rc10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "unlink", "node": "c1", "link": "black", "n": 2, "end": "b2"},
+              {"change": "reparent", "node": "b2", "to": {"node": "room"}}
+            ],
+            "events": [
+              {"event": "eden:left_black", "node": "c1", "changes": [0]},
+              {"event": "eden:stood_up", "node": "c1", "changes": [1]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose": ["c1", "b1", "b2"]},
+        "c1": {
+          "kind": "eden:chess_table",
+          "links": {"white": [], "black": []},
+          "slots": {"white_seat": [], "black_seat": []},
+          "fields": {"phase": "resigned", "turn": "white", "winner": "black", "castling": 15, "en_passant": 64}
+        }
+      }
+    },
+    {
+      "name": "cards_sit_in_draw_play_lay_down_leave",
+      "about": "A Soul sits in at the card table, takes up a hand, draws two cards, plays one onto the table, lays the hand down and leaves.",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "t1"]},
+          "t1": {"kind": "eden:card_table", "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand"},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this": "t1", "form": "sit_in", "args": {"seat": "south"}},
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "link", "node": "t1", "link": "player", "n": 1, "end": "b1"},
+              {"change": "reparent", "node": "b1", "to": {"node": "t1", "slot": "south"}}
+            ],
+            "events": [
+              {"event": "eden:joined_the_game", "node": "t1", "changes": [0]},
+              {"event": "eden:sat_down", "node": "t1", "changes": [1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "h1", "form": "take_up"},
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change": "link", "node": "h1", "link": "player", "n": 1, "end": "b1"}],
+            "events": [{"event": "eden:took_up_the_hand", "node": "h1", "changes": [0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "h1", "form": "draw", "args": {"pack": "t1"}},
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "set", "node": "t1", "field": "cards", "n": 1, "to": 51, "by": -1},
+              {"change": "set", "node": "h1", "field": "cards", "n": 1, "to": 1, "by": 1}
+            ],
+            "events": [{"event": "eden:drew_a_card", "node": "h1", "changes": [0, 1]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "h1", "form": "draw", "args": {"pack": "t1"}},
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "set", "node": "t1", "field": "cards", "n": 1, "to": 50, "by": -1},
+              {"change": "set", "node": "h1", "field": "cards", "n": 1, "to": 2, "by": 1}
+            ],
+            "events": [{"event": "eden:drew_a_card", "node": "h1", "changes": [0, 1]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "h1", "form": "play", "args": {"pack": "t1"}},
+          "receipt": "rc5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "set", "node": "h1", "field": "cards", "n": 1, "to": 1, "by": -1},
+              {"change": "set", "node": "t1", "field": "cards", "n": 1, "to": 51, "by": 1}
+            ],
+            "events": [{"event": "eden:played_a_card", "node": "h1", "changes": [0, 1]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "h1", "form": "lay_down"},
+          "receipt": "rc6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change": "unlink", "node": "h1", "link": "player", "n": 1, "end": "b1"}],
+            "events": [{"event": "eden:laid_the_hand_down", "node": "h1", "changes": [0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this": "t1", "form": "leave"},
+          "receipt": "rc7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change": "unlink", "node": "t1", "link": "player", "n": 1, "end": "b1"},
+              {"change": "reparent", "node": "b1", "to": {"node": "room"}}
+            ],
+            "events": [
+              {"event": "eden:left_the_game", "node": "t1", "changes": [0]},
+              {"event": "eden:stood_up", "node": "t1", "changes": [1]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose": ["t1", "b1"]},
+        "t1": {
+          "kind": "eden:card_table",
+          "children": ["h1"],
+          "links": {"player": []},
+          "slots": {"south": []},
+          "fields": {"cards": 51}
+        },
+        "h1": {"kind": "eden:card_hand", "links": {"player": []}, "fields": {"cards": 1}}
+      }
+    }
+  ]
+}

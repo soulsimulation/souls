@@ -34,7 +34,7 @@ export const isRefreshOnlyObjectAdvance = (advance: unknown) => typeof advance =
 export type NearFilter = {at: readonly [number, number]; radius: number; kinds: {has(kind: string): boolean}};
 
 export type ObjectActResult = {accepted: true; object: {id: string; version: number}; action: string; result?: Record<string, unknown>; bodies?: BodyRequest[]}
-  | {accepted: false; code: string; reason: string; object: string; action: string};
+  | {accepted: false; code: string; reason: string; object: string; action: string; /** SA-C3: an entry form's verdict (forms-adapter.ts) */ decided?: unknown};
 
 export class Objects {
   private kinds = new Map<string, ObjectKind>();
@@ -279,7 +279,7 @@ export class Objects {
     });
   }
   private actOnce(id: string, soul: EdgeSoul, action: string, params: Record<string, unknown>,persist=true,preview?:{after?:unknown}): ObjectActResult {
-    const refuse = (r: Refusal): ObjectActResult => ({accepted: false, code: r.code, reason: r.reason, object: id, action});
+    const refuse = (r: Refusal & {decided?: unknown}): ObjectActResult => ({accepted: false, code: r.code, reason: r.reason, object: id, action, ...(r.decided ? {decided: r.decided} : {})});
     const raw = OBJECT_ID.test(id) ? this.row(id) : undefined;
     const kind = raw && this.kinds.get(raw.kind);
     if (!raw || !kind || !this.visible(raw, soul.soulId, kind)) throw new EdgeError(404, 'not-found', 'no such object here');
