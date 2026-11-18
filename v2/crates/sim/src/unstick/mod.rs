@@ -30,13 +30,13 @@
 pub mod town;
 
 use crate::controller::Track;
-use crate::host::{Runner, waiting};
+use crate::host::{Runner, named, waiting};
 use crate::links::turns::ROOM;
 use crate::walk::town::Town;
 use crate::walk::{Leg, World, node_of};
 use replica::effects::Refusal;
-use replica::encode::{Name, Value};
-use replica::host::{F_HELD, F_ROUTE, F_SHOULDER};
+use replica::encode::Value;
+use replica::host::{F_HELD, F_SHOULDER};
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::time::Micros;
@@ -128,8 +128,6 @@ struct Walker {
     legs: Vec<Leg>,
     leg: usize,
     carried: bool,
-    /// The routes given it, counted (`F_ROUTE`).
-    routes: u64,
 }
 
 /// The ladder over one runner's walkers.
@@ -146,30 +144,6 @@ pub struct Ladder {
 fn len(a: Vec3, b: Vec3) -> i64 {
     let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
     (d(a.x, b.x) + d(a.z, b.z)).isqrt() as i64
-}
-
-fn int(n: i64) -> Value {
-    match u64::try_from(n) {
-        Ok(u) => Value::Uint(u),
-        Err(_) => Value::Nint(n.unsigned_abs() - 1),
-    }
-}
-
-/// The `F_ROUTE` value of route `count`: `[count, [[x, y, z] or [x, y, z, link], ...]]`.
-fn route_value(count: u64, legs: &[Leg]) -> Value {
-    let legs = legs
-        .iter()
-        .map(|l| {
-            let mut v = vec![int(l.to.x), int(l.to.y), int(l.to.z)];
-            v.extend(l.link.map(|k| k.to_value()));
-            Value::Array(v)
-        })
-        .collect();
-    Value::Array(vec![Value::Uint(count), Value::Array(legs)])
-}
-
-fn name_of(n: &'static str) -> Name {
-    Name::new(n).unwrap_or_else(|| Name::new("souls:ended").unwrap_or_else(|| unreachable!()))
 }
 
 impl Ladder {
@@ -189,7 +163,6 @@ impl Ladder {
                 legs,
                 leg: 0,
                 carried: false,
-                routes: 0,
             },
         );
     }
@@ -210,7 +183,7 @@ impl Ladder {
 
     /// Ends `who`'s order by name: its run ends, and the record says why.
     fn end(&mut self, runner: &mut Runner, who: Id, order: Id, name: &'static str, detail: String) {
-        runner.end(who, name_of(name));
+        runner.end(who, named(name));
         self.clocks.remove(&who);
         self.record(runner.now, who, order, Rung::Ended { name, detail });
     }
@@ -225,10 +198,8 @@ impl Ladder {
         let (node, goal) = w.goal;
         match world.plan(body, node, goal) {
             Ok(legs) => {
-                w.routes += 1;
-                let v = route_value(w.routes, &legs);
+                runner.route(who, &legs);
                 (w.legs, w.leg) = (legs, 0);
-                runner.fields.entry(who).or_default().insert(F_ROUTE, v);
             }
             Err(e) => {
                 let order = w.order;

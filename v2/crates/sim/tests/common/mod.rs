@@ -109,6 +109,22 @@ pub fn walk(
     Ok(legs)
 }
 
+/// A walker sent to a point (N9): `body` (new to the runner, or already in it) asks a standing spot near `target`
+/// for the order `order`, and walks there at `speed` once one is granted.
+pub fn send(
+    r: &mut Runner,
+    body: Body,
+    speed: i64,
+    target: sim::spots::Target,
+    order: Id,
+) -> Result<(), Refusal> {
+    let who = body.id;
+    if r.controller.body(who).is_none() {
+        r.add_body(humanoid(), body)?;
+    }
+    r.send(who, Box::new(Route::sent(speed, r.tick)), target, order)
+}
+
 /// The straight distance between two points, µm (rounded down).
 pub fn dist(a: Vec3, b: Vec3) -> i64 {
     let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);

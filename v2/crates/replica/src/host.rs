@@ -78,6 +78,9 @@ pub const F_ROUTE: u64 = 45;
 /// A field the world sets on a walker's body while it walks it out to legal ground (N10's last rung, T9c): 1. The
 /// walk stands meanwhile, and its mark is cleared.
 pub const F_HELD: u64 = 46;
+/// A field the world shows on a body standing on the standing spot it was granted (N9, T9c): 1. A walk to its own
+/// spot passes between such bodies.
+pub const F_SETTLED: u64 = 47;
 
 /// How a skill's step ended (rule 7).
 #[derive(Clone, Debug, PartialEq, Eq)]

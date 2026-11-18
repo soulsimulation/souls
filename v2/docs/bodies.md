@@ -63,7 +63,11 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
    **The walk's fields (T9b A3).** A walker waiting for a link taken in turns sets field 41 on its own body,
    `[link, distance µm]`, and clears it with `[]`; the world shows field 42 (1) on such a link and field 43, the body
    its owning node lets in, both read with `read(link)`. The owner reads the marks as of the last tick and writes
-   its grants; a walker never writes the link.
+   its grants; a walker never writes the link. **N10 and N9 (T9c #3127).** The world sets on a walker's body field
+   44 (1: the shoulder turn, no body pushes it), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
+   ...]]`, walked from its first leg: N10's reroute, or the way to a standing spot N9 granted) and field 46 (1: the
+   world walks it out to legal ground, and the walk stands); it shows field 47 (1) on a body standing on its own
+   granted spot. Ending a walk by name is the world's: it ends the run.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
@@ -73,8 +77,9 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
 The controller (`v2/crates/sim/src/controller`, B1 #2680) is the only way a body is moved or posed: it holds each
 body's mover state and is the one caller of the mover. It also carries a body across a link along the link's line
 (T9b #3120, `sim::host::carry`), and answers a dry run (what one step would do to a copy, moving nothing) for the
-world's geometry answers. N7's `Crowd` still keeps its own bodies, stepped by that dry run, until T9c retires it for
-the walk skill (`skills::route`). A driver is a claim
+world's geometry answers. By its own rule, with no driver, it carries a body found on illegal ground to the nearest
+legal point (N10's walk-out, T9c #3127). Skills run on its bodies through `sim::host::Runner`, a tick at a time; N7's
+`Crowd` is retired (T9c). A driver is a claim
 made by rule 4's rules, so a second driver asking for a held resource is refused by name and the first driver's input
 stands. A driver is a skill, its staged inputs handed on by `sim::host::hand_on` under its run's driver, or a script
 (`v2/tools/body-script`). One input type serves every family: velocity and mode (T4), facing and stance, set only by

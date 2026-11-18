@@ -37,7 +37,8 @@ use replica::bodies::Family;
 use replica::effects::{Change, Event, Refusal, read_id};
 use replica::encode::{Name, Value};
 use replica::host::{
-    Answer, Ask, F_CROSSING, F_SHOULDER, F_WAITING, Host, Near, Progress, Seen, Skill,
+    Answer, Ask, F_CROSSING, F_HELD, F_ROUTE, F_SETTLED, F_SHOULDER, F_WAITING, Host, Near,
+    Progress, Seen, Skill,
 };
 use replica::ids::{Id, Minter, Scope};
 use replica::pose::{ControllerInput, Vec3};
@@ -47,8 +48,9 @@ use replica::world_model::End;
 
 use crate::controller::{Controller, Driver, Part, Track};
 use crate::mover::Body as Moved;
+use crate::spots::Target;
 use crate::walk::town::{Town, View};
-use crate::walk::{Mark, World, node_of};
+use crate::walk::{Leg, Mark, World, node_of};
 
 /// The N lane's answers to T9's closed list of geometry questions, asked for `body`.
 pub trait Geometry {
@@ -389,6 +391,13 @@ pub struct Runner {
     pub now: Micros,
     /// The runs that ended: when (the tick's start) and how.
     pub ended: BTreeMap<Id, (Micros, Progress)>,
+    /// What each body was sent to, and the order it was sent for: it asks a standing spot near the point (N9) while
+    /// its order lasts.
+    pub asks: BTreeMap<Id, (Target, Id)>,
+    /// The place each asker was granted (µm, the target node's frame).
+    pub granted: BTreeMap<Id, Vec3>,
+    /// The routes the world gave each body (`F_ROUTE`), counted.
+    routes: BTreeMap<Id, u64>,
     seed: u64,
     minter: Minter,
     /// The bodies not carried across a link, by node and cell of [`CELL`], as of the end of the last tick.
@@ -420,12 +429,38 @@ fn body_kind() -> Name {
     Name::new("souls:body").unwrap_or_else(|| unreachable!("a fixed name"))
 }
 
+/// A refusal's name as a run's end.
+pub fn named(name: &str) -> Name {
+    Name::new(name).unwrap_or_else(body_kind)
+}
+
+fn int(n: i64) -> Value {
+    match u64::try_from(n) {
+        Ok(u) => Value::Uint(u),
+        Err(_) => Value::Nint(n.unsigned_abs() - 1),
+    }
+}
+
+/// The `F_ROUTE` value of route `count`: `[count, [[x, y, z] or [x, y, z, link], ...]]`.
+fn route_value(count: u64, legs: &[Leg]) -> Value {
+    let legs = legs
+        .iter()
+        .map(|l| {
+            let mut v = vec![int(l.to.x), int(l.to.y), int(l.to.z)];
+            v.extend(l.link.map(|k| k.to_value()));
+            Value::Array(v)
+        })
+        .collect();
+    Value::Array(vec![Value::Uint(count), Value::Array(legs)])
+}
+
 /// The world a tick's skills ask: the town's answers and the runner's bodies.
 struct Here<'a> {
     town: View<'a>,
     controller: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
     grid: &'a BTreeMap<(Id, i64, i64), Vec<Near>>,
+    settled: BTreeSet<Id>,
 }
 
 impl Geometry for Here<'_> {
@@ -457,6 +492,9 @@ impl Geometry for Here<'_> {
         let mut fields = self.fields.get(&node).cloned().unwrap_or_default();
         if let Some(l) = self.controller.carrying(node) {
             fields.insert(F_CROSSING, l.to_value());
+        }
+        if self.settled.contains(&node) {
+            fields.insert(F_SETTLED, Value::Uint(1));
         }
         Some(Seen {
             id: node,
@@ -505,6 +543,9 @@ impl Runner {
             tick,
             now: 0,
             ended: BTreeMap::new(),
+            asks: BTreeMap::new(),
+            granted: BTreeMap::new(),
+            routes: BTreeMap::new(),
             seed: 1,
             minter: Minter::new(Scope([0x9b; 16])),
             grid: BTreeMap::new(),
@@ -534,12 +575,48 @@ impl Runner {
     pub fn start(&mut self, body: Id, skill: Box<dyn Skill>) -> Result<(), Refusal> {
         let driver = self.controller.claim(body, &skill.shape())?;
         self.ended.remove(&body);
+        self.asks.remove(&body);
+        self.granted.remove(&body);
         self.runs.push(Run {
             body,
             driver,
             skill,
         });
         Ok(())
+    }
+
+    /// Runs `skill` on `body`, sent to `target` for the order `order` (N9): it asks a standing spot near the point,
+    /// and once one is granted the world gives it the route there ([`Runner::route`]), or ends it by the refusal's
+    /// name. An ask it made before is left.
+    pub fn send(
+        &mut self,
+        body: Id,
+        skill: Box<dyn Skill>,
+        target: Target,
+        order: Id,
+    ) -> Result<(), Refusal> {
+        if let Some(k) = self.runs.iter().position(|r| r.body == body) {
+            let r = self.runs.remove(k);
+            let _ = self.controller.release(body, r.driver);
+        }
+        self.start(body, skill)?;
+        self.asks.insert(body, (target, order));
+        self.granted.remove(&body);
+        Ok(())
+    }
+
+    /// The world gives `body`'s walk a route (`F_ROUTE`), walked from its first leg.
+    pub fn route(&mut self, body: Id, legs: &[Leg]) {
+        let n = self.routes.entry(body).or_default();
+        *n += 1;
+        let v = route_value(*n, legs);
+        self.fields.entry(body).or_default().insert(F_ROUTE, v);
+    }
+
+    /// Whether `body` stands on the standing spot it was granted: its walk there arrived, and it still holds it.
+    pub fn settled(&self, body: Id) -> bool {
+        self.granted.contains_key(&body)
+            && matches!(self.ended.get(&body), Some((_, Progress::Done)))
     }
 
     /// Whether a skill runs on `body`.
@@ -558,7 +635,19 @@ impl Runner {
             f.remove(&F_WAITING);
             f.remove(&F_SHOULDER);
         }
+        self.asks.remove(&body);
+        self.granted.remove(&body);
         self.ended.insert(body, (self.now, Progress::Failed(name)));
+    }
+
+    /// The world ends `body`'s order: its run, if any, and its ask (N9: the spot is released at the next tick).
+    pub fn end_order(&mut self, body: Id) {
+        if let Some(k) = self.runs.iter().position(|r| r.body == body) {
+            let r = self.runs.remove(k);
+            let _ = self.controller.release(body, r.driver);
+        }
+        self.asks.remove(&body);
+        self.granted.remove(&body);
     }
 
     /// `body` stays where it is by its own order: its run, if any, ends unrecorded.
@@ -612,9 +701,50 @@ impl Runner {
                 waiting: waiting(self.fields.get(&b.id)),
                 crossing: self.controller.carrying(b.id),
                 staying: self.staying.contains(&b.id),
+                // An ask stands while its order lasts and the body is not held (walked out by the world).
+                spot: self
+                    .asks
+                    .get(&b.id)
+                    .filter(|_| {
+                        !self
+                            .fields
+                            .get(&b.id)
+                            .is_some_and(|f| f.contains_key(&F_HELD))
+                    })
+                    .copied(),
             })
             .collect();
         town.turns(&marks, at)?;
+        town.spots(&marks, at)?;
+        // A walk sent to a point gets its route once its place is granted; a refusal ends it by name.
+        let waiting: Vec<(Id, Target)> = self
+            .asks
+            .iter()
+            .filter(|(who, _)| self.running(**who) && !self.granted.contains_key(who))
+            .map(|(who, (t, _))| (*who, *t))
+            .collect();
+        for (who, target) in waiting {
+            let Some(body) = self.controller.body(who).copied() else {
+                continue;
+            };
+            match town.spot(who, &target) {
+                Some(Ok(p)) => match town.plan(&body, target.node, p) {
+                    Ok(legs) => {
+                        self.granted.insert(who, p);
+                        self.route(who, &legs);
+                    }
+                    Err(e) => self.end(who, named(e.name)),
+                },
+                Some(Err(name)) => self.end(who, named(name)),
+                None => {}
+            }
+        }
+        let settled: BTreeSet<Id> = self
+            .granted
+            .keys()
+            .copied()
+            .filter(|b| self.settled(*b))
+            .collect();
         let drivers: BTreeMap<Id, Driver> = self.runs.iter().map(|r| (r.body, r.driver)).collect();
         let staged = {
             let view = town.view();
@@ -624,6 +754,7 @@ impl Runner {
                 controller: &self.controller,
                 fields: &self.fields,
                 grid: &self.grid,
+                settled,
             };
             step(
                 tree,
