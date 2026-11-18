@@ -18,7 +18,7 @@ export const FORMAT = 'souls-entry/1';
 // Section 10 is reserved for Engine v2 T3's hashed table of referenced kinds (T3, #2640, rule 14); it is not implemented
 // here. Section 11 is `children`, the kinds a thing admits as children: a check at commit by plain kind name, never a
 // hashed reference, so `kindRefs` does not follow it. Section 12 is `reactions` (SA-F15), numbered when that task lands.
-export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11,
+export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14,
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
@@ -73,6 +73,14 @@ export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_
 export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait']);
 export const CHANGES = Object.freeze(['set', 'reparent', 'link', 'unlink', 'create', 'remove', 'timer']);
 export const SUBJECTS = Object.freeze(['actor', 'this']);
+/** A vehicle (SA-F14, #2884) declares what Engine v2 needs to let a Soul drive it, never how it moves: a drive seat, a speed,
+ *  its size (the bounds) and the kind of ground it may cross. Ground is whole kinds: `level` (no doors, stairs or ladders)
+ *  or `deep_water` (deep enough to swim in). A ride is a set trip between stops that nobody steers (a sail). */
+export const VEHICLE_GROUNDS = Object.freeze(['level', 'deep_water']);
+/** Where a rider may step off: ground to stand on, water to swim in, or somewhere neither holds. */
+export const SPOTS = Object.freeze(['level', 'shallow', 'deep_water', 'door', 'stairs', 'ladder', 'blocked']);
+export const SPOTS_STAND = Object.freeze(['level', 'shallow']);
+export const SPOTS_SWIM = Object.freeze(['deep_water']);
 
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const KIND = /^[a-z][a-z0-9-]*:[a-z][a-z0-9_]*$/;
@@ -120,6 +128,9 @@ export function validateEntry(entry) {
   for (const [name, f] of Object.entries(state)) field(f, `state.${name}`, links, err, closedNames.includes(name));
   if (entry.closed !== undefined) closed(entry.closed, state, links, err);
   children(section(entry, 'children', err), err);
+  if (entry.vehicle !== undefined) vehicle(entry, err);
+  if (entry.ride !== undefined) ride(entry, err);
+  if (entry.vehicle !== undefined && entry.ride !== undefined) err('ride', 'a kind is a vehicle (steered) or a ride (a set trip), not both');
   for (const [name, l] of Object.entries(links)) {
     const p = `links.${name}`;
     if (!isObj(l)) { err(p, 'a link type is an object'); continue; }
@@ -268,6 +279,56 @@ function children(table, err) {
     if (!(typeof c.kind === 'string' && KIND.test(c.kind))) err(`${p}.kind`, 'a kind, "namespace:name"');
     if (!(isInt(c.most) && c.most > 0)) err(`${p}.most`, 'how many children at most, a whole number above zero');
   }
+}
+
+function speed(v, path, err) {
+  if (!(isInt(v.speed_mm_s) && v.speed_mm_s > 0)) err(`${path}.speed_mm_s`, 'its speed in whole millimetres per second, above zero');
+  if (!VEHICLE_GROUNDS.includes(v.ground)) err(`${path}.ground`, `the ground it may cross, one of ${VEHICLE_GROUNDS.join(', ')}`);
+}
+
+/** A vehicle: a thing a Soul sits in or on and steers. Whoever holds the drive seat steers; the engine owns the motion. */
+function vehicle(entry, err) {
+  const v = entry.vehicle, slots = isObj(entry.slots) ? entry.slots : {}, forms = isObj(entry.forms) ? entry.forms : {};
+  if (!isObj(v)) { err('vehicle', 'an object: {"drive", "steer", "speed_mm_s", "ground"}'); return; }
+  only(v, ['drive', 'steer', 'speed_mm_s', 'ground'], 'vehicle', err);
+  if (entry.owner !== 'thing') err('owner', 'a vehicle is a thing');
+  if (!Array.isArray(entry.geometry?.bounds_mm)) err('geometry.bounds_mm', 'a vehicle says its size: the bounds');
+  speed(v, 'vehicle', err);
+  const d = slots[v.drive];
+  if (!(typeof v.drive === 'string' && isObj(d) && d.admits === 'body' && d.posture === 'sit' && d.most === 1)) err('vehicle.drive', 'names a slot of this kind that admits one body, sitting: the drive seat');
+  const f = forms[v.steer];
+  if (!(typeof v.steer === 'string' && isObj(f))) err('vehicle.steer', 'names the form of this kind that steers it');
+  else {
+    if (f.who !== 'holder') err('vehicle.steer', 'the steering form is for the holder of the drive seat: who is "holder"');
+    if (!(Array.isArray(f.steps) && f.steps.some(s => s?.step === 'move'))) err('vehicle.steer', 'the steering form has a move step (its motion is the engine\'s)');
+  }
+}
+
+/** A ride: a set trip between stops, as a ride on a track (Engine v2 N12). Nobody steers; it may go across and back. */
+function ride(entry, err) {
+  const r = entry.ride, slots = isObj(entry.slots) ? entry.slots : {}, points = isObj(entry.points) ? entry.points : {}, forms = isObj(entry.forms) ? entry.forms : {};
+  if (!isObj(r)) { err('ride', 'an object: {"seats", "stops", "returns", "start", "speed_mm_s", "ground"}'); return; }
+  only(r, ['seats', 'stops', 'returns', 'start', 'speed_mm_s', 'ground'], 'ride', err);
+  if (entry.owner !== 'thing') err('owner', 'a ride is a thing');
+  if (!Array.isArray(entry.geometry?.bounds_mm)) err('geometry.bounds_mm', 'a ride says its size: the bounds');
+  speed(r, 'ride', err);
+  if (!Array.isArray(r.seats) || !r.seats.length) err('ride.seats', 'a list of slots that admit a body');
+  else r.seats.forEach((n, i) => { if (!(slots[n]?.admits === 'body')) err(`ride.seats.${i}`, 'names a slot of this kind that admits a body'); });
+  if (!Array.isArray(r.stops) || r.stops.length < 2) err('ride.stops', 'two or more stand points, in the order of the trip');
+  else r.stops.forEach((n, i) => { if (points[n]?.role !== 'stand') err(`ride.stops.${i}`, 'names a point of this kind whose role is stand'); });
+  if (typeof r.returns !== 'boolean') err('ride.returns', 'true if the trip goes back the way it came, false if it ends at the last stop');
+  const f = forms[r.start];
+  if (!(typeof r.start === 'string' && isObj(f) && f.starts === 'act')) err('ride.start', 'names the form of this kind that an actor starts the trip with');
+}
+
+/** A rider stepping off a vehicle or a ride at `spot` (one of SPOTS), `moving` or not. Getting on and off is only while it
+ *  stands still, and only where the rider could stand or swim. Refused with a code, `moving` or `no_footing`, and a reason naming the spot. */
+export function dismount(entry, {moving, spot}) {
+  if (!isObj(entry?.vehicle) && !isObj(entry?.ride)) return {ok: false, code: 'not_a_vehicle', reason: `${entry?.kind} is neither a vehicle nor a ride`};
+  if (!SPOTS.includes(spot)) return {ok: false, code: 'unknown_spot', reason: `"${spot}" is not one of ${SPOTS.join(', ')}`};
+  if (moving) return {ok: false, code: 'moving', reason: `${entry.kind} is moving; getting off is only while it stands still`};
+  if (!SPOTS_STAND.includes(spot) && !SPOTS_SWIM.includes(spot)) return {ok: false, code: 'no_footing', reason: `a rider could not stand or swim at ${spot}`};
+  return {ok: true};
 }
 
 /** A row of places: the slots that name one `row` are ordered by `place`; a row of two or more names its ends. */
