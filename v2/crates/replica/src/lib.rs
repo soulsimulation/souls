@@ -9,6 +9,7 @@ pub mod audience;
 pub mod bodies;
 pub mod directory;
 pub mod durability;
+pub mod edit;
 pub mod effects;
 pub mod encode;
 pub mod facts;
