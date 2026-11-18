@@ -55,7 +55,8 @@ export const AUDIENCE_RULES = Object.freeze(['everyone', 'owner', 'linked', 'cre
 /** `place`: a node whose kind is a place (owner `place`), such as the place a thing stands in; a `state` need reads its
  *  fields through the link, never from the tree (contract T2: a parent means lifetime and frame only). */
 export const LINK_ENDS = Object.freeze(['soul', 'body', 'thing', 'place']);
-export const POINT_ROLES = Object.freeze(['stand', 'grip', 'contact', 'outlet']);
+/** `joint`: a connector, where a part joins another (Engine v2 B17, #3338): its own `connector` kind and the kind it `mates` with. */
+export const POINT_ROLES = Object.freeze(['stand', 'grip', 'contact', 'outlet', 'joint']);
 export const SLOT_ADMITS = Object.freeze(['body', 'thing']);
 /** A row's ends: the first and the last place of a row of slots, found by `place` (SA-D3, #2855). */
 export const ROW_ENDS = Object.freeze(['first', 'last']);
@@ -185,8 +186,9 @@ export function validateEntry(entry) {
   for (const [name, pt] of Object.entries(points)) {
     const p = `points.${name}`;
     if (!isObj(pt)) { err(p, 'a point is an object'); continue; }
-    only(pt, ['role', 'at_mm', 'yaw_mdeg'], p, err);
+    only(pt, ['role', 'at_mm', 'yaw_mdeg', 'connector', 'mates'], p, err);
     if (!POINT_ROLES.includes(pt.role)) err(`${p}.role`, `must be one of ${POINT_ROLES.join(', ')}`);
+    for (const k of ['connector', 'mates']) if ((pt.role === 'joint') !== (typeof pt[k] === 'string' && IDENT.test(pt[k]))) err(`${p}.${k}`, 'a joint point, and only one, names its connector kind and the kind it mates with, lower_snake_case');
     vec(pt.at_mm, `${p}.at_mm`, err);
     if (pt.yaw_mdeg !== undefined && !isInt(pt.yaw_mdeg)) err(`${p}.yaw_mdeg`, 'whole millidegrees');
   }

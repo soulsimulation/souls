@@ -1,0 +1,19 @@
+[package]
+name = "assets"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Uploads and assets by hash, with limits (Engine v2 G6, #2747): the check, the store, the hold point."
+
+[dependencies]
+replica = { path = "../replica" }
+# PNG pixel data is inflated with a bound on its output, so a small file never decodes to a large one.
+miniz_oxide = "=0.8.9"
+
+[dev-dependencies]
+# G1's commit and K4's log, for the upload-and-place test.
+sim = { path = "../sim" }
+
+# The child's address-space and CPU limits, a second wall beside its counted memory.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
