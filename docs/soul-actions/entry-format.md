@@ -113,8 +113,9 @@ A row of places names the slots in it with `row` and `place` (1 at the first end
 back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are data (`tools/entry/cases/slots.json`).
 
 `looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
-`tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
-`look.mjs` converts to metres only when it draws.
+`tags`, in whole millimetres (a polygon's points too), with an angle in whole millidegrees and a part's `scale` and
+`glow` in permille. The format has no floating-point number and `look.mjs` converts to metres and fractions only when it
+draws; a text, list or schedule field changes no part, so it is not drawn.
 
 ## A form
 
@@ -146,6 +147,33 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
 
+## An activity (proposed: `roles`)
+
+A group activity (a lecture, a supper, later a handshake, a dance or a bout) is a node Souls enter (SA-G1a,
+[#2872](https://github.com/soulsimulation/souls/issues/2872); Engine v2 B5, [#2724](https://github.com/soulsimulation/souls/issues/2724)).
+Its kind is an ordinary entry plus a `roles` section, which the validator does not take yet: it is proposed on
+[#2842](https://github.com/soulsimulation/souls/issues/2842), and until then the examples are test kinds
+(`packages/form-rules/cases/kinds/test/lecture_activity.json`, `supper.json`).
+
+```json
+"roles": {
+  "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
+  "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } }
+}
+```
+
+- A **role** is one of the kind's link types; membership is that link to the body, and the link's `most` is how many
+  the role takes. `need` is `required` (the activity cannot start without it), `replaceable` (required, and another
+  may take it while it runs) or `optional`. Starting, leaving and ending are SA-G1b's and Engine v2 B5's.
+- **places** say where a member of the role may be, in a fixed order. `in: "this"`: the activity's own `slots`, in
+  the order listed, so a body becomes the activity's child. `in: "here"`: the slots of things in the same place as
+  the activity whose origin is within `within_mm` of the activity's, nearest first, then by node id, then in the
+  thing's slot order. Only a slot that admits a body counts, and, if `posture` is given, only one with that posture.
+  The first slot with room is the place. If no slot has room, the answer is `no_free_place`, naming the role.
+- **Entering is a form** of the kind. It links the role to the actor and moves the actor into a slot argument
+  (`reparent`), and the role's places fill that argument. Who may enter a role is that form's `who`.
+- The world moves no body. Each Soul walks and sits by its own steps; the form's effects only link and set the parent.
+  Anything that needs another Soul's yes is an offer with an expiry (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)).
 ## A move
 
 A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
