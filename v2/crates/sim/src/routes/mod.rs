@@ -9,8 +9,9 @@
 //!   open ground one of each square it crosses. A doorway to the open ground is such a link, one end on the
 //!   building's floor and the other on the ground's squares.
 //! - **Coarse.** A search (A*, the heuristic the straight distance in the ground's frame) over portals: within a
-//!   piece, from each portal to each other; across a link, from one end to the other. The distance between two
-//!   portals of one piece is its line inside the piece (below), computed on first use and cached with the piece.
+//!   piece, from each portal to each other; across a link, from one end to the other, never straight back across
+//!   the link just crossed. The distance between two portals of one piece is its line inside the piece (below),
+//!   computed on first use and cached with the piece.
 //! - **Fine.** Inside one piece, a search over its triangles and string pulling (the funnel), done as a walker
 //!   enters it. A route carries the first piece's line; the rest is cut as the body goes. String pulling treats the
 //!   body as a point, which is right here: the patch is the ground already shrunk by the body's radius.
@@ -32,10 +33,12 @@
 //!
 //! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), routes across water (N11). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
+pub mod way;
+
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;
-use crate::ground::{MARGIN, OpenGround, Piece, SQUARE, Scene};
+use crate::ground::{MARGIN, OpenGround, Piece, SQUARE};
 use crate::links::{Building, End, F_OPEN, Kind, Link, Open, ground_doors};
 use replica::effects::Refusal;
 use replica::encode::Value;
@@ -301,7 +304,7 @@ impl Map {
         };
         let mut ground_meets = Vec::new();
         // The open ground, square by square, and each piece's stretches along its square's edges.
-        let open = OpenGround::prepare(&Scene::of(tree, ground)?, radius)?;
+        let open = OpenGround::of(tree, ground, radius)?;
         let gv = version(ground);
         // Edge stretches by line: (true for x = c, c) → (lo, hi, square, piece).
         let mut lines: BTreeMap<(bool, i64), Vec<Stretch>> = BTreeMap::new();
@@ -711,14 +714,15 @@ impl Map {
             p[0].div_euclid(SQUARE) as i32,
             p[1].div_euclid(SQUARE) as i32,
         );
-        let list = self
-            .by_patch
-            .get(&(node, None))
-            .or_else(|| self.by_patch.get(&(node, Some(square))))?;
+        let (list, open) = match self.by_patch.get(&(node, None)) {
+            Some(l) => (l, false),
+            None => (self.by_patch.get(&(node, Some(square)))?, true),
+        };
         let y = mm(at.y);
+        // The open ground is one level, its plan at 0; a body on it stands at the terrain's height (N11a, #2735).
         list.iter()
             .filter(|&&q| {
-                self.pieces[q as usize]
+                open || self.pieces[q as usize]
                     .piece
                     .vertices
                     .first()
@@ -1051,7 +1055,10 @@ impl Map {
                 }
             }
             let (l, side) = (self.portals[u as usize].link, self.portals[u as usize].side);
-            if l != NONE {
+            // Never straight back across the link just crossed: that lands on another portal of the end the body
+            // went in by, a doorway used as a bridge between two squares' pieces of the open ground, which no walk
+            // follows (#3187). Ground there is reached across the pieces.
+            if l != NONE && self.seen[u as usize].3 != LINK | l {
                 if let Some(why) = self.refuse(tree, l, has) {
                     let far = self.links[l as usize].ends[1 - side as usize]
                         .iter()

@@ -29,6 +29,11 @@ step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
+# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md).
+# The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
+step origin-headers node --test tools/origin/origin.test.mjs
+# What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
+step cost node --test tools/ops/cost/cost.test.mjs
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 

@@ -10,8 +10,8 @@
 //!    writes no part, and a world that jumps ahead (K9) does not leave holes in the numbers. Every [`HASH_EVERY`]th
 //!    part (numbers 9, 19, …) carries the state hash (`hash.rs`) of the view's copy after it, so a reader checks it
 //!    holds the same state. A part never changes once written; a reader may cache it for a year.
-//!    `{1: number, 2: from µs, 3: to µs, 4: first sequence, 5: entries, 6: packed T6 part, 7: state hash}`, 7 when
-//!    carried.
+//!    `{1: number, 2: from µs, 3: to µs, 4: first sequence, 5: entries, 6: packed T6 part, 7: state hash, 8: [[first,
+//!    count], ...]}`, 7 when carried, 8 when the view skipped entries (rule 6).
 //! 3. **The pointer** ([`Pointer`]) is the one file that changes: the newest part, the period, the header's hash, the
 //!    newest part's end in world time, world time against wall time, and "quiet until" for a still world.
 //!    `{1: newest, 2: period µs, 3: header hash, 4: newest's end µs, 5: anchor world µs, 6: anchor wall ms, 7: quiet
@@ -19,7 +19,12 @@
 //! 4. **Words never travel in parts.** A part is T6 bytes, whose text items are names only (T6 rule 10); free text is
 //!    a reference (T8, `{21: id}`). Words reach an entitled audience by another path (W4), not here.
 //! 5. **The reader** ([`Player`]) applies parts in number order to R1's replica, refuses a part out of order by name,
-//!    and checks each carried hash.
+//!    and checks each carried hash. It keeps the part's motion samples, every one in entry order ([`Player::samples`]),
+//!    so a page draws a body through each of them, not only through its state after the part (V6, #2715).
+//! 6. **A view's gaps are declared, never guessed.** A view skips the entries it does not hold (another audience's, or
+//!    outside its node; T7 rule 4), so its sequences jump. A part lists each jump before its entries as `[first,
+//!    count]`, and the reader's replica accepts exactly those (`Replica::apply_gaps`); a jump a part does not declare
+//!    is still refused as `sequence-gap`, so a lost part is never skipped. A stream with no gaps has no field 8.
 
 pub mod lz;
 #[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
@@ -28,9 +33,10 @@ mod wasm;
 use std::collections::BTreeMap;
 
 use crate::apply::Replica;
-use crate::effects::{Header, Part, Refusal};
+use crate::effects::{Body, Change, Header, Part, Refusal};
 use crate::encode::{Value, decode, encode, to_hex};
 use crate::ids::Id;
+use crate::pose::HandOff;
 use crate::time::Micros;
 use crate::views::Key;
 use crate::world_model::Audience;
@@ -82,6 +88,24 @@ fn read_bytes(v: Option<&Value>, what: &str) -> R<Vec<u8>> {
         Some(Value::Bytes(b)) => Ok(b.clone()),
         _ => refuse("stream-record", format!("{what} is missing")),
     }
+}
+
+fn read_gaps(v: Option<&Value>) -> R<Vec<(u64, u64)>> {
+    let Some(v) = v else {
+        return Ok(Vec::new());
+    };
+    let Value::Array(a) = v else {
+        return refuse("stream-record", "a part's gaps are not a list");
+    };
+    a.iter()
+        .map(|g| match g {
+            Value::Array(p) if p.len() == 2 => Ok((
+                read_uint(p.first(), "a gap's first")?,
+                read_uint(p.get(1), "a gap's count")?,
+            )),
+            _ => refuse("stream-record", "a gap is [first, count]"),
+        })
+        .collect()
 }
 
 fn read_map(bytes: &[u8], what: &str) -> R<BTreeMap<u64, Value>> {
@@ -139,6 +163,8 @@ pub struct StreamPart {
     pub entries: u64,
     pub part: Vec<u8>,
     pub hash: Option<Vec<u8>>,
+    /// The sequences the view skipped before this part's entries, `(first, count)` in order (rule 6).
+    pub gaps: Vec<(u64, u64)>,
 }
 
 impl StreamPart {
@@ -154,6 +180,13 @@ impl StreamPart {
         ]);
         if let Some(h) = &self.hash {
             m.insert(7, Value::Bytes(h.clone()));
+        }
+        if !self.gaps.is_empty() {
+            let pairs = self
+                .gaps
+                .iter()
+                .map(|(f, c)| Value::Array(vec![Value::Uint(*f), Value::Uint(*c)]));
+            m.insert(8, Value::Array(pairs.collect()));
         }
         bytes_of(Value::Map(m))
     }
@@ -172,6 +205,7 @@ impl StreamPart {
                 .get(&7)
                 .map(|v| read_bytes(Some(v), "a part's hash"))
                 .transpose()?,
+            gaps: read_gaps(m.get(&8))?,
         })
     }
 }
@@ -269,6 +303,7 @@ impl Played {
 pub struct Player {
     replica: Replica,
     next: u64,
+    samples: Vec<HandOff>,
 }
 
 impl Player {
@@ -277,6 +312,7 @@ impl Player {
         Ok(Player {
             replica: Replica::start(header)?,
             next: 0,
+            samples: Vec::new(),
         })
     }
 
@@ -286,6 +322,11 @@ impl Player {
 
     pub fn replica(&self) -> &Replica {
         &self.replica
+    }
+
+    /// The motion samples of the part played last, every one, in entry order (V6, #2715).
+    pub fn samples(&self) -> &[HandOff] {
+        &self.samples
     }
 
     /// Plays one part's file bytes: the next number only, whole or not at all.
@@ -301,8 +342,21 @@ impl Player {
         if part.header != self.replica.header().hash().to_bytes() {
             return refuse("header-mismatch", "the part names another header");
         }
-        self.replica.apply(&part)?;
+        self.replica.apply_gaps(&part, &sp.gaps)?;
         self.next += 1;
+        self.samples = part
+            .effects
+            .iter()
+            .filter_map(|e| match &e.body {
+                Body::Changes(cs) => Some(cs),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|c| match &c.change {
+                Change::Motion(h) => Some(*h),
+                _ => None,
+            })
+            .collect();
         let hash = match &sp.hash {
             Some(h) => Some(*h == crate::hash::state_hash(self.replica.tree())?.to_bytes()),
             None => None,
