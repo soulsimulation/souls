@@ -460,6 +460,39 @@ impl World for Town {
 }
 
 impl Town {
+    /// The legs of a walk shaped by `way` (E10, #2781): the routes from where `body` stands through each of the way's
+    /// points (`crate::routes::way`) and on to `goal` when one is named, joined into one walk. A point is a leg with
+    /// no link that is not the last, which the walk passes without stopping. Each point is one route search, counted
+    /// in the points returned.
+    pub fn plan_way(
+        &mut self,
+        body: &Body,
+        way: &replica::walk::Way,
+        goal: Option<Vec3>,
+    ) -> Result<(Vec<Leg>, crate::routes::way::Points), Refusal> {
+        let from = body.pose.position;
+        let pts = crate::routes::way::points(&self.tree, &self.map, self.ground, from, goal, way)?;
+        let mut stops = pts.points.clone();
+        stops.extend(goal);
+        if stops.is_empty() {
+            return Err(refusal("way-empty", "a walk with no point and no goal"));
+        }
+        let (mut legs, mut at) = (Vec::new(), *body);
+        for p in stops {
+            legs.extend(self.plan(&at, self.ground, p)?);
+            at = self.surface(self.ground)?.place(
+                body.id,
+                Frame {
+                    node: self.ground,
+                    slot: None,
+                },
+                p,
+                Quat::IDENTITY,
+            )?;
+        }
+        Ok((legs, pts))
+    }
+
     /// Where `body` aims next on its way to `to` (on the node it stands on), x and z µm: `to` when a straight walk
     /// reaches it, else the next corner of the line there.
     pub fn corner_of(&mut self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {

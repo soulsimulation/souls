@@ -22,6 +22,7 @@ pub mod rules;
 pub mod time;
 pub mod tree;
 pub mod views;
+pub mod walk;
 // R1's bindings import wasm-bindgen's glue, so the checker (T10, no imports) leaves them out.
 #[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
 mod wasm;
