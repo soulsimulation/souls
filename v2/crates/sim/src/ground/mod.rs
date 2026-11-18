@@ -39,6 +39,12 @@
 //!   corner or its middle over water (ground cover: a pier, a shore) keeps 0, the cover's height as before. Cutting
 //!   through every 1 m sample instead made Eden's open ground 24 times the triangles and slowed N15's thousand
 //!   walkers past real time; heights on the vertices made the routes' one level many.
+//! - **Things on the terrain.** What stands on the open ground is measured from the ground under it, not from the
+//!   plan's 0 (#3227; `scene::Terrain::ground`: the terrain's height there, or 0 where that is nearer, as over water
+//!   under a pier): a floor is ground cover within [`STEP`] of it, a footprint below [`BODY_HIGH`] above it, a
+//!   doorway or a step meets the open ground's plan from its height above it, and an outline step steps down to it.
+//!   So Eden's 94 floors of buildings on its hills (a cottage 10.3 m up) are joined to the open ground like the
+//!   town's. Boxes on the open ground still span the body from the plan's 0.
 //! - **Steep cells.** A 1 m cell whose slope is above [`STEEP`] (a rise over run of 0.5774, today's) is taken from
 //!   the open ground before its cover is added back: no centre stands on it, so the mover slides along its edge and
 //!   a route goes round it. Cells are taken as they are, not grown by the radius: a body's edge may hang over one.
@@ -370,6 +376,9 @@ struct Door {
     across: [i64; 2],
     half: i64,
     y: i64,
+    /// The open ground's height under it, µm (its terrain's, #3227): the open ground's cut, whose plan is at 0, meets
+    /// a doorway at `y` less this. 0 on a floor.
+    ground: i64,
     /// Through the wall: from `n0` to `n1` mm along `across`.
     n0: i64,
     n1: i64,
@@ -473,6 +482,11 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             across,
             half: dw.width / 2000,
             y: dw.y,
+            ground: if s.open {
+                Terrain::ground(s.terrain.as_ref(), dw.at[0], dw.at[1], dw.y)
+            } else {
+                0
+            },
             n0: -DOOR_HALF_DEPTH,
             n1: DOOR_HALF_DEPTH,
             step: dw.step,
@@ -508,11 +522,12 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
         let rect = door.rect(-door.half, door.half, door.n0, door.n1);
         let gr = grow(&rect, d);
         let bb = bounds(&gr);
-        never.push((gr, dw.y, bb));
+        never.push((gr, dw.y - door.ground, bb));
         doors.push(door);
     }
     for f in &s.footprints {
-        if f.y < BODY_HIGH * 1000 {
+        // A building on the terrain is a footprint where its floor stands on the ground under it (#3227).
+        if scene::above_ground(s.terrain.as_ref(), f) < BODY_HIGH * 1000 {
             let r = ccw(f.ring.iter().map(|p| g(*p)).collect::<Result<_, _>>()?);
             // Grown outwards: the ring turned clockwise has the outside on its left.
             let mut parts = Vec::new();
@@ -657,7 +672,7 @@ fn meets(
 ) {
     let reach = g.d + PASSAGE_REACH;
     for door in &g.doors {
-        if (door.y - y).abs() >= BODY_LOW * 1000 {
+        if (door.y - door.ground - y).abs() >= BODY_LOW * 1000 {
             continue;
         }
         let q0 = door.rect(-door.half, door.half, door.n0 - reach, door.n1 + reach);
@@ -766,8 +781,9 @@ impl OpenGround {
 
     /// The open ground node `ground` of `tree`, on the terrain it holds (N1b, #3197), if any.
     pub fn of(tree: &Tree, ground: Id, radius: i64) -> Result<OpenGround, String> {
-        let mut o = OpenGround::prepare(&Scene::of(tree, ground)?, radius)?;
-        o.1 = Terrain::of(tree, ground)?;
+        let s = Scene::of(tree, ground)?;
+        let mut o = OpenGround::prepare(&s, radius)?;
+        o.1 = s.terrain;
         Ok(o)
     }
 
