@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":226,"group":"with-others","words":"sit round the campfire with the others","obvious":3,"things":{"campfire":"eden:campfire","log":"eden:log"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"log"}}]}

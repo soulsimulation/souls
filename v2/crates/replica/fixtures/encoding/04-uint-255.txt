@@ -1,0 +1,2 @@
+255 # the largest one-byte argument
+18ff
