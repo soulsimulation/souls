@@ -60,7 +60,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 14 | `ride` | A set trip between stops that nobody steers (below) |
 | 15 | `stock` | The things a container is known to hold, yielded when taken (below) |
 | 16 | `areas` | What a kind says about resting on it, or about a named part of its surroundings, where its shape cannot (below) |
-| 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
+| 17 | `roles` | An activity's roles: how much each is needed and where its members may be, and its "now" line, `now` (below) |
 | 18 | `motion` | How a thing moves: `{"how"}`, one of `one_hand`, `two_hands`, `pushed_by_one`, `two_souls`, `wheeled`, `fixed` (below) |
 | 19 | `loose` | How long it lasts once nobody holds or owns it: `{"ever": true}` or `{"us": <microseconds>}` (below) |
 | 20 | `looks` | How it looks: `model` (a look id), `table`, the looks table, and `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
@@ -188,7 +188,7 @@ body's family declares it.
 **Bounds and timed values.** `min` / `max`: whole bounds of an `int` field (or a timed value); an amount moved never
 takes it past them. A `transfer` fills to `max` and draws down to `min`. A `timed` field is a value that changes with
 time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit: `count`, `mm`,
-`g`, `mg`, `mC` or `permille`), and a default
+`g`, `mg`, `mC` or `permille`, or `us` for a countdown), and a default
 of three whole numbers, `{"value", "per_s", "set_us"}`: the value in that unit, its rate in that unit per second, and the
 world time it was set, in microseconds. A slow process takes a small unit so its rate stays a whole number a second:
 the planter's water (SA-V4a) is in mg and dries at 5 mg a second (18 g an hour), and its stages come from timers a
@@ -421,20 +421,22 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   seated. A body still in the activity's own slots is moved out to the place the activity is in, so removing the
   activity removes no body. Then the activity is removed. The rules name the two events `released` and `ended`.
   Nothing removes a member for being quiet.
-- **The "now" line** (proposed: a `now` section) names the parts of the activity's state that say what is happening
+- **The "now" line** (`roles.now`: a member of the activity's own section, 17, so no role is named `now`) names the parts of the activity's state that say what is happening
   now. Souls read it as a fact and schedule themselves by it; the engine never waits on their behalf.
 
   ```json
-  "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" }
+  "roles": { ..., "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" } }
   ```
 
   `floor` is the link type whose ends have the floor. `stage` is an enum field. `ends` is a timed field (SA-F5a)
   counting down in microseconds; the activity ends at the first microsecond it reaches 0. A part the asker may not
-  see is left out and named as unseen.
-- **Unattended**, an activity is removed at that time by its own world form (`who: "world"`, `starts: "timer"`),
+  see is left out and named as unseen. The check gate takes a role for `floor`, an enum field for `stage` and a
+  timed field for `ends`.
+- **Unattended**, an activity is removed at that time by its own world form (`who: "world"`, `starts: "timer"`; the
+  check gate counts the crossing as what arms it),
   whose needs are the time (`ends` at most 0) and that no role is linked. The engine's timer runs it then. While
   anyone is in it, the form is refused and nothing changes.
-  The example is `packages/form-rules/cases/kinds/test/talk.json`.
+  The examples are `packages/form-rules/cases/kinds/test/talk.json` and the lecture, `content/kinds/hall/lecture.json`.
 
 - **A standing activity** (proposed: a `standing` section; SA-G2, [#2874](https://github.com/soulsimulation/souls/issues/2874))
   outlasts a sitting: a course or a job. It names `members`, a link type for those who belong across days; `present`,

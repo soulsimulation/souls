@@ -1,0 +1,101 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:hall_lecture (SA-V5, #2877), each form done once: a speaker takes the lectern, a listener sits on a bench and leaves, the speaker steps down; and a lecture nobody entered is removed at its time by its own world form.",
+  "cases": [
+    {
+      "name": "hall_lecture_take_the_lectern_attend_leave_step_down",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "h1", "k1"] },
+          "h1": { "kind": "eden:hall_lecture" },
+          "k1": { "kind": "eden:bench" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "h1", "form": "take_the_lectern", "args": { "place": { "node": "h1", "slot": "lectern" } } },
+          "receipt": "hl1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "link", "node": "h1", "link": "speaker", "n": 1, "end": "b1" },
+              { "change": "reparent", "node": "b1", "to": { "node": "h1", "slot": "lectern" } },
+              { "change": "set", "node": "h1", "field": "phase", "n": 1, "to": "speaking" }
+            ],
+            "events": [
+              { "event": "eden:took_the_lectern", "node": "h1", "changes": [0] },
+              { "event": "eden:stood_at_the_lectern", "node": "h1", "changes": [1] },
+              { "event": "eden:lecture_began", "node": "h1", "changes": [2] }
+            ]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "h1", "form": "attend", "args": { "seat": { "node": "k1", "slot": "left" } } },
+          "receipt": "hl2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "link", "node": "h1", "link": "listener", "n": 2, "end": "b2" },
+              { "change": "reparent", "node": "b2", "to": { "node": "k1", "slot": "left" } }
+            ],
+            "events": [
+              { "event": "eden:joined_the_audience", "node": "h1", "changes": [0] },
+              { "event": "eden:sat_down", "node": "h1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "h1", "form": "leave" },
+          "receipt": "hl3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "unlink", "node": "h1", "link": "listener", "n": 2, "end": "b2" },
+              { "change": "reparent", "node": "b2", "to": { "node": "room" } }
+            ],
+            "events": [
+              { "event": "eden:left_the_audience", "node": "h1", "changes": [0] },
+              { "event": "eden:stood_up", "node": "h1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "act": { "this": "h1", "form": "step_down" },
+          "receipt": "hl4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "unlink", "node": "h1", "link": "speaker", "n": 1, "end": "b1" },
+              { "change": "reparent", "node": "b1", "to": { "node": "room" } }
+            ],
+            "events": [
+              { "event": "eden:stepped_down", "node": "h1", "changes": [0] },
+              { "event": "eden:left_the_lectern", "node": "h1", "changes": [1] }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "hall_lecture_nobody_entered_lapses_at_its_time",
+      "state": {
+        "actor": "b1",
+        "now_us": 3600000000,
+        "nodes": {
+          "room": { "loose": ["b1", "h1"] },
+          "h1": { "kind": "eden:hall_lecture" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        { "act": { "this": "h1", "form": "lapse" }, "receipt": "hl5", "expect": { "verdict": "yes", "events": [{ "event": "eden:lapsed", "node": "h1", "changes": [0] }] } }
+      ],
+      "after": { "h1": null, "room": { "loose": ["b1"] } }
+    }
+  ]
+}
