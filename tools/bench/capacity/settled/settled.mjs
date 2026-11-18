@@ -167,14 +167,14 @@ async function arm(world, souls, limit, heapMb) {
 // ------------------------------------------------------------------ disk after 24 h (worked out, not waited for)
 // The database at hour h: everything but snapshots grows at the measured rate; snapshots plateau at the newest 5 plus the
 // first of each day (db.ts saveSnapshot: 7 after 24 h, counting two day buckets; 12 after a week), each the mean measured
-// size. Hourly backups (main.ts pruneBackups): the newest 6 plus the 00:00 UTC file of each of the last 8 days, so 7
-// after 24 h and 14 after a week; each is a copy of the database at its hour, counted here at the horizon's size (an upper
+// size. Hourly backups (world-main.ts pruneBackups, #2542): the newest 2, so 2 after 24 h and after a week; each is a
+// copy of the database at its hour, counted here at the horizon's size (an upper
 // bound). WAL and the other files are taken as measured at the end.
 function disk24h(r, gb = 100) {
   const c = r.content; if (r.otherGrowthBytesPerHour == null || !c?.snapshots) return null;
   const meanSnap = c.snapshotBytes / c.snapshots, rest = r.endDirBytes - r.files.filter((x) => /^sim\.db$|^backup-/.test(x.f)).reduce((s, x) => s + x.bytes, 0);
   const dbAt = (h, snaps) => c.otherBytes + Math.max(0, r.otherGrowthBytesPerHour) * Math.max(0, h - r.settledMin / 60) + snaps * meanSnap;
-  const db24 = dbAt(24, 7), dbWeek = dbAt(24 * 7, 12), at24 = rest + db24 * (1 + 7), week = rest + dbWeek * (1 + 14);
+  const db24 = dbAt(24, 7), dbWeek = dbAt(24 * 7, 12), at24 = rest + db24 * (1 + 2), week = rest + dbWeek * (1 + 2);
   return { meanSnapshotMb: mb(meanSnap), db24Mb: mb(db24), dir24hMb: mb(at24), dirWeekMb: mb(week), worldsPer100GbAt24h: Math.floor((gb * 1e9) / at24), worldsPer100GbWeek: Math.floor((gb * 1e9) / week) };
 }
 
