@@ -12,7 +12,7 @@
 //! - **No overflow after a long sleep.** Everything is worked in 128 bits: a product of two 64-bit numbers fits, and
 //!   a value or time beyond the signed 64-bit range is refused (`beyond_i64`), never wrapped.
 //!
-//! The shared cases: `packages/form-rules/cases/timed/` (format `souls-timed-cases/1`).
+//! The shared cases: SA-F5a's `souls-timed-cases/1`, copied as data into `fixtures/timed/`.
 
 use crate::encode::Value;
 use crate::time::{MICROS_PER_SECOND, Micros};
@@ -162,9 +162,8 @@ mod tests {
     use super::*;
     use crate::rules::json::{Value as J, parse};
 
-    const CASES: &str = include_str!("../../../../packages/form-rules/cases/timed/kettle.json");
-    const KIND: &str =
-        include_str!("../../../../packages/form-rules/cases/kinds/test/timed_kettle.json");
+    const CASES: &str = include_str!("../fixtures/timed/cases.json");
+    const KIND: &str = include_str!("../fixtures/timed/kind.json");
 
     fn int(v: Option<&J>) -> Option<i128> {
         match v? {
