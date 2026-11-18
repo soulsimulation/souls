@@ -5,9 +5,9 @@
 //!   push away from every neighbour within [`RANGE`], leaning right when one comes head-on, and hand the velocity to
 //!   the mover. At a link's near end it crosses the link by the link's move, opening a shut door first (stand, open,
 //!   cross: the opening is written at the end of the tick and read the next, T1).
-//! - **Neighbours** are read as of the previous tick (T1, `v2/docs/TRUNK.md`): a plain grid per node of the bodies'
-//!   positions and velocities, taken before any walker moves, in cells of [`RANGE`]. Two at one point push apart
-//!   by id: the lower id goes right.
+//! - **Neighbours** are read as of the previous tick (T1, `v2/docs/TRUNK.md`): the spatial index (N16,
+//!   `crate::index`) of the bodies' positions, with their velocities, taken before any walker moves. Two at one
+//!   point push apart by id: the lower id goes right.
 //! - **A preference.** The push is resolved on the walker's own axes: forward, where it may slow the walker but never
 //!   below a tenth of its free speed (no waiting at a narrow place yet: N8), and sideways. The sum never exceeds free
 //!   speed. Overlap is allowed, and measured ([`Crowd::close`]).
@@ -30,11 +30,16 @@
 //!   and arrives within [`AT_SPOT`] of it. Its mark asks while its order runs; when it no longer asks (it left, or
 //!   its order ended, [`Crowd::end`]) the place is released.
 //!
-//! Not here: the ladder (N10), the neighbour index proper (N16), the transfer records
+//! **Retiring** (T9b #3120): the walk now runs as a skill through the host (`skills::route`, the same algorithm). This
+//! `Crowd` keeps its own bodies, stepped by the controller's dry run, until T9c moves N10's ladder and these tests onto
+//! the skill.
+//!
+//! Not here: the ladder (N10), the transfer records
 //! of a crossing (N6's `mover::cross` needs the zone's pose scene, which no caller holds yet).
 
 pub mod town;
 
+use crate::index::Index;
 use crate::mover::Body;
 use crate::spots::Target;
 use replica::effects::Refusal;
@@ -191,14 +196,17 @@ struct Seen {
     settled: bool,
 }
 
-/// The bodies of one tick by node and cell of [`RANGE`].
+/// The bodies of one tick, as they stood before any walker moves: the spatial index (N16, `crate::index`) and what
+/// each is.
 struct Grid {
-    cells: BTreeMap<(Id, i64, i64), Vec<Seen>>,
+    index: Index,
+    seen: BTreeMap<Id, Seen>,
 }
 
 impl Grid {
-    fn of(walkers: &[Walker]) -> Grid {
-        let mut cells: BTreeMap<(Id, i64, i64), Vec<Seen>> = BTreeMap::new();
+    fn of(walkers: &[Walker], split: bool) -> Grid {
+        let mut index = if split { Index::new() } else { Index::fixed() };
+        let mut seen = BTreeMap::new();
         for w in walkers.iter().filter(|w| !w.crossing) {
             let p = w.body.pose.position;
             let s = Seen {
@@ -209,39 +217,20 @@ impl Grid {
                 waiting: w.waiting,
                 settled: w.spot.is_some() && w.arrived.is_some(),
             };
-            cells.entry(Grid::key(s.node, s.at)).or_default().push(s);
+            index.put_body(s.id, s.node, s.at);
+            seen.insert(s.id, s);
         }
-        Grid { cells }
-    }
-
-    fn key(node: Id, p: [i64; 2]) -> (Id, i64, i64) {
-        (node, p[0].div_euclid(RANGE), p[1].div_euclid(RANGE))
+        Grid { index, seen }
     }
 
     /// Every other body on `node` within `r` of `p`, in id order.
     fn near(&self, me: Id, node: Id, p: [i64; 2], r: i64) -> Vec<(Seen, i64)> {
-        let (_, i, j) = Grid::key(node, p);
-        let mut out = Vec::new();
-        for di in -1..=1 {
-            for dj in -1..=1 {
-                for s in self
-                    .cells
-                    .get(&(node, i + di, j + dj))
-                    .into_iter()
-                    .flatten()
-                {
-                    if s.id == me {
-                        continue;
-                    }
-                    let d = len([p[0] - s.at[0], p[1] - s.at[1]]);
-                    if d < r {
-                        out.push((*s, d));
-                    }
-                }
-            }
-        }
-        out.sort_by_key(|(s, _)| s.id);
-        out
+        self.index
+            .bodies_within(node, p, r)
+            .into_iter()
+            .filter(|(id, _)| *id != me)
+            .map(|(id, d)| (self.seen[&id], d))
+            .collect()
     }
 }
 
@@ -321,6 +310,8 @@ pub struct Crowd {
     pub walked: u64,
     /// Of those, the ones with another centre closer than [`CLOSE`] on the same node.
     pub close: u64,
+    /// Whether the neighbour index splits crowded cells (N16; on by default). No walker notices either way.
+    pub split: bool,
 }
 
 impl Crowd {
@@ -331,6 +322,7 @@ impl Crowd {
             now: 0,
             walked: 0,
             close: 0,
+            split: true,
         }
     }
 
@@ -404,7 +396,7 @@ impl Crowd {
 
     /// One tick for every walker, in id order, against its neighbours as they stood at the end of the last tick.
     pub fn step(&mut self, world: &mut impl World) -> Result<(), Refusal> {
-        let grid = Grid::of(&self.walkers);
+        let grid = Grid::of(&self.walkers, self.split);
         let (dt, at) = (self.tick, self.now + self.tick);
         // The marks as of the last tick, read by the owners of the links taken in turns.
         let marks: Vec<Mark> = self
@@ -525,7 +517,7 @@ impl Crowd {
         }
         self.now = at;
         // The overlap measure, on where the bodies stand now.
-        let after = Grid::of(&self.walkers);
+        let after = Grid::of(&self.walkers, self.split);
         for w in self.walkers.iter().filter(|w| w.arrived.is_none()) {
             if w.crossing {
                 continue;

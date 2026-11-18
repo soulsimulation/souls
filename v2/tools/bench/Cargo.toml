@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `frozen`: K8, #2671."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `frozen`: K8, #2671; `timers`: K9, #2672; `moves`: B2, #2681."
 
 [[bin]]
 name = "tree"
@@ -19,6 +19,23 @@ path = "replica-equal/main.rs"
 name = "frozen"
 path = "src/frozen.rs"
 
+[[bin]]
+name = "timers"
+path = "src/timers.rs"
+
+[[bin]]
+name = "moves"
+path = "src/moves.rs"
+
+[[bin]]
+name = "walkers"
+path = "walkers/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
+# The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
 sim = { path = "../../crates/sim" }
+testworld = { path = "../testworld" }
+import-eden = { path = "../import-eden" }
+# The `moves` bench places its bodies with the script driver's helpers (B2, #2681).
+body-script = { path = "../body-script" }

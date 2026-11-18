@@ -725,7 +725,20 @@ impl Map {
                     .is_some_and(|v| i64::from(v[1]) == y)
             })
             .map(|&q| {
-                let (_, d2, near) = self.gap(q, p);
+                let (t, d2, mut near) = self.gap(q, p);
+                // Rounded onto the grid, the nearest point of a slanted edge may lie just off the piece: it is taken
+                // a millimetre at a time towards its triangle's middle until it stands on it.
+                for _ in 0..3 {
+                    if d2 == i64::MAX || self.locate(q, near, y).is_some() {
+                        break;
+                    }
+                    let [a, b, c] = self.tri(q, t);
+                    let m = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3];
+                    near = [
+                        near[0] + (m[0] - near[0]).signum(),
+                        near[1] + (m[1] - near[1]).signum(),
+                    ];
+                }
                 (d2, q, near)
             })
             .min()

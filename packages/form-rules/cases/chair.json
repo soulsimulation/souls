@@ -1,0 +1,109 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:chair (SA-X24): sit in its one seat; pull it out and push it in by its back rail, never with someone in it.",
+  "cases": [
+    {
+      "name": "chair_sit_free",
+      "act": { "this": "c1", "form": "sit", "args": { "seat": "seat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:chair", "slots": { "seat": [] } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 760, -150] },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "chair_sit_taken",
+      "act": { "this": "c1", "form": "sit", "args": { "seat": "seat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:chair", "slots": { "seat": ["b2"] } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 760, -150] },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "detail": { "node": "c1", "slot": "seat" }, "fix": null }
+    },
+    {
+      "name": "chair_pull_out_in_reach",
+      "act": { "this": "c1", "form": "pull_out" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:chair", "fields": { "tucked": true }, "slots": { "seat": [] } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 760, -150] },
+          "b2": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "chair_pull_out_from_too_far",
+      "act": { "this": "c1", "form": "pull_out" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:chair", "fields": { "tucked": true }, "slots": { "seat": [] } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 760, 1400] },
+          "b2": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 0, "detail": { "point": "back", "move": "press" } }
+    },
+    {
+      "name": "chair_push_in_empty",
+      "act": { "this": "c1", "form": "push_in" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:chair", "slots": { "seat": [] } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 760, -150] },
+          "b2": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "chair_push_in_while_someone_sits",
+      "act": { "this": "c1", "form": "push_in" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:chair", "slots": { "seat": ["b2"] } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 760, -150] },
+          "b2": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "detail": { "node": "c1", "slot": "seat" } }
+    },
+    {
+      "name": "chair_push_in_from_too_far",
+      "act": { "this": "c1", "form": "push_in" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": { "kind": "eden:chair", "slots": { "seat": [] } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 760, 1400] },
+          "b2": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 1, "detail": { "point": "back", "move": "press" } }
+    }
+  ]
+}

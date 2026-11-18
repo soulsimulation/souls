@@ -1,0 +1,298 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:dyeable_cloth",
+  "owner": "thing",
+  "state": {
+    "dye": {
+      "n": 1,
+      "type": "enum",
+      "values": ["undyed", "indigo", "rust"],
+      "default": "undyed",
+      "audience": {"rule": "everyone"}
+    },
+    "banded": {
+      "n": 2,
+      "type": "bool",
+      "default": false,
+      "audience": {"rule": "everyone"}
+    },
+    "indigo": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "audience": {"rule": "everyone"}
+    },
+    "rust": {
+      "n": 4,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "audience": {"rule": "everyone"}
+    },
+    "water": {
+      "n": 5,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 2,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 25, 0]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [360, 50, 260]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "free": true}
+      ],
+      "steps": [
+        {"step": "take"}
+      ],
+      "effects": [
+        {"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}
+      ]
+    },
+    "dye_indigo_solid": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bench": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cloth_dye_bench",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "needs_indigo"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "bench"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "indigo",
+          "from": {"arg": "bench"},
+          "into": "this",
+          "amount": 1,
+          "event": "pigment_used"
+        },
+        {
+          "change": "transfer",
+          "field": "water",
+          "from": {"arg": "bench"},
+          "into": "this",
+          "amount": 1,
+          "event": "water_used"
+        },
+        {"change": "set", "field": "dye", "to": "indigo", "event": "dyed"},
+        {"change": "set", "field": "banded", "to": false, "event": "finish_set"}
+      ]
+    },
+    "dye_indigo_banded": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bench": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cloth_dye_bench",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "needs_indigo"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "bench"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "indigo",
+          "from": {"arg": "bench"},
+          "into": "this",
+          "amount": 1,
+          "event": "pigment_used"
+        },
+        {
+          "change": "transfer",
+          "field": "water",
+          "from": {"arg": "bench"},
+          "into": "this",
+          "amount": 1,
+          "event": "water_used"
+        },
+        {"change": "set", "field": "dye", "to": "indigo", "event": "dyed"},
+        {"change": "set", "field": "banded", "to": true, "event": "finish_set"}
+      ]
+    },
+    "dye_rust_solid": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bench": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cloth_dye_bench",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "needs_rust"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "bench"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "rust",
+          "from": {"arg": "bench"},
+          "into": "this",
+          "amount": 1,
+          "event": "pigment_used"
+        },
+        {
+          "change": "transfer",
+          "field": "water",
+          "from": {"arg": "bench"},
+          "into": "this",
+          "amount": 1,
+          "event": "water_used"
+        },
+        {"change": "set", "field": "dye", "to": "rust", "event": "dyed"},
+        {"change": "set", "field": "banded", "to": false, "event": "finish_set"}
+      ]
+    },
+    "dye_rust_banded": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bench": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cloth_dye_bench",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "needs_rust"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "bench"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "rust",
+          "from": {"arg": "bench"},
+          "into": "this",
+          "amount": 1,
+          "event": "pigment_used"
+        },
+        {
+          "change": "transfer",
+          "field": "water",
+          "from": {"arg": "bench"},
+          "into": "this",
+          "amount": 1,
+          "event": "water_used"
+        },
+        {"change": "set", "field": "dye", "to": "rust", "event": "dyed"},
+        {"change": "set", "field": "banded", "to": true, "event": "finish_set"}
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:dyeable_cloth",
+    "table": [
+      {
+        "part": "body",
+        "field": "dye",
+        "do": "tint",
+        "at": {"undyed": "#e9dfc5", "indigo": "#3450a0", "rust": "#b44e32"}
+      },
+      {
+        "part": "rope",
+        "field": "banded",
+        "do": "show",
+        "at": {"true": 1, "false": 0}
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,14,0],"size":[360,28,260],"tint":"natural","role":"body"},{"kind":"box","at":[0,32,-100],"size":[360,8,60],"tint":"natural","role":"body"},{"kind":"box","at":[-140,31,20],"size":[22,6,210],"tint":"natural","role":"rope"},{"kind":"box","at":[-70,31,20],"size":[22,6,210],"tint":"natural","role":"rope"},{"kind":"box","at":[0,31,20],"size":[22,6,210],"tint":"natural","role":"rope"},{"kind":"box","at":[70,31,20],"size":[22,6,210],"tint":"natural","role":"rope"},{"kind":"box","at":[140,31,20],"size":[22,6,210],"tint":"natural","role":"rope"}],"palette":{"natural":"#e9dfc5","indigo":"#3450a0","rust":"#b44e32"},"tags":["art","cloth","textile","item"]}
+  },
+  "text": {
+    "card": "A folded cloth to dye at a cloth-dye bench: indigo or rust, solid or banded.",
+    "needs_indigo": "This bench needs an unused indigo charge and water.",
+    "needs_rust": "This bench needs an unused rust charge and water.",
+    "put_down_first": "Put down what you are holding before dyeing.",
+    "art": "art",
+    "cloth": "cloth",
+    "dye": "dye",
+    "textile": "textile"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": ["cloth", "dye", "textile"]
+  }
+}

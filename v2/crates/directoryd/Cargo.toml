@@ -3,14 +3,19 @@ name = "directoryd"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "The directory process (Engine v2, #2635): so far its accounts (W1, #2704)."
+description = "The directory (Engine v2, #2635): where a world runs, when it wakes, where a Soul is (W8, #2729); its accounts (W1, #2704)."
 
 [dependencies]
 replica = { path = "../replica" }
-# RS256 signatures (the session check) and the random account and principal ids.
+# RS256 signatures (the session check), the random account and principal ids (W1); the object store's request
+# signature (AWS SigV4: SHA-256 and HMAC) and the in-memory store's ETags (W8).
 ring = "0.17"
-# The account store: one SQLite file, with SQLite's online backup for a consistent copy.
+# The account store: one SQLite file, with SQLite's online backup for a consistent copy (W1).
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
 serde_json = "1"
-# The provider's public keys, fetched over HTTPS when its key id changes.
+# The provider's public keys, fetched over HTTPS when its key id changes (W1); the object store over HTTP(S) (W8).
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+# A4: a world's tick loop (sim's Ticker on a fake clock) keeps ticking while the store is out of reach.
+sim = { path = "../sim" }

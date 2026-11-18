@@ -17,17 +17,25 @@
 //!   body walking a straight line adds no record ([`Logged`]). The log holds inputs, not motion: the mover's motion
 //!   samples are its own output.
 //!
-//! Not here: moves themselves and cancel rules (B2), gateway intents (lane I), drawing (lane V), N7's walk, which
-//! still steps the mover itself until T9b (#3120) moves it behind the host.
+//! - **Carried across a link** (T9b #3120). A link names the move that crosses it (T4); the world turns a skill's
+//!   `Host::cross` into a [`Track`] (`crate::host::carry`), and the controller carries the body along it, at most its
+//!   speed times the tick, then stands it on the far node's surface. Velocity inputs wait meanwhile.
+//! - **A dry run** ([`Controller::probe`]): what one step would do to a copy of a body, moving nothing. The world's
+//!   geometry answers use it (is a straight walk clear?), so the mover has no caller but this module.
+//!
+//! Not here: moves themselves and cancel rules (B2), gateway intents (lane I), drawing (lane V), the transfer
+//! records of a crossing (N6's `mover::cross`), and N7's `Crowd`, which keeps its own bodies until T9c retires it
+//! (it steps them through [`Controller::probe`] and [`Track::advance`]).
 
 use std::collections::BTreeMap;
 
+use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
 use replica::encode::{Name, Value, encode};
 use replica::ids::Id;
-use replica::pose::{ControllerInput, HandOff, Mode, Quat, Support, Vec3};
+use replica::pose::{ControllerInput, Frame, HandOff, Mode, Quat, Support, Vec3};
 use replica::time::Micros;
 
 type R<T> = Result<T, Refusal>;
@@ -148,11 +156,84 @@ pub struct Stepped {
     pub refused: Vec<(Id, Refusal)>,
 }
 
+/// A carry across a link by its move (T9b #3120): a line to follow at a speed, then standing on a node's surface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Track {
+    pub link: Id,
+    /// The points left to follow, µm, in the frame of the node the body stands on when it begins.
+    pub line: Vec<Vec3>,
+    /// µm a second.
+    pub speed: i64,
+    /// The node it stands on at the end.
+    pub to: Id,
+    /// Where on `to` it stands (that node's frame) when the line is in another frame; else the line's last point.
+    pub arrive: Option<Vec3>,
+}
+
+fn dist2(a: Vec3, b: Vec3) -> i128 {
+    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+    d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)
+}
+
+impl Track {
+    /// One tick along the line, at most speed times `dt`: `true` once the body stands on `to`'s surface.
+    pub fn advance(
+        &mut self,
+        body: &mut Moved,
+        surfaces: &BTreeMap<Id, Surface>,
+        dt: Micros,
+    ) -> R<bool> {
+        if dt <= 0 {
+            return refuse("tick-not-positive", format!("{dt} µs"));
+        }
+        let mut reach = i128::from(self.speed) * i128::from(dt) / 1_000_000;
+        let mut p = body.pose.position;
+        while let Some(&next) = self.line.first() {
+            let d = dist2(p, next).isqrt();
+            if d <= reach {
+                reach -= d;
+                p = next;
+                self.line.remove(0);
+                continue;
+            }
+            let part = |a: i64, b: i64| a + (i128::from(b - a) * reach / d) as i64;
+            p = Vec3::new(part(p.x, next.x), part(p.y, next.y), part(p.z, next.z));
+            break;
+        }
+        let old = body.pose.position;
+        let v = |a: i64, b: i64| ((i128::from(b - a) * 1_000_000) / i128::from(dt)) as i64;
+        body.linear = Vec3::new(v(old.x, p.x), v(old.y, p.y), v(old.z, p.z));
+        body.pose.position = p;
+        if !self.line.is_empty() {
+            return Ok(false);
+        }
+        let Some(on) = surfaces.get(&self.to) else {
+            return refuse("no-surface", replica::world_model::show(self.to));
+        };
+        let linear = body.linear;
+        let frame = Frame {
+            node: self.to,
+            slot: None,
+        };
+        *body = on.place(
+            body.id,
+            frame,
+            self.arrive.unwrap_or(p),
+            body.pose.orientation,
+        )?;
+        body.linear = linear;
+        Ok(true)
+    }
+}
+
 struct Slot {
     claims: Claims,
     moved: Moved,
     input: Input,
     logged: Option<Input>,
+    /// Whether the input may differ from the one logged: set by every change, so an unchanged body costs no compare.
+    touched: bool,
+    track: Option<Track>,
 }
 
 /// Every body's claims, input and mover state; the only way any of them is moved or posed.
@@ -162,11 +243,14 @@ pub struct Controller {
     /// The last driver number given.
     drivers: Driver,
     log: Vec<Logged>,
+    /// Where each body not being carried stands, kept as the bodies move: "who is near" (N16).
+    near: Index,
 }
 
 impl Slot {
     /// The parts `held` covered go back to neutral: locomotion to standing still, each resource's move to none.
     fn neutral(&mut self, held: &[Name]) {
+        self.touched = true;
         let family = self.claims.family();
         let locomotion = family
             .resources
@@ -222,6 +306,7 @@ impl Controller {
             return refuse("body-duplicate", replica::world_model::show(moved.id));
         }
         let input = Input::neutral(moved.pose.orientation);
+        self.near.put_moved(&moved);
         self.bodies.insert(
             moved.id,
             Slot {
@@ -229,6 +314,8 @@ impl Controller {
                 moved,
                 input,
                 logged: None,
+                touched: true,
+                track: None,
             },
         );
         Ok(())
@@ -286,9 +373,53 @@ impl Controller {
         Ok(())
     }
 
+    /// What one step of `input` for `dt` would do to a copy of `body` on `surface`: a dry run that moves nothing.
+    pub fn probe(
+        surface: &Surface,
+        body: &Moved,
+        input: ControllerInput,
+        dt: Micros,
+        at: Micros,
+    ) -> R<Moved> {
+        let mut b = *body;
+        surface.step(&mut b, input, dt, at)?;
+        Ok(b)
+    }
+
+    /// Carries `body` along `track` from the next step, if `driver` holds its locomotion; its velocity input goes to
+    /// still. `crossing-under-way` when it is already carried.
+    pub fn cross(&mut self, body: Id, driver: Driver, track: Track) -> R<()> {
+        let s = self.slot(body)?;
+        s.steers(driver)?;
+        if let Some(t) = &s.track {
+            return refuse("crossing-under-way", replica::world_model::show(t.link));
+        }
+        s.input.velocity = Vec3::ZERO;
+        s.touched = true;
+        s.track = Some(track);
+        self.near.remove_body(body);
+        Ok(())
+    }
+
+    /// The link `body` is being carried across, if any.
+    pub fn carrying(&self, body: Id) -> Option<Id> {
+        self.bodies.get(&body)?.track.as_ref().map(|t| t.link)
+    }
+
+    /// The spatial index of the bodies not being carried, as the mover last left them (N16).
+    pub fn near(&self) -> &Index {
+        &self.near
+    }
+
+    /// The bodies as the mover last left them, in id order.
+    pub fn bodies(&self) -> impl Iterator<Item = &Moved> {
+        self.bodies.values().map(|s| &s.moved)
+    }
+
     /// Sets one part of `body`'s input, if `driver` holds its resources (`resource-not-held`, `resource-missing`).
     pub fn set(&mut self, body: Id, driver: Driver, part: Part) -> R<()> {
         let s = self.slot(body)?;
+        s.touched = true;
         match part {
             Part::Velocity(v, mode) => {
                 s.steers(driver)?;
@@ -331,7 +462,7 @@ impl Controller {
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {
         let mut out = Stepped::default();
         for (&id, s) in self.bodies.iter_mut() {
-            if s.logged.as_ref() != Some(&s.input) {
+            if s.touched && s.logged.as_ref() != Some(&s.input) {
                 match encode(&s.input.record(at, id)) {
                     Ok(bytes) => self.log.push(Logged {
                         at,
@@ -351,7 +482,27 @@ impl Controller {
                 }
                 s.logged = Some(s.input.clone());
             }
+            s.touched = false;
             s.moved.pose.orientation = s.input.facing;
+            if let Some(t) = s.track.as_mut() {
+                match t.advance(&mut s.moved, surfaces, dt) {
+                    Ok(true) => {
+                        s.track = None;
+                        s.input.velocity = Vec3::ZERO;
+                        // A changed input: logged at the next step (B2's `touched`).
+                        s.touched = true;
+                    }
+                    Ok(false) => {}
+                    Err(r) => {
+                        s.track = None;
+                        out.refused.push((id, r));
+                    }
+                }
+                if s.track.is_none() {
+                    self.near.put_moved(&s.moved);
+                }
+                continue;
+            }
             let Support::Surface { surface, .. } = s.moved.pose.support else {
                 out.refused.push((
                     id,
@@ -381,6 +532,7 @@ impl Controller {
                 Ok(None) => {}
                 Err(r) => out.refused.push((id, r)),
             }
+            self.near.put_moved(&s.moved);
         }
         out
     }
