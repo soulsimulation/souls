@@ -8,12 +8,12 @@
 //!
 //! Until the engine takes intents (I4), this end answers each new intent with a receipt naming one log entry, so the
 //! gateway can be run against a world that restarts: `worldd gateway-link --socket <path> --lineage <32 hex> --epoch
-//! <n> [--arrivals <file>] [--room <cups>]`. With `--arrivals`, it appends `<actor hex> <sequence> <place hash hex>` for
+//! <n> [--arrivals <file>] [--room <items>]`. With `--arrivals`, it appends `<actor hex> <sequence> <place hash hex>` for
 //! every intent it takes, in the order taken, so a bench can check each actor's order across restarts, and a client's
 //! copy against the place.
 //!
-//! Its state (R5b, #3164) is a place, whose id is the zone's, holding one room of `--room` cups (default 8). Each intent
-//! taken sets one cup's field, in turn; the place is sealed after each, and every record its seals gave is kept, so it
+//! Its state (R5b, #3164) is a place, whose id is the zone's, holding one room of `--room` items (default 8). Each intent
+//! taken sets one item's field, in turn; the place is sealed after each, and every record its seals gave is kept, so it
 //! answers R5's sync requests (`replica::sync::wire`) for every actor, each granted the place.
 
 use std::collections::{HashMap, VecDeque};
@@ -60,21 +60,21 @@ struct World {
 const KINDS: &str = r#"
 {1: "souls:place", 2: "place", 11: ["souls:room"]}
 {1: "souls:room", 2: "place", 11: ["thing"]}
-{1: "souls:cup", 2: "thing"}
+{1: "souls:item", 2: "thing"}
 "#;
 
-/// The stand-in's state: a place (the zone's id) holding one room of cups, and every record its seals gave.
+/// The stand-in's state: a place (the zone's id) holding one room of items, and every record its seals gave.
 struct Place {
     tree: Tree,
     header: Header,
     rules: Rules,
-    cups: Vec<Id>,
+    items: Vec<Id>,
     records: Records,
     entries: u64,
 }
 
 impl Place {
-    fn new(zone: Id, cups: u64) -> Option<Place> {
+    fn new(zone: Id, items: u64) -> Option<Place> {
         let rules = Rules {
             kinds: parse_kinds(KINDS).ok()?,
             ..Rules::default()
@@ -86,10 +86,10 @@ impl Place {
                 .find(|k| k.starts_with(&format!("{plain}@")))
                 .and_then(|k| Name::new(k))
         };
-        let (place, room_kind, cup_kind) = (
+        let (place, room_kind, item_kind) = (
             kind("souls:place")?,
             kind("souls:room")?,
-            kind("souls:cup")?,
+            kind("souls:item")?,
         );
         let header = Header::read(
             &encode(&Value::Map(BTreeMap::from([
@@ -104,7 +104,7 @@ impl Place {
                 (
                     6,
                     Value::Array(
-                        [&place, &room_kind, &cup_kind]
+                        [&place, &room_kind, &item_kind]
                             .map(|k| Value::Text(k.clone()))
                             .to_vec(),
                     ),
@@ -118,7 +118,7 @@ impl Place {
             tree: Tree::start(zone, place),
             header,
             rules,
-            cups: Vec::new(),
+            items: Vec::new(),
             records: Records::default(),
             entries: 0,
         };
@@ -142,10 +142,10 @@ impl Place {
             fields: BTreeMap::from([(1, Value::Uint(x))]),
         };
         let mut inside = Vec::new();
-        for k in 0..cups {
-            let cup = Id::new(zone.scope(), 2 + k)?;
-            inside.push(create(cup, &cup_kind, room, k * 1000));
-            p.cups.push(cup);
+        for k in 0..items {
+            let item = Id::new(zone.scope(), 2 + k)?;
+            inside.push(create(item, &item_kind, room, k * 1000));
+            p.items.push(item);
         }
         let entries = vec![
             p.entry(zone, vec![create(room, &room_kind, zone, 0)]),
@@ -197,15 +197,15 @@ impl Place {
         Some(())
     }
 
-    /// Sets the next cup's field to `to`.
+    /// Sets the next item's field to `to`.
     fn set(&mut self, to: u64) -> Option<()> {
-        let cup = *self
-            .cups
-            .get((to % self.cups.len().max(1) as u64) as usize)?;
+        let item = *self
+            .items
+            .get((to % self.items.len().max(1) as u64) as usize)?;
         let e = self.entry(
-            cup,
+            item,
             vec![Change::Set {
-                node: cup,
+                node: item,
                 field: 1,
                 to: Value::Uint(to),
                 by: None,
@@ -358,7 +358,7 @@ pub fn run(args: &[String]) -> i32 {
     };
     let usage = || {
         eprintln!(
-            "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--arrivals <file>] [--room <cups>]"
+            "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--arrivals <file>] [--room <items>]"
         );
         2
     };
@@ -375,7 +375,7 @@ pub fn run(args: &[String]) -> i32 {
     };
     let Some(place) = arg("--room")
         .map_or(Some(8), |n| n.parse::<u64>().ok())
-        .and_then(|cups| Place::new(zone, cups))
+        .and_then(|items| Place::new(zone, items))
     else {
         return usage();
     };
@@ -535,14 +535,14 @@ mod tests {
         let mut w = world();
         let mut copy = sync::Copy::default();
         let first = sync_by_frames(&mut w, &mut copy);
-        assert_eq!(first.held, 6, "the place, its room and four cups");
+        assert_eq!(first.held, 6, "the place, its room and four items");
         assert_eq!(first.fetched, 6);
         take(&mut w, &intent(1)).expect("a receipt");
         let s = sync_by_frames(&mut w, &mut copy);
         assert_eq!(
             (s.changed, s.fetched, s.held),
             (1, 3, 6),
-            "the place, the room and the one cup set"
+            "the place, the room and the one item set"
         );
         assert_eq!(to_hex(&copy.roots()[&w.zone]), w.place.hash());
         let refused = ask(
