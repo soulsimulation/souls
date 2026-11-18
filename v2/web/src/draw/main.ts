@@ -8,6 +8,7 @@ import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
+import { arrive } from '../worlds/arrive.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -46,7 +47,9 @@ addEventListener('resize', resize);
 resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
-if (!address) status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
+const worldName = new URLSearchParams(location.search).get('world');
+const firstFrame = arrive(worldName, status);
+if (!address) worldName || (status.textContent = 'no stream: open this page with ?stream=<the stream directory>');
 else new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
@@ -77,6 +80,7 @@ renderer.setAnimationLoop((now) => {
     drawn = world.draw(t);
     if (!framed && drawn > 0) {
       framed = true;
+      firstFrame();
       cam.setExtent(world.extent);
       const at = world.crowd(t);
       if (at) cam.look(at, 0.6, -0.6, 55);
