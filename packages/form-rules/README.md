@@ -4,13 +4,14 @@ What a form needs, decided from plain data (Soul Actions SA-F2, [#2843](https://
 what it does, as generic changes plus named events (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)),
 the value of a field that changes with time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)),
 who may do a form, as a test on links (SA-F7a, [#2848](https://github.com/soulsimulation/souls/issues/2848)),
-and how a thing reacts, by rules on its kind (SA-F15, [#2853](https://github.com/soulsimulation/souls/issues/2853)).
+how a thing reacts, by rules on its kind (SA-F15, [#2853](https://github.com/soulsimulation/souls/issues/2853)),
+and where a Soul entering a role of an activity is placed (SA-G1a, [#2872](https://github.com/soulsimulation/souls/issues/2872)).
 `decide(input)` answers whether a form of a kind written in the [entry format](../../docs/soul-actions/entry-format.md)
 can be done now. Nothing in today's server or client calls it yet; Engine v2's shared rules (R2,
 [#2685](https://github.com/soulsimulation/souls/issues/2685)) write it again and run the same cases.
 
 ```sh
-node --test packages/form-rules/src/*.test.ts        # every case in cases/, cases/effects/, cases/timed/, cases/who/ and cases/react/, plus the library's own checks
+node --test packages/form-rules/src/*.test.ts        # every case in cases/, cases/effects/, cases/timed/, cases/who/, cases/react/ and cases/activity/, plus the library's own checks
 node packages/form-rules/bin/check-reactions.mjs     # the check gate's rule check over every kind (exit 1 on a refusal)
 node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed values and crossings in Node and in a browser build
 ```
@@ -218,6 +219,22 @@ order, and every error expected. The `reactions` section is not in the entry for
 switch and its lamps, a street lamp, a kettle on a stove, a shop, a chiming door) use test kinds in
 `cases/kinds/test/`.
 
+## An activity
+
+An activity kind carries a `roles` section (proposed for the format on
+[#2842](https://github.com/soulsimulation/souls/issues/2842); the format page's "An activity" section says what it
+holds). `place(input)` takes a rule case's input whose act is an entering form of the activity: the form that links a
+role to the actor and puts the actor into a slot argument. It returns `{verdict: "yes", role, place, args}`, with the
+first free place by the role's rule filled into the argument, or `{verdict: "no", reason: "no_free_place", role,
+detail: {places}}`, where `places` is how many places it looked at. A node's `at_mm` is its origin in the frame of the
+place it is loose in. `enter(input)` asks who may (SA-F7a), then the place, then the form's needs and effects
+(SA-F2b), and returns the effects with `role` and `place`. `apply` applies them.
+
+A file in `cases/activity/` is `{"format": "souls-activity-cases/1", "about": ..., "cases": [...]}`. Each case has a
+state, the `activity` node, and the Souls who `enter` in order: each with its `actor`, `form`, `receipt` and what
+`enter` should return (`expect`). The test checks that every body is where the rules placed it and that no place is
+given twice. Then it compares the nodes `after`. The examples are a lecture in three rooms and a supper whose host
+must be its owner. Both are test kinds, because `roles` is not in the entry format yet.
 ## Looks
 
 `looks(input)` in `src/looks.ts` (SA-D1a, [#2885](https://github.com/soulsimulation/souls/issues/2885)) turns a kind's
