@@ -1,0 +1,142 @@
+{
+  "refused": [
+    { "why": "a duration in ticks (key)", "edit": { "phases": { "start_up_us": 250000, "start_up_ticks": 5, "recovery_us": 300000 } }, "path": "phases.start_up_ticks", "word": "ticks" },
+    { "why": "a duration in ticks (named phase)", "edit": { "phases": { "start_up_ticks": 5, "recovery_us": 300000 } }, "path": "phases.start_up_ticks", "word": "ticks" },
+    { "why": "a float duration", "raw": "{\"format\":\"souls-move/1\",\"move\":\"press\",\"claims\":[\"manipulator\"],\"blocks\":[\"manipulator\"],\"cancels_on\":[],\"effector\":\"hand\",\"reach_mm\":600,\"phases\":{\"start_up_us\":250000.0,\"recovery_us\":300000}}", "word": "floating" },
+    { "why": "a claim by anatomy", "edit": { "claims": ["right_arm"] }, "path": "claims.0", "word": "anatomy" },
+    { "why": "a reach of a full arm and more", "edit": { "reach_mm": 900 }, "path": "reach_mm", "word": "arm" },
+    { "why": "no recovery", "edit": { "phases": { "start_up_us": 250000 } }, "path": "phases.recovery_us", "word": "required" }
+  ],
+  "pour": [
+    { "why": "a kettle's spout over a cup's rim (the spout's offset from the grip is read from the kettle entry)", "from_kind": "content/kinds/kitchen/kettle.json", "grip": "grip", "spout": "spout", "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [450, 780, 150] } },
+    { "why": "a watering can's rose over a planter's rim (no can entry yet: the offset is the case's)", "effector_mm": [380, -60, 0], "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [900, 520, -120] } }
+  ],
+  "pose": [
+    {
+      "why": "a press on a button: rest, middle of start-up, contact, after recovery",
+      "move": "press",
+      "record": { "start_us": 1000000, "from_mm": [0, 900, 300], "contact_mm": [-118, 236, 0] },
+      "at_us": [[900000, [0, 900, 300]], [1125000, [-59, 568, 150]], [1250000, [-118, 236, 0]], [1550000, [0, 900, 300]], [9000000, [0, 900, 300]]]
+    },
+    {
+      "why": "a slide from one point to another: contact, middle of the slide, its end",
+      "move": "slide",
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [100, 500, 0], "to_mm": [300, 500, 0] },
+      "at_us": [[250000, [100, 500, 0]], [450000, [200, 500, 0]], [650000, [300, 500, 0]]]
+    },
+    {
+      "why": "rounding: a position rounds to the nearest millimetre, halves away from zero (Engine v2 rule); halfway of 3, -3 and 1 is 2, -2 and 1",
+      "move": "press",
+      "record": { "start_us": 0, "from_mm": [0, 0, 0], "contact_mm": [3, -3, 1] },
+      "at_us": [[125000, [2, -2, 1]]]
+    },
+    {
+      "why": "the same press mirrored through zero gives the mirrored positions",
+      "move": "press",
+      "record": { "start_us": 0, "from_mm": [0, 0, 0], "contact_mm": [-3, 3, -1] },
+      "at_us": [[125000, [-2, 2, -1]]]
+    },
+    {
+      "why": "a swing: a hand pushes a hinged leaf from the handle at contact to its far position; the middle of the swing is halfway",
+      "move": "swing",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [-300, 1000, 500], "to_mm": [300, 1000, 900] },
+      "at_us": [[1999999, [0, 900, 300]], [2150000, [-150, 950, 400]], [2300000, [-300, 1000, 500]], [2650000, [0, 1000, 700]], [3000000, [300, 1000, 900]], [3175000, [150, 950, 600]], [3350000, [0, 900, 300]]]
+    },
+    {
+      "why": "a stroke: a hand drawn along a line at one height, from its start at contact to its end",
+      "move": "stroke",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [-200, 700, 500], "to_mm": [200, 700, 500] },
+      "at_us": [[1999999, [0, 900, 300]], [2125000, [-100, 800, 400]], [2250000, [-200, 700, 500]], [2700000, [0, 700, 500]], [3150000, [200, 700, 500]], [3300000, [100, 800, 400]], [3450000, [0, 900, 300]]]
+    },
+    {
+      "why": "a tug: a hand takes a pull handle high and draws it down; contact is at the handle, the end is the pulled position",
+      "move": "tug",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [100, 1500, 400], "to_mm": [100, 1000, 400] },
+      "at_us": [[1999999, [0, 900, 300]], [2150000, [50, 1200, 350]], [2300000, [100, 1500, 400]], [2475000, [100, 1250, 400]], [2650000, [100, 1000, 400]], [2825000, [50, 950, 350]], [3000000, [0, 900, 300]]]
+    },
+    {
+      "why": "a knock: one rap on a leaf; contact is the instant the knuckle meets it, then the hand returns",
+      "move": "knock",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [0, 1400, 500] },
+      "at_us": [[1999999, [0, 900, 300]], [2150000, [0, 1150, 400]], [2300000, [0, 1400, 500]], [2525000, [0, 1150, 400]], [2750000, [0, 900, 300]]]
+    },
+    {
+      "why": "a lock: a hand at a keyhole or latch; contact is at the lock, then the hand returns",
+      "move": "lock",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [150, 1000, 450] },
+      "at_us": [[1999999, [0, 900, 300]], [2200000, [75, 950, 375]], [2400000, [150, 1000, 450]], [2600000, [75, 950, 375]], [2800000, [0, 900, 300]]]
+    }
+  ],
+  "consume": [
+    {
+      "why": "a cup's rim at the mouth, one sip (the rim is 90 mm above the grip, toward the face)",
+      "effector_mm": [0, 90, 60],
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [0, 1500, 200], "count": 1 }
+    },
+    {
+      "why": "a bread roll's bitten edge at the mouth, three bites (no roll entry: the offset is the case's)",
+      "effector_mm": [0, 40, 70],
+      "record": { "start_us": 500000, "from_mm": [0, 900, 300], "contact_mm": [0, 1500, 200], "count": 3 }
+    }
+  ],
+  "strike": [
+    {
+      "why": "a hammer's head on a loose bench joint, three blows (the head is 280 mm out from the grip; no hammer entry: the offset is the case's)",
+      "effector_mm": [0, -60, 280],
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [650, 480, 120], "count": 3 }
+    },
+    {
+      "why": "one blow on a tent stake, an odd start time",
+      "effector_mm": [0, -60, 280],
+      "record": { "start_us": 1234567, "from_mm": [0, 900, 300], "contact_mm": [-420, 60, 240], "count": 1 }
+    }
+  ],
+  "pump": [
+    {
+      "why": "a hand pump's nozzle on a pillow's valve, four strokes (no pump entry: the offset is the case's)",
+      "effector_mm": [0, -200, 150],
+      "record": { "start_us": 250000, "from_mm": [0, 900, 300], "contact_mm": [380, 300, 310], "count": 4 }
+    },
+    {
+      "why": "one stroke at the same valve",
+      "effector_mm": [0, -200, 150],
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [380, 300, 310] }
+    }
+  ],
+  "consume": [
+    {
+      "why": "a cup's rim at the mouth, one sip (the rim is 90 mm above the grip, toward the face)",
+      "effector_mm": [0, 90, 60],
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [0, 1500, 200], "count": 1 }
+    },
+    {
+      "why": "a bread roll's bitten edge at the mouth, three bites (no roll entry: the offset is the case's)",
+      "effector_mm": [0, 40, 70],
+      "record": { "start_us": 500000, "from_mm": [0, 900, 300], "contact_mm": [0, 1500, 200], "count": 3 }
+    }
+  ],
+  "strike": [
+    {
+      "why": "a hammer's head on a loose bench joint, three blows (the head is 280 mm out from the grip; no hammer entry: the offset is the case's)",
+      "effector_mm": [0, -60, 280],
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [650, 480, 120], "count": 3 }
+    },
+    {
+      "why": "one blow on a tent stake, an odd start time",
+      "effector_mm": [0, -60, 280],
+      "record": { "start_us": 1234567, "from_mm": [0, 900, 300], "contact_mm": [-420, 60, 240], "count": 1 }
+    }
+  ],
+  "pump": [
+    {
+      "why": "a hand pump's nozzle on a pillow's valve, four strokes (no pump entry: the offset is the case's)",
+      "effector_mm": [0, -200, 150],
+      "record": { "start_us": 250000, "from_mm": [0, 900, 300], "contact_mm": [380, 300, 310], "count": 4 }
+    },
+    {
+      "why": "one stroke at the same valve",
+      "effector_mm": [0, -200, 150],
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [380, 300, 310] }
+    }
+  ]
+}
