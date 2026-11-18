@@ -1,0 +1,8 @@
+[package]
+name = "gatewayd"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Agents' sockets (Engine v2, #2635). Empty so far (K1, #2638)."
+
+[dependencies]

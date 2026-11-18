@@ -29,6 +29,13 @@ test('A1: the kettle, the seat and the lecture each have a yes per form and a ca
   }
 });
 
+test('a within_reach of another thing is unknown, not no, when its pose is not in the input', () => {
+  const c = cases.find(([, k]) => k.name === 'fill_tap_in_reach')![1];
+  const nodes = { ...c.state.nodes, t1: { kind: 'test:reach_tap' } };
+  const v = decide({ kinds, ...c, state: { ...c.state, nodes } });
+  assert.deepEqual([v.verdict, (v as { node?: string }).node, (v as { field?: string }).field], ['unknown', 't1', 'at_mm']);
+});
+
 test('A4: unknown only for a field outside the audience; the same state seen by all is definite', () => {
   for (const [, c] of cases.filter(([, c]) => c.expect.verdict === 'unknown')) {
     const all = decide({ kinds, ...c, asker: { sees: 'all' } });
@@ -100,4 +107,22 @@ test('a state need\'s fix passes over a form that would itself be refused now', 
   assert.equal(dark.verdict, 'no');
   assert.deepEqual(dark.verdict === 'no' && dark.fix, { form: 'switch_on' }, 'dim_up needs a lit lamp, so the dark lamp is told to switch on');
   assert.deepEqual(lit.verdict === 'no' && lit.fix, { form: 'dim_up' }, 'a lit lamp is dimmed up, the first form in order that is ready');
+});
+
+test('reach to another thing: walk-first, else the measured pose (`of`), else unknown', () => {
+  const touch = (needs: unknown[], steps: unknown[]) => ({ kind: 'test:hand', forms: { touch: { who: 'anyone', starts: 'act', takes: { thing: { type: 'thing' } }, needs, steps } } });
+  const ball = { kind: 'test:ball', points: { top: { at_mm: [0, 100, 0] } } };
+  const ask = (entry: unknown, ballAt?: number[]) => decide({
+    kinds: { 'test:hand': entry, 'test:ball': ball } as never,
+    act: { this: 'h', form: 'touch', args: { thing: 'x' } },
+    state: { actor: 'me', nodes: { room: { loose: ['me', 'x'] }, h: { kind: 'test:hand' }, me: { effector_mm: [0, 100, 0] }, x: { kind: 'test:ball', ...(ballAt ? { at_mm: ballAt } : {}) } }, moves: { tap: { reach_mm: 50 } } },
+    asker: { sees: [] },
+  });
+  const walks = touch([{ need: 'within_reach', point: { arg: 'thing' } }], [{ step: 'walk_to', point: { arg: 'thing' } }]);
+  const measured = touch([{ need: 'within_reach', point: 'top', of: { arg: 'thing' } }], [{ step: 'move', move: 'tap', toward: { arg: 'thing' } }]);
+  const neither = touch([{ need: 'within_reach', point: { arg: 'thing' } }], []);
+  assert.equal(ask(walks).verdict, 'yes', 'the form walks to it and it is in the actor\'s place');
+  assert.equal(ask(measured, [0, 0, 0]).verdict, 'yes', 'its pose is measured and its point is within the move\'s reach');
+  assert.equal(ask(measured).verdict, 'unknown', 'no walk and no pose');
+  assert.equal(ask(neither).verdict, 'unknown', 'no walk and no `of`');
 });

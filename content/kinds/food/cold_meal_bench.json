@@ -1,0 +1,293 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cold_meal_bench",
+  "owner": "thing",
+  "state": {
+    "greens": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tomato": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "beans": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "portions": {
+      "n": 4,
+      "type": "int",
+      "unit": "count",
+      "default": 9,
+      "min": 0,
+      "max": 9,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [-170, 0, 1000]
+    }
+  },
+  "slots": {
+    "out": {
+      "admits": "thing",
+      "kinds": [
+        "eden:cold_wrap"
+      ],
+      "most": 1,
+      "at_mm": [-170, 990, 100],
+      "fits_mm": [130, 130, 130]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [1100, 1080, 650]
+  },
+  "forms": {
+    "add_greens": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "wrap": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cold_wrap",
+            "in": "this",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "greens",
+          "from": "this",
+          "into": {
+            "arg": "wrap"
+          },
+          "amount": 1,
+          "event": "greens_added"
+        },
+        {
+          "change": "transfer",
+          "field": "portions",
+          "from": "this",
+          "into": {
+            "arg": "wrap"
+          },
+          "amount": 1,
+          "event": "portion_added"
+        }
+      ]
+    },
+    "add_tomato": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "wrap": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cold_wrap",
+            "in": "this",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "tomato",
+          "from": "this",
+          "into": {
+            "arg": "wrap"
+          },
+          "amount": 1,
+          "event": "tomato_added"
+        },
+        {
+          "change": "transfer",
+          "field": "portions",
+          "from": "this",
+          "into": {
+            "arg": "wrap"
+          },
+          "amount": 1,
+          "event": "portion_added"
+        }
+      ]
+    },
+    "add_beans": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "wrap": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cold_wrap",
+            "in": "this",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "beans",
+          "from": "this",
+          "into": {
+            "arg": "wrap"
+          },
+          "amount": 1,
+          "event": "beans_added"
+        },
+        {
+          "change": "transfer",
+          "field": "portions",
+          "from": "this",
+          "into": {
+            "arg": "wrap"
+          },
+          "amount": 1,
+          "event": "portion_added"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:cold_meal_bench",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,965,0],"size":[1100,30,650],"tint":"wood"},{"kind":"box","at":[-460,475,-250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[-460,475,250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[460,475,-250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[460,475,250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[-170,985,100],"size":[280,10,280],"tint":"board"},{"kind":"box","at":[-340,1005,-210],"size":[120,40,40],"tint":"greens","when":"@greens>=1"},{"kind":"box","at":[-340,1005,-150],"size":[120,40,40],"tint":"greens","when":"@greens>=2"},{"kind":"box","at":[-340,1005,-90],"size":[120,40,40],"tint":"greens","when":"@greens>=3"},{"kind":"box","at":[-40,1005,-210],"size":[120,40,40],"tint":"tomato","when":"@tomato>=1"},{"kind":"box","at":[-40,1005,-150],"size":[120,40,40],"tint":"tomato","when":"@tomato>=2"},{"kind":"box","at":[-40,1005,-90],"size":[120,40,40],"tint":"tomato","when":"@tomato>=3"},{"kind":"box","at":[260,1005,-210],"size":[120,40,40],"tint":"beans","when":"@beans>=1"},{"kind":"box","at":[260,1005,-150],"size":[120,40,40],"tint":"beans","when":"@beans>=2"},{"kind":"box","at":[260,1005,-90],"size":[120,40,40],"tint":"beans","when":"@beans>=3"}],"palette":{"wood":"#856342","board":"#d4bb82","greens":"#4f8839","tomato":"#c84837","beans":"#a47f47"},"tags":["kitchen","table","food","object"]}
+  },
+  "text": {
+    "card": "A meal bench with greens, tomato and beans: add them to a wrap on its board.",
+    "kitchen": "kitchen",
+    "meal": "meal",
+    "salad": "salad",
+    "howto_wrap": "Put a wrap on the board, then add each portion you choose for ten seconds; take the wrap and eat it."
+  },
+  "card": {
+    "text": "card",
+    "category": "kitchen",
+    "synonyms": [
+      "meal",
+      "salad"
+    ]
+  },
+  "howtos": {
+    "wrap": {
+      "text": "howto_wrap",
+      "steps": [
+        {
+          "form": "add_greens"
+        },
+        {
+          "form": "add_tomato"
+        },
+        {
+          "form": "add_beans"
+        }
+      ]
+    }
+  }
+}
