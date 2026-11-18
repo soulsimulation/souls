@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":163,"group":"getting-around","words":"explore the library","obvious":3,"things":{"hall":"eden:hall","bookshelf":"eden:bookshelf"},"chain":[{"this":"me","form":"go_to","args":{"place":"hall"}},{"this":"me","form":"look_at","args":{"target":"bookshelf"}}]}

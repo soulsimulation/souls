@@ -33,7 +33,7 @@ Two PRs that both append to one shared file conflict every time. So nothing a PR
 |---|---|
 | editing `CHANGELOG.md` | add one fragment, `changes/<pr-or-slug>.md` ([format](../../changes/README.md)); the `release` workflow compiles the fragments into `CHANGELOG.md` |
 | editing an existing conformance record | add a new supplement for your change in `packages/conformance/conformance/` ([conformance](../../packages/conformance/conformance/README.md)); older supplements are never edited |
-| committing generated output | let CI build it: the changelog, the web build and gate receipts are produced by workflows, not committed by PRs |
+| committing generated output | let CI build it: the changelog, the web build and gate receipts are produced by workflows, not committed by PRs; `tools/world-launcher/soul/eden.mjs` is built in CI and synced on main by a bot PR, so PRs don't commit its rebuilt blocks (#3118) |
 | re-pinning a baseline inside a feature commit | regenerate the walk or bundle baseline (`--write`) in its own commit, with the reason in the message, after rebasing |
 
 ## The merge train
@@ -50,8 +50,10 @@ the next train run; `gh workflow run merge-train.yml --ref main` starts one.
 see the header of `merge-train.yml`): `merge:ready` enqueues the PR through auto-merge once its required checks are
 green at its head, and the queue re-tests the combination with what is ahead of it (`merge_group` runs) and lands it.
 `proof-ok` is a required check, so T3–T4 still wait for approval. Removing `merge:ready` takes a PR out; a PR the
-queue drops loses the label with a comment giving the reason. The non-strict and strict landing below apply only
-when the ruleset does not require the queue.
+queue drops loses the label with a comment giving the reason. A PR with any file outside the low-risk paths (`LOW_RISK`
+in `.github/scripts/ci-scope.mjs`) waits, keeping its label, while eight such PRs are queued or set to auto-merge
+(`MIXED_CAP`); low-risk PRs enqueue up to the queue's own limit, and every queue exit starts the train again. The
+non-strict and strict landing below apply only when the ruleset does not require the queue.
 
 - **Non-strict**: a T0–T2 PR that touches no strict path, whose required checks are green on its current head, which
   GitHub reports mergeable without conflict, and while `main`'s CI is green, is squash-merged as is, even when it is
@@ -149,9 +151,9 @@ and a comment naming the files. To redo one by hand, run `gh workflow run restac
   disposition in the PR. The change's author cannot supply its only review. Preserve the failed provider run;
   a separate review does not turn it into a pass. Do not require duplicate provider reviews. All required status
   checks and sign-offs under the approval matrix still apply; a required failed status cannot be bypassed by a comment.
-- **`@claude` for follow-ups.** Mention `@claude` in an issue, PR comment or review (the `claude` workflow) to ask a
-  question, iterate on review feedback or have it push a fix to the PR branch. Only the owner, members and
-  collaborators can trigger it.
+- **`@claude` for follow-ups.** Mention `@claude` in a PR review or review comment (the `claude` workflow; issues and
+  issue comments no longer trigger it) to ask a question, iterate on review feedback or have it push a fix to the PR
+  branch. Only the owner, members and collaborators can trigger it.
 - **Proof tiers.** The PR states its tier and links its proof: lint (T0); focused tests and typecheck (T1); an uncut,
   real-speed clip of the changed journey (T2, the `proof` skill records it); a scenario playtest, a reviewer-agent
   pass and sign-off under the approval matrix (T3). T4 is the release head. What a reviewer checks: [review](review.md).

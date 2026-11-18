@@ -1,0 +1,901 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:potted_plant (the coordinator's decision of 17 Nov: Eden's carried pots are their own kind, with the planter's growth forms). The pot keeps the planter's water (a timed value in mg, falling 5 mg a second, dry below 1 360 000 mg), stage and ripening as fields 1 to 3, and its sow, water, sprout, leaf and flower forms unchanged but for the fruit timer a pot does not have; these are the planter's own cases for those forms, with the kind renamed, so the same numbers give the same verdicts.",
+ "cases": [
+  {
+   "name": "potted_sow_every_need_met",
+   "act": {
+    "this": "p1",
+    "form": "sow"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/2",
+      "bare"
+     ],
+     [
+      "b1/effector_mm",
+      [
+       0,
+       400,
+       300
+      ]
+     ],
+     [
+      "move/press/reach_mm",
+      600
+     ]
+    ]
+   }
+  },
+  {
+   "name": "potted_sow_already_sown",
+   "act": {
+    "this": "p1",
+    "form": "sow"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "stage",
+     "found": "seed",
+     "wanted": {
+      "is": "bare"
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_sow_out_of_reach",
+   "act": {
+    "this": "p1",
+    "form": "sow"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       2000
+      ]
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "soil",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "soil"
+    }
+   }
+  },
+  {
+   "name": "potted_sprout_moist_on_day_1",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 86400000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/1",
+      3568000
+     ],
+     [
+      "p1/field/2",
+      "seed"
+     ],
+     [
+      "p1/field/3",
+      86400
+     ]
+    ]
+   }
+  },
+  {
+   "name": "potted_leaf_moist_on_day_2",
+   "act": {
+    "this": "p1",
+    "form": "leaf"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 172800000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 86400000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/1",
+      3136000
+     ],
+     [
+      "p1/field/2",
+      "sprout"
+     ],
+     [
+      "p1/field/3",
+      86400
+     ]
+    ]
+   }
+  },
+  {
+   "name": "potted_flower_moist_on_day_3",
+   "act": {
+    "this": "p1",
+    "form": "flower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 259200000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 172800000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/1",
+      2704000
+     ],
+     [
+      "p1/field/2",
+      "leafy"
+     ],
+     [
+      "p1/field/3",
+      86400
+     ]
+    ]
+   }
+  },
+  {
+   "name": "potted_sprout_dry_on_day_1",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 86400000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 568000,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_sprout_dry_still_refused_on_day_10",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 864000000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 0,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_leaf_after_the_soil_dried",
+   "act": {
+    "this": "p1",
+    "form": "leaf"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 604800000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 976000,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_flower_after_the_soil_dried",
+   "act": {
+    "this": "p1",
+    "form": "flower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 604800000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 976000,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_sprout_at_another_stage",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 86400000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "stage",
+     "found": "sprout",
+     "wanted": {
+      "is": "seed"
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_leaf_at_another_stage",
+   "act": {
+    "this": "p1",
+    "form": "leaf"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 172800000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 86400000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "stage",
+     "found": "seed",
+     "wanted": {
+      "is": "sprout"
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_flower_at_another_stage",
+   "act": {
+    "this": "p1",
+    "form": "flower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 259200000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 172800000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "stage",
+     "found": "seed",
+     "wanted": {
+      "is": "leafy"
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_sprout_half_a_day_into_the_stage",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 86400000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 43200000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 2,
+    "detail": {
+     "field": "ripening",
+     "found": 43200,
+     "wanted": {
+      "at_least": 86400
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_leaf_half_a_day_into_the_stage",
+   "act": {
+    "this": "p1",
+    "form": "leaf"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 172800000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 129600000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 2,
+    "detail": {
+     "field": "ripening",
+     "found": 43200,
+     "wanted": {
+      "at_least": 86400
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_flower_half_a_day_into_the_stage",
+   "act": {
+    "this": "p1",
+    "form": "flower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 259200000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 216000000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 2,
+    "detail": {
+     "field": "ripening",
+     "found": 43200,
+     "wanted": {
+      "at_least": 86400
+     }
+    }
+   }
+  },
+  {
+   "name": "potted_water_holding_a_can",
+   "act": {
+    "this": "p1",
+    "form": "water"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": "c1"
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "c1": {
+      "kind": "eden:watering_can"
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "potted_water_with_no_can",
+   "act": {
+    "this": "p1",
+    "form": "water"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:potted_plant",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_holding_kind",
+    "need": 0,
+    "detail": {
+     "kind": "eden:watering_can"
+    },
+    "fix": {
+     "step": "take",
+     "kind": "eden:watering_can"
+    }
+   }
+  }
+ ]
+}

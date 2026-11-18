@@ -1,0 +1,52 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Making and removing: a made thing appears where its form names (here a hand, or loose where the actor is) with an id taken from the receipt; removing a held thing frees the hand.",
+  "cases": [
+    {
+      "name": "tear_off_a_slip_discard_it_post_one",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "h1"] },
+          "h1": { "kind": "test:sheet" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "h1", "form": "tear_off" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "create", "node": "rc1.0", "kind": "test:slip", "to": { "node": "b1", "hand": "left" } }],
+            "events": [{ "event": "test:tore_off", "node": "h1", "changes": [0] }]
+          }
+        },
+        {
+          "act": { "this": "rc1.0", "form": "discard" },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "remove", "node": "rc1.0" }],
+            "events": [{ "event": "test:discarded", "node": "rc1.0", "changes": [0] }]
+          }
+        },
+        {
+          "act": { "this": "h1", "form": "post" },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "create", "node": "rc3.0", "kind": "test:slip", "to": { "node": "room" } }],
+            "events": [{ "event": "test:posted", "node": "h1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": {
+        "b1": { "hands": { "left": null, "right": null } },
+        "rc1.0": null,
+        "rc3.0": { "kind": "test:slip" },
+        "room": { "loose": ["b1", "h1", "rc3.0"] }
+      }
+    }
+  ]
+}

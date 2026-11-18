@@ -1,0 +1,122 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:picture_frame",
+  "owner": "thing",
+  "state": {
+    "picture": {
+      "n": 1,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "title": {
+      "n": 2,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "maker": {
+      "n": 3,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      876,
+      738,
+      50
+    ]
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:picture_frame",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            62,
+            0
+          ],
+          "polygon": [
+            [
+              -438,
+              -13
+            ],
+            [
+              438,
+              -13
+            ],
+            [
+              438,
+              13
+            ],
+            [
+              -438,
+              13
+            ]
+          ],
+          "h": 676,
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            400,
+            30
+          ],
+          "size": [
+            760,
+            560,
+            20
+          ],
+          "round": 0,
+          "tint": "canvas"
+        }
+      ],
+      "round": 12,
+      "palette": {
+        "frame": "#b8913f",
+        "canvas": "#7fa7c9"
+      },
+      "tags": [
+        "signage",
+        "sign-text",
+        "frame",
+        "art",
+        "display",
+        "media",
+        "wall"
+      ]
+    }
+  },
+  "text": {
+    "card": "A framed picture to hang on a wall; its picture, title and maker by reference.",
+    "art": "art",
+    "painting": "painting",
+    "photo": "photo"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "painting",
+      "photo"
+    ]
+  }
+}

@@ -1,0 +1,166 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:bread_loaf (core/bread-loaf-pack@1, 1 placed): six pieces torn off while held; the last finishes it.",
+ "cases": [
+  {
+   "name": "bread_loaf_eaten_to_the_last_tear_off",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bread_loaf",
+      "fields": {}
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    },
+    "now_us": 0
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "tear_off"
+     },
+     "now_us": 0,
+     "receipt": "rtear_off0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "slices",
+        "n": 1,
+        "to": 5
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:tore_off_a_piece",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "tear_off"
+     },
+     "now_us": 1000000,
+     "receipt": "rtear_off1000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "tear_off"
+     },
+     "now_us": 2000000,
+     "receipt": "rtear_off2000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "tear_off"
+     },
+     "now_us": 3000000,
+     "receipt": "rtear_off3000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "tear_off"
+     },
+     "now_us": 4000000,
+     "receipt": "rtear_off4000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "tear_off"
+     },
+     "now_us": 6000000,
+     "receipt": "rtear_off6000000",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "finish"
+     },
+     "now_us": 7000000,
+     "receipt": "rfinish7000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "remove",
+        "node": "t1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:finished",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

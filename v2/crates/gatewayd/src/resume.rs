@@ -2,8 +2,10 @@
 //! version `[lineage, zone, epoch, sequence]` (`v2/docs/ids.md` rule 8). For each grant the gateway keeps the last
 //! [`KEPT`] frames the world sent it, each with its version. A client that signs in with a cursor gets every kept frame
 //! after it, or is told by name ([`CANNOT_RESUME`]) that it cannot and must start again: when the cursor is from
-//! another lineage or zone, older than a frame already let go, newer than anything sent, or when the gateway holds
-//! nothing for the grant (it restarted). Resume by cursor with a plain "start again" is Discord's gateway design.
+//! another lineage or zone, from another epoch than the newest frame (R5, #2699: a superseded writer may have sent
+//! what the next one never kept, so the client compares from the top, `replica::sync`), older than a frame already
+//! let go, newer than anything sent, or when the gateway holds nothing for the grant (it restarted). Resume by cursor
+//! with a plain "start again" is Discord's gateway design.
 
 use std::collections::VecDeque;
 
@@ -95,6 +97,7 @@ impl Kept {
             return Resume::CannotResume;
         };
         if newest.place != cursor.place
+            || newest.epoch != cursor.epoch
             || cursor.after(newest)
             || self.dropped.as_ref().is_some_and(|d| d.after(cursor))
         {
@@ -126,13 +129,23 @@ mod tests {
     }
 
     #[test]
-    fn a4_resumes_after_the_cursor_across_epochs() {
+    fn a4_resumes_after_the_cursor_within_the_newest_epoch() {
         let mut k = Kept::default();
         for (e, s) in [(1, 1), (1, 2), (2, 3), (2, 4)] {
             k.push(at(e, s), vec![u8::try_from(s).unwrap()]);
         }
-        assert_eq!(k.resume(&at(1, 2)), Resume::Resumed(vec![vec![3], vec![4]]));
+        assert_eq!(k.resume(&at(2, 3)), Resume::Resumed(vec![vec![4]]));
         assert_eq!(k.resume(&at(2, 4)), Resume::Resumed(vec![]));
+    }
+
+    #[test]
+    fn r5_a3_a_cursor_from_another_epoch_never_resumes() {
+        let mut k = Kept::default();
+        for (e, s) in [(1, 1), (1, 2), (2, 3), (2, 4)] {
+            k.push(at(e, s), vec![u8::try_from(s).unwrap()]);
+        }
+        assert_eq!(k.resume(&at(1, 2)), Resume::CannotResume, "an older epoch");
+        assert_eq!(k.resume(&at(3, 0)), Resume::CannotResume, "a later epoch");
     }
 
     #[test]

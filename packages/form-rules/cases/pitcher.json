@@ -1,0 +1,55 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:pitcher (from #1868). A pitcher holds up to 1000 g of water (four quarter-litres). Anyone with a free hand takes it; its holder pours an amount they choose into another pitcher, out of this one and into that one, the two amounts summing to zero. Refused, as the original refused: not held ('The intended source must remain in your hand'), empty, an amount it does not have ('The source does not contain that many finite units; choose less or refill from another pitcher') and an amount the other cannot hold ('The receiver lacks capacity for that amount; choose less or empty it by pouring elsewhere'). Nothing in the pitcher's own forms fills it, so an empty pitcher names no fix.",
+  "cases": [
+    {
+      "name": "take_every_need_met",
+      "act": { "this": "p1", "form": "take" },
+      "state": { "actor": "b1", "nodes": { "p1": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "take_no_free_hand",
+      "act": { "this": "p1", "form": "take" },
+      "state": { "actor": "b1", "nodes": { "p1": { "kind": "eden:pitcher" }, "p2": { "kind": "eden:pitcher" }, "p3": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p2", "right": "p3" } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": { "step": "put" } }
+    },
+    {
+      "name": "pour_every_need_met",
+      "act": { "this": "p1", "form": "pour", "args": { "into": "p2", "amount": 500 } },
+      "state": { "actor": "b1", "nodes": { "p1": { "kind": "eden:pitcher", "fields": { "water": 1000 } }, "p2": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "pour_not_held",
+      "act": { "this": "p1", "form": "pour", "args": { "into": "p2", "amount": 500 } },
+      "state": { "actor": "b1", "nodes": { "p1": { "kind": "eden:pitcher", "fields": { "water": 1000 } }, "p2": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": { "step": "take", "thing": "p1" } }
+    },
+    {
+      "name": "pour_empty",
+      "act": { "this": "p1", "form": "pour", "args": { "into": "p2", "amount": 250 } },
+      "state": { "actor": "b1", "nodes": { "p1": { "kind": "eden:pitcher" }, "p2": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "detail": { "field": "water", "found": 0, "wanted": { "at_least": 1 } }, "fix": null }
+    },
+    {
+      "name": "pour_more_than_it_has",
+      "act": { "this": "p1", "form": "pour", "args": { "into": "p2", "amount": 750 } },
+      "state": { "actor": "b1", "nodes": { "p1": { "kind": "eden:pitcher", "fields": { "water": 500 } }, "p2": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_enough", "need": 2, "detail": { "node": "p1", "field": "water", "has": 500, "amount": 750 }, "fix": null }
+    },
+    {
+      "name": "pour_more_than_the_other_holds",
+      "act": { "this": "p1", "form": "pour", "args": { "into": "p2", "amount": 500 } },
+      "state": { "actor": "b1", "nodes": { "p1": { "kind": "eden:pitcher", "fields": { "water": 1000 } }, "p2": { "kind": "eden:pitcher", "fields": { "water": 750 } }, "b1": { "hands": { "left": "p1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_room", "need": 3, "detail": { "node": "p2", "field": "water", "room": 250, "amount": 500 }, "fix": null }
+    }
+  ]
+}

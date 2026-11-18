@@ -9,10 +9,10 @@ use replica::bodies::{Class, Family, Resource};
 use replica::effects::{Refusal, fixture_bytes, schema_hash};
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Purpose, Scope};
-use replica::moves::Seat;
+use replica::moves::Place;
 use replica::pose::{Frame, Quat, Vec3};
 use sim::links::Doors;
-use sim::slots::SeatAt;
+use sim::slots::PlaceAt;
 use sim::walk::town::Town;
 
 use crate::bodies::Bodies;
@@ -113,12 +113,12 @@ pub fn bodies() -> Result<Bodies, Refusal> {
     )?;
     let mut b = Bodies::new(town, 50_000)?;
     b.add_body(humanoid(), at)?;
-    let chair = decode(&fixture_bytes(CHAIR)?).map_err(|e| refusal("seat-unread", e))?;
-    let seat = Seat::from_value(&chair.value)?;
+    let chair = decode(&fixture_bytes(CHAIR)?).map_err(|e| refusal("place-unread", e))?;
+    let place = Place::from_value(&chair.value)?;
     for (_, thing, point) in chairs() {
-        b.add_seat(SeatAt {
+        b.add_place(PlaceAt {
             thing,
-            seat: seat.clone(),
+            place: place.clone(),
             point,
             facing: Quat::IDENTITY,
             floor: ground,

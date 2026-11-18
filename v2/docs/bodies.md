@@ -13,7 +13,8 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
    2 manipulator, 3 gaze, 4 voice (a class added later takes the next number; another is `class-unknown`), and for a
    manipulator the body's slot that holds what it holds. There is no fixed body plan: four legs and no hands, two of
    each, a beak. A family is authored as a kind whose owner is `family` (SA-F1, E21), with its resources in a
-   meaning section of its entry, below 20 and outside the register's 9 to 12 and 17 (B2 picks the number);
+   meaning section of its entry: section 13, `{1: resources, 2: actions, 3: full model, 4: simple model}` (B13,
+   `kinds/body.rs`; `v2/tools/import-body` writes it for a body from the authoring kit);
    `replica` holds it decoded as `{1: name, 2: [{1: name, 2: class, 3: slot}, ...]}`, never an authored or stored
    form. Unknown fields, and two resources of one name, are refused (`not-a-family`, `resource-duplicate`).
 2. **A skill claims classes or names, never anatomy:** every resource of a class (a walk takes all the legs), any
@@ -87,6 +88,17 @@ the driver holding all the body's locomotion, and one move per resource, set by 
 is `resource-not-held` or `resource-missing`. An unheld resource gets the neutral input (still, hands down, facing
 kept), which never moves a body. An input is logged only when it changes.
 
+Gaze and voice (B11 #2742). Where a body looks is part of its input (a node, a point or ahead, record field 8), set
+by the driver holding its gaze and logged when it changes. Its voice carries one utterance at a time: a new one
+replaces the one under way or waits behind it, by the intent's `replace`, and lasts its length from its words, one
+timer. The world writes each as `souls:said {1: {21: words}, 2: reach mm, 3: [hearer, ...], 4: length µs}` in an
+entry whose audience says who may read it ([audience.md](audience.md) rule 4, `replica::speech`). Its hearers are
+resolved when it is written and recorded (`sim::speech`): for ordinary talk, the Souls whose interest set (R4) holds
+the speaker, found from the bodies within the set's leave distance, never a scan. So a body walks, carries and talks
+at once, each under its own driver. Each tick the world brings the interest sets up to date after the controller's step and
+writes the utterances it started (`sim::speech::heard`, #3231); the view tier addresses each utterance's entry to the
+subscriptions that follow one of its recorded hearers, and to no other.
+
 ## Moves (B2)
 
 A move (`v2/crates/replica/src/moves.rs`, B2 #2681) is data: its claims, blocks and cancels in rule 2 to 4's terms,
@@ -100,17 +112,17 @@ move's resources cancels it at its next phase end (`claim-taken`).
 ## Postures and seats (B3)
 
 `v2/crates/sim/src/slots` (B3 #2682) seats bodies. A seat is one slot of a thing, with its kind's data
-(`replica::moves::Seat`, fixture `v2/crates/replica/fixtures/seats/`): the slot's height above the floor, taken from
+(`replica::moves::Place`, fixture `v2/crates/replica/fixtures/seats/`): the slot's height above the floor, taken from
 the model geometry, and a point to stand at. Sitting and lying are moves (`sit.diag`, `lie.diag`). At a move's contact
-instant the controller hands the body from the floor into the slot (`Controller::seat`, T4's hand-off from mover to
+instant the controller hands the body from the floor into the slot (`Controller::slot_in`, T4's hand-off from mover to
 slot) with the stance the request named. Postures are the controller's stance input: stand, sit, lie. Rising
 (`rise.diag`) is the reverse: at contact the body is handed back onto the floor at the stand point
 (`Controller::stand`).
 
 - **Reserved at commit.** One tick's requests are taken together and ordered by a stable key: the body's id, then the
-  seat's. The first takes the seat. Each later request is refused `seat-taken`, and the refusal names the holder. The
+  seat's. The first takes the seat. Each later request is refused `place-taken`, and the refusal names the holder. The
   hold is keyed by the seat's thing, so finding the holder is one lookup, never a scan.
-- **A seat above standing reach is refused** `seat-out-of-reach`. Its height alone is compared with the move's reach.
+- **A seat above standing reach is refused** `place-out-of-reach`. Its height alone is compared with the move's reach.
 - **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
   controller keeps it apart from the bodies it steps, so a tick never visits it.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and

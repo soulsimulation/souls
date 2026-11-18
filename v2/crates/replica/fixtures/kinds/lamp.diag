@@ -1,0 +1,9 @@
+# A lamp (Engine v2 K3, #2667): a thing with one settable field and a form that sets it. Sections as SA-F1 (#2842)
+# numbers them: 1 name, 2 owner, 3 state, 5 points, 6 slots, 8 forms, 11 children. Lengths are whole millimetres.
+{
+  1: "souls:lamp",
+  2: "thing",
+  3: {1: {1: "lit", 2: "bool", 3: 0, 4: "public"}},          # state: name, type, default, audience
+  5: {1: {1: "switch", 2: [0, 300, 40], 3: "contact"}},     # points: name, position in mm, role
+  8: {1: {1: "switch", 2: [["reach", 1], ["press", 1]]}}    # forms: name, steps (a move by name, then its arguments)
+}

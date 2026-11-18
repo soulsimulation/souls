@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":125,"group":"two-things","words":"put the plant on the dresser","obvious":3,"things":{"plant":"eden:potted_plant","dresser":"eden:dresser"},"chain":[{"this":"me","form":"pick_up","carry":"plant","args":{"thing":"plant"}},{"this":"me","form":"put","place":{"at":"on","thing":"plant","anchor":"dresser"},"args":{"thing":"plant"}}]}

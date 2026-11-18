@@ -16,7 +16,10 @@
 //! - **Steps.** A floor of a building on the open ground, whose outline's edge bounds a surface within [`STEP`] of the
 //!   ground (a shop's porch, 100 mm up), steps down there: each such edge is a doorway of no depth (`Doorway::step`),
 //!   taken from neither side, whose passage is cut like any doorway's. N4 makes it a link from the floor to the
-//!   ground where its passage meets both ([`crate::links::Kind::Step`]).
+//!   ground where its passage meets both ([`crate::links::Kind::Step`]). Inside a floor, two surfaces that share a
+//!   stretch of edge and lie within [`STEP`] of each other in height (a bridge's deck, quads 100 to 145 mm apart) are
+//!   cut as two heights, each shrunk at that edge like any other; the stretch is a step too, at the height between
+//!   them, which N4 makes a link from the floor to itself (#3224). Surfaces further apart are joined only by a stair.
 //!   Boxes overlap and cross the floor's edge, so they are a union taken away, never a list of holes; a floor may
 //!   fall into several pieces, and each piece is cut into triangles that keep its edges (`i_triangle`, then
 //!   Delaunay flips).
@@ -29,16 +32,40 @@
 //!   it is on, its height and the width left for the centre at the doorway's middle. A shut door is the link's state
 //!   (N4, #2652), never an obstacle.
 //! - **Height.** Every vertex is `[x, y, z]` in whole millimetres in the node's frame (T4, #2644: never a 2D point on a
-//!   floor). A floor's vertices carry its surface's height. The open ground's carry 0: the tree holds no terrain yet
-//!   (N1, #2649, imports the waters' outlines and levels, not the 1 m heights), so slopes and steep cells wait for N11 (#2735).
+//!   floor). A floor's vertices carry its surface's height. The open ground's are at 0, its plan: the routes, the
+//!   doorways' meets and the spots read it as one level. Its heights are the terrain's (N11a, #2735, from N1b's
+//!   `scene::Terrain`, read by [`OpenGround::of`]): the mover reads them at the point inside every triangle that
+//!   lies on the terrain ([`OpenGround::on_terrain`], `crate::mover::Surface::on_terrain`), and a triangle with a
+//!   corner or its middle over water (ground cover: a pier, a shore) keeps 0, the cover's height as before. Cutting
+//!   through every 1 m sample instead made Eden's open ground 24 times the triangles and slowed N15's thousand
+//!   walkers past real time; heights on the vertices made the routes' one level many.
+//! - **Things on the terrain.** What stands on the open ground is measured from the ground under it, not from the
+//!   plan's 0 (#3227; `scene::Terrain::ground`: the terrain's height there, or 0 where that is nearer, as over water
+//!   under a pier): a floor is ground cover within [`STEP`] of it, a footprint below [`BODY_HIGH`] above it, a
+//!   doorway or a step meets the open ground's plan from its height above it, and an outline step steps down to it.
+//!   So Eden's 94 floors of buildings on its hills (a cottage 10.3 m up) are joined to the open ground like the
+//!   town's. A box on the open ground is measured from the ground under its middle (#3241), so a fence or a tree on
+//!   a hill blocks at its foot as on flat ground; a doorway's wall and passage are read against the boxes at the
+//!   doorway's height above the ground.
+//! - **Steep cells.** A 1 m cell whose slope is above [`STEEP`] (a rise over run of 0.5774, today's) is taken from
+//!   the open ground before its cover is added back: no centre stands on it, so the mover slides along its edge and
+//!   a route goes round it. Cells are taken as they are, not grown by the radius: a body's edge may hang over one.
 //! - **Where it lives.** Here in `sim`, native only. An agent's client never loads the ground: where a described spot
 //!   is a point, the server binds the legal standing spot (E2, #2709).
+//! - **Versions** (G3, #2760). Each node's ground has a version ([`Versions`]), bumped when a committed part changes
+//!   what its scene is read from ([`touched`]): a node's shape fields, its place, its parent, it coming or going, a
+//!   link at it. A change inside a building touches every floor of it; one not under a floor of a building (the
+//!   building itself, a floor's surfaces, a wall on the open ground) touches the open ground too. The would-be ground
+//!   of the touched nodes is cut off the clock thread from the tree as the part leaves it, and installed on the tick
+//!   the part commits (`crate::walk::town::Town::install`): no tick sees new geometry over old ground. A route
+//!   records the versions it was planned on, and the walk is planned again on a mismatch (`crate::unstick`).
 //!
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
 
 pub mod exits;
 pub mod scene;
+pub mod sizes;
 
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay::{Overlay, ShapeType};
@@ -46,12 +73,15 @@ use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::i_float::int::point::IntPoint;
 use i_overlay::i_shape::int::shape::{IntShape, IntShapes};
 use i_triangle::int::triangulatable::IntTriangulatable;
+use replica::effects::{Body, Change, Part};
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::{Quat, Vec3};
 use replica::tree::Tree;
-pub use scene::{Doorway, Scene, Solid, Surface, Water};
-use std::collections::HashMap;
+use replica::world_model::plain;
+pub use scene::{Doorway, Scene, Solid, Surface, Terrain, Water};
 use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// The clearance kept beyond the body's radius, mm.
 pub const MARGIN: i64 = 60;
@@ -63,8 +93,13 @@ pub const BODY_HIGH: i64 = 1_800;
 pub const STEP: i64 = BODY_LOW;
 /// The open ground's square, mm.
 pub const SQUARE: i64 = 16_000;
-/// Today's walking body, mm (`HUMAN_PROFILE`).
-pub const HUMAN_RADIUS: i64 = 280;
+/// The steepest slope a body stands on, parts per million (rise over run, today's 0.5774: 30°).
+pub const STEEP: i64 = 577_400;
+/// The terrain's cell, mm.
+const CELL: i32 = 1_000;
+/// Today's walking body, mm (`HUMAN_PROFILE`): the standard size class. Other bodies are cut for their own class
+/// (B12, `replica::kinds::sizes::Size`): one cut per class, kept by [`Cache`] per radius.
+pub const HUMAN_RADIUS: i64 = Size::Standard.radius_mm();
 /// A doorway's depth either side of its middle when no wall flanks it, mm.
 const DOOR_HALF_DEPTH: i64 = 100;
 /// How far the passage through a doorway runs past the grown wall, so that it overlaps the patch on each side, mm.
@@ -352,6 +387,9 @@ struct Door {
     across: [i64; 2],
     half: i64,
     y: i64,
+    /// The open ground's height under it, µm (its terrain's, #3227): the open ground's cut, whose plan is at 0, meets
+    /// a doorway at `y` less this. 0 on a floor.
+    ground: i64,
     /// Through the wall: from `n0` to `n1` mm along `across`.
     n0: i64,
     n1: i64,
@@ -434,8 +472,19 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             None => grow(&r, d),
         };
         let bb = bounds(&gr);
-        flat.push((r, b.y0, b.y1));
-        boxes.push((gr, b.y0, b.y1, bb));
+        // On the open ground a box is measured from the ground under its middle, as a footprint is (#3241): a fence
+        // on a hill spans the body at its foot as on flat ground. The open ground's plan, cut at 0, meets it there.
+        let lift = if s.open {
+            let (x, z) = b
+                .ring
+                .iter()
+                .fold((0, 0), |(x, z), p| (x + p[0] / 4, z + p[1] / 4));
+            Terrain::ground(s.terrain.as_ref(), x, z, b.y0)
+        } else {
+            0
+        };
+        flat.push((r, b.y0 - lift, b.y1 - lift));
+        boxes.push((gr, b.y0 - lift, b.y1 - lift, bb));
     }
     let mut never = Vec::new();
     let mut doors = Vec::new();
@@ -455,6 +504,11 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             across,
             half: dw.width / 2000,
             y: dw.y,
+            ground: if s.open {
+                Terrain::ground(s.terrain.as_ref(), dw.at[0], dw.at[1], dw.y)
+            } else {
+                0
+            },
             n0: -DOOR_HALF_DEPTH,
             n1: DOOR_HALF_DEPTH,
             step: dw.step,
@@ -471,7 +525,7 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             door.point(door.half + 50, 0),
         ];
         for (r, y0, y1) in &flat {
-            if spans(*y0, *y1, dw.y) && flank.iter().any(|f| inside_convex(r, *f)) {
+            if spans(*y0, *y1, dw.y - door.ground) && flank.iter().any(|f| inside_convex(r, *f)) {
                 // A box of the door's own wall runs along it. One that meets the opening end-on (a corridor's side
                 // wall starting at the jamb) runs through it, and would make the whole corridor doorway.
                 let cs: Vec<(i64, i64)> = r.iter().map(|p| door.coords(*p)).collect();
@@ -490,11 +544,12 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
         let rect = door.rect(-door.half, door.half, door.n0, door.n1);
         let gr = grow(&rect, d);
         let bb = bounds(&gr);
-        never.push((gr, dw.y, bb));
+        never.push((gr, dw.y - door.ground, bb));
         doors.push(door);
     }
     for f in &s.footprints {
-        if f.y < BODY_HIGH * 1000 {
+        // A building on the terrain is a footprint where its floor stands on the ground under it (#3227).
+        if scene::above_ground(s.terrain.as_ref(), f) < BODY_HIGH * 1000 {
             let r = ccw(f.ring.iter().map(|p| g(*p)).collect::<Result<_, _>>()?);
             // Grown outwards: the ring turned clockwise has the outside on its left.
             let mut parts = Vec::new();
@@ -585,6 +640,49 @@ fn piece(shape: &IntShape<i32>, y: i64) -> Piece {
     }
 }
 
+/// Whether `p` lies inside `shape` (its outer ring less its holes) and on none of its edges.
+fn strictly_inside(shape: &IntShape<i32>, p: P) -> bool {
+    let mut odd = false;
+    for c in shape {
+        for k in 0..c.len() {
+            let (a, b) = (c[k], c[(k + 1) % c.len()]);
+            let cross = i64::from(b.x - a.x) * i64::from(p.y - a.y)
+                - i64::from(b.y - a.y) * i64::from(p.x - a.x);
+            let within = |u: i32, v: i32, w: i32| u.min(v) <= w && w <= u.max(v);
+            if cross == 0 && within(a.x, b.x, p.x) && within(a.y, b.y, p.y) {
+                return false;
+            }
+            if (a.y > p.y) != (b.y > p.y) {
+                // Where the edge crosses the point's row, compared without dividing.
+                let lhs = i64::from(p.x - a.x) * i64::from(b.y - a.y);
+                let rhs = i64::from(b.x - a.x) * i64::from(p.y - a.y);
+                if (b.y > a.y && lhs < rhs) || (b.y < a.y && lhs > rhs) {
+                    odd = !odd;
+                }
+            }
+        }
+    }
+    odd
+}
+
+/// Whether `p` lies inside or on any of `rings` (each one closed ring, any winding).
+fn in_any(rings: &[Vec<P>], p: P) -> bool {
+    rings.iter().any(|r| {
+        let shape: IntShape<i32> = vec![r.clone()];
+        strictly_inside(&shape, p)
+            || (0..r.len()).any(|k| {
+                let (a, b) = (r[k], r[(k + 1) % r.len()]);
+                let cross = i64::from(b.x - a.x) * i64::from(p.y - a.y)
+                    - i64::from(b.y - a.y) * i64::from(p.x - a.x);
+                cross == 0
+                    && a.x.min(b.x) <= p.x
+                    && p.x <= a.x.max(b.x)
+                    && a.y.min(b.y) <= p.y
+                    && p.y <= a.y.max(b.y)
+            })
+    })
+}
+
 /// The doorways' meets with the pieces just cut (all at height `y`).
 fn meets(
     g: &Grown,
@@ -596,7 +694,7 @@ fn meets(
 ) {
     let reach = g.d + PASSAGE_REACH;
     for door in &g.doors {
-        if (door.y - y).abs() >= BODY_LOW * 1000 {
+        if (door.y - door.ground - y).abs() >= BODY_LOW * 1000 {
             continue;
         }
         let q0 = door.rect(-door.half, door.half, door.n0 - reach, door.n1 + reach);
@@ -606,7 +704,7 @@ fn meets(
         }
         let mut clip = Vec::new();
         for (r, y0, y1, bb) in &g.boxes {
-            if spans(*y0, *y1, door.y) && meets_box(bb, &window) {
+            if spans(*y0, *y1, door.y - door.ground) && meets_box(bb, &window) {
                 clip.push(r.clone());
             }
         }
@@ -694,12 +792,68 @@ pub fn cut_floor(s: &Scene, radius: i64, t: Turn) -> Result<Patch, String> {
     Ok(patch)
 }
 
-/// The open ground, prepared once for one radius: every square is cut from it.
-pub struct OpenGround(Grown);
+/// The open ground, prepared once for one radius: every square is cut from it, on its terrain when it has one.
+pub struct OpenGround(Grown, Option<Terrain>);
 
 impl OpenGround {
+    /// The open ground of `s`, flat at 0.
     pub fn prepare(s: &Scene, radius: i64) -> Result<OpenGround, String> {
-        prepare(s, radius, Turn::NONE).map(OpenGround)
+        prepare(s, radius, Turn::NONE).map(|g| OpenGround(g, None))
+    }
+
+    /// The open ground node `ground` of `tree`, on the terrain it holds (N1b, #3197), if any.
+    pub fn of(tree: &Tree, ground: Id, radius: i64) -> Result<OpenGround, String> {
+        let s = Scene::of(tree, ground)?;
+        let mut o = OpenGround::prepare(&s, radius)?;
+        o.1 = s.terrain;
+        Ok(o)
+    }
+
+    /// The terrain it is cut on, if any.
+    pub fn terrain(&self) -> Option<&Terrain> {
+        self.1.as_ref()
+    }
+
+    /// Per piece of `pieces` (cut from this open ground), per triangle: whether it lies on the terrain, so that its
+    /// heights are the terrain's. Not when there is no terrain, nor when a corner or the middle of the triangle lies
+    /// in or on a water's outline (ground cover over water keeps 0).
+    pub fn on_terrain(&self, pieces: &[Piece]) -> Vec<Vec<bool>> {
+        let wet = |p: P| {
+            self.0.waters.iter().any(|(r, bb)| {
+                bb[0] <= p.x
+                    && p.x <= bb[2]
+                    && bb[1] <= p.y
+                    && p.y <= bb[3]
+                    && in_any(std::slice::from_ref(r), p)
+            })
+        };
+        pieces
+            .iter()
+            .map(|pc| {
+                pc.triangles
+                    .iter()
+                    .map(|t| {
+                        let c = t.map(|k| {
+                            let v = pc.vertices[k as usize];
+                            P::new(v[0], v[2])
+                        });
+                        let mid = P::new(
+                            ((i64::from(c[0].x) + i64::from(c[1].x) + i64::from(c[2].x)) / 3)
+                                as i32,
+                            ((i64::from(c[0].y) + i64::from(c[1].y) + i64::from(c[2].y)) / 3)
+                                as i32,
+                        );
+                        self.1.is_some() && !c.iter().chain([&mid]).any(|&p| wet(p))
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The same open ground on terrain `t`.
+    pub fn on(mut self, t: Terrain) -> OpenGround {
+        self.1 = Some(t);
+        self
     }
 
     /// The squares that hold anything, as (i, j) with the square from (i·[`SQUARE`], j·[`SQUARE`]).
@@ -747,6 +901,34 @@ impl OpenGround {
         };
         let (wet, cover) = (near(&g.waters), near(&g.covers));
         let mut open = op(&[square_ring(w)], &wet, OverlayRule::Difference);
+        // The terrain's steep cells in the square, taken away in runs along x.
+        let n = (SQUARE as i32 / CELL) as usize;
+        if let Some(t) = &self.1 {
+            let um = |v: i32| i64::from(v) * 1000;
+            let mut steep: Vec<Vec<P>> = Vec::new();
+            for r in 0..=n {
+                let z = w[1] + r as i32 * CELL;
+                let mut run: Option<i32> = None;
+                for c in 0..=n {
+                    let x = w[0] + c as i32 * CELL;
+                    let is = r < n
+                        && c < n
+                        && t.slope_at(um(x) + 500_000, um(z) + 500_000)
+                            .is_some_and(|s| s > STEEP);
+                    match (run, is) {
+                        (None, true) => run = Some(x),
+                        (Some(x0), false) => {
+                            steep.push(square_ring([x0, z, x, z + CELL]));
+                            run = None;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if !steep.is_empty() {
+                open = shapes_op(&open, &steep, OverlayRule::Difference);
+            }
+        }
         if !cover.is_empty() {
             // The cover inside the square, added back over the water it lies on (a pier, a shore).
             let on = op(&cover, &[square_ring(w)], OverlayRule::Intersect);
@@ -756,12 +938,115 @@ impl OpenGround {
         let shapes = cut_level(g, open, 0, Some(w));
         let mut meets_out = Vec::new();
         meets(&self.0, &shapes, 0, 0, Some(w), &mut meets_out);
+        let pieces = shapes.iter().map(|sh| piece(sh, 0)).collect();
         Patch {
             radius: self.0.d - MARGIN - 1,
-            pieces: shapes.iter().map(|sh| piece(sh, 0)).collect(),
+            pieces,
             meets: meets_out,
         }
     }
+}
+
+/// Each node's ground version (G3, #2760): 0 until a committed part first touches it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Versions(BTreeMap<Id, u64>);
+
+impl Versions {
+    pub fn of(&self, node: Id) -> u64 {
+        self.0.get(&node).copied().unwrap_or(0)
+    }
+
+    /// Whether no ground has changed yet.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// One more for each node of `nodes`.
+    pub fn bump<'a>(&mut self, nodes: impl IntoIterator<Item = &'a Id>) {
+        for n in nodes {
+            *self.0.entry(*n).or_default() += 1;
+        }
+    }
+}
+
+/// The fields a scene is read from: a change to any other (a door's open field, a name) leaves the ground as it was.
+const SHAPE: [u64; 11] = [
+    scene::F_OPEN_DOOR_LINK,
+    scene::F_OUTLINE,
+    scene::F_SOLIDS,
+    scene::F_SURFACES,
+    scene::F_LINE,
+    scene::F_LINE_WIDTH,
+    scene::F_WATER_LEVEL,
+    scene::F_PLACE_OF,
+    scene::F_DOORWAYS,
+    scene::F_TILE_SIZE,
+    scene::F_TILES,
+];
+
+/// The nodes whose ground a change at node `id` of `tree` changes (see the module's notes), added to `out`.
+fn grounds_of(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
+    let kind = |h| tree.node(h).map(|n| plain(n.kind().as_str()).to_owned());
+    let mut up = tree.handle(id);
+    let mut under_floor = false;
+    while let Some(h) = up {
+        let k = kind(h).unwrap_or_default();
+        if k == scene::GROUND {
+            out.insert(tree.node(h).map_or(id, |n| n.id()));
+            return;
+        }
+        let kids = tree.children(h).unwrap_or(&[]);
+        let floors: Vec<Id> = kids
+            .iter()
+            .filter(|&&c| kind(c).as_deref() == Some(scene::FLOOR))
+            .filter_map(|&c| tree.node(c).map(|n| n.id()))
+            .collect();
+        if !floors.is_empty() {
+            out.extend(floors);
+            if under_floor {
+                return;
+            }
+        }
+        if k == scene::FLOOR && tree.node(h).is_some_and(|n| n.id() != id) {
+            under_floor = true;
+        }
+        up = tree
+            .node(h)
+            .and_then(|n| n.parent())
+            .and_then(|p| tree.handle(p));
+    }
+}
+
+/// The nodes whose ground the committed part `part` changes: read in `before` (the tree it was applied to) for what
+/// it moves or removes, and in `after` for what it places or moves. Motion samples change no ground.
+pub fn touched(before: &Tree, after: &Tree, part: &Part) -> BTreeSet<Id> {
+    let mut ids = Vec::new();
+    for e in &part.effects {
+        let Body::Changes(changes) = &e.body else {
+            continue;
+        };
+        for c in changes {
+            match &c.change {
+                Change::Create { node, .. }
+                | Change::Remove { node }
+                | Change::Reparent { node, .. } => ids.push(*node),
+                Change::Set { node, field, .. } if SHAPE.contains(field) => ids.push(*node),
+                Change::Link { ends, .. } => ids.extend(ends),
+                Change::Unlink { link } => {
+                    if let Some((_, ends, ..)) = before.link(*link) {
+                        ids.extend(ends);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = BTreeSet::new();
+    for id in ids {
+        grounds_of(before, id, &mut out);
+        grounds_of(after, id, &mut out);
+    }
+    out
 }
 
 /// Patches kept per node, node version and radius (G3, #2760, rebuilds one on an edit by asking with the new version).
