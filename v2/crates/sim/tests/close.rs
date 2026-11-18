@@ -159,6 +159,7 @@ impl Host for H<'_> {
         self.body
     }
     fn clear_timer(&mut self, _timer: Id) {}
+    fn cross(&mut self, _link: Id, _speed: i64) {}
     fn draw(&mut self) -> u64 {
         0
     }
@@ -206,6 +207,9 @@ impl Host for Counting<'_> {
     }
     fn clear_timer(&mut self, timer: Id) {
         self.h.clear_timer(timer)
+    }
+    fn cross(&mut self, link: Id, speed: i64) {
+        self.h.cross(link, speed)
     }
     fn draw(&mut self) -> u64 {
         self.h.draw()
@@ -575,12 +579,14 @@ impl Host for Fake {
         match q {
             Ask::Toward { .. } => Some(Answer::Point(Vec3::new(0, 0, 4_000_000))),
             Ask::Distance { .. } => None,
+            Ask::Near { .. } => None,
         }
     }
     fn set_timer(&mut self, _after: Micros, _name: Name) -> Id {
         id(1)
     }
     fn clear_timer(&mut self, _timer: Id) {}
+    fn cross(&mut self, _link: Id, _speed: i64) {}
     fn draw(&mut self) -> u64 {
         0
     }
