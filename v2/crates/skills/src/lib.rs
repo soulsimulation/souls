@@ -5,5 +5,6 @@
 // No float in what a skill decides (lane note 4; K14).
 #![deny(clippy::float_arithmetic)]
 
+pub mod close;
 pub mod scan;
 pub mod walk;
