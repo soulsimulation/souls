@@ -20,9 +20,10 @@ step toolchain bash -c 'rustup component add rustfmt clippy && rustup target add
 
 step format cargo fmt --all --check
 # Engine code names no kind (K3, #2667): the fixture kinds' names are in no Rust code under the crates' src/. Comment
-# lines and lines that embed a fixture file (data) are set aside; tests and fixtures name kinds on purpose.
+# lines and lines that embed a fixture file (data) are set aside; tests and fixtures name kinds on purpose. The refusal
+# `seat.occupied` (N19, #3341: a body stands where a part would be seated) names a step, not a kind.
 step no-kind-names bash -c '! grep -rniEw --include="*.rs" "lamps?|seats?|cups?" crates/*/src |
-  grep -vE "^[^:]+:[0-9]+:[[:space:]]*//" | grep -v "include_str!"'
+  grep -vE "^[^:]+:[0-9]+:[[:space:]]*//" | grep -v "include_str!" | grep -v "\"seat\.occupied\""'
 step lints cargo clippy --workspace --all-targets --locked -- -D warnings
 # replica's WASM-only code (the wasm-bindgen export) is linted on its own target too.
 step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked -- -D warnings

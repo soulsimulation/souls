@@ -20,7 +20,9 @@
 //!   with B5's leave, which B18 refuses by name until the part stands.
 //! - **Refused before anyone moves** ([`Seating::check`]): `crew.size`, `slot.occupied` (another part in the slot),
 //!   `reach.too-high` (the slot's height above the crew's standing reach), and B18's refusals of the seating as it
-//!   would be committed. Every commit here goes through [`Seating::write`], the structure rule's guarded write.
+//!   would be committed, and `seat.occupied` when a body stands where the part would be (N19, #3341). Every commit
+//!   here goes through [`Seating::write`], the structure rule's guarded write, which asks for G3's rebuild of the
+//!   ground when one is kept ([`Seating::rebuild`]): a seated part is fixed geometry to walkers.
 //!
 //! Not here: ladders, raising from lying, three carriers, decks and stairs, the gathering walk, a crew member who leaves
 //! between steps (B5's leave; a new member joins the next activity).
@@ -43,6 +45,8 @@ use replica::world_model::{Audience, End, show};
 
 use super::Activities;
 pub use super::carry::SLOT;
+use crate::ground::HUMAN_RADIUS;
+use crate::ground::scene::stands_in;
 use crate::slots::hands::{Entry, in_slot};
 use crate::structure::Structure;
 
@@ -93,6 +97,8 @@ pub struct Seating {
     pub parts: Vec<Vec<Effect>>,
     /// The track each crew node is on while it sets a part in.
     tracks: BTreeMap<Id, Owner>,
+    /// G3's rebuild, asked for by each commit when the ground is kept (N19, #3341): a seated part is fixed geometry.
+    pub rebuild: Option<crate::ground::Rebuild>,
 }
 
 fn leave(header: &Header, transfer: Id, node: Id, pose: Pose) -> Body {
@@ -148,6 +154,7 @@ impl Seating {
             audience,
             parts: Vec::new(),
             tracks: BTreeMap::new(),
+            rebuild: None,
         }
     }
 
@@ -185,8 +192,12 @@ impl Seating {
     pub fn write(&mut self, tree: &mut Tree, at: Micros, entries: Vec<Entry>) -> R<()> {
         let (part, effects) = self.part(tree, at, entries)?;
         self.structure.check(tree, &part.effects)?;
+        let before = self.rebuild.as_ref().map(|_| tree.frozen());
         tree.commit(&self.header, &part, &self.rules)?;
         self.parts.push(effects);
+        if let (Some(rebuild), Some(before)) = (self.rebuild.as_mut(), before) {
+            rebuild(before, &part)?;
+        }
         Ok(())
     }
 
@@ -209,7 +220,8 @@ impl Seating {
     }
 
     /// The refusals before anyone moves, for `part` to go to `target` with `activity`'s crew, whose standing reach is
-    /// `reach` µm: `crew.size`, `slot.occupied`, `reach.too-high`, then B18's on the seating as it would be committed.
+    /// `reach` µm: `crew.size`, `slot.occupied`, `reach.too-high`, `seat.occupied` (a body stands where the part would
+    /// be, N19), then B18's on the seating as it would be committed.
     #[allow(clippy::too_many_arguments)]
     pub fn check(
         &self,
@@ -251,6 +263,24 @@ impl Seating {
                     "{} µm above the ground, standing reach {reach} µm",
                     target.at.y
                 ),
+            );
+        }
+        let body = |k: &str| self.rules.kinds.get(k).is_some_and(|d| d.owner == "family");
+        let (to, place, turn) = (target.to, target.place, target.turn);
+        let r = stands_in(
+            tree,
+            self.ground,
+            part,
+            to,
+            place,
+            turn,
+            HUMAN_RADIUS,
+            &body,
+        );
+        if let Some(who) = r.or_else(|e| refuse("seating.unread", e))? {
+            return refuse(
+                "seat.occupied",
+                format!("{} stands where {} would be", show(who), show(part)),
             );
         }
         let entries = self.entries(tree, mint, activity, part, target, 0)?;

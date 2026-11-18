@@ -8,11 +8,11 @@
 use i_overlay::core::overlay_rule::OverlayRule;
 use replica::encode::Value;
 use replica::ids::{Id, Scope, sha256};
-use replica::pose::{Quat, Vec3};
+use replica::pose::{Frame, Quat, Vec3};
 use replica::tree::{Handle, Tree};
 use replica::world_model::plain;
 
-use super::{P, STEP, ccw, op};
+use super::{BODY_HIGH, BODY_LOW, P, STEP, ccw, op};
 
 pub const F_OPEN_DOOR_LINK: u64 = 7; // a door thing: the doorway link it stands in (N1's F_DOORWAY)
 pub const F_OUTLINE: u64 = 11;
@@ -485,6 +485,9 @@ fn things_below(
     let mut stack = vec![top];
     while let Some(h) = stack.pop() {
         let n = tree.node(h).ok_or("a node that is gone")?;
+        if carried(tree, h) {
+            continue;
+        }
         let k = plain(n.kind().as_str());
         if k == FLOOR
             && let Some(f) = footprints.as_deref_mut()
@@ -523,6 +526,100 @@ fn things_below(
         );
     }
     Ok(())
+}
+
+/// Whether node `h` rides a slot its parent gives no point for (N19, #3341): a body's hands, a crew's carry. It is
+/// carried, so neither it nor what it holds is fixed geometry; a part seated in a bay's slot (a point) is.
+fn carried(tree: &Tree, h: Handle) -> bool {
+    let Some(n) = tree.node(h) else {
+        return false;
+    };
+    let (Some(sl), Some(p)) = (n.slot(), n.parent().and_then(|p| tree.handle(p))) else {
+        return false;
+    };
+    slot_point(tree, p, sl).is_none()
+}
+
+/// Whether `p` lies within `r` of the ring `ring` (inside it, or within `r` of an edge), µm.
+pub fn within(ring: &[Xz], p: Xz, r: i64) -> bool {
+    if inside(ring, p) {
+        return true;
+    }
+    let r2 = i128::from(r) * i128::from(r);
+    (0..ring.len()).any(|k| {
+        let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
+        let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+        let (px, pz) = (i128::from(p[0] - a[0]), i128::from(p[1] - a[1]));
+        let len2 = ex * ex + ez * ez;
+        let t = if len2 == 0 {
+            0
+        } else {
+            (px * ex + pz * ez).clamp(0, len2)
+        };
+        // The nearest point on the edge, as a fraction t / len2 of it.
+        let (dx, dz) = if len2 == 0 {
+            (px, pz)
+        } else {
+            (px - ex * t / len2, pz - ez * t / len2)
+        };
+        dx * dx + dz * dz <= r2
+    })
+}
+
+/// The first body standing where `part` would be with the pose `place`, `turn` in the frame `to` (N19, #3341): a
+/// node `body` says is one (by its kind), whose centre, read in the frame of `ground`, lies within `radius` mm of a
+/// box of the part whose height span meets the body's ([`BODY_LOW`] to [`BODY_HIGH`] above its feet). The seating
+/// refuses such a seat before the lift (`seat.occupied`), as G2 refuses an edit that would bury a Soul.
+#[allow(clippy::too_many_arguments)]
+pub fn stands_in(
+    tree: &Tree,
+    ground: Id,
+    part: Id,
+    to: Frame,
+    place: Vec3,
+    turn: Quat,
+    radius: i64,
+    body: &dyn Fn(&str) -> bool,
+) -> Result<Option<Id>, String> {
+    let g = tree.handle(ground).ok_or("no such ground")?;
+    let th = tree.handle(to.node).ok_or("no such frame")?;
+    let ph = tree.handle(part).ok_or("no such part")?;
+    let at = match to.slot {
+        Some(sl) => slot_point(tree, th, sl).ok_or("a slot its parent does not have")?,
+        None => Vec3::ZERO,
+    };
+    let x = xform_to(tree, th, g)?.then(Xform {
+        pos: at.plus(place).map_err(|e| format!("{e:?}"))?,
+        rot: turn,
+    })?;
+    let mut boxes = Vec::new();
+    solids_of(tree, ph, &x, &mut boxes)?;
+    let mut stack = vec![g];
+    while let Some(h) = stack.pop() {
+        let n = tree.node(h).ok_or("a node that is gone")?;
+        stack.extend(
+            tree.children(h)
+                .ok_or("a node that is gone")?
+                .iter()
+                .copied(),
+        );
+        if h == g || !body(n.kind().as_str()) {
+            continue;
+        }
+        let Ok(w) = xform_to(tree, h, g) else {
+            continue;
+        };
+        let p = w.pos;
+        let hit = boxes.iter().any(|s| {
+            s.y1 > p.y + BODY_LOW * 1000
+                && s.y0 < p.y + BODY_HIGH * 1000
+                && within(&s.ring, [p.x, p.z], radius * 1000)
+        });
+        if hit {
+            return Ok(Some(n.id()));
+        }
+    }
+    Ok(None)
 }
 
 /// The doorway rows (N1's `F_DOORWAYS`, at each link's owning end) of every doorway link at `ends`, in `frame`.

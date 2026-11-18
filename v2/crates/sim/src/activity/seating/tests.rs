@@ -34,14 +34,19 @@ use crate::activity::carry::{Carry, HEIGHT, yaw_toward};
 use crate::activity::{Activities, Ask};
 use crate::controller::Controller;
 use crate::ground::Piece;
+use crate::ground::scene::{F_SLOTS, F_SOLIDS};
 use crate::mover::Surface;
 use crate::moves::Moves;
 use crate::structure::Structure;
 use crate::timers::DueList;
 
 const FAMILIES: &str = include_str!("../../../../replica/fixtures/bodies/families.diag");
+/// The open ground: N3's ground kind, so a town (N5) can be read from the yard and the site (N19).
 const PLACE: &str =
-    "souls:place@12200000000000000000000000000000000000000000000000000000000000000001";
+    "eden:ground@12200000000000000000000000000000000000000000000000000000000000000001";
+/// A named place on the open ground (N1's area), for N19's walks (`n19_tests.rs`).
+const AREA: &str =
+    "eden:place@12200000000000000000000000000000000000000000000000000000000000000a19";
 const WALKER: &str =
     "test:walker@12200000000000000000000000000000000000000000000000000000000000000002";
 /// The crew's activity kind, the one B17's frame entry admits as its child (`content/kinds/construction`).
@@ -249,6 +254,42 @@ fn slots(kinds: &Kinds, kind: &str) -> BTreeMap<String, (u64, Vec3)> {
         .collect()
 }
 
+/// A part's box (N1's `solids` row: centre x, z, half x, z, yaw, y0, y1, mm), from B17's bounds (section 7): a frame
+/// 1,219 mm wide, 2,438 tall and 76 deep; a beam 51 wide, 102 tall and 2,743 long.
+const FRAME_BOX: [i64; 7] = [0, 0, 609, 38, 0, 0, 2_438];
+const BEAM_BOX: [i64; 7] = [0, 0, 25, 1_371, 0, 0, 102];
+
+fn int(x: i64) -> Value {
+    if x < 0 {
+        Value::Nint((-1 - x) as u64)
+    } else {
+        Value::Uint(x as u64)
+    }
+}
+
+/// A part's boxes as the tree holds them (`F_SOLIDS`): seated, they are fixed geometry to walkers (N19).
+fn solids(b: [i64; 7]) -> BTreeMap<u64, Value> {
+    let mut row: Vec<Value> = b.iter().map(|&x| int(x)).collect();
+    row.extend([int(5), int(0)]);
+    BTreeMap::from([(F_SOLIDS, Value::Array(vec![Value::Array(row)]))])
+}
+
+/// A fixture's slot points as the tree holds them (`F_SLOTS`, `[n, x, y, z]` mm), as the import writes them (#3285).
+fn slot_points(slots: &BTreeMap<String, (u64, Vec3)>) -> BTreeMap<u64, Value> {
+    let rows = slots
+        .values()
+        .map(|(k, at)| {
+            Value::Array(vec![
+                Value::Uint(*k),
+                int(at.x / 1000),
+                int(at.y / 1000),
+                int(at.z / 1000),
+            ])
+        })
+        .collect();
+    BTreeMap::from([(F_SLOTS, Value::Array(rows))])
+}
+
 fn world() -> W {
     let (kinds, files) = kinds();
     let full = |p: &str| {
@@ -264,6 +305,8 @@ fn world() -> W {
         full("mars:rack_bay"),
         full("mars:frame_stand"),
     );
+    let bay_slots = slots(&kinds, &bay_k);
+    let stand_slots = slots(&kinds, &stand_k);
     let mut mint = Minter::new(Scope([0x19; 16]));
     let mut id = || mint.mint().expect("an id");
     let ground = id();
@@ -272,7 +315,9 @@ fn world() -> W {
     let beams = [id(), id()];
     let bodies = [id(), id(), id(), id(), id(), id()];
     let souls = [id(), id(), id(), id(), id(), id()];
-    let names = [PLACE, WALKER, CREW_KIND, &upright, &beam, &bay_k, &stand_k];
+    let names = [
+        PLACE, WALKER, CREW_KIND, AREA, &upright, &beam, &bay_k, &stand_k,
+    ];
     let hv = Value::Map(BTreeMap::from([
         (
             1,
@@ -316,8 +361,6 @@ fn world() -> W {
         souls: souls.iter().copied().collect(),
         audiences: BTreeMap::new(),
     };
-    let bay_slots = slots(&kinds, &bay_k);
-    let stand_slots = slots(&kinds, &stand_k);
     let mut tree = Tree::start(ground, n(PLACE));
     let mut cs = vec![
         Change::Create {
@@ -325,14 +368,14 @@ fn world() -> W {
             kind: n(&stand_k),
             pose: pose(ground, None, YARD),
             audience: Audience::Everyone,
-            fields: BTreeMap::new(),
+            fields: slot_points(&stand_slots),
         },
         Change::Create {
             node: bay,
             kind: n(&bay_k),
             pose: pose(ground, None, SITE),
             audience: Audience::Everyone,
-            fields: BTreeMap::new(),
+            fields: slot_points(&bay_slots),
         },
     ];
     for (k, f) in frames.iter().enumerate() {
@@ -345,7 +388,7 @@ fn world() -> W {
                 Vec3::ZERO,
             ),
             audience: Audience::Everyone,
-            fields: BTreeMap::new(),
+            fields: solids(FRAME_BOX),
         });
     }
     for (k, b) in beams.iter().enumerate() {
@@ -354,7 +397,7 @@ fn world() -> W {
             kind: n(&beam),
             pose: pose(ground, None, beam_at(k)),
             audience: Audience::Everyone,
-            fields: BTreeMap::new(),
+            fields: solids(BEAM_BOX),
         });
     }
     let corners = vec![
@@ -533,10 +576,16 @@ impl W {
 
     /// Where part `p` is on the ground's plan, µm: in a slot, its parent's place and the slot's.
     fn place_of(&self, p: Id) -> Vec3 {
-        let h = self.tree.handle(p).expect("live");
         let g = self.tree.handle(self.ground).expect("the ground");
-        let x = crate::ground::scene::xform_to(&self.tree, h, g).expect("a frame");
         let (parent, slot) = self.parent(p);
+        // The parent's frame, then the slot's point: a crew's carry slot has none in the tree (N19).
+        let ph = self.tree.handle(parent.expect("a parent")).expect("live");
+        let x = crate::ground::scene::xform_to(&self.tree, ph, g).expect("a frame");
+        let own = self
+            .tree
+            .node(self.tree.handle(p).expect("live"))
+            .and_then(|n| n.place())
+            .map_or(Vec3::ZERO, |q| q.position);
         let off = match (parent, slot) {
             (Some(b), Some(s)) if b == self.bay => {
                 self.bay_slots
@@ -554,7 +603,7 @@ impl W {
             }
             _ => Vec3::ZERO,
         };
-        add(x.pos, off)
+        x.point(add(off, own)).expect("a point")
     }
 
     /// One row of the trace: each part where it is (or `over`, a part on its set-in track), then each carrier.
@@ -1086,3 +1135,6 @@ fn trace(out: &str, rows: &[Vec<Vec3>]) {
     }
     file.flush().unwrap();
 }
+
+#[path = "n19_tests.rs"]
+mod n19;
