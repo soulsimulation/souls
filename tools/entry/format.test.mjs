@@ -99,6 +99,7 @@ const ENGINE_V2_WORDS = {
   stairs: 'E12 (#2783) and SA-F14 (#2884): a spot a rider may not step onto is stairs, a door or a ladder',
   roles: 'B5 (#2724) and SA-G1a (#2872): an activity\'s roles, each a link type its members hold',
   name: 'SA-F13 (#2852): each outcome of a draw has a name, carried on its event',
+  floor: 'SA-G1b (#2873) and B5 (#2724): an activity\'s now line names the role whose members have the floor',
 };
 
 test('A4: no part of the format names a verb, file or field of today\'s engine', () => {
