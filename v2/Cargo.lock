@@ -465,6 +465,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "import-accounts"
+version = "0.0.0"
+dependencies = [
+ "directoryd",
+ "replica",
+ "ring",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "import-eden"
 version = "0.0.0"
 dependencies = [
