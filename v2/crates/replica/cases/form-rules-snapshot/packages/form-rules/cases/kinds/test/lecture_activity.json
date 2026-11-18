@@ -1,0 +1,49 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:lecture_activity",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [1000, 2000, 4000] },
+  "state": {
+    "phase": { "n": 1, "type": "enum", "values": ["proposed", "started"], "default": "proposed", "audience": {"rule": "everyone"} }
+  },
+  "links": {
+    "speaker": { "n": 1, "from": "body", "most": 1, "audience": {"rule": "everyone"} },
+    "listener": { "n": 2, "from": "body", "most": 120, "audience": {"rule": "everyone"} }
+  },
+  "slots": {
+    "lectern": { "admits": "body", "most": 1, "at_mm": [0, 0, -2000] }
+  },
+  "roles": {
+    "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
+    "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } }
+  },
+  "forms": {
+    "take_the_lectern": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "place": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
+      "effects": [
+        { "change": "link", "link": "speaker", "from": "actor", "event": "took_the_lectern" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "stood_at_the_lectern" }
+      ]
+    },
+    "attend": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "seat": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [
+        { "change": "link", "link": "listener", "from": "actor", "event": "joined_the_audience" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }
+      ]
+    }
+  },
+  "text": { "card": "A lecture as an activity: one Soul at the lectern, the others in the seats near it." },
+  "card": { "text": "card" }
+}

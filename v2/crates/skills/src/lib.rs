@@ -6,5 +6,9 @@
 #![deny(clippy::float_arithmetic)]
 
 pub mod close;
+/// The form runner (F1, #2766).
+pub mod form_runner;
+/// N7's walk through the host (T9b #3120).
+pub mod route;
 pub mod scan;
 pub mod walk;

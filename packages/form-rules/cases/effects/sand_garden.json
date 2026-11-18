@@ -1,6 +1,6 @@
 {
   "format": "souls-effect-cases/1",
-  "about": "Sand garden (from #1678): a Soul with empty hands brushes each of the four cells along and then across (eight brushings, each changing only its cell); brushing a cell the way it already lies is refused; then it smooths all four. The pattern after each brushing is the cells' own state.",
+  "about": "Sand garden (from #1678): a Soul with empty hands brushes each of the four cells along and then across (eight brushings, each changing only its cell); brushing a cell the way it already lies is refused; then it smooths all four, and smoothing the sand again is refused: it is already smooth. The pattern after each brushing is the cells' own state.",
   "cases": [
     {
       "name": "brush_every_cell_both_ways_then_smooth",
@@ -28,7 +28,11 @@
         {
           "act": {
             "this": "sg1",
-            "form": "brush_back_left_along"
+            "form": "brush",
+            "args": {
+              "cell": "back_left",
+              "pattern": "along"
+            }
           },
           "receipt": "rg1",
           "expect": {
@@ -57,7 +61,11 @@
         {
           "act": {
             "this": "sg1",
-            "form": "brush_back_left_along"
+            "form": "brush",
+            "args": {
+              "cell": "back_left",
+              "pattern": "along"
+            }
           },
           "receipt": "rg1b",
           "expect": {
@@ -69,7 +77,11 @@
         {
           "act": {
             "this": "sg1",
-            "form": "brush_back_left_across"
+            "form": "brush",
+            "args": {
+              "cell": "back_left",
+              "pattern": "across"
+            }
           },
           "receipt": "rg2",
           "expect": {
@@ -98,7 +110,11 @@
         {
           "act": {
             "this": "sg1",
-            "form": "brush_back_right_along"
+            "form": "brush",
+            "args": {
+              "cell": "back_right",
+              "pattern": "along"
+            }
           },
           "receipt": "rg3",
           "expect": {
@@ -127,7 +143,11 @@
         {
           "act": {
             "this": "sg1",
-            "form": "brush_back_right_across"
+            "form": "brush",
+            "args": {
+              "cell": "back_right",
+              "pattern": "across"
+            }
           },
           "receipt": "rg4",
           "expect": {
@@ -156,7 +176,11 @@
         {
           "act": {
             "this": "sg1",
-            "form": "brush_front_left_along"
+            "form": "brush",
+            "args": {
+              "cell": "front_left",
+              "pattern": "along"
+            }
           },
           "receipt": "rg5",
           "expect": {
@@ -185,7 +209,11 @@
         {
           "act": {
             "this": "sg1",
-            "form": "brush_front_left_across"
+            "form": "brush",
+            "args": {
+              "cell": "front_left",
+              "pattern": "across"
+            }
           },
           "receipt": "rg6",
           "expect": {
@@ -214,7 +242,11 @@
         {
           "act": {
             "this": "sg1",
-            "form": "brush_front_right_along"
+            "form": "brush",
+            "args": {
+              "cell": "front_right",
+              "pattern": "along"
+            }
           },
           "receipt": "rg7",
           "expect": {
@@ -243,7 +275,11 @@
         {
           "act": {
             "this": "sg1",
-            "form": "brush_front_right_across"
+            "form": "brush",
+            "args": {
+              "cell": "front_right",
+              "pattern": "across"
+            }
           },
           "receipt": "rg8",
           "expect": {
@@ -338,6 +374,18 @@
               }
             ],
             "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "smooth"
+          },
+          "receipt": "rg10",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
           }
         }
       ],

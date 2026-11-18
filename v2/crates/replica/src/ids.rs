@@ -18,8 +18,22 @@ pub const COUNTER_LIMIT: u64 = 1 << 53;
 
 /// Who minted an id: 16 random bytes, new for every world and every fork (rule 1). The bytes come from the caller
 /// (the directory, or the operating system's random source); nothing here draws them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Scope(pub [u8; 16]);
+
+/// The bytes' own order (lexicographic), compared as one big-endian number: the same order, without a byte-by-byte
+/// compare on every lookup by id (#3213).
+impl Ord for Scope {
+    fn cmp(&self, other: &Scope) -> std::cmp::Ordering {
+        u128::from_be_bytes(self.0).cmp(&u128::from_be_bytes(other.0))
+    }
+}
+
+impl PartialOrd for Scope {
+    fn partial_cmp(&self, other: &Scope) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 /// A node's id: its scope and a counter below [`COUNTER_LIMIT`]. Encoded as `[h'<scope>', counter]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -78,6 +92,26 @@ impl Minter {
     /// A minter for a new world, fork or zone writer, with its fresh scope.
     pub fn new(scope: Scope) -> Minter {
         Minter { scope, next: 0 }
+    }
+
+    /// A restarted writer's minter: its scope, and the next counter it gives out (from its checkpoint, K4b).
+    pub fn at(scope: Scope, next: u64) -> Minter {
+        Minter { scope, next }
+    }
+
+    pub fn scope(&self) -> Scope {
+        self.scope
+    }
+
+    /// The next counter it gives out: every counter below it has been given out.
+    pub fn next(&self) -> u64 {
+        self.next
+    }
+
+    /// Records that `counter` of its scope was given out (an id read back from the log after a checkpoint), so it is
+    /// never given out again.
+    pub fn past(&mut self, counter: u64) {
+        self.next = self.next.max(counter.saturating_add(1));
     }
 
     /// The next id. A counter is never given out twice (rule 4).
@@ -177,6 +211,10 @@ pub enum Purpose {
     View,
     /// A redaction list: the references removed so far (contracts T7 and T8).
     Redactions,
+    /// An upload's stored bytes, after its check (G6, #2747, `v2/crates/assets`).
+    Upload,
+    /// A stored model of a kind's picture: the binary glTF a page fetches (V17, #2717).
+    Model,
 }
 
 impl Purpose {
@@ -192,6 +230,8 @@ impl Purpose {
             Purpose::Fixture => "souls/fixture/1",
             Purpose::View => "souls/view/1",
             Purpose::Redactions => "souls/redactions/1",
+            Purpose::Upload => "souls/upload/1",
+            Purpose::Model => "souls/model/1",
         }
     }
 }

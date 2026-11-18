@@ -148,8 +148,8 @@ jobs:
         if: matrix.kind != 'v2'
         # Instances on one host share a user and home, so the default dest would collide between concurrent jobs (#1162).
         with: { dest: '${{ runner.temp }}/setup-pnpm' }
+      # The v2 job too: its web steps run TypeScript, which needs Node 22.18 or later.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: matrix.kind != 'v2'
         with: { node-version: 22 }
       # The pnpm store cache, GitHub-hosted only, saved only on main. The store sits under PNPM_HOME (the dest above,
       # in runner.temp), and actions/cache versions an entry by its path: setup-node's `cache: pnpm` made one copy per

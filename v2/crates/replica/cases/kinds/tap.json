@@ -1,0 +1,12 @@
+{
+  "format": "souls-entry/1",
+  "kind": "r2:tap",
+  "owner": "thing",
+  "about": "A tap for R2's cases (#2685): another thing whose point a cup is filled under, with a point to stand at.",
+  "state": {},
+  "points": {
+    "outlet": { "role": "pour", "at_mm": [0, 0, 100] },
+    "stand": { "role": "stand", "at_mm": [0, -500, 0] }
+  },
+  "forms": {}
+}

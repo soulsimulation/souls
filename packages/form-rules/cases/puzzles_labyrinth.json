@@ -1,0 +1,69 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:labyrinth_board (from #1852). A cursor on a spiral path of 25 cells, from the entrance (0) to the centre (24); `position` is how far in it is and `ahead` how far is left to the centre, so the two always sum to 24. With empty hands ('Put down held objects before tracing or resetting this board.') a Soul traces in or out a number of cells in two seconds; more cells than remain that way is refused ('Fewer cells remain to the centre than that; choose fewer steps or reverse direction.'). Reset returns the cursor to the entrance, refused when it is there ('This same cursor and trace are already reset at the entrance.').",
+  "cases": [
+    {
+      "name": "labyrinth_trace_in_every_need_met",
+      "act": {"this":"l1","form":"trace_in","args":{"steps":6}},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:labyrinth_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "labyrinth_trace_in_hands_full",
+      "act": {"this":"l1","form":"trace_in","args":{"steps":6}},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:labyrinth_board"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "labyrinth_trace_in_past_the_centre",
+      "act": {"this":"l1","form":"trace_in","args":{"steps":6}},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:labyrinth_board","fields":{"position":20,"ahead":4}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"says":"too_far_in"}
+    },
+    {
+      "name": "labyrinth_trace_out_every_need_met",
+      "act": {"this":"l1","form":"trace_out","args":{"steps":4}},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:labyrinth_board","fields":{"position":20,"ahead":4}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "labyrinth_trace_out_hands_full",
+      "act": {"this":"l1","form":"trace_out","args":{"steps":4}},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:labyrinth_board","fields":{"position":20,"ahead":4}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "labyrinth_trace_out_past_the_entrance",
+      "act": {"this":"l1","form":"trace_out","args":{"steps":4}},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:labyrinth_board","fields":{"position":3,"ahead":21}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"says":"too_far_out"}
+    },
+    {
+      "name": "labyrinth_reset_every_need_met",
+      "act": {"this":"l1","form":"reset"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:labyrinth_board","fields":{"position":12,"ahead":12}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "labyrinth_reset_hands_full",
+      "act": {"this":"l1","form":"reset"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:labyrinth_board","fields":{"position":12,"ahead":12}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "labyrinth_reset_already_at_the_entrance",
+      "act": {"this":"l1","form":"reset"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:labyrinth_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"already_reset"}
+    }
+  ]
+}
