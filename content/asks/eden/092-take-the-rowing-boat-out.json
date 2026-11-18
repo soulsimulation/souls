@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":92,"group":"object","words":"take the rowing boat out","obvious":2,"things":{"boat":"eden:rowing_boat"},"chain":[{"this":"boat","form":"ride"},{"this":"boat","form":"steer"}]}

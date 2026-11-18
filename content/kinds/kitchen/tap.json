@@ -1,0 +1,24 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:tap",
+  "owner": "thing",
+  "state": {
+    "water": { "n": 1, "type": "int", "unit": "g", "default": 1000000000, "min": 0, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "outlet": { "role": "outlet", "at_mm": [0, 300, 120], "yaw_mdeg": 0 },
+    "stand": { "role": "stand", "at_mm": [0, 0, 500] }
+  },
+  "geometry": { "bounds_mm": [120, 350, 250] },
+  "forms": {},
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:tap" },
+  "text": {
+    "card": "A tap: it gives cold water to anything held under its outlet.",
+    "water": "water",
+    "fountain": "fountain",
+    "refill": "refill"
+  },
+  "card": { "text": "card", "category": "water", "synonyms": ["fountain", "refill"] }
+}

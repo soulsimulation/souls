@@ -1,0 +1,15 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:street_lamp",
+  "owner": "thing",
+  "state": {
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": {"rule": "everyone"} }
+  },
+  "geometry": { "bounds_mm": [300, 4000, 300] },
+  "reactions": {
+    "on_at_dusk": { "when": { "on": "world", "field": "light", "is": "dusk" }, "do": [{ "change": "set", "field": "lit", "to": true, "event": "lamp_lit" }] },
+    "off_at_dawn": { "when": { "on": "world", "field": "light", "is": "dawn" }, "do": [{ "change": "set", "field": "lit", "to": false, "event": "lamp_out" }] }
+  },
+  "text": { "card": "A test street lamp for reactions: it comes on when the world announces dusk and goes out at dawn." },
+  "card": { "text": "card" }
+}

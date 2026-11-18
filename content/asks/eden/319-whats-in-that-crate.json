@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":319,"group":"looking","words":"whats in that crate","obvious":2,"things":{"crate":"eden:crate"},"chain":[{"this":"crate","form":"open"},{"read":"crate","field":"stock"}]}

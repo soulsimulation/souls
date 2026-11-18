@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":117,"group":"two-things","words":"push the bed against the wall","obvious":2,"things":{"bed":"eden:bed"},"chain":[{"this":"me","form":"push","push":"bed","args":{"thing":"bed"}},{"this":"me","form":"put","place":{"at":"against","thing":"bed"},"args":{"thing":"bed"}}]}
