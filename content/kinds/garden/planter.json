@@ -1,0 +1,86 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:planter",
+  "owner": "thing",
+  "state": {
+    "water": { "n": 1, "type": "timed", "unit": "mg", "default": { "value": 400000, "per_s": -5, "set_us": 0 }, "min": 0, "max": 4000000, "audience": { "rule": "everyone" } },
+    "stage": { "n": 2, "type": "enum", "values": ["bare", "seed", "sprout", "leafy", "flowering", "fruiting"], "default": "bare", "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "soil": { "role": "contact", "at_mm": [0, 372, 0] },
+    "stand": { "role": "stand", "at_mm": [0, 0, 600] }
+  },
+  "geometry": { "bounds_mm": [900, 900, 500] },
+  "forms": {
+    "sow": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "stage", "is": "bare" },
+        { "need": "within_reach", "point": "soil" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "soil" }],
+      "effects": [
+        { "change": "set", "field": "stage", "to": "seed", "event": "sown" },
+        { "change": "timer", "form": "sprout", "after_us": 86400000000, "event": "sprout_due" }
+      ]
+    },
+    "sprout": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{ "need": "state", "field": "water", "at_least": 1360000 }],
+      "steps": [],
+      "effects": [
+        { "change": "set", "field": "stage", "to": "sprout", "event": "sprouted" },
+        { "change": "timer", "form": "leaf", "after_us": 86400000000, "event": "leaf_due" }
+      ]
+    },
+    "leaf": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{ "need": "state", "field": "water", "at_least": 1360000 }],
+      "steps": [],
+      "effects": [
+        { "change": "set", "field": "stage", "to": "leafy", "event": "leafed" },
+        { "change": "timer", "form": "flower", "after_us": 86400000000, "event": "flower_due" }
+      ]
+    },
+    "flower": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{ "need": "state", "field": "water", "at_least": 1360000 }],
+      "steps": [],
+      "effects": [
+        { "change": "set", "field": "stage", "to": "flowering", "event": "flowered" },
+        { "change": "timer", "form": "fruit", "after_us": 86400000000, "event": "fruit_due" }
+      ]
+    },
+    "fruit": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{ "need": "state", "field": "water", "at_least": 1360000 }],
+      "steps": [],
+      "effects": [
+        { "change": "set", "field": "stage", "to": "fruiting", "event": "fruited" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:planter",
+    "table": [
+      { "part": "fill", "field": "stage", "do": "grow", "at": { "seed": 0, "sprout": 1000, "leafy": 2000, "flowering": 3000, "fruiting": 4000 } },
+      { "part": "fill", "field": "water", "do": "wilt", "range": [0, 1360000], "to": [1000, 0] },
+      { "part": "fill", "field": "water", "do": "tint", "range": [1359999, 1360000], "to": ["#b8a184", "#3b2b1d"] }
+    ],
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[0,180,0],"size":[900,360,500],"round":20,"tint":"wood"},{"kind":"box","at":[0,362,0],"size":[820,16,420],"round":0,"tint":"soil","role":"fill","pivot":[0,372,0]}],"palette":{"wood":"#7a5a3c","soil":"#5b4632"},"tags":["garden","planter","plant","object"]}
+  },
+  "text": {
+    "card": "A planter: sow it and it grows by itself while its soil is moist.",
+    "garden": "garden",
+    "plant": "plant",
+    "grow": "grow"
+  },
+  "card": { "text": "card", "category": "garden", "synonyms": ["plant", "grow"] }
+}

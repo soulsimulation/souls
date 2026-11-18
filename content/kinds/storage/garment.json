@@ -1,0 +1,69 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:garment",
+  "owner": "thing",
+  "state": {
+    "style": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "coat",
+        "shirt",
+        "dress",
+        "trousers",
+        "hat",
+        "scarf"
+      ],
+      "default": "coat",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      80,
+      350
+    ]
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:garment",
+    "table": [
+      {
+        "part": "body",
+        "field": "style",
+        "do": "tint",
+        "at": {
+          "coat": "#5a6f8f",
+          "shirt": "#e8e2d0",
+          "dress": "#a8445a",
+          "trousers": "#3b3f46",
+          "hat": "#6b4f2e",
+          "scarf": "#c9862f"
+        }
+      }
+    ],
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[0,20,0],"size":[480,30,340],"round":10,"tint":"cloth","role":"body"},{"kind":"box","at":[0,40,-120],"size":[200,12,80],"round":6,"tint":"cloth","role":"body"}],"palette":{"cloth":"#5a6f8f"},"tags":["object","clothing","item"]}
+  },
+  "text": {
+    "card": "A folded garment from a wardrobe or a drawer: a coat, shirt, dress or hat.",
+    "clothing": "clothing",
+    "clothes": "clothes",
+    "outfit": "outfit"
+  },
+  "card": {
+    "text": "card",
+    "category": "clothing",
+    "synonyms": [
+      "clothes",
+      "outfit"
+    ]
+  }
+}

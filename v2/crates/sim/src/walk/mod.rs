@@ -5,9 +5,9 @@
 //!   push away from every neighbour within [`RANGE`], leaning right when one comes head-on, and hand the velocity to
 //!   the mover. At a link's near end it crosses the link by the link's move, opening a shut door first (stand, open,
 //!   cross: the opening is written at the end of the tick and read the next, T1).
-//! - **Neighbours** are read as of the previous tick (T1, `v2/docs/TRUNK.md`): a plain grid per node of the bodies'
-//!   positions and velocities, taken before any walker moves, in cells of [`RANGE`]. Two at one point push apart
-//!   by id: the lower id goes right.
+//! - **Neighbours** are read as of the previous tick (T1, `v2/docs/TRUNK.md`): the spatial index (N16,
+//!   `crate::index`) of the bodies' positions, with their velocities, taken before any walker moves. Two at one
+//!   point push apart by id: the lower id goes right.
 //! - **A preference.** The push is resolved on the walker's own axes: forward, where it may slow the walker but never
 //!   below a tenth of its free speed (no waiting at a narrow place yet: N8), and sideways. The sum never exceeds free
 //!   speed. Overlap is allowed, and measured ([`Crowd::close`]).
@@ -24,12 +24,24 @@
 //! - **Integers.** Positions in µm, velocities in µm a second, time in µs; square roots by `isqrt`. Nothing is hashed
 //!   or decided by a float.
 //!
-//! Not here: standing spots (N9), the ladder (N10), the neighbour index proper (N16), the transfer records
+//! - **Standing spots** (N9, `crate::spots`). A walker sent to a point ([`Crowd::send`]) marks what it asks; at the
+//!   start of each tick the world's spot tables read the marks of the last tick ([`World::spots`]) and grant each
+//!   asker its own place near the point ([`World::spot`]). Until then it stands; once granted it walks to that place
+//!   and arrives within [`AT_SPOT`] of it. Its mark asks while its order runs; when it no longer asks (it left, or
+//!   its order ended, [`Crowd::end`]) the place is released.
+//!
+//! **Retiring** (T9b #3120): the walk now runs as a skill through the host (`skills::route`, the same algorithm). This
+//! `Crowd` keeps its own bodies, stepped by the controller's dry run, until T9c moves N10's ladder and these tests onto
+//! the skill.
+//!
+//! Not here: the ladder (N10), the transfer records
 //! of a crossing (N6's `mover::cross` needs the zone's pose scene, which no caller holds yet).
 
 pub mod town;
 
+use crate::index::Index;
 use crate::mover::Body;
+use crate::spots::Target;
 use replica::effects::Refusal;
 use replica::ids::Id;
 use replica::pose::{Support, Vec3};
@@ -48,6 +60,10 @@ pub const LEAN: i64 = 2;
 pub const AT_LINK: i64 = 50_000;
 /// A walk's goal is reached within this, µm.
 pub const AT_GOAL: i64 = 300_000;
+/// A granted standing spot is reached within this, µm (N9).
+pub const AT_SPOT: i64 = 50_000;
+/// Within this of its granted standing spot, µm, no neighbour pushes a walker (N9).
+pub const CALM: i64 = 1_000_000;
 /// A walker without leave marks itself waiting for a narrow link within this of its near end, µm.
 pub const MARK: i64 = 3_000_000;
 /// A walker without leave stands within this of a narrow link's near end, µm.
@@ -67,8 +83,8 @@ pub enum Pass {
 }
 
 /// One body as the world reads it at the start of a tick (as it stood at the end of the last): where it is, the
-/// link it waits for and how far from that link's near end (µm), the link it is crossing, and whether it stays
-/// where it is by its own order.
+/// link it waits for and how far from that link's near end (µm), the link it is crossing, whether it stays
+/// where it is by its own order, and the point it asks a standing spot near, with its order (N9).
 #[derive(Clone, Copy, Debug)]
 pub struct Mark {
     pub who: Id,
@@ -77,6 +93,7 @@ pub struct Mark {
     pub waiting: Option<(Id, i64)>,
     pub crossing: Option<Id>,
     pub staying: bool,
+    pub spot: Option<(Target, Id)>,
 }
 
 /// One leg of a walk: walk to `to` (µm, in the frame of the node the body stands on), then cross `link`, or arrive.
@@ -121,6 +138,16 @@ pub trait World {
     fn pass(&self, _link: Id, _who: Id) -> Pass {
         Pass::Free
     }
+    /// At the start of a tick ending at `at`, after the turns: every body's mark as of the last tick, for the owners
+    /// of the spot tables to grant and release standing spots (N9). A world without them grants none.
+    fn spots(&mut self, _marks: &[Mark], _at: Micros) -> Result<(), Refusal> {
+        Ok(())
+    }
+    /// What `who`, sent to `target`, was given: its place (µm, the target node's frame) or a refusal's name; `None`
+    /// until its ask is read.
+    fn spot(&self, _who: Id, _target: &Target) -> Option<Result<Vec3, &'static str>> {
+        None
+    }
 }
 
 /// The node a body stands on.
@@ -152,6 +179,9 @@ pub struct Walker {
     pub shoulder: bool,
     /// The ladder holds it, so this skill never moves it: its order ended by this name, or `walk-out` (N10).
     pub held: Option<&'static str>,
+    /// Sent to this point by a standing spot (N9), and the place granted there, once granted.
+    pub to: Option<Target>,
+    pub spot: Option<Vec3>,
 }
 
 /// What a neighbour is, as of the previous tick.
@@ -162,16 +192,21 @@ struct Seen {
     at: [i64; 2],
     v: [i64; 2],
     waiting: Option<(Id, i64)>,
+    /// Standing on its own granted spot (N9).
+    settled: bool,
 }
 
-/// The bodies of one tick by node and cell of [`RANGE`].
+/// The bodies of one tick, as they stood before any walker moves: the spatial index (N16, `crate::index`) and what
+/// each is.
 struct Grid {
-    cells: BTreeMap<(Id, i64, i64), Vec<Seen>>,
+    index: Index,
+    seen: BTreeMap<Id, Seen>,
 }
 
 impl Grid {
-    fn of(walkers: &[Walker]) -> Grid {
-        let mut cells: BTreeMap<(Id, i64, i64), Vec<Seen>> = BTreeMap::new();
+    fn of(walkers: &[Walker], split: bool) -> Grid {
+        let mut index = if split { Index::new() } else { Index::fixed() };
+        let mut seen = BTreeMap::new();
         for w in walkers.iter().filter(|w| !w.crossing) {
             let p = w.body.pose.position;
             let s = Seen {
@@ -180,40 +215,22 @@ impl Grid {
                 at: [p.x, p.z],
                 v: [w.body.linear.x, w.body.linear.z],
                 waiting: w.waiting,
+                settled: w.spot.is_some() && w.arrived.is_some(),
             };
-            cells.entry(Grid::key(s.node, s.at)).or_default().push(s);
+            index.put_body(s.id, s.node, s.at);
+            seen.insert(s.id, s);
         }
-        Grid { cells }
-    }
-
-    fn key(node: Id, p: [i64; 2]) -> (Id, i64, i64) {
-        (node, p[0].div_euclid(RANGE), p[1].div_euclid(RANGE))
+        Grid { index, seen }
     }
 
     /// Every other body on `node` within `r` of `p`, in id order.
     fn near(&self, me: Id, node: Id, p: [i64; 2], r: i64) -> Vec<(Seen, i64)> {
-        let (_, i, j) = Grid::key(node, p);
-        let mut out = Vec::new();
-        for di in -1..=1 {
-            for dj in -1..=1 {
-                for s in self
-                    .cells
-                    .get(&(node, i + di, j + dj))
-                    .into_iter()
-                    .flatten()
-                {
-                    if s.id == me {
-                        continue;
-                    }
-                    let d = len([p[0] - s.at[0], p[1] - s.at[1]]);
-                    if d < r {
-                        out.push((*s, d));
-                    }
-                }
-            }
-        }
-        out.sort_by_key(|(s, _)| s.id);
-        out
+        self.index
+            .bodies_within(node, p, r)
+            .into_iter()
+            .filter(|(id, _)| *id != me)
+            .map(|(id, d)| (self.seen[&id], d))
+            .collect()
     }
 }
 
@@ -293,6 +310,8 @@ pub struct Crowd {
     pub walked: u64,
     /// Of those, the ones with another centre closer than [`CLOSE`] on the same node.
     pub close: u64,
+    /// Whether the neighbour index splits crowded cells (N16; on by default). No walker notices either way.
+    pub split: bool,
 }
 
 impl Crowd {
@@ -303,6 +322,7 @@ impl Crowd {
             now: 0,
             walked: 0,
             close: 0,
+            split: true,
         }
     }
 
@@ -329,10 +349,42 @@ impl Crowd {
             staying: false,
             shoulder: false,
             held: None,
+            to: None,
+            spot: None,
         };
+        self.insert(w);
+        Ok(())
+    }
+
+    /// Adds a walker sent to the point `target` for the order `order`: it asks for a standing spot near it, stands
+    /// until one is granted, then walks there (N9).
+    pub fn send(&mut self, body: Body, speed: i64, order: Id, target: Target) {
+        self.insert(Walker {
+            body,
+            speed,
+            order,
+            legs: Vec::new(),
+            leg: 0,
+            crossing: false,
+            arrived: None,
+            waiting: None,
+            staying: false,
+            shoulder: false,
+            held: None,
+            to: Some(target),
+            spot: None,
+        });
+    }
+
+    /// Ends `who`'s order: it leaves the crowd, and what it held is released at the start of the next tick.
+    pub fn end(&mut self, who: Id) -> Option<Walker> {
+        let k = self.walkers.iter().position(|w| w.body.id == who)?;
+        Some(self.walkers.remove(k))
+    }
+
+    fn insert(&mut self, w: Walker) {
         let k = self.walkers.partition_point(|o| o.body.id < w.body.id);
         self.walkers.insert(k, w);
-        Ok(())
     }
 
     /// Whether every walker has arrived.
@@ -344,7 +396,7 @@ impl Crowd {
 
     /// One tick for every walker, in id order, against its neighbours as they stood at the end of the last tick.
     pub fn step(&mut self, world: &mut impl World) -> Result<(), Refusal> {
-        let grid = Grid::of(&self.walkers);
+        let grid = Grid::of(&self.walkers, self.split);
         let (dt, at) = (self.tick, self.now + self.tick);
         // The marks as of the last tick, read by the owners of the links taken in turns.
         let marks: Vec<Mark> = self
@@ -357,12 +409,38 @@ impl Crowd {
                 waiting: w.waiting.filter(|_| w.arrived.is_none()),
                 crossing: w.crossing.then(|| w.legs[w.leg].link).flatten(),
                 staying: w.staying,
+                spot: w.to.filter(|_| w.held.is_none()).map(|t| (t, w.order)),
             })
             .collect();
         world.turns(&marks, at)?;
+        world.spots(&marks, at)?;
         for w in self.walkers.iter_mut() {
             if w.arrived.is_some() || w.staying || w.held.is_some() {
                 continue;
+            }
+            // Sent to a point: stand until a place is granted, then walk there; a refusal ends the order by its name.
+            if let Some(t) = w.to
+                && w.spot.is_none()
+            {
+                match world.spot(w.body.id, &t) {
+                    Some(Ok(p)) => match world.plan(&w.body, t.node, p) {
+                        Ok(legs) => {
+                            (w.legs, w.leg, w.spot) = (legs, 0, Some(p));
+                        }
+                        Err(e) => {
+                            w.held = Some(e.name);
+                            continue;
+                        }
+                    },
+                    Some(Err(name)) => {
+                        w.held = Some(name);
+                        continue;
+                    }
+                    None => {
+                        w.body.linear = Vec3::ZERO;
+                        continue;
+                    }
+                }
             }
             if w.crossing {
                 let link = w.legs[w.leg].link.expect("a crossing leg");
@@ -404,7 +482,7 @@ impl Crowd {
                     }
                     continue;
                 }
-                None if gap <= AT_GOAL => {
+                None if gap <= if w.spot.is_some() { AT_SPOT } else { AT_GOAL } => {
                     w.arrived = Some(self.now);
                     continue;
                 }
@@ -414,10 +492,16 @@ impl Crowd {
             let node = node_of(&w.body);
             // Those waiting at a narrow place make way: they push only others waiting.
             let mut near = grid.near(w.body.id, node, [p.x, p.z], RANGE);
-            if w.shoulder {
+            // The shoulder turn, or the last stretch to a granted standing spot (N9): the spot is its own, so no
+            // neighbour pushes it off.
+            if w.shoulder || (w.spot.is_some() && leg.link.is_none() && gap <= CALM) {
                 near.clear();
             } else if pass != Pass::Wait {
                 near.retain(|(n, _)| n.waiting.is_none());
+            }
+            if w.spot.is_some() {
+                // Those standing on their own spots stand apart already: a walker to its spot passes between them.
+                near.retain(|(n, _)| !n.settled);
             }
             let v = wanted(w.body.id, [p.x, p.z], aim, w.speed, dt, &near);
             // Along an edge: a step the mover cuts to nothing is tried turned by 45 and then 70 degrees, either way
@@ -433,7 +517,7 @@ impl Crowd {
         }
         self.now = at;
         // The overlap measure, on where the bodies stand now.
-        let after = Grid::of(&self.walkers);
+        let after = Grid::of(&self.walkers, self.split);
         for w in self.walkers.iter().filter(|w| w.arrived.is_none()) {
             if w.crossing {
                 continue;

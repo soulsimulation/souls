@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":166,"group":"getting-around","words":"go to the cafe","obvious":3,"things":{"counter":"eden:counter","table":"eden:parasol_table"},"chain":[{"this":"me","form":"go_to","args":{"place":"counter"}}]}

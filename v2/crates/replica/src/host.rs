@@ -38,14 +38,37 @@ pub enum Ask {
     Distance { from: Id, to: Id },
     /// The next point on a walkable route from a node toward a point in its parent's frame, or none.
     Toward { from: Id, to: Vec3 },
+    /// The other bodies standing on the node the body stands on, within `radius` of it (T4's units), as of the
+    /// previous tick (T1): for keeping apart (T9b, #3120). A body being carried across a link is on no node.
+    Near { radius: i64 },
 }
 
 /// An answer, in integers (rule 7).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answer {
     Distance(i64),
     Point(Vec3),
+    /// The bodies near, in id order.
+    Near(Vec<Near>),
 }
+
+/// A body near the asker (rule 7, `Ask::Near`): its id, position in the shared node's frame and velocity, in T4's
+/// units, as of the previous tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Near {
+    pub id: Id,
+    pub position: Vec3,
+    pub velocity: Vec3,
+}
+
+/// A field the world shows on a body it is carrying across a link (rule 7, `Host::cross`): the link's id.
+pub const F_CROSSING: u64 = 40;
+/// A field a walker sets on its own body while it waits for a link taken in turns (N8): `[link id, distance µm]`.
+pub const F_WAITING: u64 = 41;
+/// A field the world shows on a link taken in turns, read with `Host::read(link)`: always 1 (T9b A3).
+pub const F_TURNS: u64 = 42;
+/// A field the world shows on a link taken in turns: the body its owner lets in now, if any (T9b A3).
+pub const F_GRANTED: u64 = 43;
 
 /// How a skill's step ended (rule 7).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +97,11 @@ pub trait Host {
     fn draw(&mut self) -> u64;
     /// A controller input for the body: T4's own type (B1 turns it into motion).
     fn control(&mut self, input: ControllerInput);
+    /// Asks the world to carry the body across `link` by the link's move (T4: a link names the move that crosses
+    /// it), at `speed` µm a second at most. A granted request, carried out after the phase by the controller, the body's one mover: while it is
+    /// carried, its read shows [`F_CROSSING`] and its velocity inputs wait. A shut door in the link is opened for it
+    /// by the world (the body as the acting Soul), and it stands that tick; the skill asks again the next.
+    fn cross(&mut self, link: Id, speed: i64);
     /// One entry of the body's own node (T6 rule 6): generic changes, applied all or none, and what they meant. A
     /// change to any node but the body and those the same changes create under it is refused (`write-outside-own`).
     fn emit(&mut self, changes: Vec<Change>, meaning: Option<Event>) -> R<()>;

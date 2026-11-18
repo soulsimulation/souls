@@ -15,11 +15,13 @@
 //     high ground, frogs sing at ponds by night and gulls call over the sea by day.
 // Everything is quiet by default (MASTER_DEFAULT) and ambient music is opt-in.
 import type { Entity, StoredDef, WorldModel } from '@souls/world-compiler';
+import type { LookRow } from '../../../../packages/form-rules/src/looks.ts';
 
 export type SoundKind =
   | 'water' | 'stream' | 'fire' | 'wind' | 'creak' | 'birds' | 'bell' | 'hum' | 'engine' | 'chime' | 'frogs' | 'music'
   | 'waves' | 'crickets' | 'chatter' | 'footsteps' | 'leaves' | 'flag' | 'waterfowl' | 'bees' | 'kettle';
-export type SoundSpec = { kind: SoundKind; radius: number; volume: number; when?: string; mode?: 'loop' | 'change'; variant?: number };
+/** `tune` / `mood` (SA-D7): a music spec from a looks-table sound row that plays notes from content/tunes (sound.ts playTunes), not a loop. */
+export type SoundSpec = { kind: SoundKind; radius: number; volume: number; when?: string; mode?: 'loop' | 'change'; variant?: number; tune?: string; mood?: string };
 export type Source = 'object' | 'ambient' | 'resident' | 'visitor';
 /** `cloud`: pts is a set of separate points (a cluster of trees); the distance is to the nearest one. */
 /** `follow`: an ambience that goes where the listener goes (the sea along a shore): heard at its level wherever the
@@ -73,6 +75,21 @@ export function distanceTo(e: Pick<Emitter, 'pts' | 'area'>, x: number, y: numbe
 /** Loudness 0..1 heard from distance d (smooth quadratic fall-off to 0 at the radius). */
 export const falloff = (d: number, radius: number, volume: number) => (d >= radius ? 0 : volume * (1 - d / radius) ** 2);
 
+/** The looks table a kind carries in its def (`make.args.looks_table`, as the picture reads it). */
+export const tableOf = (def: unknown): LookRow[] => { const t = (def as { make?: { args?: { looks_table?: unknown } } } | undefined)?.make?.args?.looks_table; return Array.isArray(t) ? (t as LookRow[]) : []; };
+/** Sound specs from the sound rows of a looks table: what is heard, how far (`reach_mm`), driven by a field. A tune row is a music spec
+ *  that sound.ts plays from the tunes list; another sound follows a boolean field (`when`). Event rows are played from the record (V21). */
+function tableSpecs(def: unknown): SoundSpec[] {
+  const out: SoundSpec[] = [];
+  for (const r of tableOf(def)) {
+    if (r.do !== 'sound' || r.event !== undefined || typeof r.field !== 'string' || !Number.isInteger(r.reach_mm)) continue;
+    const loud = Math.max(0, ...Object.values(r.at ?? {}).concat(r.to ?? []).filter((v): v is number => typeof v === 'number')) / 1000;
+    const radius = Math.max(1, Math.min(120, (r.reach_mm as number) / 1000)), volume = Math.min(1, loud);
+    if (r.sound === 'tune') out.push({ kind: 'music', radius, volume, mode: 'loop', ...(r.tune !== undefined ? { tune: r.tune } : { mood: r.mood }) });
+    else if (isKind(r.sound) && r.at && Object.keys(r.at).every((k) => k === 'true' || k === 'false') && r.at.false === 0 && Number(r.at.true) > 0) out.push({ kind: r.sound, radius, volume, mode: r.mode === 'once' ? 'change' : 'loop', when: r.field });
+  }
+  return out;
+}
 /** A def's sound specs: `components.sound` and its `also` list (at most 4 in all). Unknown kinds are dropped. */
 export function specsOf(def: Pick<StoredDef, 'components'> | undefined): SoundSpec[] {
   const raw = (def?.components as { sound?: unknown } | undefined)?.sound;
@@ -82,7 +99,7 @@ export function specsOf(def: Pick<StoredDef, 'components'> | undefined): SoundSp
     if (!s || !isKind(s.kind)) continue;
     out.push({ kind: s.kind, radius: Math.max(1, Math.min(120, num(s.radius, 14))), volume: Math.max(0, Math.min(1, num(s.volume, 0.5))), when: typeof s.when === 'string' ? s.when : undefined, mode: s.mode === 'change' ? 'change' : 'loop', ...(typeof s.variant === 'number' ? { variant: s.variant } : {}) });
   }
-  return out;
+  return [...out, ...tableSpecs(def)].slice(0, 4);
 }
 
 // ---------------------------------------------------------------- implied sounds (from what a thing is)

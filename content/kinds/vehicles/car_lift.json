@@ -1,0 +1,65 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:car_lift",
+  "owner": "thing",
+  "state": {"raised":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "points": {
+    "mechanic": {"role":"stand","at_mm":[1600,0,800],"yaw_mdeg":180000},
+    "control": {"role":"contact","at_mm":[1600,900,350]}
+  },
+  "geometry": {"bounds_mm":[3640,2450,1460]},
+  "forms": {
+    "raise": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"raised","is":false},{"need":"within_reach","point":"control"}],
+      "steps": [{"step":"move","move":"press","at":"control"}],
+      "effects": [{"change":"set","field":"raised","to":true,"event":"raised"}]
+    },
+    "lower": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"raised","is":true},{"need":"within_reach","point":"control"}],
+      "steps": [{"step":"move","move":"press","at":"control"}],
+      "effects": [{"change":"set","field":"raised","to":false,"event":"lowered"}]
+    }
+  },
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:car_lift",
+    "table": [
+      {"part":"boom","field":"raised","do":"slide","axis":"y","at":{"false":0,"true":1500},"over_us":20000000},
+      {"sound":"hum","field":"raised","at":{"false":0,"true":200},"reach_mm":8000}
+    ],
+    "shape": {
+      "shapes": [
+        {"kind":"extrude","at":[-1600,30,0],"polygon":[[-220,-270],[220,-270],[220,270],[-220,270]],"h":40,"tint":"base"},
+        {"kind":"extrude","at":[-1600,30,0],"polygon":[[-100,-120],[100,-120],[100,120],[-100,120]],"h":2340,"tint":"post"},
+        {"kind":"box","at":[-1600,2380,0],"size":[320,60,360],"round":0,"tint":"cap"},
+        {"kind":"cyl","at":[-1240,475,350],"r":40,"h":1005,"segments":4,"tint":"arm","pitch":92876,"yaw":45779,"role":"boom"},
+        {"kind":"cyl","at":[-1240,475,-350],"r":40,"h":1005,"segments":4,"tint":"arm","pitch":92876,"yaw":134187,"role":"boom"},
+        {"kind":"box","at":[-1552,1200,160],"size":[80,1800,20],"round":0,"tint":"stripe"},
+        {"kind":"extrude","at":[1600,30,0],"polygon":[[-220,-270],[220,-270],[220,270],[-220,270]],"h":40,"tint":"base"},
+        {"kind":"extrude","at":[1600,30,0],"polygon":[[-100,-120],[100,-120],[100,120],[-100,120]],"h":2340,"tint":"post"},
+        {"kind":"box","at":[1600,2380,0],"size":[320,60,360],"round":0,"tint":"cap"},
+        {"kind":"cyl","at":[1240,475,350],"r":40,"h":1005,"segments":4,"tint":"arm","pitch":92876,"yaw":-45779,"role":"boom"},
+        {"kind":"cyl","at":[1240,475,-350],"r":40,"h":1005,"segments":4,"tint":"arm","pitch":92876,"yaw":-134187,"role":"boom"},
+        {"kind":"box","at":[1552,1200,160],"size":[80,1800,20],"round":0,"tint":"stripe"},
+        {"kind":"box","at":[0,2420,0],"size":[3400,60,80],"round":0,"tint":"post"},
+        {"kind":"extrude","at":[1600,805,300],"polygon":[[-70,-20],[70,-20],[70,20],[-70,20]],"h":190,"tint":"control"}
+      ],
+      "palette": {"base":"#4a4f52","post":"#2f6b8a","cap":"#2b2d30","arm":"#3b3d40","stripe":"#d9a63a","control":"#c23a2b"},
+      "tags": ["furniture","work","garage"]
+    }
+  },
+  "text": {
+    "card": "A two-post car lift: raise its arms at the control to work underneath a car.",
+    "work": "work",
+    "vehicle_lift": "vehicle lift",
+    "garage_lift": "garage lift",
+    "howto_raise": "Stand at the control and raise the arms; lower them when the work is done."
+  },
+  "card": {"text":"card","category":"work","synonyms":["vehicle_lift","garage_lift"]},
+  "howtos": {"raise":{"text":"howto_raise","steps":[{"form":"raise"},{"form":"lower"}]}}
+}
