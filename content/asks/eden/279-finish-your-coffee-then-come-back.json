@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":279,"group":"over-time","words":"finish your coffee then come back here","obvious":2,"things":{"coffee":"eden:cup_of_coffee_pack","start":"eden:footpath"},"chain":[{"this":"coffee","form":"drink"},{"this":"me","form":"go_to","args":{"place":"start"}}]}

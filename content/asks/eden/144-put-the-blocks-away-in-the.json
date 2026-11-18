@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":144,"group":"two-things","words":"put the blocks away in the crate","obvious":2,"things":{"blocks":"eden:toy_blocks","crate":"eden:crate"},"chain":[{"this":"me","form":"pick_up","carry":"blocks","args":{"thing":"blocks"}},{"this":"me","form":"put","place":{"at":"in","thing":"blocks","anchor":"crate"},"args":{"thing":"blocks"}}]}

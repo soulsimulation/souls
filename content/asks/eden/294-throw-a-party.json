@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":294,"group":"open-ended","words":"throw a party","obvious":2,"things":{"party":"eden:calendar_entry","lights":"eden:string_lights","speaker":"eden:speaker"},"chain":[{"this":"party","form":"post"},{"this":"lights","form":"switch_on"},{"this":"speaker","form":"play_music"}]}

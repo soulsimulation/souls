@@ -1,0 +1,188 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "A note pinned and taken down (from entry 19, #493): Ana pins \"Choir practice Thursday\" (its words by reference); Ben cannot pin over it, and cannot take it down, since only its author does; Ana takes it down and the place is free again.",
+ "cases": [
+  {
+   "name": "pinned_refused_twice_taken_down_by_its_author",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:pinned_note",
+      "links": {
+       "author": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       120,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "pin",
+      "args": {
+       "words": "w_choir"
+      }
+     },
+     "receipt": "r1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "t1",
+        "link": "author",
+        "n": 1,
+        "end": "b1"
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "words",
+        "n": 1,
+        "to": {
+         "text": "w_choir"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:note_pinned",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:note_written",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "pin",
+      "args": {
+       "words": "w_choir"
+      }
+     },
+     "actor": "b2",
+     "receipt": "r2",
+     "expect": {
+      "verdict": "no",
+      "reason": "already_linked",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "take_down"
+     },
+     "actor": "b2",
+     "receipt": "r3",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_linked",
+      "effect": 0,
+      "detail": {
+       "link": "author"
+      }
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "take_down"
+     },
+     "receipt": "r4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "t1",
+        "link": "author",
+        "n": 1,
+        "end": "b1"
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "words",
+        "n": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:note_taken_down",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:note_cleared",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:pinned_note",
+     "links": {
+      "author": []
+     },
+     "fields": {}
+    }
+   }
+  }
+ ]
+}
