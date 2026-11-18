@@ -21,6 +21,7 @@ pub mod query;
 pub mod read;
 pub mod refusals;
 pub mod rules;
+pub mod select;
 pub mod selector;
 pub mod time;
 pub mod tree;
