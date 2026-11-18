@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":80,"group":"object","words":"water the plants","obvious":3,"things":{"can":"eden:watering_can","plant":"eden:potted_plant"},"chain":[{"this":"me","form":"pick_up","carry":"can","args":{"thing":"can"}},{"this":"can","form":"water","args":{"plant":"plant"}}]}

@@ -7,6 +7,9 @@
 //!
 //! This is not N15's walker scene (A1's), which does not exist yet: swap `World::build` and the tick's part for it.
 
+// A bench times runs with the wall clock; the wall-clock rule (K7, v2/clippy.toml) is for the engine, not a bench.
+#![allow(clippy::disallowed_methods)]
+
 use replica::apply::Replica;
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, schema_hash,

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":5,"group":"object","words":"hold the door open","obvious":2,"things":{"door":"eden:door"},"chain":[{"this":"door","form":"open"},{"this":"door","form":"hold_open"}]}

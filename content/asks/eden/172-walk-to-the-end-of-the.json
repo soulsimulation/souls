@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":172,"group":"getting-around","words":"walk to the end of the pier","obvious":3,"things":{"pier":"eden:pier"},"chain":[{"this":"me","form":"go_to","args":{"place":"pier"}}]}
