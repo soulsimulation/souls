@@ -9,6 +9,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "archive"
+version = "0.0.0"
+dependencies = [
+ "directoryd",
+ "miniz_oxide",
+ "replica",
+ "sim",
+]
+
+[[package]]
 name = "assets"
 version = "0.0.0"
 dependencies = [
@@ -227,6 +237,15 @@ checksum = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "facts"
+version = "0.0.0"
+dependencies = [
+ "archive",
+ "replica",
+ "worldd",
 ]
 
 [[package]]
@@ -1286,6 +1305,8 @@ dependencies = [
  "replica",
  "rustix",
  "sim",
+ "skills",
+ "testworld",
 ]
 
 [[package]]

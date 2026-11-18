@@ -34,6 +34,8 @@ step tests cargo test --workspace --locked
 step origin-headers node --test tools/origin/origin.test.mjs
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
 step cost node --test tools/ops/cost/cost.test.mjs
+# The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
+step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 
@@ -132,6 +134,10 @@ step rules-equal node --input-type=module -e '
   const got = r.rules_run(readFileSync("target/tmp/rules/run.json", "utf8")), want = readFileSync("target/tmp/rules/native.txt", "utf8");
   console.log(`rules-equal: ${want.split("\n").length - 1} cases, WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} native`);
   if (got !== want) process.exit(1);'
+# The fact sheet (V10, #2720): a 20 s recording's live and history sheets and one factsAt record, the same bytes
+# from the same WASM build in Node as natively (tools/facts/wasm.mjs).
+step facts-wasm bash -c 'cargo run -p facts --release --locked --quiet -- vectors target/facts-vectors &&
+  node tools/facts/wasm.mjs target/wasm-load/pkg target/facts-vectors'
 # The form rules' drift report (R2, #2685): the live packages/form-rules cases against this library, whose required
 # test reads a pinned snapshot. Only the daily full run on main (schedule) or V2_FULL=1, never per change; it prints
 # each disagreement and never fails the job.

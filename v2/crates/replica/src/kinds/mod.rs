@@ -143,6 +143,8 @@ pub struct KindDef {
     pub links: BTreeMap<u64, LinkType>,
     /// Section 13, an authored body's declaration (B13), for a family kind that has one.
     pub body: Option<body::Decl>,
+    pub slots: BTreeMap<u64, Slot>,
+    pub links: BTreeMap<u64, LinkType>,
 }
 
 impl KindDef {
@@ -237,6 +239,8 @@ impl Kinds {
                             slots,
                             links,
                             body,
+                            slots,
+                            links,
                         } = d;
                         let def = KindDef {
                             name,
@@ -248,6 +252,8 @@ impl Kinds {
                             slots,
                             links,
                             body,
+                            slots,
+                            links,
                         };
                         self.by_hash.insert(k.hash, def);
                     }
@@ -404,6 +410,8 @@ struct Sections {
     slots: BTreeMap<u64, Slot>,
     links: BTreeMap<u64, LinkType>,
     body: Option<body::Decl>,
+    slots: BTreeMap<u64, Slot>,
+    links: BTreeMap<u64, LinkType>,
 }
 
 /// Reads and checks the sections this module knows.

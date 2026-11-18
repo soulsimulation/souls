@@ -24,6 +24,7 @@ pub mod slots;
 pub mod speech;
 pub mod spots;
 pub mod structure;
+pub mod timed;
 pub mod timers;
 pub mod unit;
 pub mod unstick;
