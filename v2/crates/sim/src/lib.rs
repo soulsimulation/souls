@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod clock;
+pub mod frozen;
 pub mod gaits;
 pub mod ground;
 pub mod links;
