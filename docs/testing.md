@@ -158,6 +158,16 @@ therefore **windowed**:
   which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
   `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
 
+**Low-risk paths.** When every file a PR or a merge group changes sits under `tools/entry/`, `content/kinds/`,
+`content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
+`AGENTS.md` and `CLAUDE.md`, CI skips the server shards, `latency`, the smoke, `packages` (the walk) and `types-web` (the
+bundle). It runs `repo`, `soul-tools` (the entry tests, the form-rules tests and the one launcher test that reads
+`content/kinds`) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
+keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
+and the usual path map decides; a changelog fragment beside any other file still selects every job. The list is
+`LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after a low-risk merge group runs in full, since the
+group did not run every `qualify` job.
+
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
 `merge:ready` once a head's `ci-ok` is green, and remove `ci:run` from PRs that leave the window. A PR labelled
 `merge:ready` straight from a deferred head still works: the labeled run replaces the deferred one, and the train reads
