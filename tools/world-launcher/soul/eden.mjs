@@ -3135,7 +3135,7 @@ const formRules = (() => {
 // What a form does once it may be done is effects.ts (SA-F2b, #2844); the amount a transfer
 // moves is measured here, so the `room` need and the effect agree on one number.
 
-const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'moves']);
+const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'enough', 'moves']);
 const REASONS = Object.freeze([
   'field_differs',
   'slot_taken',
@@ -3146,6 +3146,7 @@ const REASONS = Object.freeze([
   'not_linked',
   'already_linked',
   'no_room',
+  'not_enough',
   'link_full',
   'moves_by',
   'motion_unsaid',
@@ -3344,9 +3345,12 @@ function decide(input       )          {
       const wanted                          = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n                           )[k];
       // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does;
-      // the fix's own needs on this field must hold now, or it would be refused in turn
-      const fix = formFix((e) => (e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
+      // a set with `by` meets it if the value it adds up to does, within the field's bounds (a crank that adds charge)
+      const after = (by         ) => (whole(by) && whole(value) ? value + by : null);
+      const fix = formFix((e) => (e.change === 'set' && e.field === field && !has(e, 'by') && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
+        (e.change === 'set' && e.field === field && after(e.by) !== null && after(e.by)  >= (def.min ?? 0) && (!whole(def.max) || after(e.by)  <= def.max) && meets(after(e.by))) ||
         (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))),
+        // the fix's own needs on this field must hold now, or it would be refused in turn
         (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
@@ -3490,26 +3494,34 @@ function decide(input       )          {
     linked: (n, i) => link(n, i, true),
     unlinked: (n, i) => link(n, i, false),
 
-    // Every amount the form moves has room where it lands (SA-F2b): a pour never overflows.
-    room(_n, i) {
-      const transfers = (form.effects ?? []).filter((e) => e && e.change === 'transfer');
-      if (!transfers.length) return { ok: false, no: bad(i, 'no_transfer') };
-      for (const e of transfers) {
-        const m = measure(kinds, nodes, act.this, args, e);
-        if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
-        for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]]         ) {
-          if (!sees(audienceOf(kinds[nodes[node]?.kind ?? ''], m.field, def))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
-        }
-        read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
-        read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
-        if (m.room !== null && m.moved > m.room) {
-          const detail = { node: m.into, field: m.field, room: m.room, amount: m.moved };
-          return { ok: false, no: { verdict: 'no', reason: 'no_room', need: i, detail, fix: null, read } };
-        }
-      }
-      return { ok: true };
-    },
+    // Every amount the form moves has room where it lands (SA-F2b): a pour never overflows. `enough`: every amount the
+    // form asks is there to give, so a pour of three units from a pitcher holding two is refused rather than made smaller.
+    room: (_n, i) => moves(i, 'room'),
+    enough: (_n, i) => moves(i, 'enough'),
   };
+
+  function moves(i        , which                   )          {
+    const transfers = (form .effects ?? []).filter((e) => e && e.change === 'transfer');
+    if (!transfers.length) return { ok: false, no: bad(i, 'no_transfer') };
+    for (const e of transfers) {
+      const m = measure(kinds, nodes, act.this, args, e);
+      if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
+      for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]]         ) {
+        if (!sees(audienceOf(kinds[nodes[node]?.kind ?? ''], m.field, def))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
+      }
+      read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
+      read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
+      if (which === 'room' && m.room !== null && m.moved > m.room) {
+        const detail = { node: m.into, field: m.field, room: m.room, amount: m.moved };
+        return { ok: false, no: { verdict: 'no', reason: 'no_room', need: i, detail, fix: null, read } };
+      }
+      if (which === 'enough' && m.moved < m.asked) {
+        const detail = { node: m.from, field: m.field, has: m.moved, amount: m.asked };
+        return { ok: false, no: { verdict: 'no', reason: 'not_enough', need: i, detail, fix: null, read } };
+      }
+    }
+    return { ok: true };
+  }
 
   function link(n      , i        , wantLinked         )          {
     const type = n.link ?? '';
@@ -3725,6 +3737,8 @@ function resolve(ref         , args                         )                {
               
                       
                 
+                                                     
+                
   
 
 /**
@@ -3765,7 +3779,7 @@ function measure(kinds                       , nodes                      , self
     want = room;
   } else if (e.amount && typeof e.amount === 'object' && has(e.amount, 'arg')) want = args[(e.amount                   ).arg];
   if (!whole(want) || want < 0) return { bad: 'not_whole_number', detail: { amount: e.amount ?? null } };
-  return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)) };
+  return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)), asked: want };
 }
 return { NEEDS, REASONS, MAX_HANDS, CARRIED, PUSHED, seesAudience, decide, valueAt, crossing, WHO, whoMay, measure };
 })();
