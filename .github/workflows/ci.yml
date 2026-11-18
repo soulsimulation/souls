@@ -132,7 +132,8 @@ jobs:
     # `native` is never heavy: its camera perf budget is wall time, and a shared host under load misses it (#1162).
     runs-on: ${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || matrix.light && vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
-    timeout-minutes: ${{ matrix.kind == 'server' && 45 || 60 }}
+    # launcher passes in 20-27 min on hosted runners; 40 fails a hung test file in time to keep the merge queue moving.
+    timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || 60 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
