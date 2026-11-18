@@ -48,7 +48,8 @@ export const ALLOWED = {
   replica: ['wasm-bindgen'],
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld'],
   worldd: ['replica', 'sim'],
-  gatewayd: [],
+  // Agents' sockets (I1, #2683): WebSocket on tokio through axum, a constant-time compare, the OS random source.
+  gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util'],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
   skills: ['replica'],
 };
