@@ -12,6 +12,8 @@
     "beside_the_board": { "role": "stand", "at_mm": [-1300, 0, 500], "yaw_mdeg": 90000 }
   },
   "geometry": { "bounds_mm": [1900, 2100, 700] },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
   "forms": {
     "present": {
       "who": "anyone",

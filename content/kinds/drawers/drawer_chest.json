@@ -70,6 +70,12 @@
       500
     ]
   },
+  "motion": {
+    "how": "pushed_by_one"
+  },
+  "loose": {
+    "ever": true
+  },
   "forms": {
     "open": {
       "who": "anyone",

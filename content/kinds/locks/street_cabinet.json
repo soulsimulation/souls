@@ -62,6 +62,12 @@
       550
     ]
   },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
   "forms": {
     "open": {
       "who": "anyone",

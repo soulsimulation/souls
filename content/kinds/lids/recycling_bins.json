@@ -46,6 +46,12 @@
       700
     ]
   },
+  "motion": {
+    "how": "wheeled"
+  },
+  "loose": {
+    "ever": true
+  },
   "forms": {
     "open": {
       "who": "anyone",
