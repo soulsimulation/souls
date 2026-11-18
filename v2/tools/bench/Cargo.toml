@@ -32,6 +32,11 @@ path = "src/moves.rs"
 name = "forms"
 path = "src/forms.rs"
 
+# F9, #2776: Eden's floor lamps moved to a second revision while 100 walkers move.
+[[bin]]
+name = "refresh"
+path = "src/refresh.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
