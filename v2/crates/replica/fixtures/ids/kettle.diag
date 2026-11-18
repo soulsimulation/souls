@@ -1,0 +1,14 @@
+# The kettle: the kind of the hash cases (Engine v2 T3, #2640, v2/docs/ids.md). Sections follow SA-F1 (#2842):
+# 1 name, 3 state, 5 points, 7 geometry, 8 forms; 10 is the kinds it refers to; 20 and up sit beside the kind.
+{
+  1: "souls:kettle",
+  3: {                                                   # state fields: number, then name, type, default, audience
+    1: {1: "water_g", 2: "int", 3: 0, 4: "public"},
+    2: {1: "heat_mc", 2: "int", 3: 20000, 4: "holder"}
+  },
+  5: {1: {1: "spout", 2: [0, 90, 120]}},                 # points: name, position in mm
+  7: h'12201111111111111111111111111111111111111111111111111111111111111111',  # the geometry, by its hash
+  8: {1: {1: "pour", 2: [["walk_to", "spout"], ["fill", 1]]}},  # forms: name, steps; 1 is reference 1 below
+  10: {1: "souls:cup"},                                  # the kinds it refers to, by local number
+  20: {1: "souls/looks/kettle-steel"}                    # a look, beside the kind
+}

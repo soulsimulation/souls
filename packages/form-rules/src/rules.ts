@@ -68,7 +68,11 @@ export type Effect = {
   amount?: unknown;
   form?: string;
   after_us?: number;
+  /** A `draw`: the table the world draws one outcome from (SA-F13). */
+  outcomes?: DrawRow[];
 };
+/** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
+export type DrawRow = { name: string; weight: number | { field: string }; event: string; set: { field: string; to: unknown }[] };
 export type Entry = {
   kind: string;
   state?: Record<string, { n: number; default: unknown; audience: Audience; type?: string; unit?: string; min?: number; max?: number }>;
@@ -76,6 +80,8 @@ export type Entry = {
   points?: Record<string, { at_mm: number[] }>;
   slots?: Record<string, { admits: string; most: number; at_mm?: number[] }>;
   forms?: Record<string, Form>;
+  /** A closed kind: the fields it names take the container's audience and declare none of their own (SA-F8, #2849). */
+  closed?: { audience: Audience; fields?: string[] };
 };
 export type Node = {
   kind?: string;
@@ -84,15 +90,28 @@ export type Node = {
   slots?: Record<string, unknown[]>;
   hands?: Record<string, string | null>;
   effector_mm?: number[];
+  /** Its origin in the frame of the place it is loose in, whole mm, supplied by the engine (an activity's places, SA-G1a). */
+  at_mm?: number[];
   /** Things resting loose in this node (on its ground or a surface), not in a slot or a hand. */
   loose?: string[];
 };
 /** A field's audience: a rule object of the entry format (SA-F8), or a bare string left in old data. */
 export type Audience = string | { rule: 'everyone' | 'owner' | 'creator' } | { rule: 'linked'; link: string };
+
+/** Whether an asker whose `sees` is `sees` belongs to `audience`: the one resolver every audience read uses. */
+export function seesAudience(sees: unknown, audience: Audience): boolean {
+  if (sees === 'all') return true;
+  const list = Array.isArray(sees) ? sees : [];
+  if (typeof audience !== 'object' || audience === null) return typeof audience === 'string' && list.includes(audience); // a bare string keeps its old meaning; none declared is seen by no list
+  if (audience.rule === 'everyone') return true;
+  if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
+  return list.includes(audience.rule);
+}
 export type Input = {
   kinds: Record<string, Entry>;
   act: { this: string; form: string; args?: Record<string, unknown> };
-  state: { actor: string; nodes: Record<string, Node>; moves?: Record<string, { reach_mm: number }> };
+  /** `now_us`: world time in whole microseconds, needed only to read a `timed` field. */
+  state: { actor: string; nodes: Record<string, Node>; moves?: Record<string, { reach_mm: number }>; now_us?: number };
   asker: { sees: string[] | 'all' };
 };
 export type Read = [string, unknown];
@@ -107,6 +126,14 @@ type Outcome = { ok: true } | { ok: false; no: Verdict } | { ok: 'unknown'; unkn
 const has = (o: unknown, k: string): boolean => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
 const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() : []);
 const whole = (v: unknown): v is number => Number.isSafeInteger(v);
+/** A whole number as a safe integer or a big integer (a timed value beyond 2^53, SA-F5a). */
+const int = (v: unknown): v is number | bigint => whole(v) || typeof v === 'bigint';
+/** A flag is stored as 0 or 1 (Engine v2's encoding has no booleans); an entry may still write true or false. */
+const flag = (def: { type?: string }, v: unknown): unknown => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
+
+/** Who may see a state field: the container's audience when the kind is closed and names it, else the field's own. */
+const audienceOf = (entry: Entry | undefined, field: string, def = entry?.state?.[field]): Audience =>
+  entry?.closed?.fields?.includes(field) ? entry.closed.audience : (def?.audience as Audience);
 
 /** Decide whether `input.act` can be done now. Never throws on bad data: it answers `bad_input`. */
 export function decide(input: Input): Verdict {
@@ -133,20 +160,15 @@ export function decide(input: Input): Verdict {
   if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
   // The asker's `sees` lists the audiences it belongs to: `owner`, `creator`, and `linked:<link type>` for each link
   // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
-  const sees = (audience: Audience) => {
-    if (asker.sees === 'all') return true;
-    const list = Array.isArray(asker.sees) ? asker.sees : [];
-    if (typeof audience === 'string') return list.includes(audience);
-    if (audience.rule === 'everyone') return true;
-    if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
-    return list.includes(audience.rule);
-  };
+  const sees = (audience: Audience) => seesAudience(asker.sees, audience);
 
   // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
-  const formFix = (meets: (e: Effect) => boolean): Fix | null => {
+  // `ready`, when given, passes over a form its own needs would refuse now (a dimmer step on a lamp that is dark).
+  const formFix = (meets: (e: Effect) => boolean, ready?: (f: Form) => boolean): Fix | null => {
     for (const name of sorted(entry.forms)) {
       const f = entry.forms![name];
       if (name === act.form || f.who !== 'anyone' || f.starts !== 'act') continue;
+      if (ready && !ready(f)) continue;
       if ((f.effects ?? []).some(meets)) return { form: name };
     }
     return null;
@@ -164,20 +186,28 @@ export function decide(input: Input): Verdict {
       const field = n.field ?? '';
       const def = has(entry.state, field) ? entry.state![field] : undefined;
       if (!def) return { ok: false, no: bad(i, 'no_such_field', { field }) };
-      if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
-      const value = has(self.fields, field) ? self.fields![field] : def.default;
+      if (!sees(audienceOf(entry, field))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
+      let value = has(self.fields, field) ? self.fields![field] : def.default;
+      if (def.type === 'timed') {
+        const now = valueAt(def, value, state.now_us);
+        if (typeof now === 'object') return { ok: false, no: bad(i, now.bad, { field }) };
+        value = now;
+      }
       read.push([`${act.this}/field/${def.n}`, value]);
       const ranged = has(n, 'at_least') || has(n, 'at_most');
-      if (ranged && !whole(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
-      const meets = (v: unknown) =>
-        (!has(n, 'is') || v === n.is) &&
-        (!has(n, 'not') || v !== n.not) &&
-        (!has(n, 'at_least') || (whole(v) && v >= (n.at_least as number))) &&
-        (!has(n, 'at_most') || (whole(v) && v <= (n.at_most as number)));
+      if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
+      const holds = (m: Need, v: unknown) =>
+        (!has(m, 'is') || flag(def, v) === flag(def, m.is)) &&
+        (!has(m, 'not') || flag(def, v) !== flag(def, m.not)) &&
+        (!has(m, 'at_least') || (int(v) && v >= (m.at_least as number))) &&
+        (!has(m, 'at_most') || (int(v) && v <= (m.at_most as number)));
+      const meets = (v: unknown) => holds(n, v);
       if (meets(value)) return { ok: true };
       const wanted: Record<string, unknown> = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
-      const fix = formFix((e) => e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to));
+      // the fix's own needs on this field must hold now, or it would be refused in turn
+      const fix = formFix((e) => e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to),
+        (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
 
@@ -272,7 +302,7 @@ export function decide(input: Input): Verdict {
         const m = measure(kinds, nodes, act.this, args, e);
         if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
         for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]] as const) {
-          if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
+          if (!sees(audienceOf(kinds[nodes[node]?.kind ?? ''], m.field, def))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
         }
         read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
         read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
@@ -311,6 +341,150 @@ export function decide(input: Input): Verdict {
   }
   return unknown ?? { verdict: 'yes', read };
 }
+
+// timed:begin. A value that changes with time (SA-F5a, #2845), shared with Engine v2 F5 (#2770).
+// It is stored as three whole numbers, `{value, per_s, set_us}`: the value when it was set, its rate per second
+// (in the field's unit) and the world time it was set, in microseconds. Nothing is written between events.
+// World time is a signed 64-bit count that never stops, so every number may arrive as a safe integer or a big
+// integer (as T0's encoding reads one beyond 2^53), is worked as a big integer, and is refused (`beyond_i64`) only
+// outside the signed 64-bit range. A result is a number when it is a safe integer, else a big integer.
+// Every number here is a big integer; the lint in timed.test.ts refuses any number literal that is not.
+
+export type Int = number | bigint;
+export type Timed = { value: Int; per_s: Int; set_us: Int };
+type Bounds = { min?: Int; max?: Int };
+type Exact = { v0: bigint; rate: bigint; set: bigint; at: bigint; lo: bigint | null; hi: bigint | null };
+const I64_MIN = -(1n << 63n), I64_MAX = (1n << 63n) - 1n;
+
+/** A whole number as a big integer; `null` if it is not one; `beyond` if it lies outside the signed 64-bit range. */
+function big(v: unknown): bigint | null | 'beyond' {
+  const b = typeof v === 'bigint' ? v : whole(v) ? BigInt(v) : null;
+  return b === null ? null : b < I64_MIN || b > I64_MAX ? 'beyond' : b;
+}
+
+function exact(def: Bounds, stored: unknown, at: unknown): Exact | { bad: string } {
+  if (!stored || typeof stored !== 'object') return { bad: 'not_timed' };
+  const { value, per_s, set_us } = stored as Partial<Timed>;
+  const three = [value, per_s, set_us].map(big);
+  if (three.includes(null)) return { bad: 'not_whole_number' };
+  const now = big(at);
+  if (now === null) return { bad: 'no_time' };
+  const bounds = [def.min, def.max].map((b) => (b === undefined ? undefined : big(b)));
+  if (bounds.includes(null)) return { bad: 'not_whole_number' };
+  if ([...three, now, ...bounds].includes('beyond')) return { bad: 'beyond_i64' };
+  const [v0, rate, set] = three as bigint[];
+  const [lo, hi] = bounds.map((b) => (b === undefined ? null : (b as bigint)));
+  if ((now as bigint) < set) return { bad: 'time_before_set' };
+  if (lo !== null && hi !== null && lo > hi) return { bad: 'bounds_crossed' };
+  return { v0: clamp(v0, lo, hi), rate, set, at: now as bigint, lo, hi };
+}
+
+function clamp(v: bigint, lo: bigint | null, hi: bigint | null): bigint {
+  if (lo !== null && v < lo) return lo;
+  if (hi !== null && v > hi) return hi;
+  return v;
+}
+
+/** A result: a number if it is a safe integer, a big integer beyond that, refused outside the signed 64-bit range. */
+function out(v: bigint): Int | { bad: string } {
+  if (v < I64_MIN || v > I64_MAX) return { bad: 'beyond_i64' };
+  return v >= BigInt(Number.MIN_SAFE_INTEGER) && v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v;
+}
+
+function at(x: Exact, t: bigint): bigint {
+  return clamp(x.v0 + (x.rate * (t - x.set)) / 1000000n, x.lo, x.hi);
+}
+
+/**
+ * The value of a timed field at `now_us`: the whole units accrued since it was set (rate x elapsed / 1,000,000,
+ * truncated toward zero) added to its value, held within the field's `min` and `max`.
+ */
+export function valueAt(def: Bounds, stored: unknown, now_us: unknown): Int | { bad: string } {
+  const x = exact(def, stored, now_us);
+  if ('bad' in x) return x;
+  return out(at(x, x.at));
+}
+
+/**
+ * The first whole microsecond, at or after `from_us`, at which the value is `at_least` (or `at_most`) the level: the
+ * time it crosses, rounded up, so a need on the field turns from no to yes at exactly that time. `null` when it never
+ * does: the rate is zero or points away, or a bound stops the value short of the level.
+ */
+export function crossing(def: Bounds, stored: unknown, level: { at_least?: Int; at_most?: Int }, from_us: unknown): Int | null | { bad: string } {
+  const x = exact(def, stored, from_us);
+  if ('bad' in x) return x;
+  const rising = level && has(level, 'at_least') && !has(level, 'at_most');
+  const falling = level && has(level, 'at_most') && !has(level, 'at_least');
+  const L = big(rising ? level.at_least : falling ? level.at_most : undefined);
+  if (L === null) return { bad: 'malformed_level' };
+  if (L === 'beyond') return { bad: 'beyond_i64' };
+  const now = at(x, x.at);
+  if (rising ? now >= L : now <= L) return out(x.at);
+  if (rising ? x.rate <= 0n || (x.hi !== null && x.hi < L) : x.rate >= 0n || (x.lo !== null && x.lo > L)) return null;
+  const gap = rising ? L - x.v0 : x.v0 - L;
+  const speed = rising ? x.rate : -x.rate;
+  return out(x.set + (gap * 1000000n + speed - 1n) / speed);
+}
+// timed:end
+
+// who:begin. Who may do a form (SA-F7a, #2848): one closed list, shared with Engine v2 F6 (#2771). A form's `who` is a
+// test on links, never on a field: `anyone` (the default: owning does not lock); `holder`, the thing is in one of the
+// actor's hands (holding is a parent); `world`, a form a timer starts, which no Soul's act may do; or
+// `{"link": <type>}`, the actor or the actor's Soul (the end of the body's `soul` link, T2) is an end of a link of that
+// type on the thing: its owner, a member, the Soul whose turn it is, a role in the activity, a relation its creator
+// set. The rule is the form's own data, so it is read before anyone tries; a refusal names it and, for a link, its ends.
+// The lint in who.test.ts refuses any read of a field between these markers.
+
+export const WHO = Object.freeze(['anyone', 'holder', 'world', 'link']);
+export type WhoVerdict =
+  | { verdict: 'yes'; who: unknown; read: Read[] }
+  | { verdict: 'no'; reason: 'not_permitted' | 'bad_input'; who: unknown; detail: Record<string, unknown>; read: Read[] }
+  | { verdict: 'unknown'; who: unknown; node: string; link: string; read: Read[] };
+
+/** Whether the actor may do `input.act` at all, before its needs: yes, no naming who may, or unknown. Never throws. */
+export function whoMay(input: Input): WhoVerdict {
+  const read: Read[] = [];
+  const bad = (what: string, extra: Record<string, unknown> = {}): WhoVerdict => ({ verdict: 'no', reason: 'bad_input', who: null, detail: { what, ...extra }, read });
+  if (!input || typeof input !== 'object' || !input.act || !input.state || !input.kinds || !input.asker) return bad('malformed');
+  const { act, state, kinds, asker } = input;
+  const nodes = state.nodes ?? {};
+  const self = has(nodes, act.this) ? nodes[act.this] : undefined;
+  if (!self) return bad('no_such_node', { node: act.this });
+  const entry = self.kind && has(kinds, self.kind) ? kinds[self.kind] : undefined;
+  if (!entry) return bad('no_such_kind', { kind: self.kind ?? null });
+  const form = has(entry.forms, act.form) ? entry.forms![act.form] : undefined;
+  if (!form) return bad('no_such_form', { form: act.form });
+  const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
+  if (!actor) return bad('no_such_node', { node: state.actor });
+  const who = form.who ?? 'anyone';
+  const yes: WhoVerdict = { verdict: 'yes', who, read };
+  const refuse = (detail: Record<string, unknown>): WhoVerdict => ({ verdict: 'no', reason: 'not_permitted', who, detail, read });
+
+  if (who === 'anyone') return yes;
+  if (who === 'world') return refuse({});
+  if (who === 'holder') {
+    const h = actor.hands ?? {};
+    if (typeof h !== 'object' || Object.keys(h).length > MAX_HANDS) return bad('too_many_hands');
+    for (const name of sorted(h)) read.push([`${state.actor}/hand/${name}`, h[name] ?? null]);
+    return sorted(h).some((k) => h[k] === act.this) ? yes : refuse({});
+  }
+  const type = who && typeof who === 'object' && Object.keys(who).length === 1 ? (who as { link?: unknown }).link : undefined;
+  if (typeof type !== 'string') return bad('unknown_who', { who });
+  const def = has(entry.links, type) ? entry.links![type] : undefined;
+  if (!def) return bad('no_such_link', { link: type });
+  const sees = seesAudience(asker.sees, def.audience);
+  if (!sees) return { verdict: 'unknown', who, node: act.this, link: type, read };
+  const list = self.links?.[type];
+  const ends = Array.isArray(list) ? list : [];
+  if (!whole(def.most) || ends.length > def.most) return bad('link_over_most', { link: type });
+  // The actor's Soul: a body is linked to its Soul (T2), at most one.
+  const souls = actor.links?.soul;
+  const soul = Array.isArray(souls) && souls.length === 1 && typeof souls[0] === 'string' ? souls[0] : null;
+  read.push([`${state.actor}/soul`, soul]);
+  read.push([`${act.this}/link/${def.n}/ends`, ends]);
+  return ends.some((e) => e === state.actor || (soul !== null && e === soul)) ? yes : refuse({ link: type, ends });
+}
+// who:end
 
 function resolve(ref: unknown, args: Record<string, unknown>): string | null {
   if (typeof ref === 'string') return ref;
