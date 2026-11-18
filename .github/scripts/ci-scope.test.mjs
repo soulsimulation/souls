@@ -423,7 +423,7 @@ const BATTERY = JOBS.map(j => j.name).sort();
 const CONTENT_DIFF = ['content/kinds/kitchen/kettle.json', 'content/kinds/kitchen/teapot.json', 'packages/form-rules/cases/kettle.json', 'changes/sa-kitchen.md'];
 
 test('serverReaders: the shards holding a server test that reads content, cases, form-rules or tools/entry, found in the tree', () => {
-  const all = ['a.test.ts', 'b.test.ts', 'god/forms-adapter.test.ts', 'owner-response-milestones.test.ts', 'c.test.ts', 'd.test.ts', 'e.test.ts', 'f.test.ts'];
+  const all = ['a.test.ts', 'b.test.ts', 'god/forms-adapter.test.ts', 'owner-response-milestones.test.ts', 'c.test.ts', 'd.test.ts', 'e.test.ts', 'f.test.ts', 'g.test.ts', 'h.test.ts'];
   const src = { 'god/forms-adapter.test.ts': "import {loadEntries} from '../../../../tools/entry/look.mjs'; loadEntries(resolve(ROOT, 'content/kinds'))", 'owner-response-milestones.test.ts': "tags: ['entry']" };
   const got = serverReaders({ files: all, read: f => src[f] ?? 'nothing here' });
   assert.ok(got.includes('latency'), 'the latency file is its own job');
