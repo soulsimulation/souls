@@ -1,0 +1,30 @@
+# A body on the deck of a moving boat, and a dock (Engine v2 T4, #2644, v2/docs/pose.md). Field 1: the root frame
+# (the place). Field 2: movables, each after its frame, {1: id, 2: pose, 3: owner, 4: {slot: point}}; a pose is
+# {1: [frame node, slot], 2: position um, 3: orientation [w, x, y, z] scaled by 2^30, 4: support {1: which, 2: node,
+# 3: height um}} (which: 0 none, 1 surface, 2 slot, 3 volume, 4 track); an owner is {1: which, 2: track} (1 slot,
+# 2 its own mover, 3 track, 4 island); a track is {1: which, 2: t0 us, 4: velocity um/s, 5: gravity um/s^2, 6: spin
+# urad/s} (1 rest, 2 straight, 3 thrown), starting from the pose's position. Field 3: where a node must be in the root frame at world
+# time t, um, worked out in exact rationals and rounded once (within one unit per frame crossed).
+{
+  1: 1,
+  2: [
+    {1: 2,                                                       # the boat, on a straight track, turned 37 degrees
+     2: {1: [1], 2: [10000000, 0, -5000000], 3: [1018254771, 0, 340703281, 0], 4: {1: 3, 2: 6}},
+     3: {1: 3, 2: {1: 2, 2: 0, 4: [3000000, 0, 1200000]}},
+     4: {1: [0, 1200000, 0]}},                                   # slot 1: the deck's middle
+    {1: 3,                                                       # a body standing on the deck, turned -25 degrees
+     2: {1: [2], 2: [500000, 1200000, -250000], 3: [1048289855, 0, -232400266, 0], 4: {1: 1, 2: 2, 3: 0}},
+     3: {1: 2},                                                  # its own mover, steered by its controller
+     4: {2: [250000, 1400000, 100000]}},                         # slot 2: the right hand
+    {1: 5,                                                       # a ball held in the right hand: frame and support are the slot
+     2: {1: [3, 2], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 2}},
+     3: {1: 1}},
+    {1: 4,                                                       # the dock, at rest, turned 90 degrees
+     2: {1: [1], 2: [12000000, 1000000, -4000000], 3: [759250125, 0, 759250125, 0], 4: {1: 1, 2: 7, 3: 0}},
+     3: {1: 3, 2: {1: 1}}}
+  ],
+  3: [
+    [3, 0, [10248864, 1200000, -5500566]],
+    [3, 2000000, [16248864, 1200000, -3100566]]
+  ]
+}

@@ -21,6 +21,8 @@
   "children": {
     "slot": { "kind": "eden:signup_slot", "most": 20 }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:signup_sheet",
     "table": [

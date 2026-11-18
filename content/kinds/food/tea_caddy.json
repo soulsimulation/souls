@@ -295,6 +295,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:tea_caddy",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,40,0],"size":[340,80,220],"tint":"wood"},{"kind":"box","at":[-110,130,-40],"size":[100,100,100],"tint":"tin"},{"kind":"box","at":[110,130,-40],"size":[100,100,100],"tint":"tin"},{"kind":"box","at":[-110,185,-40],"size":[80,12,80],"tint":"green","when":"@green>=1"},{"kind":"box","at":[-110,160,-40],"size":[80,40,80],"tint":"green","when":"@green>=5"},{"kind":"box","at":[110,185,-40],"size":[80,12,80],"tint":"mint","when":"@mint>=1"},{"kind":"box","at":[110,160,-40],"size":[80,40,80],"tint":"mint","when":"@mint>=5"},{"kind":"box","at":[0,95,60],"size":[160,30,90],"tint":"tin"},{"kind":"box","at":[-35,115,60],"size":[70,14,70],"tint":"green","when":"@well_green>=1"},{"kind":"box","at":[35,115,60],"size":[70,14,70],"tint":"mint","when":"@well_mint>=1"},{"kind":"box","at":[0,90,-60],"size":[90,20,90],"tint":"glass"},{"kind":"box","at":[0,115,-60],"size":[70,30,70],"tint":"mixed","when":"@reserve_green>=1"},{"kind":"box","at":[0,140,-60],"size":[56,20,56],"tint":"mixed","when":"@reserve_mint>=1"}],"palette":{"wood":"#8a5f3c","tin":"#9aa3a0","green":"#4f6b2a","mint":"#8fc47a","glass":"#d6e4e0","mixed":"#6c8a45"},"tags":["kitchen","tea","caddy","object"]}

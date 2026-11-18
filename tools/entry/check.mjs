@@ -29,11 +29,12 @@ export const RULES = Object.freeze({
   card: 'every kind has a card: one line of purpose, at most 80 characters',
   'no-labels': 'no card carries a label such as "quiet" or "cosy"',
   shape: 'the entry is well formed (the format\'s own rules)',
+  hatch: 'a code hatch is for what no declared form can say: it reads two or more fields, and a kind has at most four',
   refs: 'every kind it refers to is loaded, and kinds do not refer to each other in a circle',
 });
 
 /** What "cheap" means, counted at the maximum. A kind over any of these is refused before it runs. */
-export const BUDGET = Object.freeze({stateBytes: 9216, linkEdges: 1024, forms: 32, parts: 64, perForm: 16});
+export const BUDGET = Object.freeze({stateBytes: 9216, linkEdges: 1024, forms: 32, parts: 64, perForm: 16, hatches: 4});
 const BYTES = {bool: 1, enum: 1, int: 8, duration: 8, text: 8};
 const LINK_EDGE_BYTES = 8;
 
@@ -88,16 +89,19 @@ function rules(entry) {
   for (const [fn, f] of Object.entries(forms)) {
     const p = `forms.${fn}`;
     // targets: an argument that picks a thing or a slot is described with the list its type needs, and is used.
-    const used = new Set(JSON.stringify([f.needs, f.steps, f.effects]).match(/"arg":"[^"]+"/g)?.map(s => s.slice(7, -1)));
+    const used = new Set(JSON.stringify([f.needs, f.steps, f.effects, f.hatch?.reads]).match(/"arg":"[^"]+"/g)?.map(s => s.slice(7, -1)));
     for (const [an, a] of Object.entries(f.takes ?? {})) {
       const wantOf = a.type === 'slot' ? 'free_slots' : a.type === 'thing' ? 'things' : null;
       if (a.select && wantOf && a.select.of !== wantOf) add('targets', `${p}.takes.${an}.select.of`, `argument "${an}" is a ${a.type} but its selector picks ${a.select.of}`, `set select.of to "${wantOf}"`);
       if (!used.has(an)) add('targets', `${p}.takes.${an}`, `argument "${an}" is taken but nothing in the form uses it`, `use {"arg": "${an}"} in a need, step or effect, or remove it`);
     }
-    // makes: a create is paid for in its own form (something is removed, or a field the form needed is spent).
+    // makes: a create is paid for in its own form (something is removed, or a field the form needed is spent). A stock's
+    // take form is paid by its count, which the engine lowers by one in the same batch (SA-F12): the format forbids it
+    // setting the count itself.
     (f.effects ?? []).forEach((e, i) => {
       if (e.change !== 'create') return;
-      const spent = f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && !n.link && !n.of && n.field === x.field));
+      const spent = Object.values(isObj(entry.stock) ? entry.stock : {}).some(s => isObj(s) && s.take === fn && s.kind === e.kind)
+        || f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && !n.link && !n.of && n.field === x.field));
       if (!spent) add('makes', `${p}.effects.${i}`, `creates ${e.kind} and pays for nothing`, 'add a remove effect for what it is made from, or a set of a field the form needs (spending it)');
     });
     // no-waiting: a timer that arms its own form again waits on a condition by polling; a name that counts a time of day.
@@ -119,8 +123,21 @@ function rules(entry) {
 
   wayOut(entry, add);
 
-  // moves: the sections are SA-F10's. Until the format defines them, data cannot break this rule and it is not checked.
-  if (!('motion' in F.RESERVED) && entry.owner === 'thing' && movable(entry)) for (const s of ['motion', 'loose']) if (entry[s] === undefined) add('moves', s, `a thing that can be carried says nothing of its ${s}`, `add a "${s}" section`);
+  // hatch: the hatch must not become a way round the closed lists. A function of one field is a state need or a set, which a
+  // declared form says; a hatch that only reads and answers one thing is refused with that pointer.
+  const hatches = F.hatchesOf(entry);
+  if (hatches.length > BUDGET.hatches) add('hatch', 'forms', `${hatches.length} hatches, over ${BUDGET.hatches}`, 'express the rest with declared forms, or split the kind');
+  for (const h of hatches) {
+    const p = `forms.${h.form}.hatch`;
+    if (h.reads.length < 2) add('hatch', `${p}.reads`, `reads only ${h.reads.length === 1 ? JSON.stringify(h.reads[0]) : 'nothing'}; a function of one value is a state need (is, not, at_least, at_most) or a set effect`, 'write the form with a need or an effect and drop the hatch');
+    if (h.answers === 'verdict' && h.reads.every(r => 'field' in r && entry.state?.[r.field]?.type === 'bool')) add('hatch', `${p}.answers`, 'a verdict over bool fields only is a list of state needs', 'write each field as a state need and drop the hatch');
+  }
+
+  // moves: a thing says how it moves and how long it lasts loose (SA-F10, sections 18 and 19), whether or not it can be carried.
+  if (entry.owner === 'thing') {
+    if (entry.motion === undefined) add('moves', 'motion', 'the kind does not say how it moves', `add "motion": {"how": "<one of ${F.MOTIONS.join(', ')}>"}`);
+    if (entry.loose === undefined) add('moves', 'loose', 'the kind does not say how long it lasts loose', 'add "loose": {"ever": true}, or {"us": <microseconds>} for a stated time');
+  }
 
   // card: a kind has one line of purpose, short enough to read at a glance.
   if (entry.card === undefined) add('card', 'card', 'the kind has no card', 'add "card": {"text": "<key>"} naming a text entry that says what it is for, in one line');
@@ -132,9 +149,6 @@ function rules(entry) {
   if (label) add('no-labels', `text.${entry.card.text}`, `the card says "${label[1]}", a label`, `cut "${label[1]}" and say the facts: what it has and what can be done`);
   return out;
 }
-
-const movable = e => Object.values(e.forms ?? {}).some(f => (f.needs ?? []).some(n => n.need === 'held_by_actor') || (f.steps ?? []).some(s => s.step === 'take' || s.step === 'put') ||
-  (f.effects ?? []).some(x => x.change === 'reparent' && x.what === 'this'));
 
 /** Every chain of needs has a way out. A form is reachable when the state its needs ask for can be reached from the
  *  defaults through reachable forms (a timer form also needs a reachable form to arm it). A field something outside
@@ -269,7 +283,8 @@ else if (isMain) {
   const files = args.length ? args.flatMap(resolve) : all;
   const rows = checkFiles(files, [...new Set([...all, ...files])]);
   let bad = 0;
-  for (const r of rows) { if (r.findings.length) bad++; console.log(JSON.stringify({file: relative(ROOT, r.file), kind: r.entry?.kind, ok: !r.findings.length, findings: r.findings})); }
-  console.log(JSON.stringify({checked: rows.length, refused: bad, ok: bad === 0}));
+  for (const r of rows) { if (r.findings.length) bad++; console.log(JSON.stringify({file: relative(ROOT, r.file), kind: r.entry?.kind, ok: !r.findings.length, ...(r.entry && F.hatchesOf(r.entry).length ? {hatches: F.hatchesOf(r.entry).length, waiting_for_engine: true} : {}), findings: r.findings})); }
+  const hatches = rows.reduce((n, r) => n + (r.entry ? F.hatchesOf(r.entry).length : 0), 0);
+  console.log(JSON.stringify({checked: rows.length, refused: bad, ok: bad === 0, hatches, waiting_for_engine: rows.filter(r => r.entry && F.hatchesOf(r.entry).length).length}));
   process.exitCode = bad ? 1 : 0;
 }
