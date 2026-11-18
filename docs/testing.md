@@ -231,15 +231,17 @@ entry and form-rules tests) run on a self-hosted runner labelled `souls-light` w
 `ubuntu-latest` otherwise, with the same steps either way. `runs-on` cannot fall back by itself, so the `scope` job asks
 the runner list (`GET /repos/{owner}/{repo}/actions/runners`) and gives each light job the label while idle runners last
 (`idleRunners`, `assignLight`); its step summary says where each went and why. Listing runners needs a token with
-Administration: read, which the workflow's own token cannot have, so it comes from the repository secret
-`CI_RUNNERS_TOKEN`. Without the secret, or on any API error or timeout (10 s), every light job runs hosted, as before.
+Administration: Read, which the workflow's own token cannot have, so the scope job reads it with the existing
+fine-grained `MERGE_TRAIN_TOKEN`. If that token lacks the permission, the call returns 403 and the step summary says
+"runners not readable with MERGE_TRAIN_TOKEN (needs Administration: Read)". On that, any other API error, a timeout
+(10 s) or no token, every light job runs hosted, as before.
 - **Where.** Three instances on the timed-runner host, pinned to every CPU the six `souls-timed` instances do not own
   (physical cores 18-23 and their siblings: 6 physical, 12 logical), so the timed runs keep their cores. Set them up with
   `tools/ci/setup-runners.sh --count 3 --prefix souls-light --label souls-light --no-playwright --cpus-except
   souls-timed-1,souls-timed-2,souls-timed-3,souls-timed-4,souls-timed-5,souls-timed-6`, run as root on the host,
   `--dry-run` first: it prints the CPUs it read from each timed instance and the set it pins to.
-- **Turn it off** by deleting the secret (`gh secret delete CI_RUNNERS_TOKEN -R soulsimulation/souls`) or stopping the
-  instances; light jobs then run hosted. A light job placed on a runner that goes offline before it starts waits for it.
+- **Turn it off** by stopping the instances or removing their `souls-light` label; light jobs then run hosted. A light
+  job placed on a runner that goes offline before it starts waits for it.
 
 ## Remote gate
 

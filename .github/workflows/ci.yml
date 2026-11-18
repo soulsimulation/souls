@@ -82,9 +82,9 @@ jobs:
           DRAFT: ${{ github.event.pull_request.draft || false }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           GREEN: ${{ steps.green.outputs.green || steps.queued.outputs.covered || false }}
-          # Administration: read, to find an idle souls-light runner for the light jobs (docs/testing.md#self-hosted-runners).
-          # Unset, unreachable or refused: every light job runs hosted.
-          CI_RUNNERS_TOKEN: ${{ secrets.CI_RUNNERS_TOKEN }}
+          # Read only here: the runner list, to find an idle souls-light runner for the light jobs (needs Administration: Read;
+          # docs/testing.md#self-hosted-runners). Unset, refused (403) or unreachable: every light job runs hosted.
+          MERGE_TRAIN_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN }}
         # A push to main and a manual run check everything (FULL_EVENTS); the merge train reads those runs.
         run: node .github/scripts/ci-scope.mjs --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --draft "$DRAFT" --labels "$LABELS" --green-at-head "$GREEN"
 

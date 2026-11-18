@@ -119,13 +119,14 @@ test('light pool: busy or offline runners, none labelled, or no token leave ever
     assert.ok(assignLight(lightPlan(), got.idle).every(j => runnerFor(j) === 'ubuntu-latest'));
   }
   const api = listing(runner('souls-light-1', LIGHT_LABEL, 'online', false));
-  assert.deepEqual(await idleRunners({ repo: 'o/r', token: '', fetchImpl: api.fetchImpl }), { idle: 0, online: 0, why: 'no runner token (CI_RUNNERS_TOKEN)' });
+  assert.deepEqual(await idleRunners({ repo: 'o/r', token: '', fetchImpl: api.fetchImpl }), { idle: 0, online: 0, why: 'no runner token (MERGE_TRAIN_TOKEN unset)' });
   assert.equal(api.calls.length, 0, 'no token: the API is not asked');
 });
 
 test('light pool: an API failure (refused, server error, network error, timeout, unreadable) falls back to hosted', async () => {
   const cases = [
-    [async () => new Response('{"message":"Resource not accessible by integration"}', { status: 403 }), /HTTP 403/],
+    [async () => new Response('{"message":"Resource not accessible by personal access token"}', { status: 403 }), /^runners not readable with MERGE_TRAIN_TOKEN \(needs Administration: Read\)$/],
+    [async () => new Response('', { status: 401 }), /HTTP 401/],
     [async () => new Response('', { status: 502 }), /HTTP 502/],
     [async () => { throw new TypeError('fetch failed'); }, /runner list failed: fetch failed/],
     [(url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))), /timed out/],
@@ -142,7 +143,7 @@ test('light pool: an API failure (refused, server error, network error, timeout,
 });
 
 test('light pool: the scope command with no token runs every job hosted and says why', () => {
-  const env = { ...process.env, CI_RUNNERS_TOKEN: '', GITHUB_OUTPUT: '', GITHUB_STEP_SUMMARY: '' };
+  const env = { ...process.env, MERGE_TRAIN_TOKEN: '', GITHUB_OUTPUT: '', GITHUB_STEP_SUMMARY: '' };
   const out = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./ci-scope.mjs', import.meta.url)), '--files', 'tools/entry/check.mjs', '--event', 'pull_request', '--labels', '["ci:run"]'], { encoding: 'utf8', env }));
   assert.ok(out.matrix.includes('soul-tools'));
   assert.deepEqual(out.light.placed, []);
@@ -152,7 +153,7 @@ test('light pool: the scope command with no token runs every job hosted and says
 test('ci.yml: the runner reaches only runs-on; the scope step passes the runner token', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   assert.equal(workflow.match(/matrix\.runner/g)?.length, 1, 'matrix.runner is read once, in runs-on, and by no step');
-  assert.match(workflow, /^          CI_RUNNERS_TOKEN: \$\{\{ secrets\.CI_RUNNERS_TOKEN \}\}$/m);
+  assert.match(workflow, /^          MERGE_TRAIN_TOKEN: \$\{\{ secrets\.MERGE_TRAIN_TOKEN \}\}$/m);
 });
 
 test('the soul-actions job runs on its own paths, full scope included, and on nothing else (#1061)', () => {

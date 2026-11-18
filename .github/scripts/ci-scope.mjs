@@ -72,15 +72,17 @@ export function runnerFor(job, heavyRunner = '') {
 export const LIGHT_LABEL = 'souls-light';
 
 /** How many runners labelled `label` are online and idle, from the repository's runner list. Listing runners needs a token
- * with Administration: read (the CI_RUNNERS_TOKEN secret); the workflow's own token cannot. No token, an HTTP error, a
- * timeout or an unreadable answer is 0 idle, so every job stays hosted. */
+ * with Administration: read, which the workflow's own token cannot have; ci.yml passes the MERGE_TRAIN_TOKEN secret.
+ * No token, a 403 (the token lacks that permission), another HTTP error, a timeout or an unreadable answer is 0 idle,
+ * so every job stays hosted. */
 export async function idleRunners({ repo, label = LIGHT_LABEL, token, fetchImpl = globalThis.fetch, timeoutMs = 10_000 }) {
-  if (!token) return { idle: 0, online: 0, why: 'no runner token (CI_RUNNERS_TOKEN)' };
+  if (!token) return { idle: 0, online: 0, why: 'no runner token (MERGE_TRAIN_TOKEN unset)' };
   try {
     const res = await fetchImpl(`https://api.github.com/repos/${repo}/actions/runners?per_page=100`, {
       headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
       signal: AbortSignal.timeout(timeoutMs),
     });
+    if (res.status === 403) return { idle: 0, online: 0, why: 'runners not readable with MERGE_TRAIN_TOKEN (needs Administration: Read)' };
     if (!res.ok) return { idle: 0, online: 0, why: `runner list: HTTP ${res.status}` };
     const { runners } = await res.json();
     if (!Array.isArray(runners)) return { idle: 0, online: 0, why: 'runner list: unreadable answer' };
@@ -189,7 +191,7 @@ async function main(argv) {
   const plan = { ...full, ...windowed({ include: full.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
   // The light pool is asked only when a light job will run; any failure keeps it hosted (idleRunners).
   const light = plan.include.some(j => j.light)
-    ? await idleRunners({ repo: process.env.GITHUB_REPOSITORY, token: process.env.CI_RUNNERS_TOKEN })
+    ? await idleRunners({ repo: process.env.GITHUB_REPOSITORY, token: process.env.MERGE_TRAIN_TOKEN })
     : { idle: 0, why: 'no light job selected' };
   plan.include = assignLight(plan.include, light.idle);
   const placed = plan.include.filter(j => j.runner).map(j => j.name);
