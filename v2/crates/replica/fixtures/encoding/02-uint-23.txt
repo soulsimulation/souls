@@ -1,0 +1,2 @@
+23 # the largest integer held in the first byte
+17
