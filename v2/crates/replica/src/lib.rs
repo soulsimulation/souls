@@ -12,6 +12,7 @@ pub mod directory;
 pub mod durability;
 pub mod effects;
 pub mod encode;
+pub mod facts;
 pub mod group;
 pub mod hash;
 pub mod history;
