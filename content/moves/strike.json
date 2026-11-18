@@ -1,0 +1,21 @@
+{
+  "format": "souls-move/1",
+  "move": "strike",
+  "claims": [
+    "manipulator"
+  ],
+  "blocks": [
+    "manipulator"
+  ],
+  "cancels_on": [
+    "claim_taken",
+    "out_of_reach"
+  ],
+  "effector": "held_point",
+  "reach_mm": 600,
+  "phases": {
+    "start_up_us": 600000,
+    "strike_us": 400000,
+    "recovery_us": 500000
+  }
+}

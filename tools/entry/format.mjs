@@ -44,6 +44,14 @@ export const AUDIENCE_RULES = Object.freeze(['everyone', 'owner', 'linked', 'cre
 export const LINK_ENDS = Object.freeze(['soul', 'body', 'thing']);
 export const POINT_ROLES = Object.freeze(['stand', 'grip', 'contact', 'outlet']);
 export const SLOT_ADMITS = Object.freeze(['body', 'thing']);
+/** A row's ends: the first and the last place of a row of slots, found by `place` (SA-D3, #2855). */
+export const ROW_ENDS = Object.freeze(['first', 'last']);
+/** How far outside the thing's bounds a point may lie, in millimetres. A grip, a button or a spout may stand a little proud of
+ *  the box (a handle, a lip); a place to stand is by the thing, within a body's reach of it. The frame is the thing's own:
+ *  the origin at the centre of its footprint on the ground, x right, y up, z to the front; `bounds_mm` is [width, height,
+ *  depth], so x runs from -width/2 to width/2, y from 0 to height, z from -depth/2 to depth/2. */
+export const POINT_MARGIN_MM = 100;
+export const STAND_MARGIN_MM = 2000;
 export const POSTURES = Object.freeze(['sit', 'lie']);
 export const WHO = Object.freeze(['anyone', 'holder', 'world']);
 export const STARTS = Object.freeze(['act', 'timer']);
@@ -123,14 +131,17 @@ export function validateEntry(entry) {
     const p = `slots.${name}`;
     if (name in points) err(p, `"${name}" is already a point; a part's name is used once`);
     if (!isObj(s)) { err(p, 'a slot is an object'); continue; }
-    only(s, ['admits', 'posture', 'most', 'at_mm', 'stand', 'fits_mm'], p, err);
+    only(s, ['admits', 'posture', 'most', 'at_mm', 'stand', 'fits_mm', 'kinds', 'row', 'place', 'end'], p, err);
     if (!SLOT_ADMITS.includes(s.admits)) err(`${p}.admits`, `must be one of ${SLOT_ADMITS.join(', ')}`);
     if (s.posture !== undefined && (s.admits !== 'body' || !POSTURES.includes(s.posture))) err(`${p}.posture`, `a body's slot only, one of ${POSTURES.join(', ')}`);
     if (!(isInt(s.most) && s.most > 0)) err(`${p}.most`, 'how many it admits, a whole number above zero');
     vec(s.at_mm, `${p}.at_mm`, err);
     if (s.fits_mm !== undefined) vec(s.fits_mm, `${p}.fits_mm`, err, true);
     if (s.stand !== undefined && points[s.stand]?.role !== 'stand') err(`${p}.stand`, 'names a point whose role is stand');
+    if (s.kinds !== undefined && !(s.admits === 'thing' && Array.isArray(s.kinds) && s.kinds.length > 0 && s.kinds.every(k => typeof k === 'string' && KIND.test(k)))) err(`${p}.kinds`, 'a thing slot only: the kinds it admits, a list of "namespace:name" (none listed admits any thing)');
   }
+  rows(slots, err);
+  places(entry, points, slots, err);
   if (entry.geometry !== undefined) {
     if (!isObj(entry.geometry)) err('geometry', 'an object');
     else { only(entry.geometry, ['bounds_mm'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true); }
@@ -234,6 +245,63 @@ function children(table, err) {
     if (!(typeof c.kind === 'string' && KIND.test(c.kind))) err(`${p}.kind`, 'a kind, "namespace:name"');
     if (!(isInt(c.most) && c.most > 0)) err(`${p}.most`, 'how many children at most, a whole number above zero');
   }
+}
+
+/** A row of places: the slots that name one `row` are ordered by `place`; a row of two or more names its ends. */
+function rows(slots, err) {
+  const by = {};
+  for (const [name, s] of Object.entries(slots)) {
+    if (!isObj(s)) continue;
+    const p = `slots.${name}`;
+    if (s.row === undefined) { for (const k of ['place', 'end']) if (s[k] !== undefined) err(`${p}.${k}`, 'only a slot in a row has one; name its row'); continue; }
+    if (!(typeof s.row === 'string' && IDENT.test(s.row))) { err(`${p}.row`, 'a row is named in lower_snake_case'); continue; }
+    if (!(isInt(s.place) && s.place > 0)) err(`${p}.place`, 'where it is in its row, counting from 1 at the first end, a whole number above zero');
+    if (s.end !== undefined && !ROW_ENDS.includes(s.end)) err(`${p}.end`, `must be one of ${ROW_ENDS.join(', ')}`);
+    (by[s.row] ??= []).push([name, s]);
+  }
+  for (const [row, list] of Object.entries(by)) {
+    const nums = list.map(([, s]) => s.place).filter(isInt);
+    for (const [name, s] of list) if (isInt(s.place) && nums.indexOf(s.place) !== nums.lastIndexOf(s.place)) err(`slots.${name}.place`, `place ${s.place} is used twice in row "${row}"`);
+    if (list.length < 2) continue;
+    const lo = Math.min(...nums), hi = Math.max(...nums);
+    for (const [name, s] of list) {
+      const want = s.place === lo ? 'first' : s.place === hi ? 'last' : undefined;
+      if (s.end !== want) err(`slots.${name}.end`, want ? `the ${want === 'first' ? 'lowest' : 'highest'} place of row "${row}" names its end: "${want}"` : `a place in the middle of row "${row}" names no end`);
+    }
+  }
+}
+
+/** Points and slots lie in the thing's own frame, within the margin of its bounds (a stand point within a body's reach). */
+function places(entry, points, slots, err) {
+  const b = entry.geometry?.bounds_mm;
+  const named = [...Object.entries(points).map(([n, v]) => [`points.${n}`, v.at_mm, v.role === 'stand' ? STAND_MARGIN_MM : POINT_MARGIN_MM]),
+    ...Object.entries(slots).map(([n, v]) => [`slots.${n}`, v?.at_mm, POINT_MARGIN_MM])];
+  if (!Array.isArray(b) || b.length !== 3 || !b.every(isInt)) {
+    if (Object.values(points).some(v => isObj(v) && v.role !== 'stand') || Object.keys(slots).length) err('geometry.bounds_mm', 'a point or a slot is declared; say the bounds it lies within');
+    return;
+  }
+  const lo = [-(b[0] >> 1), 0, -(b[2] >> 1)], hi = [b[0] >> 1, b[1], b[2] >> 1];
+  for (const [path, at, margin] of named) {
+    if (!Array.isArray(at) || at.length !== 3 || !at.every(isInt)) continue;
+    const axis = at.findIndex((v, i) => v < lo[i] - margin || v > hi[i] + margin);
+    if (axis >= 0) err(`${path}.at_mm`, `${'xyz'[axis]} = ${at[axis]} mm is more than ${margin} mm outside the thing's bounds (${lo[axis]} to ${hi[axis]} mm on ${'xyz'[axis]}, in its own frame)`);
+  }
+}
+
+/** Does this slot of the entry admit a thing of this kind? A slot that names no kinds admits any thing; a body's slot none. */
+export function admits(entry, slotName, kind) {
+  const s = entry?.slots?.[slotName];
+  if (!isObj(s)) return {ok: false, reason: `no slot "${slotName}"`};
+  if (s.admits !== 'thing') return {ok: false, reason: `slot "${slotName}" admits a body, not a thing`};
+  if (s.kinds && !s.kinds.includes(kind)) return {ok: false, reason: `slot "${slotName}" admits ${s.kinds.join(', ')}; ${kind} is not one of them`};
+  return {ok: true};
+}
+
+/** The rows of an entry: for each row, its slots in order and its two ends (null while a row has a single place). */
+export function rowsOf(entry) {
+  const out = {};
+  for (const [name, s] of Object.entries(entry?.slots ?? {})) if (isObj(s) && typeof s.row === 'string') (out[s.row] ??= []).push([s.place, name]);
+  return Object.fromEntries(Object.entries(out).map(([row, l]) => { const slots = l.sort((a, b) => a[0] - b[0]).map(x => x[1]); return [row, {slots, first: slots[0], last: slots.length > 1 ? slots.at(-1) : null}]; }));
 }
 
 /** A list: one field, a declared bound, records of small values. Changed by setting the whole list again. */
