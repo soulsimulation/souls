@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":245,"group":"with-others","words":"sing a song for them","obvious":2,"things":{"mic":"eden:microphone","stage":"eden:stage"},"chain":[{"this":"me","form":"go_to","args":{"place":"stage"}},{"this":"mic","form":"sing"}]}

@@ -1,0 +1,10 @@
+{
+  "format": "souls-move/1",
+  "move": "pour",
+  "claims": ["manipulator"],
+  "blocks": ["manipulator"],
+  "cancels_on": ["claim_taken", "out_of_reach"],
+  "effector": "held_point",
+  "reach_mm": 600,
+  "phases": { "start_up_us": 700000, "pour_us": 2500000, "recovery_us": 500000 }
+}
