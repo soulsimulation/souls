@@ -21,6 +21,9 @@
 //!
 //! Integers only: millimetres in the ground's frame. Nothing here is hashed; the decision (within 1.5 m) is exact.
 
+// The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; this tool's map is a lookup.
+#![allow(clippy::disallowed_types)]
+
 use import_eden::json::{self, Json};
 use import_eden::{F_DEF, F_LEVEL, F_ORIGIN, Import};
 use replica::encode::Value;

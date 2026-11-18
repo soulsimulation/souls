@@ -19,6 +19,10 @@
 //! - **Each node keeps its hash** (K5, #2669; `seal`): every step that changes what a node's hash covers marks the
 //!   node and its ancestors, so a checkpoint hashes and writes only what changed.
 
+// The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s: these maps are lookups by id and name, never iterated
+// into state, a hash or the log.
+#![allow(clippy::disallowed_types)]
+
 mod check;
 mod seal;
 

@@ -28,6 +28,10 @@
 //! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), other body sizes (B12), routes across
 //! water (N11). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
+// The repeat rule (K12, v2/clippy.toml): the distance and patch maps are lookups on the search's hot path, never
+// iterated, so their order reaches no route.
+#![allow(clippy::disallowed_types)]
+
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::{HUMAN_RADIUS, OpenGround, Piece, SQUARE, Scene};
