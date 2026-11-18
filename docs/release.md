@@ -90,7 +90,10 @@ gh workflow run release.yml --ref main -f version=0.131 -f sha=<sha> -f dry_run=
 
 Publish tags the sha and opens the changelog pull request against main with the fragments as of the sha that are still
 on main; fragments merged after it wait for the next release. The sha must contain this change (the eyes it runs come
-from its own tree). Without `sha`, a release ships main's HEAD under the freeze below, as before.
+from its own tree, so preflight refuses a sha without `release-pin.mjs`). The workflow comes from main while ship.sh,
+eyes and the receipt checks come from the sha's tree, so pin a recent commit. A pin that needs a client stamp gets the
+stamp pull request as usual; once it merges, pin a commit at or after it and gate that. Without `sha`, a release ships
+main's HEAD under the freeze below, as before.
 
 ## Release freeze
 

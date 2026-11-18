@@ -214,7 +214,7 @@ jobs:
             ! git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null || { echo "::error::$branch already exists: merge or close its pull request, then dispatch again"; exit 1; }
             git push origin "HEAD:refs/heads/$branch"
             GH_TOKEN="$PR_TOKEN" gh pr create --base main --head "$branch" --label no-changelog --title "release: stamp the Soul client for $VERSION" \
-              --body "$(tail -1 "$stamp"): the client changed since the last release. Created by release.yml run $GITHUB_RUN_ID. Review and give it merge:ready; once it merges, gate main's head and dispatch the dry run again." \
+              --body "$(tail -1 "$stamp"): the client changed since the last release. Created by release.yml run $GITHUB_RUN_ID. Review and give it merge:ready; once it merges, gate main's head (or, for a pinned release, pin a commit at or after the stamp's merge and gate it) and dispatch the dry run again." \
               | tee -a "$GITHUB_STEP_SUMMARY"
             echo "stamped=1" >> "$GITHUB_OUTPUT"
             echo "Client stamp opened as a pull request (above); nothing else ran." >> "$GITHUB_STEP_SUMMARY"

@@ -6,11 +6,15 @@
 //        the last release tag reachable from <rev> (v0.*, so a stray tag such as v4.18 never wins a version sort)
 //   node tools/world-launcher/deploy/ship/release-pin.mjs check <sha> [--main origin/main]
 //        exit 1 with the reason unless <sha> is a full 40-hex commit, an ancestor of --main, and strictly newer than the
-//        last release reachable from --main (nothing ships backwards); prints last=<tag> (or last= with no release yet)
+//        last release reachable from --main (nothing ships backwards), and its tree has this file: the eyes job runs the
+//        pin's own eyes.mjs, and only a tree with pinned-sha support matches a run at main's head to the sha it ships;
+//        prints last=<tag> (or last= with no release yet)
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const RELEASE_TAGS = 'v0.*';
+/** A pin's tree must hold this: it came with eyes.mjs's pinned-run match (a run whose title names the sha). */
+export const PIN_AWARE = 'tools/world-launcher/deploy/ship/release-pin.mjs';
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
 const holds = (cwd, ...a) => { try { git(cwd, ...a); return true; } catch { return false; } };
 
@@ -30,6 +34,7 @@ export function pinProblem(sha, { main = 'origin/main', cwd = process.cwd() } = 
     if (tagged === sha) return `${sha.slice(0, 12)} is the last release ${last} itself`;
     if (!holds(cwd, 'merge-base', '--is-ancestor', tagged, sha)) return `${sha.slice(0, 12)} is not newer than the last release ${last}`;
   }
+  if (!holds(cwd, 'cat-file', '-e', `${sha}:${PIN_AWARE}`)) return `${sha.slice(0, 12)} predates pinned-sha releases (no ${PIN_AWARE}): its eyes would refuse the run; pin a later commit or ship main's HEAD under the freeze`;
   return null;
 }
 
