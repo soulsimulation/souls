@@ -1,0 +1,245 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "Candle molding (from #1899): Ana molds a blue taper (wax 6 to 5, wicks 6 to 5; the candle is made in the out place with its shape and colour), a second molding is refused until the candle is taken, she takes it, then molds a red pillar.",
+ "cases": [
+  {
+   "name": "mold_refuse_take_mold",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "k1",
+       "b1"
+      ]
+     },
+     "k1": {
+      "kind": "eden:candle_mold_bench",
+      "slots": {
+       "out": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       120,
+       900,
+       400
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "k1",
+      "form": "mold",
+      "args": {
+       "shape": "taper",
+       "colour": "blue"
+      }
+     },
+     "receipt": "cm1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "wax",
+        "n": 1,
+        "to": 5
+       },
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "wicks",
+        "n": 2,
+        "to": 5
+       },
+       {
+        "change": "create",
+        "node": "cm1.0",
+        "kind": "eden:molded_candle",
+        "to": {
+         "node": "k1",
+         "slot": "out"
+        },
+        "fields": {
+         "shape": "taper",
+         "colour": "blue"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:wax_used",
+        "node": "k1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:wick_used",
+        "node": "k1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:candle_molded",
+        "node": "k1",
+        "changes": [
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "k1",
+      "form": "mold",
+      "args": {
+       "shape": "pillar",
+       "colour": "red"
+      }
+     },
+     "receipt": "cm2",
+     "expect": {
+      "verdict": "no",
+      "reason": "slot_taken",
+      "need": 2,
+      "says": "take_candle_first"
+     }
+    },
+    {
+     "act": {
+      "this": "cm1.0",
+      "form": "take"
+     },
+     "receipt": "cm3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "cm1.0",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:taken",
+        "node": "cm1.0",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "k1",
+      "form": "mold",
+      "args": {
+       "shape": "pillar",
+       "colour": "red"
+      }
+     },
+     "receipt": "cm4",
+     "expect": {
+      "verdict": "no",
+      "reason": "hand_not_empty",
+      "need": 3,
+      "says": "empty_hands"
+     }
+    }
+   ]
+  },
+  {
+   "name": "a_red_pillar_taken",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "k1",
+       "b1"
+      ]
+     },
+     "k1": {
+      "kind": "eden:candle_mold_bench",
+      "slots": {
+       "out": [
+        "c1"
+       ]
+      }
+     },
+     "c1": {
+      "kind": "eden:molded_candle",
+      "fields": {
+       "shape": "pillar",
+       "colour": "red"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "c1",
+      "form": "take"
+     },
+     "receipt": "ct1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "c1",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:taken",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ]
+  }
+ ]
+}
