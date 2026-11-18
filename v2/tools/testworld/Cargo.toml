@@ -1,0 +1,10 @@
+[package]
+name = "testworld"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "A small test world, generated from a seed (Engine v2 N2, #2650): written as N1's facts file and loaded through it."
+
+[dependencies]
+replica = { path = "../../crates/replica" }
+import-eden = { path = "../import-eden" }

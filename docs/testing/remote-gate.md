@@ -115,7 +115,9 @@ no longer needs the maintainer's terminal:
 gh workflow run gate.yml -f sha=<full sha> [-f baseline=<ref>] [-f scope=auto] [-f dry_run=true]
 ```
 
-It shares release.yml's `release` concurrency group (one gate at a time), refuses a non-dry run once the day's runs of
+With no `baseline`, it gates against the last release tag reachable from the candidate (`release-pin.mjs last`:
+`git describe --tags --abbrev=0 --match 'v0.*' <sha>`), so a pinned candidate behind main compares with the release
+it builds on. It shares release.yml's `release` concurrency group (one gate at a time), refuses a non-dry run once the day's runs of
 both workflows reach `modal_gates_per_day` (PROOF-POLICY.yml), keeps the baseline cache across runs with
 `actions/cache` keyed by baseline commit and Node version, and uploads `gate.log` and `receipt.json` as the
 `gate-<sha>` artifact. It ships nothing; the ship step is tracked by #519.
