@@ -12,9 +12,11 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 name = "bench"
 version = "0.0.0"
 dependencies = [
+ "body-script",
  "import-eden",
  "replica",
  "sim",
+ "testworld",
 ]
 
 [[package]]
@@ -336,6 +338,14 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "supervisor"
+version = "0.0.0"
+dependencies = [
+ "directoryd",
+ "replica",
+]
 
 [[package]]
 name = "syn"
