@@ -35,7 +35,7 @@ pub struct Kind {
 }
 
 /// Whether an admit list takes a child of kind `name` (plain `namespace:name`) whose kind's owner is `owner`.
-fn takes(list: &BTreeSet<String>, name: &str, owner: &str) -> bool {
+pub(crate) fn takes(list: &BTreeSet<String>, name: &str, owner: &str) -> bool {
     let category = match owner {
         "thing" => Some("thing"),
         "family" => Some("body"),
@@ -97,7 +97,7 @@ pub struct Draft {
 }
 
 /// Whether everyone in audience `a` can see what audience `wider` shows.
-fn within(audiences: &BTreeMap<Id, BTreeSet<Id>>, a: Audience, wider: Audience) -> bool {
+pub(crate) fn within(audiences: &BTreeMap<Id, BTreeSet<Id>>, a: Audience, wider: Audience) -> bool {
     match (a, wider) {
         (_, Audience::Everyone) => true,
         (Audience::Everyone, Audience::Of(_)) => false,
