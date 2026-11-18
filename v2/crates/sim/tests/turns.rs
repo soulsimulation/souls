@@ -2,18 +2,17 @@
 //!
 //! `cargo test -p sim --release --test turns -- --nocapture` runs Step 0 (50 walkers each way on the building's 1.0 m
 //! stair with no turns, ten seeded runs), the same swap with turns (A1 to A3, two seeds), the owner and the tick-late
-//! read (A4) and a body staying on the stair (A5).
+//! read (A4) and a body staying on the stair (A5). The walkers run N7's walk skill through the host (T9c #3127).
 
-use import_eden::Import;
-use replica::effects::{Header, schema_hash};
-use replica::encode::{Value, encode};
-use replica::ids::{Hash, Id, Purpose, Scope};
+mod common;
+
+use common::{arrived, dist, humanoid, id, stand, walk};
+use replica::ids::Id;
 use replica::pose::{Frame, Quat, Vec3};
 use replica::world_model::show;
+use sim::host::{Runner, waiting};
+use sim::links::Kind;
 use sim::links::turns::{Facts, State, Turn, Turns};
-use sim::links::{Doors, Kind};
-use sim::mover::Body;
-use sim::walk::Crowd;
 use sim::walk::town::Town;
 use std::collections::BTreeMap;
 
@@ -23,39 +22,8 @@ const EACH_WAY: usize = 50;
 const SLOW: i64 = 100_000; // µm a second: 0.1 m/s
 const CLOSE: i64 = 420_000; // µm
 
-fn id(n: u64) -> Id {
-    Id::new(Scope([7; 16]), n).unwrap()
-}
-
 fn town() -> (Town, BTreeMap<String, Id>) {
-    let w = testworld::generate(1, 0).expect("the test world");
-    let Import {
-        tree, rules, nodes, ..
-    } = import_eden::load(&w.text).expect("the test world loads");
-    let root = nodes["world"];
-    let v = Value::Map(BTreeMap::from([
-        (
-            1,
-            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/turns-test/1").to_bytes()),
-        ),
-        (2, Value::Bytes(schema_hash().to_bytes())),
-        (3, Value::Bytes(root.scope().0.to_vec())),
-        (4, root.to_value()),
-        (5, Value::Uint(0)),
-        (6, Value::Array(Vec::new())),
-        (7, Value::Array(Vec::new())),
-    ]));
-    let header = Header::read(&encode(&v).unwrap()).unwrap();
-    let next = tree.to_state().next;
-    let ground = nodes["ground"];
-    let t = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
-    (t, nodes)
-}
-
-fn stand(t: &Town, who: Id, node: Id, at: Vec3) -> Body {
-    t.surfaces[&node]
-        .place(who, Frame { node, slot: None }, at, Quat::IDENTITY)
-        .unwrap_or_else(|e| panic!("{}: {}", e.name, e.detail))
+    common::town(b"souls/turns-test/1")
 }
 
 /// SplitMix64: the seeded shuffle.
@@ -102,15 +70,10 @@ fn spots(t: &Town, floor: Id) -> Vec<Vec3> {
     out
 }
 
-fn dist(a: Vec3, b: Vec3) -> i64 {
-    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-    (d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)).isqrt() as i64
-}
-
 /// What a run of the swap measured.
 struct Run {
     t: Town,
-    c: Crowd,
+    c: Runner,
     stair: Id,
     arrived: usize,
     ticks: u64,
@@ -185,13 +148,13 @@ fn swap(seed: u64, turns: bool, stay: bool) -> Run {
     let mut s = Seed(seed);
     shuffle(&mut down, &mut s);
     shuffle(&mut up, &mut s);
-    let mut c = Crowd::new(TICK);
+    let mut c = Runner::new(TICK);
     for k in 0..EACH_WAY as u64 {
         let a = stand(&t, id(1 + k), f0, down[k as usize]);
-        c.add(&mut t, a, SPEED, id(1001 + k), f1, up[k as usize])
+        walk(&mut c, &mut t, a, SPEED, f1, up[k as usize])
             .unwrap_or_else(|e| panic!("no plan up: {}: {}", e.name, e.detail));
         let b = stand(&t, id(101 + k), f1, up[k as usize]);
-        c.add(&mut t, b, SPEED, id(1101 + k), f0, down[k as usize])
+        walk(&mut c, &mut t, b, SPEED, f0, down[k as usize])
             .unwrap_or_else(|e| panic!("no plan down: {}: {}", e.name, e.detail));
     }
     let stayer = stay.then(|| {
@@ -202,12 +165,9 @@ fn swap(seed: u64, turns: bool, stay: bool) -> Run {
             (l.line[0].z + l.line[l.line.len() - 1].z) / 2,
         );
         let mut body = stand(&t, id(999), f0, down[EACH_WAY]);
-        c.add(&mut t, body, SPEED, id(1999), f0, down[EACH_WAY])
-            .expect("a plan");
         body.pose.position = mid;
-        let w = c.walkers.iter_mut().find(|w| w.body.id == id(999)).unwrap();
-        w.body = body;
-        w.staying = true;
+        c.add_body(humanoid(), body).expect("a body");
+        c.stay(id(999));
         (id(999), mid)
     });
     let mut r = Run {
@@ -226,30 +186,24 @@ fn swap(seed: u64, turns: bool, stay: bool) -> Run {
     };
     let mut was: BTreeMap<Id, Vec3> = BTreeMap::new();
     let mut slow_since: BTreeMap<Id, i64> = BTreeMap::new();
-    let movers = |c: &Crowd| {
-        c.walkers
-            .iter()
-            .filter(|w| !w.staying)
-            .all(|w| w.arrived.is_some())
-    };
     for _ in 0..12_000 {
-        if movers(&r.c) {
+        if r.c.runs.is_empty() {
             break;
         }
-        r.c.step(&mut r.t)
+        r.c.tick(&mut r.t)
             .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
         r.ticks += 1;
         let now = r.c.now;
-        for w in &r.c.walkers {
-            if w.waiting.is_some() {
-                r.first_mark.entry(w.body.id).or_insert(now);
+        for (who, f) in &r.c.fields {
+            if waiting(Some(f)).is_some() {
+                r.first_mark.entry(*who).or_insert(now);
             }
         }
         let inside: Vec<(Id, Vec3)> =
-            r.c.walkers
-                .iter()
-                .filter(|w| w.crossing && w.legs[w.leg].link == Some(stair))
-                .map(|w| (w.body.id, w.body.pose.position))
+            r.c.controller
+                .bodies()
+                .filter(|b| r.c.controller.carrying(b.id) == Some(stair))
+                .map(|b| (b.id, b.pose.position))
                 .collect();
         for &(who, p) in &inside {
             r.inside += 1;
@@ -274,9 +228,9 @@ fn swap(seed: u64, turns: bool, stay: bool) -> Run {
         slow_since.retain(|k, _| was.contains_key(k));
     }
     r.arrived =
-        r.c.walkers
-            .iter()
-            .filter(|w| !w.staying && w.arrived.is_some())
+        r.c.controller
+            .bodies()
+            .filter(|b| !r.c.staying.contains(&b.id) && arrived(&r.c, b.id).is_some())
             .count();
     r
 }
@@ -301,7 +255,11 @@ fn a1_a2_a3_fifty_each_way_on_the_stair_in_turns() {
     for seed in 1..=2 {
         let r = swap(seed, true, false);
         println!("{}", r.line(&format!("turns, seed {seed}")));
-        let mut times: Vec<i64> = r.c.walkers.iter().filter_map(|w| w.arrived).collect();
+        let mut times: Vec<i64> =
+            r.c.controller
+                .bodies()
+                .filter_map(|b| arrived(&r.c, b.id))
+                .collect();
         times.sort();
         if !times.is_empty() {
             println!(
@@ -409,7 +367,7 @@ fn a5_a_body_staying_on_the_stair_is_left_out_and_passed() {
         .timeline
         .iter()
         .any(|e| matches!(*e, Turn::Grant { who: g, .. } if g == who));
-    let w = r.c.walkers.iter().find(|w| w.body.id == who).unwrap();
+    let w = r.c.controller.body(who).unwrap();
     println!(
         "A5: the staying body stood at ({}, {}, {}) mm throughout: never granted ({named}), never marked waiting \
          ({}); the nearest a walker inside came to it {} mm; {} direction changes",
@@ -425,5 +383,5 @@ fn a5_a_body_staying_on_the_stair_is_left_out_and_passed() {
     );
     assert_eq!(r.arrived, 100, "the walkers pass it");
     assert!(!named && !r.first_mark.contains_key(&who));
-    assert_eq!(w.body.pose.position, at, "it stays");
+    assert_eq!(w.pose.position, at, "it stays");
 }
