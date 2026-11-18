@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":12,"group":"object","words":"go stand by the lamp","obvious":3,"things":{"lamp":"eden:floor_lamp"},"chain":[{"this":"me","form":"go_to","args":{"place":"lamp"}}]}

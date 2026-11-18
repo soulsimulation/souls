@@ -1,0 +1,320 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "The ceiling pendant (eden-pendant@1 in Eden, 60 placed). It is on until someone pulls its cord; pulling again switches it off. Today it has no forms; a ceiling light is switched in Eden asks 14.",
+ "cases": [
+  {
+   "name": "pendant_switch_on_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:pendant",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       200,
+       1760,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "pendant_switch_on_when_already_on_names_switch_off",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:pendant",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       200,
+       1760,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "switch_off"
+    }
+   }
+  },
+  {
+   "name": "pendant_switch_on_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:pendant",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       200,
+       1760,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "pull_cord",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "pull_cord"
+    }
+   }
+  },
+  {
+   "name": "pendant_switch_off_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:pendant",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       200,
+       1760,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "pendant_switch_off_when_already_off_names_switch_on",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:pendant",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       200,
+       1760,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  },
+  {
+   "name": "pendant_switch_off_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:pendant",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       200,
+       1760,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "pull_cord",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "pull_cord"
+    }
+   }
+  }
+ ]
+}

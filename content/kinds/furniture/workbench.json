@@ -1,0 +1,81 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:workbench",
+  "owner": "thing",
+  "state": {
+    "shavings": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 5,
+      "audience": { "rule": "everyone" }
+    }
+  },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 798], "yaw_mdeg": 180000 },
+    "top": { "role": "contact", "at_mm": [0, 920, 50] }
+  },
+  "geometry": { "bounds_mm": [1770, 1500, 795] },
+  "forms": {
+    "work": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "slide", "at": "top" },
+        { "step": "wait", "us": 30000000 }
+      ],
+      "effects": [{ "change": "set", "field": "shavings", "by": 1, "event": "worked" }]
+    },
+    "build": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "slide", "at": "top" },
+        { "step": "wait", "us": 30000000 }
+      ],
+      "effects": [{ "change": "set", "field": "shavings", "by": 1, "event": "built" }]
+    },
+    "repair": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "slide", "at": "top" },
+        { "step": "wait", "us": 30000000 }
+      ],
+      "effects": [{ "change": "set", "field": "shavings", "by": 1, "event": "repaired" }]
+    },
+    "tidy": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "walk_to", "point": "front" }, { "step": "move", "move": "slide", "at": "top" }],
+      "effects": [{ "change": "set", "field": "shavings", "to": 0, "event": "tidied" }]
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:workbench",
+    "shape": {"shapes":[{"kind":"extrude","at":[0,855,0],"polygon":[[-885,-360],[885,-360],[885,360],[-885,360]],"h":50,"tint":"top"},{"kind":"box","at":[-800,420,-275],"r":45,"h":840,"segments":6,"r2":36,"tint":"legs","size":[80,840,80],"round":0},{"kind":"box","at":[800,420,-275],"r":45,"h":840,"segments":6,"r2":36,"tint":"legs","size":[80,840,80],"round":0},{"kind":"box","at":[-800,420,275],"r":45,"h":840,"segments":6,"r2":36,"tint":"legs","size":[80,840,80],"round":0},{"kind":"box","at":[800,420,275],"r":45,"h":840,"segments":6,"r2":36,"tint":"legs","size":[80,840,80],"round":0},{"kind":"box","at":[0,250,0],"size":[1600,40,600],"round":0,"tint":"legs"},{"kind":"box","at":[750,970,360],"size":[160,100,120],"round":0,"tint":"metal"},{"kind":"box","at":[0,1250,-360],"size":[1600,500,30],"round":0,"tint":"board"},{"kind":"box","at":[-500,1220,-330],"size":[40,220,30],"round":0,"tint":"metal"},{"kind":"box","at":[-200,1220,-330],"size":[40,300,30],"round":0,"tint":"metal"},{"kind":"box","at":[150,1220,-330],"size":[40,220,30],"round":0,"tint":"metal"},{"kind":"box","at":[450,1220,-330],"size":[40,300,30],"round":0,"tint":"metal"},{"kind":"box","at":[300,922,120],"size":[360,40,220],"round":10,"tint":"shavings","role":"fill"}],"palette":{"top":"#c49a63","legs":"#9a6b43","metal":"#3b3d40","board":"#d8c3a0","shavings":"#e8cf98"},"tags":["furniture","work","workbench","table","surface","tools"],"round":15},
+    "table": [{ "part": "fill", "field": "shavings", "do": "scale", "range": [0, 5], "to": [0, 1000] }]
+  },
+  "text": {
+    "card": "A workbench with a vice: work, build or mend here; tidy away the shavings.",
+    "work": "work",
+    "bench": "bench",
+    "make": "make",
+    "mend": "mend",
+    "shavings": "shavings",
+    "howto_make": "Work at the bench, then tidy away the shavings it leaves."
+  },
+  "card": { "text": "card", "category": "work", "synonyms": ["bench", "make", "mend"] },
+  "howtos": { "make": { "text": "howto_make", "steps": [{ "form": "build" }, { "form": "tidy" }] } }
+}

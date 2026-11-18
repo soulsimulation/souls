@@ -1,0 +1,312 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Field journal (from #1713): two entries are written with the desk's last two inks, each signed and inked in one batch; the first cannot be rewritten, the third waits for ink, and the journal is carried off the desk with its entries.",
+  "cases": [
+    {
+      "name": "write_two_entries_until_the_desk_is_dry",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1"
+            ]
+          },
+          "d1": {
+            "kind": "eden:field_writing_desk",
+            "fields": {
+              "ink": 2
+            },
+            "slots": {
+              "journal": [
+                "j1"
+              ]
+            }
+          },
+          "j1": {
+            "kind": "eden:field_journal",
+            "children": [
+              "e1",
+              "e2",
+              "e3"
+            ]
+          },
+          "e1": {
+            "kind": "eden:journal_entry"
+          },
+          "e2": {
+            "kind": "eden:journal_entry"
+          },
+          "e3": {
+            "kind": "eden:journal_entry"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "e1",
+            "form": "write",
+            "args": {
+              "words": "w1",
+              "desk": "d1"
+            }
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "e1",
+                "link": "writer",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "set",
+                "node": "e1",
+                "field": "words",
+                "n": 1,
+                "to": {
+                  "text": "w1"
+                }
+              },
+              {
+                "change": "set",
+                "node": "d1",
+                "field": "ink",
+                "n": 1,
+                "to": 1,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "e1",
+                "field": "ink",
+                "n": 2,
+                "to": 1,
+                "by": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:entry_signed",
+                "node": "e1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:entry_written",
+                "node": "e1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:ink_used",
+                "node": "e1",
+                "changes": [
+                  2,
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "e2",
+            "form": "write",
+            "args": {
+              "words": "w2",
+              "desk": "d1"
+            }
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "e2",
+                "link": "writer",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "set",
+                "node": "e2",
+                "field": "words",
+                "n": 1,
+                "to": {
+                  "text": "w2"
+                }
+              },
+              {
+                "change": "set",
+                "node": "d1",
+                "field": "ink",
+                "n": 1,
+                "to": 0,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "e2",
+                "field": "ink",
+                "n": 2,
+                "to": 1,
+                "by": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:entry_signed",
+                "node": "e2",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:entry_written",
+                "node": "e2",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:ink_used",
+                "node": "e2",
+                "changes": [
+                  2,
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "e1",
+            "form": "write",
+            "args": {
+              "words": "w9",
+              "desk": "d1"
+            }
+          },
+          "receipt": "r8",
+          "expect": {
+            "verdict": "no",
+            "reason": "already_linked",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "e3",
+            "form": "write",
+            "args": {
+              "words": "w3",
+              "desk": "d1"
+            }
+          },
+          "receipt": "r9",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "j1",
+            "form": "take"
+          },
+          "receipt": "r10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "j1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "j1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "eden:field_writing_desk",
+          "fields": {
+            "ink": 0
+          },
+          "slots": {
+            "journal": []
+          }
+        },
+        "e1": {
+          "kind": "eden:journal_entry",
+          "links": {
+            "writer": [
+              "b1"
+            ]
+          },
+          "fields": {
+            "words": {
+              "text": "w1"
+            },
+            "ink": 1
+          }
+        },
+        "e2": {
+          "kind": "eden:journal_entry",
+          "links": {
+            "writer": [
+              "b1"
+            ]
+          },
+          "fields": {
+            "words": {
+              "text": "w2"
+            },
+            "ink": 1
+          }
+        },
+        "e3": {
+          "kind": "eden:journal_entry"
+        },
+        "b1": {
+          "hands": {
+            "left": "j1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}

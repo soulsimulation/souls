@@ -1,0 +1,244 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:candle_stand",
+  "owner": "thing",
+  "state": {
+    "lit": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "wick": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1237,
+        0
+      ]
+    },
+    "stem": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        600,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      340,
+      1300,
+      340
+    ],
+    "front": "none"
+  },
+  "forms": {
+    "light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "wick"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lit",
+          "to": true,
+          "event": "lit"
+        }
+      ]
+    },
+    "put_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "wick"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lit",
+          "to": false,
+          "event": "put_out"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:candle_stand",
+    "table": [
+      {
+        "part": "flame",
+        "field": "lit",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "flame",
+        "field": "lit",
+        "do": "flame",
+        "at": {
+          "true": 1000,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {
+      "round": 10,
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            15,
+            0
+          ],
+          "r": 160,
+          "h": 30,
+          "segments": 10,
+          "tint": "iron"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            550,
+            0
+          ],
+          "r": 18,
+          "h": 1040,
+          "segments": 8,
+          "tint": "iron"
+        },
+        {
+          "kind": "torus",
+          "at": [
+            0,
+            600,
+            0
+          ],
+          "r": 50,
+          "r2": 8,
+          "segments": 8,
+          "tint": "iron"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1070,
+            0
+          ],
+          "r": 75,
+          "h": 20,
+          "segments": 12,
+          "tint": "iron"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1155,
+            0
+          ],
+          "r": 40,
+          "h": 150,
+          "segments": 12,
+          "tint": "wax"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1237,
+            0
+          ],
+          "r": 3,
+          "h": 14,
+          "segments": 4,
+          "tint": "valve"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            1265,
+            0
+          ],
+          "r": 12,
+          "h": 45,
+          "segments": 6,
+          "tint": "flame",
+          "glow": 1000,
+          "role": "flame",
+          "pivot": [
+            0,
+            1244,
+            0
+          ]
+        }
+      ],
+      "palette": {
+        "iron": "#2e2a27",
+        "wax": "#f1e7d0",
+        "valve": "#2b2623",
+        "flame": "#ffb347"
+      },
+      "tags": [
+        "lighting",
+        "candle"
+      ]
+    }
+  },
+  "text": {
+    "card": "A floor candle stand carried in both hands: light its candle, or put it out.",
+    "light": "light",
+    "candle": "candle",
+    "candlestick": "candlestick"
+  },
+  "card": {
+    "text": "card",
+    "category": "light",
+    "synonyms": [
+      "candle",
+      "candlestick"
+    ]
+  }
+}

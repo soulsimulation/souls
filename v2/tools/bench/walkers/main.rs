@@ -1,11 +1,12 @@
 //! Engine v2 N15 (#2660): the win 1 gate. A thousand walkers in Eden, the clock at 20 ticks a second in real time.
+//! Moved onto the walk skill through the host (T9c #3127) by #3167.
 //!
 //! `cargo run -p bench --release --bin walkers -- <facts.json> <labels.json> <arm> <seed> [walkers] [seconds]
 //! [out-dir] [--fast]` (from `v2/`; defaults 1,000 walkers, 600 s, no files written). `arm` is `uniform` or `event`.
 //!
-//! - **The world** is N1's import of Eden 2026 (`v2/tools/import-eden`) as a [`Town`]. Each walker is a body in a
-//!   [`Runner`] (T9c #3127) running N7's walk skill (`skills::route`), its legs planned by the town, with N8's turns
-//!   and N10's ladder ([`Ladder`]) over it, as the sim tests build them.
+//! - **The world** is N1's import of Eden 2026 (`v2/tools/import-eden`), walked by N7's walk skill
+//!   (`skills::route`) through the host's [`Runner`], with N8's turns and N10's ladder over N3 to N6
+//!   ([`sim::walk::town::Town`]), exactly as the sim tests build it.
 //! - **The places** are the catalog places N18's labels (`v2/tools/compare-reach`) say today's engine reaches, that
 //!   the new ground holds within 1.5 m on the open ground or on a building's lowest floor, that lie within the trace's
 //!   ±320 m, and that N5 routes to from the arrival point. Every other place is left out and counted by reason.
@@ -15,14 +16,15 @@
 //!   places within 30 m of the meetup place (the bandstand), waits in runs (1 to 4 walks, `U(2, 4)` s apart, then a
 //!   log-normal pause, median 30 s, sigma 1.25, at least 2 s), and every `U(45, 120)` s sends 30 % of the walkers to
 //!   the meetup place within 2 s, replacing their orders. A walker whose order ended by name (the ladder's
-//!   `goal-unreachable`) is given its next order as if it had arrived.
+//!   `goal-unreachable`, or its walk's own) is given its next order as if it had arrived.
 //! - **The clock** is K7's [`Ticker`] on a real clock: absolute deadlines, catch-up after an overrun. `--fast` runs
 //!   the ticks back to back: world time and every walker's path are the same, so it serves the progress bar and a
 //!   quick look, never the timing bars.
-//! - **Tick time** is the whole clock-thread tick: new orders (their routing included), then the ladder's tick (the
-//!   runner's tick inside it). By phase (#3167): `orders` (new orders, their routing included), `corner` (the next
-//!   corner, timed by the town's [`Town::meter`]) and `step` (the rest of the ladder's and the runner's tick). Not in
-//!   it: the per-tick record, progress, the trace and the bench's own bookkeeping.
+//! - **Tick time** is the whole clock-thread tick: new orders, then the ladder's tick (the runner's tick inside it),
+//!   door openings written to memory. By phase: `orders` (new orders, their routing included), `corner` (the next
+//!   corner, timed by the town's [`Town::meter`]: `clear` its straight-walk checks and `search` its route searches)
+//!   and `step` (the rest of the ladder's and the runner's tick: skills, controller, turns, reroutes). Not in it: the
+//!   per-tick record, progress and the trace.
 //! - **Progress** (the bar's 30 s): under a live order, a walker progresses when it arrives, when its leg advances (a
 //!   link crossed), or when it stands 1 m nearer its leg's end than at its last progress. A new route from the ladder
 //!   is not progress: the distance is measured again, from the new leg's end.
@@ -137,7 +139,6 @@ fn mono_ns() -> u64 {
     START.get_or_init(Instant::now).elapsed().as_nanos() as u64
 }
 
-/// A body with two legs, as the sim tests give their walkers.
 fn humanoid() -> Family {
     let r = |n: &str| Resource {
         name: Name::new(n).expect("a name"),
@@ -150,34 +151,34 @@ fn humanoid() -> Family {
     }
 }
 
-/// Gives `body` (new to the runner, or in it with no run) the order `order` to walk to `goal` on `node`: its legs
-/// planned by the town, N7's walk run on it, the ladder over it.
-fn give(
-    r: &mut Runner,
-    l: &mut Ladder,
-    t: &mut Town,
+/// Starts `body`'s walk (new to the runner, or already in it) to `goal` on `node` for `order`: its legs planned by
+/// the town, its walk the skill, the ladder keeping it.
+fn order(
+    runner: &mut Runner,
+    ladder: &mut Ladder,
+    town: &mut Town,
     body: Body,
     order: Id,
     node: Id,
     goal: Vec3,
 ) -> Result<(), Refusal> {
-    let legs = t.plan(&body, node, goal)?;
-    let walk = Box::new(Route::new(
+    let legs = town.plan(&body, node, goal)?;
+    let skill = Box::new(Route::new(
         legs.iter()
-            .map(|g| skills::route::Leg {
-                to: g.to,
-                link: g.link,
+            .map(|l| skills::route::Leg {
+                to: l.to,
+                link: l.link,
             })
             .collect(),
         SPEED,
         TICK,
     ));
-    if r.controller.body(body.id).is_some() {
-        r.start(body.id, walk)?;
+    if runner.controller.body(body.id).is_some() {
+        runner.start(body.id, skill)?;
     } else {
-        r.add(humanoid(), body, walk)?;
+        runner.add(humanoid(), body, skill)?;
     }
-    l.add(body.id, order, SPEED, node, goal, legs);
+    ladder.add(body.id, order, SPEED, node, goal, legs);
     Ok(())
 }
 
@@ -206,9 +207,13 @@ fn inverse(x: &Xform, p: Vec3) -> Vec3 {
         .expect("in range")
 }
 
-fn town_of(im: Import) -> Town {
+fn town_of(im: Import) -> (Town, BTreeMap<String, Id>, BTreeMap<[u8; 32], String>) {
     let Import {
-        tree, rules, nodes, ..
+        tree,
+        rules,
+        nodes,
+        texts,
+        ..
     } = im;
     let root = nodes["world"];
     let v = Value::Map(BTreeMap::from([
@@ -226,7 +231,8 @@ fn town_of(im: Import) -> Town {
     let header = Header::read(&encode(&v).expect("bytes")).expect("a header");
     let next = tree.to_state().next;
     let ground = nodes["ground"];
-    Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town")
+    let t = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
+    (t, nodes, texts)
 }
 
 fn mm_pairs(v: Option<&Value>) -> Vec<[i64; 2]> {
@@ -258,25 +264,6 @@ fn level_of(t: &Town, node: Id) -> i64 {
         .unwrap_or(0)
 }
 
-/// Where a body stands, for the lists: its node and N5's piece there, or the point when no piece holds it.
-fn piece_of(t: &Town, b: &Body) -> String {
-    let node = node_of(b);
-    let p = b.pose.position;
-    let on = if node == t.ground {
-        "open ground".to_owned()
-    } else {
-        format!("floor {} {}", level_of(t, node), show(node))
-    };
-    match t.map.spot(node, p) {
-        Some(s) => format!("{on} piece {}", s.piece),
-        None => format!(
-            "{on} off every piece at ({} mm, {} mm)",
-            p.x / 1000,
-            p.z / 1000
-        ),
-    }
-}
-
 /// What each walker is doing beside the skill: its next order's due time, its run, and its progress.
 #[derive(Clone, Copy, Default)]
 struct Plan {
@@ -298,12 +285,23 @@ struct Plan {
     meet: bool,
 }
 
-fn pct(v: &mut [i64], q: usize) -> i64 {
-    if v.is_empty() {
-        return 0;
+/// Where a body stands, for the lists: its node and N5's piece there, or the point when no piece holds it.
+fn piece_of(t: &Town, b: &Body) -> String {
+    let node = node_of(b);
+    let p = b.pose.position;
+    let on = if node == t.ground {
+        "open ground".to_owned()
+    } else {
+        format!("floor {} {}", level_of(t, node), show(node))
+    };
+    match t.map.spot(node, p) {
+        Some(s) => format!("{on} piece {}", s.piece),
+        None => format!(
+            "{on} off every piece at ({} mm, {} mm)",
+            p.x / 1000,
+            p.z / 1000
+        ),
     }
-    v.sort_unstable();
-    v[((v.len() - 1) * q).div_ceil(100)]
 }
 
 /// The most counted keys of `m`, at most `k`, as `count x key`.
@@ -314,6 +312,14 @@ fn top(m: &BTreeMap<String, u64>, k: usize) -> Vec<String> {
         .take(k)
         .map(|(s, c)| format!("{c} x {s}"))
         .collect()
+}
+
+fn pct(v: &mut [i64], q: usize) -> i64 {
+    if v.is_empty() {
+        return 0;
+    }
+    v.sort_unstable();
+    v[((v.len() - 1) * q).div_ceil(100)]
 }
 
 fn main() {
@@ -337,28 +343,28 @@ fn main() {
     let t0 = Instant::now();
     let text = std::fs::read_to_string(facts).expect("the facts file");
     let facts_hash = Hash::of(Purpose::Fixture, text.as_bytes());
-    let mut town = town_of(import_eden::load(&text).expect("Eden loads"));
-    town.meter = Some(mono_ns);
+    let (town, _nodes, _) = town_of(import_eden::load(&text).expect("Eden loads"));
     drop(text);
-    let ground = town.ground;
-    let gh = town.tree.handle(ground).expect("the ground");
+    let mut w = town;
+    w.meter = Some(mono_ns);
+    let ground = w.ground;
+    let gh = w.tree.handle(ground).expect("the ground");
     let load_ms = t0.elapsed().as_millis();
 
     // Each surface's frame on the open ground, and its floor.
-    let frames: BTreeMap<Id, Xform> = town
+    let frames: BTreeMap<Id, Xform> = w
         .surfaces
         .keys()
         .map(|&s| {
             let x = if s == ground {
                 Xform::IDENTITY
             } else {
-                xform_to(&town.tree, town.tree.handle(s).expect("a floor"), gh)
-                    .expect("on the ground")
+                xform_to(&w.tree, w.tree.handle(s).expect("a floor"), gh).expect("on the ground")
             };
             (s, x)
         })
         .collect();
-    let lowest: Vec<Id> = town
+    let lowest: Vec<Id> = w
         .buildings
         .iter()
         .flat_map(|b| {
@@ -367,7 +373,7 @@ fn main() {
                 .filter(|(_, (l, _))| *l == 0)
                 .map(|(f, _)| *f)
         })
-        .filter(|f| town.surfaces.contains_key(f))
+        .filter(|f| w.surfaces.contains_key(f))
         .collect();
 
     // The places.
@@ -379,10 +385,10 @@ fn main() {
     };
     let walker_id = |k: u64| Id::new(Scope([7; 16]), k + 1).expect("an id");
     let order_id = |k: u64| Id::new(Scope([8; 16]), k + 1).expect("an id");
-    let start = town
+    let start = w
         .nearest(ground, arrival)
         .expect("ground at the arrival point");
-    let probe = town.surfaces[&ground]
+    let probe = w.surfaces[&ground]
         .place(
             walker_id(1_000_000),
             Frame {
@@ -418,11 +424,11 @@ fn main() {
             }
             let held = tries.iter().find_map(|&s| {
                 let local = inverse(&frames[&s], g);
-                let q = town.nearest(s, local)?;
+                let q = w.nearest(s, local)?;
                 (dist(xz(q), xz(local)) <= TOL).then_some((s, q))
             });
             let (node, at) = held.ok_or("the new ground does not hold it")?;
-            town.plan(&probe, node, at)
+            w.plan(&probe, node, at)
                 .map_err(|_| "no route from the arrival point")?;
             Ok(Place {
                 id: p.get("id").and_then(Json::str).unwrap_or("?").to_owned(),
@@ -480,8 +486,8 @@ fn main() {
     // Pockets (#3187): ground no walk reaches from the arrival point, a part of N5's map of its own. Eden has them:
     // the tennis courts, fenced on all four sides with no gate (today's engine finds them `nav.disconnected` too), and
     // slivers of a floor pinched between furniture and walls. A start the jitter puts in one is drawn again.
-    let parts = town.map.parts(HANDS);
-    let main_part = town
+    let parts = w.map.parts(HANDS);
+    let main_part = w
         .map
         .spot(ground, start)
         .map(|s| parts[s.piece as usize])
@@ -497,18 +503,17 @@ fn main() {
                     p.at.y,
                     p.at.z + seed.within(-1_500_000, 1_500_000),
                 );
-                let Some(q) = town.nearest(p.node, j) else {
+                let Some(q) = w.nearest(p.node, j) else {
                     continue;
                 };
-                if town
-                    .map
+                if w.map
                     .spot(p.node, q)
                     .is_none_or(|s| parts[s.piece as usize] != main_part)
                 {
                     pockets += 1;
                     continue;
                 }
-                if let Ok(b) = town.surfaces[&p.node].place(
+                if let Ok(b) = w.surfaces[&p.node].place(
                     who,
                     Frame {
                         node: p.node,
@@ -524,10 +529,10 @@ fn main() {
             loop {
                 let g = &places[draw(&mut seed)];
                 orders += 1;
-                match give(
+                match order(
                     &mut runner,
                     &mut ladder,
-                    &mut town,
+                    &mut w,
                     body,
                     order_id(orders),
                     g.node,
@@ -536,7 +541,7 @@ fn main() {
                     Ok(()) => break 'start,
                     Err(e) => {
                         *refused_at
-                            .entry(format!("{} (a start): {}", piece_of(&town, &body), e.name))
+                            .entry(format!("{} (a start): {}", piece_of(&w, &body), e.name))
                             .or_default() += 1;
                         if tries >= 5 {
                             restarts += 1;
@@ -559,7 +564,7 @@ fn main() {
             ..Plan::default()
         };
     }
-    town.spent.set(Spent::default());
+    w.spent.set(Spent::default());
     println!(
         "walkers: {n} placed; {pockets} starts in a pocket and {restarts} with no route out drawn again"
     );
@@ -575,13 +580,13 @@ fn main() {
     let mut trace = out.as_ref().map(|d| {
         std::fs::create_dir_all(d).expect("the out dir");
         let mut outlines: Vec<(i64, &str, Vec<[i64; 2]>)> = Vec::new();
-        let mut stack = vec![town.tree.root()];
+        let mut stack = vec![w.tree.root()];
         while let Some(h) = stack.pop() {
-            let nd = town.tree.node(h).expect("live");
+            let nd = w.tree.node(h).expect("live");
             let kind = plain(nd.kind().as_str()).to_owned();
             if kind == ROOM {
-                let floor = nd.parent().map_or(0, |f| level_of(&town, f));
-                if let Ok(x) = xform_to(&town.tree, h, gh) {
+                let floor = nd.parent().map_or(0, |f| level_of(&w, f));
+                if let Ok(x) = xform_to(&w.tree, h, gh) {
                     let ring: Vec<[i64; 2]> = mm_pairs(nd.fields().get(&F_OUTLINE))
                         .iter()
                         .filter_map(|p| x.point(Vec3::new(p[0] * 1000, 0, p[1] * 1000)).ok())
@@ -595,9 +600,9 @@ fn main() {
                     outlines.push((0, "place", ring));
                 }
             }
-            stack.extend(town.tree.children(h).expect("live").iter().copied());
+            stack.extend(w.tree.children(h).expect("live").iter().copied());
         }
-        let mut floors: Vec<i64> = node_list.iter().map(|&s| level_of(&town, s)).collect();
+        let mut floors: Vec<i64> = node_list.iter().map(|&s| level_of(&w, s)).collect();
         floors.sort_unstable();
         floors.dedup();
         let pts = |v: &[[i64; 2]]| {
@@ -614,8 +619,8 @@ fn main() {
                 .iter()
                 .map(|&s| format!(
                     "{{\"name\":\"{}\",\"floor\":{}}}",
-                    if s == ground { "open ground".to_owned() } else { format!("floor {}", level_of(&town, s)) },
-                    level_of(&town, s)
+                    if s == ground { "open ground".to_owned() } else { format!("floor {}", level_of(&w, s)) },
+                    level_of(&w, s)
                 ))
                 .collect::<Vec<_>>()
                 .join(","),
@@ -630,7 +635,12 @@ fn main() {
         f.write_all(head.as_bytes()).unwrap();
         f.write_all(&vec![0u8; (4 - (4 + head.len()) % 4) % 4]).unwrap();
         let mut c = std::io::BufWriter::new(std::fs::File::create(d.join("ticks.csv")).expect("the csv"));
-        writeln!(c, "tick,total_us,{},walking", NAMES.join("_us,") + "_us").unwrap();
+        writeln!(
+            c,
+            "tick,total_us,{},clears,clear_us,searches,search_us,walking,overruns",
+            NAMES.join("_us,") + "_us"
+        )
+        .unwrap();
         (f, c)
     });
 
@@ -657,9 +667,10 @@ fn main() {
     // The run.
     let mut tick_us: Vec<i64> = Vec::with_capacity(ticks as usize);
     let mut phase_us: Vec<[i64; 3]> = Vec::with_capacity(ticks as usize);
+    // Per tick: straight-walk checks, their time (µs), route searches, their time (µs).
+    let mut corner_parts: Vec<[i64; 4]> = Vec::with_capacity(ticks as usize);
     let mut route_us: Vec<i64> = Vec::new();
     let (mut finished, mut ended) = (0u64, 0u64);
-    let mut ended_names: BTreeMap<String, u64> = BTreeMap::new();
     let mut worst: (Micros, usize) = (0, 0);
     let mut next_moment = if arm == "event" {
         seed.within(45_000_000, 120_000_000)
@@ -679,10 +690,22 @@ fn main() {
     let mut fault_kinds: BTreeMap<String, u64> = BTreeMap::new();
     let mut fault_at: BTreeMap<String, u64> = BTreeMap::new();
     let mut faulted: std::collections::BTreeSet<Id> = std::collections::BTreeSet::new();
+    let mut ended_names: BTreeMap<String, u64> = BTreeMap::new();
     while ticker.next_tick() < ticks {
-        let mut body = |_: i64, start: Micros| {
+        let mut body = |tick: i64, start: Micros| {
+            // The clock catches up after an overrun: never past the run's last tick.
+            if tick >= ticks {
+                return;
+            }
             let at = start + TICK;
-            let s0 = town.spent.get();
+            // Who is carried as the tick starts, to name a refusal's call (not timed).
+            let carried: std::collections::BTreeSet<Id> = runner
+                .controller
+                .bodies()
+                .filter(|b| runner.controller.carried(b.id))
+                .map(|b| b.id)
+                .collect();
+            let s0 = w.spent.get();
             let a0 = Instant::now();
             // Orders due this tick: the next walk of each walker that waited, and the crowd moments.
             if at >= next_moment {
@@ -702,7 +725,9 @@ fn main() {
                     continue;
                 }
                 let who = walker_id(k as u64);
-                // Carried across a link or walked out by the world: the new order waits for it to stand.
+                let Some(b) = runner.controller.body(who).copied() else {
+                    continue;
+                };
                 if runner.controller.carried(who)
                     || runner
                         .fields
@@ -711,8 +736,8 @@ fn main() {
                 {
                     continue;
                 }
+                // A crowd moment replaces a live order.
                 runner.end_order(who);
-                let b = *runner.controller.body(who).expect("a walker");
                 let mut placed = false;
                 for _ in 0..5 {
                     let gi = if plans[k].meet {
@@ -722,10 +747,10 @@ fn main() {
                     };
                     let g = &places[gi];
                     orders += 1;
-                    match give(
+                    match order(
                         &mut runner,
                         &mut ladder,
-                        &mut town,
+                        &mut w,
                         b,
                         order_id(orders),
                         g.node,
@@ -738,7 +763,7 @@ fn main() {
                         Err(e) => {
                             refused_orders += 1;
                             *refused_at
-                                .entry(format!("{}: {}", piece_of(&town, &b), e.name))
+                                .entry(format!("{}: {}", piece_of(&w, &b), e.name))
                                 .or_default() += 1;
                         }
                     }
@@ -768,29 +793,26 @@ fn main() {
                 };
             }
             let orders_ns = a0.elapsed().as_nanos() as i64;
-            let carried: std::collections::BTreeSet<Id> = runner
-                .controller
-                .bodies()
-                .filter(|b| runner.controller.carried(b.id))
-                .map(|b| b.id)
-                .collect();
+            let s1 = w.spent.get();
             // The first refusal is in `runner.refused` with the rest: each is one walker's fault, taken below.
-            let s1 = town.spent.get();
-            let b0 = Instant::now();
-            let _ = ladder.step(&mut runner, &mut town);
-            let step_ns = b0.elapsed().as_nanos() as i64;
-            let s2 = town.spent.get();
-            tick_us.push((orders_ns + step_ns) / 1000);
-            phase_us.push(
-                [
-                    orders_ns - (s1.corner_ns - s0.corner_ns) as i64,
-                    (s2.corner_ns - s0.corner_ns) as i64,
-                    (step_ns - (s2.corner_ns - s1.corner_ns) as i64).max(0),
-                ]
-                .map(|v| v / 1000),
-            );
+            let _ = ladder.step(&mut runner, &mut w);
+            let total = a0.elapsed().as_nanos() as i64;
+            let s2 = w.spent.get();
+            let ph = [
+                orders_ns - (s1.corner_ns - s0.corner_ns) as i64,
+                (s2.corner_ns - s0.corner_ns) as i64,
+                (total - orders_ns - (s2.corner_ns - s1.corner_ns) as i64).max(0),
+            ];
+            tick_us.push(total / 1000);
+            phase_us.push(ph.map(|v| v / 1000));
+            corner_parts.push([
+                (s2.clears - s0.clears) as i64,
+                ((s2.clear_ns - s0.clear_ns) / 1000) as i64,
+                (s2.searches - s0.searches) as i64,
+                ((s2.search_ns - s0.search_ns) / 1000) as i64,
+            ]);
 
-            // Not timed: faults, rungs, arrivals, progress, the record and the trace.
+            // Not timed: faults, rungs, ends, progress, the record and the trace.
             let refused = std::mem::take(&mut runner.refused);
             for (who, e) in &refused {
                 faults += 1;
@@ -811,7 +833,7 @@ fn main() {
                     .entry(format!(
                         "{call}: {} at {link} from {}",
                         e.name,
-                        b.map_or("?".to_owned(), |b| piece_of(&town, &b))
+                        b.map_or("?".to_owned(), |b| piece_of(&w, &b))
                     ))
                     .or_default() += 1;
                 faulted.insert(*who);
@@ -833,15 +855,11 @@ fn main() {
             log_seen = ladder.log.len();
             let mut walking = 0;
             for k in 0..n {
+                let who = walker_id(k as u64);
                 let p = &mut plans[k];
                 if !p.live {
                     continue;
                 }
-                let who = walker_id(k as u64);
-                let held = runner
-                    .fields
-                    .get(&who)
-                    .is_some_and(|f| f.contains_key(&F_HELD));
                 if !runner.running(who) {
                     p.live = false;
                     match runner.ended.get(&who) {
@@ -849,14 +867,11 @@ fn main() {
                             finished += 1;
                             route_us.push(at - p.since);
                         }
-                        other => {
+                        Some((_, Progress::Failed(name))) => {
                             ended += 1;
-                            let name = match other {
-                                Some((_, Progress::Failed(nm))) => nm.as_str().to_owned(),
-                                _ => "?".to_owned(),
-                            };
-                            *ended_names.entry(name).or_default() += 1;
+                            *ended_names.entry(name.as_str().to_owned()).or_default() += 1;
                         }
+                        _ => ended += 1,
                     }
                     let gap = if arm == "event" {
                         if p.run > 1 {
@@ -872,7 +887,9 @@ fn main() {
                     continue;
                 }
                 walking += 1;
-                let b = *runner.controller.body(who).expect("a walker");
+                let Some(b) = runner.controller.body(who).copied() else {
+                    continue;
+                };
                 let Some((li, leg)) = ladder.leg(who) else {
                     continue;
                 };
@@ -894,6 +911,10 @@ fn main() {
                 }
                 if still >= BAR && !p.logged {
                     p.logged = true;
+                    let held = runner
+                        .fields
+                        .get(&who)
+                        .is_some_and(|f| f.contains_key(&F_HELD));
                     let state = if let Some(l) = runner.controller.carrying(who) {
                         format!("crossing {}", show(l))
                     } else if runner.controller.carried(who) || held {
@@ -912,7 +933,7 @@ fn main() {
                         println!(
                             "walkers: past 30 s at {} ms: walker {k}: {state}; on {}; leg {li} ({}) end {} mm away; speed {} mm/s",
                             at / 1000,
-                            piece_of(&town, &b),
+                            piece_of(&w, &b),
                             leg.link.map_or("arrive".to_owned(), show),
                             gap / 1000,
                             dist([v.x, v.z], [0, 0]) / 1000
@@ -921,13 +942,13 @@ fn main() {
                 }
             }
             if let Some((f, c)) = trace.as_mut() {
-                for x in runner.controller.bodies() {
-                    let k = index[&x.id];
-                    let node = node_of(x);
+                for b in runner.controller.bodies() {
+                    let Some(&k) = index.get(&b.id) else { continue };
+                    let node = node_of(b);
                     let q = frames
                         .get(&node)
-                        .and_then(|fr| fr.point(x.pose.position).ok())
-                        .unwrap_or(x.pose.position);
+                        .and_then(|fr| fr.point(b.pose.position).ok())
+                        .unwrap_or(b.pose.position);
                     let (px, pz) = (
                         (q.x / 10_000).clamp(-32_767, 32_767) as i16,
                         (q.z / 10_000).clamp(-32_767, 32_767) as i16,
@@ -938,14 +959,14 @@ fn main() {
                 }
                 f.write_all(&row).unwrap();
                 let ph = phase_us.last().unwrap();
+                let cp = corner_parts.last().unwrap();
                 writeln!(
                     c,
-                    "{},{},{},{},{},{walking}",
+                    "{},{},{},{},{walking},0",
                     tick_us.len() - 1,
                     tick_us.last().unwrap(),
-                    ph[0],
-                    ph[1],
-                    ph[2],
+                    ph.iter().map(i64::to_string).collect::<Vec<_>>().join(","),
+                    cp.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
                 )
                 .unwrap();
             }
@@ -1023,14 +1044,44 @@ fn main() {
     for l in top(&refused_at, 12) {
         println!("walkers: refused route from: {l}");
     }
+    // The next corner's parts: straight-walk checks and route searches, a tick and in all.
+    let sp = w.spent.get();
+    let part = |i: usize| {
+        let mut v: Vec<i64> = corner_parts.iter().map(|p| p[i]).collect();
+        (pct(&mut v, 50), pct(&mut v, 99))
+    };
+    let (cm, c99) = part(0);
+    let (ctm, ct99) = part(1);
+    let (sm, s99) = part(2);
+    let (stm, st99) = part(3);
+    let minutes = (tick_us.len() as u64 * TICK as u64).max(1) as f64 / 60e6;
+    println!(
+        "walkers: corner: {} calls; straight-walk checks {} ({} ns each), a tick median {cm} / p99 {c99}, {ctm} / {ct99} us; route searches {} ({} ns each), a tick median {sm} / p99 {s99}, {stm} / {st99} us; searches a walker a minute {:.2}; lines searched for {} (new leg, order or target {}; pushed off the line {}; at a piece's end {}; straight walk refused {}), a walker a minute {:.2}",
+        sp.corners,
+        sp.clears,
+        sp.clear_ns / sp.clears.max(1),
+        sp.searches,
+        sp.search_ns / sp.searches.max(1),
+        sp.searches as f64 / n as f64 / minutes,
+        sp.lines_new + sp.lines_off + sp.lines_end + sp.lines_blocked,
+        sp.lines_new,
+        sp.lines_off,
+        sp.lines_end,
+        sp.lines_blocked,
+        (sp.lines_new + sp.lines_off + sp.lines_end + sp.lines_blocked) as f64 / n as f64 / minutes
+    );
     if arm == "event" {
         println!("walkers: crowd moments {moments}, reactions {reacted}");
     }
     let bar = |ok: bool| if ok { "pass" } else { "miss" };
     println!(
-        "walkers: bars: median <= 5 ms {}; p99 <= 15 ms {}; no walker without progress for 30 s {}; walker faults 0 {}",
+        "walkers: bars: median <= 5 ms {}; p99 <= 15 ms {}; corner median < 1 ms {}; no walker without progress for 30 s {}; walker faults 0 {}",
         bar(med <= 5_000),
         bar(p99 <= 15_000),
+        bar({
+            let mut v: Vec<i64> = phase_us.iter().map(|p| p[1]).collect();
+            pct(&mut v, 50) < 1_000
+        }),
         bar(worst.0 < BAR),
         bar(faults == 0)
     );

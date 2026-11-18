@@ -1,0 +1,491 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:poll_option (from Soul Actions entry 25, landed in #493: core-poll-board@1). A poll board has a question and two to four options its maker sets (eden:poll_board's children, each with its label by reference). A Soul votes by hand, a tally mark beside the option; a vote is the vote link. Voting needs the tally within reach. A second vote for the same option is refused ('You already voted for Soup.'), which the link refuses (the effect case). One vote per Soul per poll (most_per 1 counted among the board's options); moving a vote is take_back on the old option, then vote.",
+ "cases": [
+  {
+   "name": "vote_every_need_met",
+   "act": {
+    "this": "o1",
+    "form": "vote"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "o1": {
+      "kind": "eden:poll_option",
+      "fields": {
+       "label": {
+        "text": "w_soup"
+       }
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "vote_out_of_reach",
+   "act": {
+    "this": "o1",
+    "form": "vote"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "o1": {
+      "kind": "eden:poll_option",
+      "fields": {
+       "label": {
+        "text": "w_soup"
+       }
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       1506
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 0,
+    "fix": {
+     "step": "walk_to",
+     "point": "tally"
+    }
+   }
+  },
+  {
+   "name": "vote_already_voted_in_this_poll",
+   "act": {
+    "this": "o1",
+    "form": "vote"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:poll_board",
+      "children": [
+       "o1",
+       "o2"
+      ]
+     },
+     "o1": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": []
+      }
+     },
+     "o2": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": [
+        "b2",
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 1,
+    "detail": {
+     "link": "vote",
+     "most_per": 1,
+     "on": [
+      "o2"
+     ]
+    },
+    "fix": null,
+    "says": "already_voted"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "vote_others_voted_here",
+   "act": {
+    "this": "o1",
+    "form": "vote"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:poll_board",
+      "children": [
+       "o1",
+       "o2"
+      ]
+     },
+     "o1": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": [
+        "b2"
+       ]
+      }
+     },
+     "o2": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "yes"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "take_back_every_need_met",
+   "act": {
+    "this": "o2",
+    "form": "take_back"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:poll_board",
+      "children": [
+       "o1",
+       "o2"
+      ]
+     },
+     "o1": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": []
+      }
+     },
+     "o2": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "yes"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "take_back_no_vote_here",
+   "act": {
+    "this": "o2",
+    "form": "take_back"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:poll_board",
+      "children": [
+       "o1",
+       "o2"
+      ]
+     },
+     "o1": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": []
+      }
+     },
+     "o2": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 0,
+    "detail": {
+     "link": "vote",
+     "count": 1
+    },
+    "fix": {
+     "form": "vote"
+    },
+    "says": "no_vote_here"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "take_back_out_of_reach",
+   "act": {
+    "this": "o2",
+    "form": "take_back"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "p1": {
+      "kind": "eden:poll_board",
+      "children": [
+       "o1",
+       "o2"
+      ]
+     },
+     "o1": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": []
+      }
+     },
+     "o2": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       1200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       1200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "fix": {
+     "step": "walk_to",
+     "point": "tally"
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  }
+ ]
+}

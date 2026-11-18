@@ -312,6 +312,20 @@ fn the_sections_beside_a_kind_have_their_own_hash() {
 }
 
 #[test]
+fn a_model_is_hashed_apart_from_geometry() {
+    // V17 (#2717): a stored model has its own label; v2/tools/import-eden/bake/bake.ts names files by this hash.
+    assert_eq!(Purpose::Model.label(), "souls/model/1");
+    assert_ne!(
+        Hash::of(Purpose::Model, b"\xa0"),
+        Hash::of(Purpose::Geometry, b"\xa0")
+    );
+    assert_eq!(
+        Hash::of(Purpose::Model, b"\xa0").to_string(),
+        "1220528068ccf7eb949f2747eaa35b723deb926e0580688e573affb8a350f7c9104c"
+    );
+}
+
+#[test]
 fn kind_names_are_lower_case() {
     // Rule 12: SA-F1's pattern, so no two kinds differ only in case.
     for bad in [

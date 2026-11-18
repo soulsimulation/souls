@@ -802,6 +802,113 @@ fn steps_eden_a_walker_steps_up_onto_a_porch_into_a_shop_and_back() {
     );
 }
 
+/// Eden's bridges (#3224): a deck of flat quads, each 100 to 145 mm above the last, joined by steps inside the floor
+/// and stepped onto from the ground at an end. A walker from 2 m beyond one end walks over the bridge to 2 m beyond
+/// the other, crossing every step of the deck; where an end has no ground to step down to, it walks to the deck's far
+/// end and back. Every tick stands on a patch or on a link's line, and no tick is longer than its speed allows.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn bridges_eden_a_walker_walks_over_each_bridge_end_to_end() {
+    let (mut t, _) = town_of(eden());
+    let ground = t.ground;
+    let reach = SPEED * TICK / 1_000_000;
+    let bridges: Vec<(Id, Id, Vec<Id>, usize)> = t
+        .buildings
+        .iter()
+        .filter(|b| def_of(&t, b.thing) == "core-bridge")
+        .map(|b| {
+            let floor = *b.floors.keys().next().expect("a deck");
+            let to_ground: Vec<Id> = b
+                .links
+                .iter()
+                .filter(|l| l.kind == sim::links::Kind::Step && l.nodes.contains(&ground))
+                .map(|l| l.id)
+                .collect();
+            let inner = b
+                .links
+                .iter()
+                .filter(|l| l.kind == sim::links::Kind::Step && l.nodes == [floor, floor])
+                .count();
+            (b.thing, floor, to_ground, inner)
+        })
+        .collect();
+    assert_eq!(bridges.len(), 4, "Eden's four bridges");
+    let mut n = 0;
+    for (thing, floor, to_ground, inner) in bridges {
+        println!(
+            "{}: {} steps to the ground, {inner} steps inside the deck",
+            show(thing),
+            to_ground.len()
+        );
+        let (from, ..) = either_side(&t, to_ground[0], 2_000_000);
+        let (goal_node, goal) = match to_ground.get(1) {
+            Some(&s) => (ground, either_side(&t, s, 2_000_000).0),
+            None => {
+                // The deck's far end: its lowest piece farthest from where the walker starts.
+                let (pieces, ..) = t.map.counts();
+                let place = t.buildings.iter().find(|b| b.thing == thing).unwrap().place;
+                let qs: Vec<u32> = (0..pieces as u32)
+                    .filter(|&q| t.map.patch_of(q).node == floor)
+                    .collect();
+                let low = qs.iter().map(|&q| t.map.standing(q)[0][1]).min().unwrap();
+                let at = qs
+                    .iter()
+                    .filter(|&&q| t.map.standing(q)[0][1] == low)
+                    .map(|&q| t.map.standing(q)[0])
+                    .max_by_key(|p| {
+                        let w = place
+                            .point(Vec3::new(p[0] * 1000, p[1] * 1000, p[2] * 1000))
+                            .unwrap();
+                        dist(w, from)
+                    })
+                    .unwrap();
+                (floor, Vec3::new(at[0] * 1000, at[1] * 1000, at[2] * 1000))
+            }
+        };
+        n += 1;
+        let who = id(100 + n);
+        let me = stand(&t, who, ground, from);
+        let mut c = Runner::new(TICK);
+        let legs = walk(&mut c, &mut t, me, SPEED, goal_node, goal)
+            .unwrap_or_else(|e| panic!("no plan over {}: {}: {}", show(thing), e.name, e.detail));
+        let links: Vec<Id> = legs.iter().filter_map(|l| l.link).collect();
+        let on_deck = links
+            .iter()
+            .filter(|k| {
+                t.buildings
+                    .iter()
+                    .find_map(|b| b.link(**k))
+                    .is_some_and(|l| l.nodes == [floor, floor])
+            })
+            .count();
+        let largest = walk_on_ground(&mut t, &mut c, who);
+        let w = *c.controller.body(who).unwrap();
+        let arrived = arrived(&c, who).expect("the walker arrives");
+        assert_eq!(node_of(&w), goal_node, "where it was going");
+        let at = world_at(&t, &w);
+        println!(
+            "  from ({}, {}) m to ({}, {}, {}) m on {}: across {} links ({on_deck} of them the deck's steps) in {} ms; largest step {largest} um, bar {reach} um",
+            from.x / 1_000_000,
+            from.z / 1_000_000,
+            at.x / 1_000_000,
+            at.y / 1_000_000,
+            at.z / 1_000_000,
+            if goal_node == ground {
+                "the ground"
+            } else {
+                "the deck"
+            },
+            links.len(),
+            arrived / 1000
+        );
+        assert_eq!(on_deck, inner, "every step of the deck crossed");
+        assert!(
+            largest <= reach + 10,
+            "no tick longer than speed times the tick"
+        );
+    }
+}
+
 const EVEN: [usize; 4] = [100, 100, 100, 100];
 const UNEVEN: [usize; 4] = [160, 120, 80, 40];
 
