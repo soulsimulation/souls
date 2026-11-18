@@ -133,6 +133,18 @@ slot) with the stance the request named. Postures are the controller's stance in
 - **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
   appears there.
 
+## Moves from the gateway (I4b)
+
+`v2/crates/worldd/src/bodies.rs` (I4b #3156) lets an intent from the gateway drive a body. A form's verb named `walk`,
+`sit` or `rise` (`eden:sit`, as T10's fixtures) is taken like any act (I4), then committed at the next tick by what
+already moves bodies: a walk is N7's walk behind the host, sent to a point (`Runner::send`, N9), to a target's point
+(parameter 1, `[x, y, z]` µm) or a seat's stand point; a sit is B3's `Slots::commit`, one tick's sits together; a
+rise is B3's `Slots::rise`. The checks are the moves' own, made as they start: claims, reach, the seat, the route.
+Bodies step in ticks caught up to world time. A move writes an entry when it starts and one when it ends, both caused
+by the intent, and is answered once, at its end: a receipt naming both when done, else a refusal naming how it ended
+(`claim-taken`, `resource-held`, ...). A new move ends a walk still going for an earlier intent as `claim-taken`. A
+sit or a rise past its act's deadline runs to its end, so a seat is never left half taken.
+
 ## The code hatch, shape only
 
 10. **The hatch is one pure function named by the hash of its module** (SA-F9, #3000): `{1: module (its SHA-256
