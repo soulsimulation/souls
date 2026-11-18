@@ -21,7 +21,8 @@ pub mod read;
 pub mod time;
 pub mod tree;
 pub mod views;
-#[cfg(target_arch = "wasm32")]
+// Not built into the checker (`checker`), which has no imports (T10, `v2/docs/intents.md` rule 13).
+#[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
 mod wasm;
 pub mod world_model;
 pub mod zones;
