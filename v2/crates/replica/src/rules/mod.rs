@@ -1129,7 +1129,10 @@ impl<'a> Rules<'a> {
 /// Runs every case of `doc` (`{"kinds": {...}, "cases": [{name, act, state, asker}, ...]}`) and answers one line a
 /// case: its name, a tab and its verdict as JSON. The native test and the WASM build in Node both run it on the same
 /// text, so equal output is equal verdicts. A doc that is not JSON answers one line naming why.
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+#[cfg_attr(
+    all(target_arch = "wasm32", not(feature = "checker")),
+    wasm_bindgen::prelude::wasm_bindgen
+)]
 pub fn rules_run(doc: &str) -> String {
     let doc = match json::parse(doc) {
         Ok(d) => d,
@@ -1148,7 +1151,10 @@ pub fn rules_run(doc: &str) -> String {
 }
 
 /// Decides one input given as JSON text and answers the verdict as JSON text.
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
+#[cfg_attr(
+    all(target_arch = "wasm32", not(feature = "checker")),
+    wasm_bindgen::prelude::wasm_bindgen
+)]
 pub fn rules_decide(input: &str) -> String {
     match json::parse(input) {
         Ok(v) => decide(&v).to_json(),
