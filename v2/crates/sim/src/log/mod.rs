@@ -44,6 +44,7 @@ pub use storage::{FileStore, Mem, MemDisk, Storage};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
+use std::time::Instant;
 
 use replica::effects::Refusal;
 
@@ -66,6 +67,8 @@ struct Marks {
     off_machine: u64,
     /// The failure that stopped the writer, for good.
     failed: Option<Refusal>,
+    /// The last sync: the durable mark before it, and when it returned (R3's view tier times frames from it).
+    synced: Option<(u64, Instant)>,
 }
 
 #[derive(Debug, Default)]
@@ -77,6 +80,32 @@ struct Shared {
 impl Shared {
     fn marks(&self) -> std::sync::MutexGuard<'_, Marks> {
         self.marks.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn wait(&self, n: u64) -> R<Option<(u64, Instant)>> {
+        let mut m = self.marks();
+        loop {
+            if m.durable >= n {
+                return Ok(m.synced);
+            }
+            if let Some(f) = &m.failed {
+                return refuse("log-failed", f.to_string());
+            }
+            m = self.moved.wait(m).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+}
+
+/// The durable mark, for a thread other than the clock thread (the view tier, R3 #2697): it reads a tick only once
+/// the tick is on the disk.
+#[derive(Clone, Debug)]
+pub struct Durable(Arc<Shared>);
+
+impl Durable {
+    /// Waits until records `..n` are on the disk (or `log-failed`). Returns the last sync: the mark before it and when
+    /// it returned; a record below that mark was made durable by an earlier sync.
+    pub fn wait(&self, n: u64) -> R<Option<(u64, Instant)>> {
+        self.0.wait(n)
     }
 }
 
@@ -213,16 +242,12 @@ impl<S: Storage + 'static> Log<S> {
 
     /// Waits until records `..n` are on the disk, or the writer has failed (`log-failed`).
     pub fn wait_durable(&self, n: u64) -> R<()> {
-        let mut m = self.shared.marks();
-        loop {
-            if m.durable >= n {
-                return Ok(());
-            }
-            if let Some(f) = &m.failed {
-                return refuse("log-failed", f.to_string());
-            }
-            m = self.shared.moved.wait(m).unwrap_or_else(|p| p.into_inner());
-        }
+        self.shared.wait(n).map(|_| ())
+    }
+
+    /// A handle on the durable mark that another thread may hold and wait on.
+    pub fn durable_mark(&self) -> Durable {
+        Durable(self.shared.clone())
     }
 
     /// Why the writer stopped, if it did.
@@ -292,6 +317,10 @@ fn write_loop<S: Storage>(
         let mut m = shared.marks();
         match out {
             Ok(()) => {
+                // Read by worldd's view tier to time frames from the sync, never by the engine.
+                #[allow(clippy::disallowed_methods)]
+                let now = Instant::now();
+                m.synced = Some((at.record, now));
                 at = At {
                     record: at.record + n,
                     offset: at.offset + buf.len() as u64,

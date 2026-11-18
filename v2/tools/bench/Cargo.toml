@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671; `timers`: K9, #2672; `restart`: K5, #2669; `moves`: B2, #2681; `seats`: B3, #2682."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671; `timers`: K9, #2672; `restart`: K5, #2669; `moves`: B2, #2681; `seats`: B3, #2682; `view-tier`: R3, #2697; `subscription`: R4, #2698."
 
 [[bin]]
 name = "seats"
@@ -44,9 +44,18 @@ path = "act-latency/main.rs"
 [[bin]]
 name = "restart"
 path = "src/restart.rs"
+
 [[bin]]
 name = "moves"
 path = "src/moves.rs"
+
+[[bin]]
+name = "view-tier"
+path = "view-tier/main.rs"
+
+[[bin]]
+name = "subscription"
+path = "subscription/main.rs"
 
 [dependencies]
 replica = { path = "../../crates/replica" }

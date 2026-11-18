@@ -37,6 +37,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
@@ -255,6 +256,8 @@ pub struct Controller {
     /// The last driver number given.
     drivers: Driver,
     log: Vec<Logged>,
+    /// Where each body not being carried stands, kept as the bodies move: "who is near" (N16).
+    near: Index,
 }
 
 /// Moves `body` from one of the controller's maps to the other, at rest in `pose`, for the driver steering it.
@@ -376,6 +379,7 @@ impl Controller {
             return refuse("body-duplicate", replica::world_model::show(moved.id));
         }
         let input = Input::neutral(moved.pose.orientation);
+        self.near.put_moved(&moved);
         self.bodies.insert(
             moved.id,
             Slot {
@@ -513,6 +517,7 @@ impl Controller {
         s.input.velocity = Vec3::ZERO;
         s.touched = true;
         s.track = Some(track);
+        self.near.remove_body(body);
         Ok(())
     }
 
@@ -524,6 +529,11 @@ impl Controller {
     /// Whether `body` is being carried, across a link or by the world's own rule.
     pub fn carried(&self, body: Id) -> bool {
         self.bodies.get(&body).is_some_and(|s| s.track.is_some())
+    }
+
+    /// The spatial index of the bodies not being carried, as the mover last left them (N16).
+    pub fn near(&self) -> &Index {
+        &self.near
     }
 
     /// The bodies as the mover last left them, in id order.
@@ -603,6 +613,9 @@ impl Controller {
                         out.refused.push((id, r));
                     }
                 }
+                if s.track.is_none() {
+                    self.near.put_moved(&s.moved);
+                }
                 continue;
             }
             // Standing still with no velocity asked: the mover would leave it as it is.
@@ -638,6 +651,7 @@ impl Controller {
                 Ok(None) => {}
                 Err(r) => out.refused.push((id, r)),
             }
+            self.near.put_moved(&s.moved);
         }
         out
     }
