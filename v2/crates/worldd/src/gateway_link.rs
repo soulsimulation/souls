@@ -8,17 +8,21 @@
 //! bodies, each with a lamp; its log is `--log` (default: the socket's path and `.log`).
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
-//! [--arrivals <file>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the
-//! order taken, so a bench can check each actor's order across restarts.
+//! [--arrivals <file>] [--health <file>] [--no-measures] [--stall-after <s> --stall-for <s>]`. With `--arrivals`, it
+//! appends `<actor hex> <sequence>` for every intent it takes, in the order taken, so a bench can check each actor's
+//! order across restarts. Measures (O4, #2694) are on unless `--no-measures`; `health.json` goes to `--health`
+//! (default: the log's path with `.health.json`). `--stall-after` holds the clock thread `--stall-for` seconds, once,
+//! that many seconds after start: the stuck-thread run.
 
 use std::fs::OpenOptions;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use replica::encode::from_hex;
 use replica::ids::Scope;
 use sim::log::FileStore;
-use worldd::answers::{self, Config};
+use worldd::answers::{self, Config, Event};
 use worldd::checkers::lamps;
 
 /// `worldd gateway-link ...`: listens for the gateway until killed.
@@ -31,7 +35,7 @@ pub fn run(args: &[String]) -> i32 {
     let usage = || {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
-             [--bodies <n>] [--arrivals <file>]"
+             [--bodies <n>] [--arrivals <file>] [--health <file>] [--no-measures] [--stall-after <s> --stall-for <s>]"
         );
         2
     };
@@ -47,6 +51,12 @@ pub fn run(args: &[String]) -> i32 {
     };
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
+    cfg.measures = !args.iter().any(|a| a == "--no-measures");
+    cfg.health =
+        Some(arg("--health").map_or_else(|| log.with_extension("health.json"), PathBuf::from));
+    let stall = arg("--stall-after")
+        .and_then(|a| a.parse::<f64>().ok())
+        .zip(arg("--stall-for").and_then(|f| f.parse::<f64>().ok()));
     if let Some(p) = arg("--arrivals") {
         match OpenOptions::new().create(true).append(true).open(p) {
             Ok(f) => cfg.arrivals = Some(f),
@@ -85,9 +95,16 @@ pub fn run(args: &[String]) -> i32 {
             return 1;
         }
     };
-    for stream in listener.incoming().flatten() {
+    if let Some((after, hold)) = stall {
         let events = world.events.clone();
-        std::thread::spawn(move || answers::serve(events, stream));
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs_f64(after));
+            let _ = events.send(Event::Stall(Duration::from_secs_f64(hold)));
+        });
+    }
+    for stream in listener.incoming().flatten() {
+        let door = world.door();
+        std::thread::spawn(move || answers::serve(door, stream));
     }
     0
 }
