@@ -1,0 +1,124 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:rowing_boat",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "landing": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1700
+      ]
+    }
+  },
+  "slots": {
+    "oars": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [
+        0,
+        450,
+        0
+      ],
+      "stand": "landing"
+    },
+    "bow": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [
+        0,
+        450,
+        -900
+      ],
+      "stand": "landing"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1500,
+      500,
+      3600
+    ]
+  },
+  "vehicle": {
+    "drive": "oars",
+    "steer": "steer",
+    "speed_mm_s": 1500,
+    "ground": "deep_water"
+  },
+  "forms": {
+    "ride": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "slot_free",
+          "slot": "oars"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "landing"
+        },
+        {
+          "step": "sit",
+          "slot": "oars"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "actor",
+          "into": "oars",
+          "event": "boarded"
+        }
+      ]
+    },
+    "steer": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "toward": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "steer",
+          "toward": {
+            "arg": "toward"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "text": {
+    "card": "A rowing boat: sit at the oars and row across water deep enough to swim in.",
+    "getting_around": "transport",
+    "boat": "boat"
+  },
+  "card": {
+    "text": "card",
+    "category": "getting_around",
+    "synonyms": [
+      "boat"
+    ]
+  }
+}

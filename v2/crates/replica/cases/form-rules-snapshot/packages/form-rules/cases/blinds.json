@@ -1,0 +1,290 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:blind_window (content/kinds/blinds/, from core/blind-window@1, Soul Actions entry 23): raise (open) and lower (close) at the pull cord with a tug, each with every need met and each need unmet. The blind is up by default.",
+ "cases": [
+  {
+   "name": "open_blind_that_are_shut",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:blind_window",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       750,
+       1250,
+       500
+      ]
+     }
+    },
+    "moves": {
+     "tug": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "open_blind_already_open_is_refused_and_told_to_close",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:blind_window",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       750,
+       1250,
+       500
+      ]
+     }
+    },
+    "moves": {
+     "tug": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "open",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "close"
+    }
+   }
+  },
+  {
+   "name": "open_out_of_reach_of_the_cord_walks_to_it",
+   "act": {
+    "this": "t1",
+    "form": "open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:blind_window",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       750,
+       1250,
+       1500
+      ]
+     }
+    },
+    "moves": {
+     "tug": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "cord",
+     "move": "tug"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "cord"
+    }
+   }
+  },
+  {
+   "name": "close_blind_that_are_open",
+   "act": {
+    "this": "t1",
+    "form": "close"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:blind_window",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       750,
+       1250,
+       500
+      ]
+     }
+    },
+    "moves": {
+     "tug": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "close_blind_already_shut_is_refused_and_told_to_open",
+   "act": {
+    "this": "t1",
+    "form": "close"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:blind_window",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       750,
+       1250,
+       500
+      ]
+     }
+    },
+    "moves": {
+     "tug": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "open",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "open"
+    }
+   }
+  },
+  {
+   "name": "close_out_of_reach_of_the_cord_walks_to_it",
+   "act": {
+    "this": "t1",
+    "form": "close"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:blind_window",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       750,
+       1250,
+       1500
+      ]
+     }
+    },
+    "moves": {
+     "tug": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "cord",
+     "move": "tug"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "cord"
+    }
+   }
+  }
+ ]
+}
