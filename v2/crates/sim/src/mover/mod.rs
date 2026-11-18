@@ -20,7 +20,12 @@
 //!   body's motion in the root frame, and T1's leave and arrive carry it under one transfer id, inside one zone.
 //!   Within one node (one square of the open ground to the next) nothing crosses: the node and frame are the same.
 //!
-//! Not here: other people (N7), gaits (N11), the controller's resources (B1), facing (B1's separate input), drawing.
+//! - **Along the surface** (N11a, #2735). A speed is along the surface: where the walked line climbs or falls, the move
+//!   is walked again from the start, its length on the plan times the line's cosine, so the distance covered on a
+//!   slope is the speed's. The height part of the velocity stored is the climb.
+//!
+//! Not here: other people (N7), the gaits' table (`crate::gaits`), the controller's resources (B1), facing (B1's
+//! separate input), drawing.
 
 use crate::ground::{Piece, SQUARE};
 use replica::effects::{Refusal, TransferRec};
@@ -349,12 +354,25 @@ impl Surface {
             div_round(i128::from(input.velocity.x) * dt, m),
             div_round(i128::from(input.velocity.z) * dt, m),
         ];
-        let (q, t, e) = if want == [0, 0] {
+        let (mut q, mut t, mut e) = if want == [0, 0] {
             (body.piece, body.tri, p)
         } else {
             self.walk(body.piece, body.tri, p, [p[0] + want[0], p[1] + want[1]])
         };
-        let y = i128::from(self.height(q, t, e));
+        let mut y = i128::from(self.height(q, t, e));
+        // Speed is along the surface (N11a, #2735): on a slope the move is walked again, shortened by the cosine of
+        // the line just walked (its length on the plan over its length on the surface), once.
+        let dy = y - i128::from(body.pose.position.y);
+        if dy != 0 && want != [0, 0] {
+            let (hx, hz) = (e[0] - p[0], e[1] - p[1]);
+            let h2 = hx * hx + hz * hz;
+            let (h, l) = (h2.isqrt(), (h2 + dy * dy).isqrt());
+            if h > 0 {
+                let w = [div_round(want[0] * h, l), div_round(want[1] * h, l)];
+                (q, t, e) = self.walk(body.piece, body.tri, p, [p[0] + w[0], p[1] + w[1]]);
+                y = i128::from(self.height(q, t, e));
+            }
+        }
         let fit = |v: i128| i64::try_from(v).map_err(|_| ());
         let (Ok(x), Ok(z)) = (fit(e[0]), fit(e[1])) else {
             return refuse("out-of-range", "a position past 64 bits");

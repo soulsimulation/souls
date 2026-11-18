@@ -30,7 +30,7 @@
 
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
-use crate::ground::{HUMAN_RADIUS, OpenGround, Piece, SQUARE, Scene};
+use crate::ground::{HUMAN_RADIUS, OpenGround, Piece, SQUARE};
 use crate::links::{Building, End, F_OPEN, Kind, Link, Open, ground_doors};
 use replica::effects::Refusal;
 use replica::encode::Value;
@@ -276,7 +276,7 @@ impl Map {
         };
         let mut ground_meets = Vec::new();
         // The open ground, square by square, and each piece's stretches along its square's edges.
-        let open = OpenGround::prepare(&Scene::of(tree, ground)?, HUMAN_RADIUS)?;
+        let open = OpenGround::of(tree, ground, HUMAN_RADIUS)?;
         let gv = version(ground);
         // Edge stretches by line: (true for x = c, c) → (lo, hi, square, piece).
         let mut lines: BTreeMap<(bool, i64), Vec<Stretch>> = BTreeMap::new();

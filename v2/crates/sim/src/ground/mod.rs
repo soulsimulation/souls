@@ -29,9 +29,14 @@
 //!   it is on, its height and the width left for the centre at the doorway's middle. A shut door is the link's state
 //!   (N4, #2652), never an obstacle.
 //! - **Height.** Every vertex is `[x, y, z]` in whole millimetres in the node's frame (T4, #2644: never a 2D point on a
-//!   floor). A floor's vertices carry its surface's height. The open ground's carry 0 still: the tree holds the 1 m
-//!   heights and classes (N1b, #3197; `scene::Terrain` reads them), but the cut does not use them until N11 (#2735)
-//!   brings slopes and steep cells.
+//!   floor). A floor's vertices carry its surface's height. The open ground's carry the terrain's (N11a, #2735, from
+//!   N1b's `scene::Terrain`, read by [`OpenGround::of`]): a square whose 1 m samples are not all one height is cut
+//!   into triangles through every sample inside it, so the mover's heights are the terrain's at each sample and
+//!   linear between. A vertex over water (on ground cover: a pier, a shore) keeps 0, the cover's height as before.
+//!   With no terrain (N3's tests, a floor) every open-ground vertex is at 0.
+//! - **Steep cells.** A 1 m cell whose slope is above [`STEEP`] (a rise over run of 0.5774, today's) is taken from
+//!   the open ground before its cover is added back: no centre stands on it, so the mover slides along its edge and
+//!   a route goes round it. Cells are taken as they are, not grown by the radius: a body's edge may hang over one.
 //! - **Where it lives.** Here in `sim`, native only. An agent's client never loads the ground: where a described spot
 //!   is a point, the server binds the legal standing spot (E2, #2709).
 //!
@@ -50,7 +55,7 @@ use i_triangle::int::triangulatable::IntTriangulatable;
 use replica::ids::Id;
 use replica::pose::{Quat, Vec3};
 use replica::tree::Tree;
-pub use scene::{Doorway, Scene, Solid, Surface, Water};
+pub use scene::{Doorway, Scene, Solid, Surface, Terrain, Water};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
@@ -64,6 +69,10 @@ pub const BODY_HIGH: i64 = 1_800;
 pub const STEP: i64 = BODY_LOW;
 /// The open ground's square, mm.
 pub const SQUARE: i64 = 16_000;
+/// The steepest slope a body stands on, parts per million (rise over run, today's 0.5774: 30°).
+pub const STEEP: i64 = 577_400;
+/// The terrain's cell, mm.
+const CELL: i32 = 1_000;
 /// Today's walking body, mm (`HUMAN_PROFILE`).
 pub const HUMAN_RADIUS: i64 = 280;
 /// A doorway's depth either side of its middle when no wall flanks it, mm.
@@ -586,6 +595,72 @@ fn piece(shape: &IntShape<i32>, y: i64) -> Piece {
     }
 }
 
+/// Whether `p` lies inside `shape` (its outer ring less its holes) and on none of its edges.
+fn strictly_inside(shape: &IntShape<i32>, p: P) -> bool {
+    let mut odd = false;
+    for c in shape {
+        for k in 0..c.len() {
+            let (a, b) = (c[k], c[(k + 1) % c.len()]);
+            let cross = i64::from(b.x - a.x) * i64::from(p.y - a.y)
+                - i64::from(b.y - a.y) * i64::from(p.x - a.x);
+            let within = |u: i32, v: i32, w: i32| u.min(v) <= w && w <= u.max(v);
+            if cross == 0 && within(a.x, b.x, p.x) && within(a.y, b.y, p.y) {
+                return false;
+            }
+            if (a.y > p.y) != (b.y > p.y) {
+                // Where the edge crosses the point's row, compared without dividing.
+                let lhs = i64::from(p.x - a.x) * i64::from(b.y - a.y);
+                let rhs = i64::from(b.x - a.x) * i64::from(p.y - a.y);
+                if (b.y > a.y && lhs < rhs) || (b.y < a.y && lhs > rhs) {
+                    odd = !odd;
+                }
+            }
+        }
+    }
+    odd
+}
+
+/// Whether `p` lies inside or on any of `rings` (each one closed ring, any winding).
+fn in_any(rings: &[Vec<P>], p: P) -> bool {
+    rings.iter().any(|r| {
+        let shape: IntShape<i32> = vec![r.clone()];
+        strictly_inside(&shape, p)
+            || (0..r.len()).any(|k| {
+                let (a, b) = (r[k], r[(k + 1) % r.len()]);
+                let cross = i64::from(b.x - a.x) * i64::from(p.y - a.y)
+                    - i64::from(b.y - a.y) * i64::from(p.x - a.x);
+                cross == 0
+                    && a.x.min(b.x) <= p.x
+                    && p.x <= a.x.max(b.x)
+                    && a.y.min(b.y) <= p.y
+                    && p.y <= a.y.max(b.y)
+            })
+    })
+}
+
+/// A piece of the open ground on terrain: triangles through the 1 m samples `pts` that lie inside it, each vertex at
+/// `height`'s height (mm).
+fn ground_piece(shape: &IntShape<i32>, pts: &[P], height: &dyn Fn(P) -> i32) -> Piece {
+    let inside: Vec<P> = pts
+        .iter()
+        .copied()
+        .filter(|p| strictly_inside(shape, *p))
+        .collect();
+    let t = shape
+        .triangulate_with_steiner_points(&inside)
+        .into_delaunay()
+        .into_raw()
+        .into_triangulation::<u32>();
+    Piece {
+        outline: shape
+            .iter()
+            .map(|c| c.iter().map(|p| [p.x, height(*p), p.y]).collect())
+            .collect(),
+        vertices: t.points.iter().map(|p| [p.x, height(*p), p.y]).collect(),
+        triangles: t.indices.chunks(3).map(|c| [c[0], c[1], c[2]]).collect(),
+    }
+}
+
 /// The doorways' meets with the pieces just cut (all at height `y`).
 fn meets(
     g: &Grown,
@@ -695,12 +770,26 @@ pub fn cut_floor(s: &Scene, radius: i64, t: Turn) -> Result<Patch, String> {
     Ok(patch)
 }
 
-/// The open ground, prepared once for one radius: every square is cut from it.
-pub struct OpenGround(Grown);
+/// The open ground, prepared once for one radius: every square is cut from it, on its terrain when it has one.
+pub struct OpenGround(Grown, Option<Terrain>);
 
 impl OpenGround {
+    /// The open ground of `s`, flat at 0.
     pub fn prepare(s: &Scene, radius: i64) -> Result<OpenGround, String> {
-        prepare(s, radius, Turn::NONE).map(OpenGround)
+        prepare(s, radius, Turn::NONE).map(|g| OpenGround(g, None))
+    }
+
+    /// The open ground node `ground` of `tree`, on the terrain it holds (N1b, #3197), if any.
+    pub fn of(tree: &Tree, ground: Id, radius: i64) -> Result<OpenGround, String> {
+        let mut o = OpenGround::prepare(&Scene::of(tree, ground)?, radius)?;
+        o.1 = Terrain::of(tree, ground)?;
+        Ok(o)
+    }
+
+    /// The same open ground on terrain `t`.
+    pub fn on(mut self, t: Terrain) -> OpenGround {
+        self.1 = Some(t);
+        self
     }
 
     /// The squares that hold anything, as (i, j) with the square from (i·[`SQUARE`], j·[`SQUARE`]).
@@ -748,6 +837,38 @@ impl OpenGround {
         };
         let (wet, cover) = (near(&g.waters), near(&g.covers));
         let mut open = op(&[square_ring(w)], &wet, OverlayRule::Difference);
+        // The terrain's samples in the square, mm, a row of x for each z; and its steep cells, taken away in runs.
+        let n = (SQUARE as i32 / CELL) as usize;
+        let mut samples: Vec<(P, i32)> = Vec::new();
+        if let Some(t) = &self.1 {
+            let um = |v: i32| i64::from(v) * 1000;
+            let mut steep: Vec<Vec<P>> = Vec::new();
+            for r in 0..=n {
+                let z = w[1] + r as i32 * CELL;
+                let mut run: Option<i32> = None;
+                for c in 0..=n {
+                    let x = w[0] + c as i32 * CELL;
+                    if let Some(h) = t.height_at(um(x), um(z)) {
+                        samples.push((P::new(x, z), mm(h) as i32));
+                    }
+                    let is = r < n
+                        && c < n
+                        && t.slope_at(um(x) + 500_000, um(z) + 500_000)
+                            .is_some_and(|s| s > STEEP);
+                    match (run, is) {
+                        (None, true) => run = Some(x),
+                        (Some(x0), false) => {
+                            steep.push(square_ring([x0, z, x, z + CELL]));
+                            run = None;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if !steep.is_empty() {
+                open = shapes_op(&open, &steep, OverlayRule::Difference);
+            }
+        }
         if !cover.is_empty() {
             // The cover inside the square, added back over the water it lies on (a pier, a shore).
             let on = op(&cover, &[square_ring(w)], OverlayRule::Intersect);
@@ -757,9 +878,32 @@ impl OpenGround {
         let shapes = cut_level(g, open, 0, Some(w));
         let mut meets_out = Vec::new();
         meets(&self.0, &shapes, 0, 0, Some(w), &mut meets_out);
+        let flat = samples.windows(2).all(|p| p[0].1 == p[1].1);
+        let pieces = if flat && samples.first().is_none_or(|s| s.1 == 0) {
+            shapes.iter().map(|sh| piece(sh, 0)).collect()
+        } else {
+            // Heights at the samples, and between them as the terrain's own bilinear reading; 0 over water.
+            let t = self.1.as_ref();
+            let height = |p: P| -> i32 {
+                if in_any(&wet, p) {
+                    return 0;
+                }
+                t.and_then(|t| t.height_at(i64::from(p.x) * 1000, i64::from(p.y) * 1000))
+                    .map_or(0, |h| mm(h) as i32)
+            };
+            let pts: Vec<P> = if flat {
+                Vec::new()
+            } else {
+                samples.iter().map(|s| s.0).collect()
+            };
+            shapes
+                .iter()
+                .map(|sh| ground_piece(sh, &pts, &height))
+                .collect()
+        };
         Patch {
             radius: self.0.d - MARGIN - 1,
-            pieces: shapes.iter().map(|sh| piece(sh, 0)).collect(),
+            pieces,
             meets: meets_out,
         }
     }

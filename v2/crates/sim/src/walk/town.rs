@@ -19,7 +19,7 @@
 
 use super::{Leg, Mark, Pass, World, node_of};
 use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, Scene};
+use crate::ground::{HUMAN_RADIUS, OpenGround};
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
 use crate::mover::{Body, Surface};
@@ -73,7 +73,7 @@ impl Town {
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
         let map = Map::build(&tree, ground, &|_| 0)?;
         let mut surfaces = BTreeMap::new();
-        let open = OpenGround::prepare(&Scene::of(&tree, ground)?, HUMAN_RADIUS)?;
+        let open = OpenGround::of(&tree, ground, HUMAN_RADIUS)?;
         let (mut pieces, mut meets) = (Vec::new(), Vec::new());
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
