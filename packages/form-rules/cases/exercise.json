@@ -1,0 +1,2242 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "The exercise family (SA-X10, #2905): a mat, a circuit marker, a lap course and an interval board need a free hand; a loaded-carry shuttle needs a carry weight in hand; chair rises need the seat empty and a free hand; the dumbbell kit builds a 2, 6 or 10 kg dumbbell only from the parts it has, and takes one apart only when its parts fit back.",
+  "cases": [
+    {
+      "name": "meditate_hands_free",
+      "act": {
+        "this": "m1",
+        "form": "meditate"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:meditation_mat"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "meditate_both_hands_full",
+      "act": {
+        "this": "m1",
+        "form": "meditate"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:meditation_mat"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "exercise_hands_free",
+      "act": {
+        "this": "c1",
+        "form": "exercise"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:exercise_circuit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "exercise_both_hands_full",
+      "act": {
+        "this": "c1",
+        "form": "exercise"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:exercise_circuit"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "walk_lap_hands_free",
+      "act": {
+        "this": "l1",
+        "form": "walk_lap"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:lap_course"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "walk_lap_both_hands_full",
+      "act": {
+        "this": "l1",
+        "form": "walk_lap"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:lap_course"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "stretch_interval_hands_free",
+      "act": {
+        "this": "s1",
+        "form": "stretch_interval"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:interval_station"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "stretch_interval_both_hands_full",
+      "act": {
+        "this": "s1",
+        "form": "stretch_interval"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:interval_station"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "jacks_interval_hands_free",
+      "act": {
+        "this": "s1",
+        "form": "jacks_interval"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:interval_station"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "jacks_interval_both_hands_full",
+      "act": {
+        "this": "s1",
+        "form": "jacks_interval"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:interval_station"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "dance_interval_hands_free",
+      "act": {
+        "this": "s1",
+        "form": "dance_interval"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:interval_station"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "dance_interval_both_hands_full",
+      "act": {
+        "this": "s1",
+        "form": "dance_interval"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:interval_station"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "carry_shuttle_holding_a_weight",
+      "act": {
+        "this": "k1",
+        "form": "carry_shuttle"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": {
+            "kind": "eden:carry_course"
+          },
+          "w1": {
+            "kind": "eden:carry_weight"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "w1"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "carry_shuttle_empty_handed_names_taking_a_weight",
+      "act": {
+        "this": "k1",
+        "form": "carry_shuttle"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": {
+            "kind": "eden:carry_course"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_holding_kind",
+        "need": 0,
+        "detail": {
+          "kind": "eden:carry_weight"
+        },
+        "fix": {
+          "step": "take",
+          "kind": "eden:carry_weight"
+        }
+      }
+    },
+    {
+      "name": "carry_shuttle_holding_something_else",
+      "act": {
+        "this": "k1",
+        "form": "carry_shuttle"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": {
+            "kind": "eden:carry_course"
+          },
+          "x1": {
+            "kind": "eden:dumbbell_2kg"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_holding_kind",
+        "need": 0,
+        "detail": {
+          "kind": "eden:carry_weight"
+        },
+        "fix": {
+          "step": "take",
+          "kind": "eden:carry_weight"
+        }
+      }
+    },
+    {
+      "name": "rises_3_empty_chair_hands_free",
+      "act": {
+        "this": "h1",
+        "form": "rises_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "h1": {
+            "kind": "eden:exercise_chair"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "rises_3_someone_in_the_chair",
+      "act": {
+        "this": "h1",
+        "form": "rises_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "h1": {
+            "kind": "eden:exercise_chair",
+            "slots": {
+              "seat": [
+                "b2"
+              ]
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "detail": {
+          "node": "h1",
+          "slot": "seat"
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "rises_3_both_hands_full",
+      "act": {
+        "this": "h1",
+        "form": "rises_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "h1": {
+            "kind": "eden:exercise_chair"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "rises_5_empty_chair_hands_free",
+      "act": {
+        "this": "h1",
+        "form": "rises_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "h1": {
+            "kind": "eden:exercise_chair"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "rises_5_someone_in_the_chair",
+      "act": {
+        "this": "h1",
+        "form": "rises_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "h1": {
+            "kind": "eden:exercise_chair",
+            "slots": {
+              "seat": [
+                "b2"
+              ]
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "detail": {
+          "node": "h1",
+          "slot": "seat"
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "rises_5_both_hands_full",
+      "act": {
+        "this": "h1",
+        "form": "rises_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "h1": {
+            "kind": "eden:exercise_chair"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "assemble_2kg_parts_there_hands_free_in_reach",
+      "act": {
+        "this": "t1",
+        "form": "assemble_2kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "assemble_2kg_short_of_handles_names_take_apart_10kg",
+      "act": {
+        "this": "t1",
+        "form": "assemble_2kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "handles",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": {
+          "form": "take_apart_10kg"
+        }
+      }
+    },
+    {
+      "name": "assemble_2kg_both_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "assemble_2kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "assemble_2kg_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "assemble_2kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              1400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2,
+        "detail": {
+          "point": "parts",
+          "move": "press"
+        },
+        "fix": {
+          "step": "walk_to",
+          "point": "parts"
+        }
+      }
+    },
+    {
+      "name": "assemble_6kg_parts_there_hands_free_in_reach",
+      "act": {
+        "this": "t1",
+        "form": "assemble_6kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "assemble_6kg_short_of_handles_names_take_apart_10kg",
+      "act": {
+        "this": "t1",
+        "form": "assemble_6kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "handles",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": {
+          "form": "take_apart_10kg"
+        }
+      }
+    },
+    {
+      "name": "assemble_6kg_short_of_plates_names_take_apart_10kg",
+      "act": {
+        "this": "t1",
+        "form": "assemble_6kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 1,
+              "plates": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "plates",
+          "found": 0,
+          "wanted": {
+            "at_least": 2
+          }
+        },
+        "fix": {
+          "form": "take_apart_10kg"
+        }
+      }
+    },
+    {
+      "name": "assemble_6kg_both_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "assemble_6kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "assemble_6kg_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "assemble_6kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              1400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3,
+        "detail": {
+          "point": "parts",
+          "move": "press"
+        },
+        "fix": {
+          "step": "walk_to",
+          "point": "parts"
+        }
+      }
+    },
+    {
+      "name": "assemble_10kg_parts_there_hands_free_in_reach",
+      "act": {
+        "this": "t1",
+        "form": "assemble_10kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "assemble_10kg_short_of_handles_names_take_apart_10kg",
+      "act": {
+        "this": "t1",
+        "form": "assemble_10kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "handles",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": {
+          "form": "take_apart_10kg"
+        }
+      }
+    },
+    {
+      "name": "assemble_10kg_short_of_plates_names_take_apart_6kg",
+      "act": {
+        "this": "t1",
+        "form": "assemble_10kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 1,
+              "plates": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "plates",
+          "found": 2,
+          "wanted": {
+            "at_least": 4
+          }
+        },
+        "fix": {
+          "form": "take_apart_6kg"
+        }
+      }
+    },
+    {
+      "name": "assemble_10kg_both_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "assemble_10kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "assemble_10kg_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "assemble_10kg"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              1400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3,
+        "detail": {
+          "point": "parts",
+          "move": "press"
+        },
+        "fix": {
+          "step": "walk_to",
+          "point": "parts"
+        }
+      }
+    },
+    {
+      "name": "take_apart_2kg_dumbbell_here_parts_out",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_2kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 4
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_2kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_apart_2kg_handle_already_in_the_kit_names_assemble_10kg",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_2kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 1,
+              "plates": 4
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_2kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "handles",
+          "found": 1,
+          "wanted": {
+            "at_most": 0
+          }
+        },
+        "fix": {
+          "form": "assemble_10kg"
+        }
+      }
+    },
+    {
+      "name": "take_apart_2kg_both_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_2kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 4
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_2kg"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "take_apart_2kg_dumbbell_elsewhere",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_2kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "yard": {
+            "loose": [
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 4
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_2kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2,
+        "detail": {
+          "thing": "d1"
+        },
+        "fix": {
+          "step": "walk_to",
+          "thing": "d1"
+        }
+      }
+    },
+    {
+      "name": "take_apart_6kg_dumbbell_here_parts_out",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_6kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 2
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_6kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_apart_6kg_handle_already_in_the_kit_names_assemble_10kg",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_6kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 1,
+              "plates": 2
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_6kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "handles",
+          "found": 1,
+          "wanted": {
+            "at_most": 0
+          }
+        },
+        "fix": {
+          "form": "assemble_10kg"
+        }
+      }
+    },
+    {
+      "name": "take_apart_6kg_plates_would_not_fit_names_assemble_10kg",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_6kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 4
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_6kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "plates",
+          "found": 4,
+          "wanted": {
+            "at_most": 2
+          }
+        },
+        "fix": {
+          "form": "assemble_10kg"
+        }
+      }
+    },
+    {
+      "name": "take_apart_6kg_both_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_6kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 2
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_6kg"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "take_apart_6kg_dumbbell_elsewhere",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_6kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "yard": {
+            "loose": [
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 2
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_6kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3,
+        "detail": {
+          "thing": "d1"
+        },
+        "fix": {
+          "step": "walk_to",
+          "thing": "d1"
+        }
+      }
+    },
+    {
+      "name": "take_apart_10kg_dumbbell_here_parts_out",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_10kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 0
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_10kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_apart_10kg_handle_already_in_the_kit_names_assemble_10kg",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_10kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 1,
+              "plates": 0
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_10kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "handles",
+          "found": 1,
+          "wanted": {
+            "at_most": 0
+          }
+        },
+        "fix": {
+          "form": "assemble_10kg"
+        }
+      }
+    },
+    {
+      "name": "take_apart_10kg_plates_would_not_fit_names_assemble_6kg",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_10kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 2
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_10kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "plates",
+          "found": 2,
+          "wanted": {
+            "at_most": 0
+          }
+        },
+        "fix": {
+          "form": "assemble_6kg"
+        }
+      }
+    },
+    {
+      "name": "take_apart_10kg_both_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_10kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 0
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_10kg"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:carry_weight"
+          },
+          "x2": {
+            "kind": "eden:carry_weight"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "take_apart_10kg_dumbbell_elsewhere",
+      "act": {
+        "this": "t1",
+        "form": "take_apart_10kg",
+        "args": {
+          "dumbbell": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "yard": {
+            "loose": [
+              "d1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit",
+            "fields": {
+              "handles": 0,
+              "plates": 0
+            }
+          },
+          "d1": {
+            "kind": "eden:dumbbell_10kg"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3,
+        "detail": {
+          "thing": "d1"
+        },
+        "fix": {
+          "step": "walk_to",
+          "thing": "d1"
+        }
+      }
+    }
+  ]
+}

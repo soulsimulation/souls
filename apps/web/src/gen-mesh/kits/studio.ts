@@ -9,15 +9,18 @@ import { meshFor, type MeshCtx } from '../registry.ts';
 import { MaterialLib } from '../materials.ts';
 import { gait, type Rig } from '../motion.ts';
 
-type Cell = { def: StoredDef; label: string; sub: string; walk?: boolean; phase?: number };
-declare global { interface Window { studio: { render(defs: StoredDef[], o?: { cols?: number; cw?: number; ch?: number; walk?: boolean; frames?: number }): Promise<{ cells: number; tris: number[]; errors: string[] }> } } }
+/** SA-P4: a def drawn once per state it declares (`frames`, each a state to set on the entity) with named places marked (`marks`, metres in the def's frame). */
+export type StateFrames = { frames: { label: string; state: Record<string, unknown> }[]; marks?: { name: string; role: string; at: [number, number, number] }[]; sub?: string };
+type Cell = { def: StoredDef; label: string; sub: string; walk?: boolean; phase?: number; state?: Record<string, unknown>; marks?: StateFrames['marks'] };
+declare global { interface Window { studio: { render(defs: StoredDef[], o?: { cols?: number; cw?: number; ch?: number; walk?: boolean; frames?: number; states?: Record<string, StateFrames> }): Promise<{ cells: number; tris: number[]; errors: string[] }> } } }
+const MARK_COLOUR: Record<string, string> = { stand: '#2a7de1', grip: '#e0803a', contact: '#d6342c', outlet: '#27a06a', slot: '#8e44ad' };
 
-export function ctxFor(def: StoredDef, model: WorldModel, lib: MaterialLib): MeshCtx {
+export function ctxFor(def: StoredDef, model: WorldModel, lib: MaterialLib, state?: Record<string, unknown>): MeshCtx {
   const gen = def.make.kind === 'gen' ? GENERATORS[def.make.gen] : undefined;
   const params: Record<string, Value> = {};
   for (const [k, f] of Object.entries({ ...(gen?.params ?? {}), ...def.params })) if ((f as { default?: Value }).default !== undefined) params[k] = (f as { default: Value }).default;
   if (def.tags.includes('creature')) params.behavior = 'idle';
-  const entity = { id: 'e_studio' + def.name.length, def: def.ref, in: { parent: 'world' }, p: [0, 0], by: 'studio', born: 0, v: 1, seed: 7, params } as never;
+  const entity = { id: 'e_studio' + def.name.length, def: def.ref, in: { parent: 'world' }, p: [0, 0], by: 'studio', born: 0, v: 1, seed: 7, params, ...(state ? { state } : {}) } as never;
   return {
     def, entity, params, args: def.make.kind === 'gen' ? ((def.make.args ?? {}) as Record<string, unknown>) : {},
     baked: model.bake(def, params, 7), model, materials: lib,
@@ -30,6 +33,8 @@ window.studio = {
     const cols = o.cols ?? 8, cw = o.cw ?? 220, ch = o.ch ?? 180, labelH = 30;
     const cells: Cell[] = [];
     for (const d of defs) {
+      const sf = o.states?.[d.name];
+      if (sf) { for (const f of sf.frames) cells.push({ def: d, label: `${d.name.replace(/^core-/, '')} · ${f.label}`, sub: sf.sub ?? '', state: f.state, marks: sf.marks }); continue; }
       cells.push({ def: d, label: d.name.replace(/^core-/, ''), sub: d.tags.slice(0, 3).join(' · ') });
       const gaitName = String((d.make as { args?: { gait?: string } }).args?.gait ?? '');
       if (o.frames && d.tags.includes('creature')) for (let k = 0; k < o.frames; k++) cells.push({ def: d, label: `${d.name.replace(/^core-/, '')} ${k + 1}/${o.frames}`, sub: gaitName, walk: true, phase: k / o.frames });
@@ -51,7 +56,7 @@ window.studio = {
       scene.add(new THREE.HemisphereLight('#fffaf0', '#8c8270', 1.6));
       const sun = new THREE.DirectionalLight('#fff3e0', 2.4); sun.castShadow = true; sun.shadow.mapSize.set(512, 512); scene.add(sun, sun.target);
       let obj: THREE.Object3D | null = null;
-      try { const b = meshFor(c.def); obj = b ? b.build(ctxFor(c.def, model, lib)) : null; } catch (e) { errors.push(`${c.def.name}: ${String(e)}`); }
+      try { const b = meshFor(c.def); obj = b ? b.build(ctxFor(c.def, model, lib, c.state)) : null; } catch (e) { errors.push(`${c.def.name}: ${String(e)}`); }
       const lbl = document.createElement('div'); lbl.className = 'lbl'; lbl.style.cssText = `left:${col * cw}px;top:${row * (ch + labelH) + ch}px;width:${cw}px;height:${labelH}px`;
       lbl.innerHTML = `<b>${c.label}</b><i>${c.sub}</i>`; root.appendChild(lbl);
       if (!obj) { errors.push(`${c.def.name}: no mesh`); continue; }
@@ -64,6 +69,15 @@ window.studio = {
       const box = new THREE.Box3().setFromObject(obj), size = box.getSize(new THREE.Vector3()), centre = box.getCenter(new THREE.Vector3());
       const ground = new THREE.Mesh(new THREE.CircleGeometry(Math.max(size.x, size.z) * 1.6 + 0.4, 28), new THREE.MeshStandardMaterial({ color: '#d8d0bd', roughness: 1 }));
       ground.rotation.x = -Math.PI / 2; ground.position.y = Math.min(0, box.min.y) - 0.002; ground.receiveShadow = true; scene.add(ground);
+      if (c.marks?.length) {
+        // the named places, drawn over the thing (not occluded) so a point inside a drawer or behind a door still shows
+        const r = Math.max(0.018, Math.max(size.x, size.y, size.z) * 0.022);
+        for (const m of c.marks) {
+          const dot = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), new THREE.MeshBasicMaterial({ color: MARK_COLOUR[m.role] ?? '#444', depthTest: false, transparent: true, opacity: 0.92 }));
+          dot.position.set(...m.at); dot.renderOrder = 10; obj.add(dot);
+        }
+        obj.updateMatrixWorld(true);
+      }
       const span = Math.max(size.x, size.y * 1.15, size.z, 0.2), radius = size.length() / 2;
       const cam = new THREE.PerspectiveCamera(26, cw / ch, 0.01, 500);
       const dist = radius / Math.sin((26 * Math.PI) / 360) * 0.92;

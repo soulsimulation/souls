@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":191,"group":"getting-around","words":"go down to the shore","obvious":3,"things":{"shore":"eden:shore"},"chain":[{"this":"me","form":"go_to","args":{"place":"shore"}}]}
