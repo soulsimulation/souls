@@ -2,12 +2,17 @@
 //! Empty but for the load probe (K1, #2638).
 #![forbid(unsafe_code)]
 
+pub mod apply;
 pub mod effects;
 pub mod encode;
+pub mod hash;
 pub mod ids;
 pub mod pose;
+pub mod query;
 pub mod time;
 pub mod tree;
+#[cfg(target_arch = "wasm32")]
+mod wasm;
 pub mod world_model;
 pub mod zones;
 
