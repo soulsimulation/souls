@@ -1,0 +1,1506 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:clay_relief (SA-X7, #2902; from #1674): three columns, each shaped to a height of 0 to 4; carried in both hands, so it is put down to be shaped.",
+  "cases": [
+    {
+      "name": "left_to_0_from_level2",
+      "act": {
+        "this": "c1",
+        "form": "left_to_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "left_to_0_already_there",
+      "act": {
+        "this": "c1",
+        "form": "left_to_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "left_to_0_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "left_to_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "left_to_1_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "left_to_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "left_to_1_already_there",
+      "act": {
+        "this": "c1",
+        "form": "left_to_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level1"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "left_to_1_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "left_to_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "left_to_2_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "left_to_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "left_to_2_already_there",
+      "act": {
+        "this": "c1",
+        "form": "left_to_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "left_to_2_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "left_to_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "left_to_3_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "left_to_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "left_to_3_already_there",
+      "act": {
+        "this": "c1",
+        "form": "left_to_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level3"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "left_to_3_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "left_to_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "left_to_4_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "left_to_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "left_to_4_already_there",
+      "act": {
+        "this": "c1",
+        "form": "left_to_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level4"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "left_to_4_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "left_to_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "left": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "middle_to_0_from_level2",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "middle_to_0_already_there",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "middle_to_0_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "middle_to_1_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "middle_to_1_already_there",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level1"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "middle_to_1_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "middle_to_2_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "middle_to_2_already_there",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "middle_to_2_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "middle_to_3_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "middle_to_3_already_there",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level3"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "middle_to_3_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "middle_to_4_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "middle_to_4_already_there",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level4"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "middle_to_4_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "middle_to_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "middle": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "right_to_0_from_level2",
+      "act": {
+        "this": "c1",
+        "form": "right_to_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "right_to_0_already_there",
+      "act": {
+        "this": "c1",
+        "form": "right_to_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "right_to_0_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "right_to_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "right_to_1_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "right_to_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "right_to_1_already_there",
+      "act": {
+        "this": "c1",
+        "form": "right_to_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level1"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "right_to_1_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "right_to_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "right_to_2_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "right_to_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "right_to_2_already_there",
+      "act": {
+        "this": "c1",
+        "form": "right_to_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "right_to_2_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "right_to_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "right_to_3_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "right_to_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "right_to_3_already_there",
+      "act": {
+        "this": "c1",
+        "form": "right_to_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level3"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "right_to_3_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "right_to_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "right_to_4_from_level0",
+      "act": {
+        "this": "c1",
+        "form": "right_to_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "right_to_4_already_there",
+      "act": {
+        "this": "c1",
+        "form": "right_to_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level4"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "right_to_4_while_carried",
+      "act": {
+        "this": "c1",
+        "form": "right_to_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c1"
+            }
+          },
+          "c1": {
+            "kind": "eden:clay_relief",
+            "fields": {
+              "right": "level0"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    }
+  ]
+}
