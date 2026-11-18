@@ -21,6 +21,8 @@ node tools/world-launcher/telemetry.mjs report --dir <launcher data>/telemetry -
 node tools/world-launcher/telemetry.mjs close  --dir <launcher data>/telemetry                    # roll up and prune now
 ```
 
+On the host, the `sim-worlds-telemetry@<stage>` unit runs the collector with alerts and the problems file, once the maintainer enables it ([below](#the-unit)).
+
 `--url` must be a loopback address. The launcher answers `/__sim/metrics` to direct loopback requests only. The
 collector stops cleanly on SIGINT/SIGTERM, and on restart it continues the current hour, recording the restart as a
 boundary.
@@ -47,6 +49,19 @@ boundary.
   each removal.
 - Only files inside `--dir` are ever removed. A failed write is counted and the collector carries on; the game never
   waits on telemetry.
+
+### The series a spike needs
+
+The launcher exports four series for a spike (#2541), next to the world series from `live.json`:
+
+| Series | Type | What |
+|---|---|---|
+| `sim_world_viewers{world}` | gauge | viewer sockets open on the world at the launcher (its `live` map); 0 is a reading |
+| `sim_launcher_event_loop_delay_p99_seconds` | gauge | the launcher process's own event-loop delay p99 since the previous scrape |
+| `sim_site_worlds_created_total` | counter | worlds created on the site since the launcher started (sign-ups and operator creations) |
+| `sim_host_disk_free_bytes`, `sim_host_disk_size_bytes` | gauge | free and total bytes of the disk the launcher data is on |
+
+Labels are the world slug only: never a Soul id, account id or address.
 
 Size, measured with a synthetic scrape of 400 registered worlds (20 running): about 7 KB per scrape before gzip. At
 15 s that is about 43 MB per day before gzip, well inside the cap.
@@ -118,7 +133,7 @@ Each rule has three windows, which give it hysteresis:
 - **Clear window:** the condition must stay clear for this long before the rule resolves. The default is 60 s.
 - **Clear threshold** (optional): a firing rule only counts as clear once its value is back past this threshold.
 
-A running world without a rule's series becomes `unknown` after the hold window, never healthy. A world that is not running is not judged, except for crash loops. Nothing is sent anywhere: delivery and dead-man alerting belong to #461, and a monitor on the same host cannot detect that host failing.
+A running world without a rule's series becomes `unknown` after the hold window, never healthy. A world that is not running is not judged, except for crash loops. A firing rule reaches a person through the public health check ([below](#reaching-a-person)). Nothing is sent from the host itself: a monitor on the same host cannot report that host failing, and the outside check can.
 
 ### Rules
 
@@ -134,8 +149,41 @@ A running world without a rule's series becomes `unknown` after the hold window,
 | `refusals` | world | any increase of `sim_world_refused_total` or `sim_world_shed_total` (fires at once; clears after 5 quiet minutes) | — |
 | `stale-live` | world | `live.json` older than 30 s (fires at once) | — |
 | `crash-loop` | any world | at least 3 non-planned restarts within 10 min (fires at once; clears after 10 min) | — |
+| `viewers-high` | world | more than 1,000 viewer sockets on one world (fires at once). Information only: it never pages. | — |
+| `launcher-loop-stall` | fleet | the launcher's own event-loop delay p99 > 0.25 s | 0.15 s |
+| `worlds-created` | fleet | more than 10 worlds created in the last hour (fires at once). Counted across launcher restarts; creations before the collector's first scrape are not counted. | — |
+| `disk-free` | fleet | under 20 % of the data disk free | — |
 | `host-memory` | fleet | host memory available < 1 GiB | 1.5 GiB |
 | `telemetry-gap` | collector | no answered scrape for more than 2.5 × the cadence. This covers failed scrapes, a silent collector seen by a later `alerts` run, and an empty store. | — |
+
+Every rule pages except `refusals` and `viewers-high`, which are recorded in `alerts.jsonl` only. `refusals` fires on any refused request, which is the ceilings doing their job, not an incident.
+
+### Reaching a person
+
+With `--problems <data>/alert-problems.json`, the collector rewrites that file after every scrape. It holds `{at, everyMs, problems}`, with one problem per firing rule that pages, coded `alert:<rule>` (for example `alert:disk-free`).
+
+- The launcher reads the file on every `/__sim/healthz`. A firing rule makes `hostOk` false and puts its code in `hostCodes` at once, and the code goes when the rule resolves.
+- `deploy/host-health.mjs` (every 10 min) folds the same codes into `host-health.json` and logs an ALERT line in `host-health.log`. For an alert, healthz trusts the file it reads itself over this timer copy, so a resolved alert clears at once.
+- A file older than 4 scrapes and at least 2 min means the collector died, and it shows as `alert:stale`. A clean stop (SIGTERM, `systemctl stop`) removes the file, so a stopped collector is never mistaken for a dead one.
+- With no file (the collector not enabled), nothing changes.
+
+The outside check watches `hostOk` on the public healthz, and that is how the alert leaves the machine. Setting it up is a hands-on step outside this repository.
+
+The same health check also covers the hourly off-site backup. While `sim-worlds-backup-hourly@<stage>.timer` is enabled, a last run that did not succeed (a timeout, or a FAILED database, which exits 1) raises `backup-hourly:<stage>`, as the nightly run raises `backup:<stage>`. The owners' health page shows the failure, with the failed database from `backup-hourly-last.json` when the run wrote one.
+
+### The unit
+
+`deploy/sim-worlds-telemetry@.service` runs `telemetry.mjs collect --launcher-args --alerts --problems ...` as `simworlds`. It writes to `/srv/sim-worlds-data/<stage>/telemetry` and to `alert-problems.json` beside it. `--launcher-args` takes the launcher's port and base from `SIM_WORLDS_ARGS` in `/etc/sim-worlds/<stage>.conf`, so the unit needs no port of its own.
+
+`install.sh` installs the unit on every release and never enables it. Enabling it is the maintainer's step, on the host:
+
+```bash
+systemctl enable --now sim-worlds-telemetry@production
+systemctl status sim-worlds-telemetry@production
+cat /srv/sim-worlds-data/production/alert-problems.json     # {"at": ..., "problems": []} when all is well
+```
+
+To stop it, run `systemctl disable --now sim-worlds-telemetry@production`. The clean stop removes `alert-problems.json`.
 
 ### Changing the rules
 
@@ -147,4 +195,125 @@ The launcher does not export process CPU, process RSS, cgroup CPU or memory pres
 
 ### Cost
 
-With 400 registered worlds (20 running), evaluation after each scrape takes 40 ms at the median and at most 80 ms at the end of an hour. That is under 0.6 % of one core at the 15 s cadence. The state file is about 40 KB.
+With 400 registered worlds (20 running), evaluation after each scrape takes 40 ms at the median and at most 80 ms at the end of an hour. That is under 0.6 % of one core at the 15 s cadence. The state file is about 40 KB. With the four spike rules (#2541), measured back to back against the rules before them over one synthetic hour (240 scrapes, two repeats each), the median was 40.8 ms against 39.0 ms and the maximum 76–79 ms against 73–80 ms.
+
+## Cost and the context packet
+
+Two commands, `cost` and `packet` (CW5 S2, #739), answer what is active, what it costs, where capacity is tight and
+what to do next. They read the store, the saved alert state and an optional cost file, and they write nothing.
+
+```bash
+node tools/world-launcher/telemetry.mjs cost   --dir <d> --cost <private>/cost.json [--range 24h]   # JSON
+node tools/world-launcher/telemetry.mjs packet --dir <d> [--cost <private>/cost.json] [--bench <capacity-qualify dir>] [--range 24h] [--json]
+```
+
+### The cost file
+
+The cost file (`sim-cost/1`) is the operator's **private** record. Keep it next to the launcher data, never in the
+repository. Rates, invoices and account mappings do not belong in public artifacts. The format is in
+`tools/world-launcher/telemetry/cost.example.json`, which holds placeholder numbers only. The file has a currency, a
+billing period and a list of items. Each item has:
+
+- a `kind`: compute, storage, backups, bandwidth, cdn, auth, model, render or other;
+- a `payer`: `platform` (the default) or `owner`;
+- a `basis`, with its numbers:
+  - `fixed` takes an `amount` per billing period;
+  - `metered` takes a `rate` per `unit` and the period's `usage`;
+- the rate's `source`, and optionally its `sourceDate`;
+- optionally, `billed` entries: actual invoice amounts, each for a named period.
+
+An unknown amount, rate or usage is written as `null`. A malformed file is refused, and the error names the field.
+
+### What `cost` reports
+
+`cost` gives three numbers and never adds them together:
+
+- **billed:** the invoice amounts whose periods overlap the window, listed with those periods, plus how many items
+  have any invoice recorded at all. With no invoice recorded, the amount is null, not 0.
+- **estimated:** the configured rates prorated over the part of the window inside the billing period, and projected
+  over the whole period. Each is given as `{low, high}`. While any rate or usage is unknown, `high` is `null` (open)
+  and the unknown items are listed.
+- **allocated:** the window's known estimate, split by a stated rule:
+  - covered time is split across worlds by their running world-hours (status share × covered time);
+  - covered time with no world running is shared fixed overhead;
+  - time without telemetry stays unallocated.
+
+Fixed rent stays fixed when activity drops. An allocated saving is not an invoice saving.
+
+Owner-paid costs, in particular agents' inference at the edge, are listed under `external`. They are never part of
+platform spend, and their amount is `unknown` unless one is given.
+
+### The context packet
+
+`packet` prints at most ten lines (or JSON, `sim-context-packet/1`):
+
+- **source:** the launcher build label and the tools commit;
+- **window and coverage**;
+- **what is active:** worlds and Souls;
+- **the top bottleneck:** firing alerts first, in rule order; otherwise the world with the worst loop and tick p99;
+- **the alert counts**, from `alerts-state.json`. A state whose last evaluated row is more than 5 minutes before the
+  window's end reads as **stale**, and an unreadable one as **unreadable**. Neither counts as "0 firing": the next
+  decision is to re-evaluate;
+- **cost provenance:** billed amounts with their invoice periods (an invoice for a whole month is not prorated to a
+  24 h window), the estimate ranges, unknowns, rate sources and dates, and external costs;
+- **headroom:** host memory minimum; CPU is unknown, because it is not exported; and the capacity qualification. That is
+  the #736 bench verdict when `--bench` names a capacity-qualify artifact directory. Only a qualifying `passes` reads
+  as qualified, and without `--bench` it says "unqualified (no capacity verdict given)";
+- **the next practical decision**, by a fixed rule, taking the first that applies:
+  1. evaluate the alerts first;
+  2. restore telemetry coverage (below 90 %, or a telemetry gap);
+  3. investigate the firing rule before any hardware change;
+  4. export the missing series;
+  5. review memory if the host went below 1.5 GiB;
+  6. otherwise, no capacity action.
+
+Without `--cost` the packet holds world slugs and numbers only: no Soul names, messages or user content. With `--cost`
+it also carries the operator's real cost figures, free-text rate sources and the build label, so it is **private**:
+its first line says `PRIVATE`, and the JSON has a `private` field. Do not publish it. It involves no model, UI or
+vendor account.
+
+## Unit costs and scenarios
+
+Two more commands (CW5 S3, #739) turn the cost file and measured activity into unit costs and world-count projections.
+
+```bash
+node tools/world-launcher/telemetry.mjs units     --dir <d> --cost <private>/cost.json [--range 24h]          # JSON
+node tools/world-launcher/telemetry.mjs scenarios --cost <private>/cost.json --bench <capacity-qualify dir> \
+  [--worlds 10,50,100,200,400] [--json]
+```
+
+`units` divides one numerator by three denominators and prints each of them:
+
+- **the numerator:** the window estimate from `cost`, over the covered part of the window, divided unrounded. It
+  includes every platform item. Shared fixed overhead is not dropped: its share is printed. An open high end stays
+  open. Its `provenance` names the window, the billing period and each item's rate source and source date.
+- **per world-hour:** running world-hours (status share × covered time).
+- **per active-Soul-hour:** for each world, mean `sim_world_active_souls` × that world's covered hours. Souls are not
+  humans.
+- **per accepted act:** the increase of `sim_world_requests_total{class="act",outcome="completed"}`, which counts act
+  requests answered below 400, not finished activities. Without that series (#737 S2) the result is unknown, never 0.
+
+A denominator that is not exported is unknown, with the reason. One that is zero has no unit cost. Fixed rent does not
+fall when activity does, so a lower unit cost at higher activity is not an invoice saving.
+
+`scenarios` projects resources and a platform total per cost period (`perPeriod`) for each world count. The period is
+the cost file's billing period, printed with its length in days. Amounts are not normalised to a month:
+
+- **The per-world footprint** is measured. It comes from the capacity-qualify artifact's runs (`*/result.json`): the
+  mean over runs of the fleet's mean active and quiet CPU cores and RSS per world, with the largest single world
+  alongside. RSS is each world's maximum, so the sums are upper bounds. Quiet is the cost of a world that ticks with
+  nobody acting, which is the continuous-world baseline. A phase or field the bench did not record is unknown
+  (null), never 0.
+- **The host count** keeps 30 % headroom. It uses the optional `host: {cores, memGiB}` on the fixed compute item of
+  the cost file. Each host's usable share is 70 % of its shape, less one launcher. Without a host shape, hosts and
+  compute cost are unknown.
+- **The per-period total** is hosts × the compute amount, plus the other platform items unchanged. Metered items are
+  listed as not scaled, because nothing ties their usage to the number of worlds. Owner-paid items stay external.
+- **Every row carries the bench verdict.** Only a qualifying `passes` lifts the "unqualified" label, and only for rows
+  at or below the number of worlds the bench measured (`worldsMeasured`). A larger row is marked `extrapolated`
+  ("per-world footprint measured at N worlds") and stays unqualified. A scenario is a
+  cost projection, not a capacity. More hosts pack independent worlds, but they do not fix a world whose main thread
+  is the bottleneck. The #736 verdict on run 41915686991 is exactly that case.
+
+Real rates stay in the operator's private cost file. `cost.example.json` shows the host shape with placeholder
+numbers.

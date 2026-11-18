@@ -7,7 +7,7 @@ import { takeBootSocket } from './snapshot-prefetch.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { watchSocket } from './client-errors.ts';
 import { useEffect, useRef, useState } from 'react';
-import { Connection } from '@souls/client';
+import { Connection, releaseWhenHidden } from '@souls/client';
 import {createStationConnection,type StationConnection} from './score/station-connection.mjs';
 import * as stationCodec from '@souls/protocol';
 import { PROTO } from '@souls/protocol';
@@ -23,23 +23,18 @@ export type Souls = {
   kernel: KernelView | null; plays: PlayView[]; talk: TalkLine[];
   /** Edge spectator feed (speech, conversation.*, fade, steward.*) from the viewer socket; newest last, max 300. */
   edge: EdgeMsg[];
+  /** #2280: no welcome on the current socket yet (page entry, a reconnect, a re-hello): Me is null for now, not "none". */
+  awaitingWelcome: boolean;
 };
 /** One `{type:'edge', …}` viewer message (EDGE-CONTRACT-v1 §7). Open shape: renderers read only what they know. */
 export type EdgeMsg = { type: 'edge'; kind?: string; [k: string]: unknown };
 
-/** This page runs an older bundle than the server's build: reload now if the protocol changed, else the next time the
- *  page has stayed hidden for a minute (a quick tab switch never reloads). Once per build. */
-let staleWatch: string | null = null;
-export function staleBundle(build: string, incompatible: boolean, hiddenMs = 60_000) {
-  const reload = () => { sessionStorage.setItem('sim.reloaded', build); location.reload(); };
-  if (incompatible) { reload(); return; }
-  if (staleWatch === build) return; staleWatch = build;
-  let t: ReturnType<typeof setTimeout> | null = null;
-  const check = () => {
-    if (document.visibilityState === 'hidden') { t ??= setTimeout(reload, hiddenMs); }
-    else if (t) { clearTimeout(t); t = null; }
-  };
-  document.addEventListener('visibilitychange', check); check();
+/** This page runs an older bundle than the server's build: reload now, once per build, only if the protocol changed. A
+ *  compatible release never reloads the page (#2368: the reload after a minute hidden was the page "refreshing by
+ *  itself" and losing its account state on return); the next page load takes the new bundle. */
+export function staleBundle(build: string, incompatible: boolean): boolean {
+  if (!incompatible) return false;
+  sessionStorage.setItem('sim.reloaded', build); location.reload(); return true;
 }
 
 /** One connection for the page. Re-renders about 5 times a second while the world runs. */
@@ -49,14 +44,14 @@ export function useSouls(getToken: () => Promise<string | null>, authed: boolean
   const authedRef=useRef(authed);authedRef.current=authed;
   const session=JSON.stringify([authed,identity]);const sessionRef=useRef(session);
   const [, force] = useState(0);
-  const s = useRef<Omit<Souls, 'conn'> & { conn: Connection | null; lastBytes: number; lastAt: number; takeEpoch?: string }>({ takes: {serverTick: 0, chunks: [], receivedAt: 0}, conn: null,station:null, privateAuthorityGeneration:0,me: null, log: [], brain: [], camera: null, ticker: [], narratives: {}, stats: null, bytesPerSec: 0, kernel: null, plays: [], talk: [], edge: [], lastBytes: 0, lastAt: Date.now() });
+  const s = useRef<Omit<Souls, 'conn'> & { conn: Connection | null; lastBytes: number; lastAt: number; takeEpoch?: string }>({ takes: {serverTick: 0, chunks: [], receivedAt: 0}, conn: null,station:null, privateAuthorityGeneration:0,me: null, log: [], brain: [], camera: null, ticker: [], narratives: {}, stats: null, bytesPerSec: 0, kernel: null, plays: [], talk: [], edge: [], awaitingWelcome: true, lastBytes: 0, lastAt: Date.now() });
   if(sessionRef.current!==session){sessionRef.current=session;retirePrivateAuthority(s.current);}
   if (!s.current.conn) {
     const st = s.current;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     st.conn = new Connection(`${proto}://${location.host}${worldPath}/ws`, () => tokenRef.current(), {
       onSession: session => {
-        retirePrivateAuthority(st);
+        retirePrivateAuthority(st);if(!session)st.awaitingWelcome=true;
         if(session&&!st.station)st.station=createStationConnection({worldId:worldId??session.worldId,codec:stationCodec});
         st.station?.onSession(session);
       },
@@ -75,14 +70,13 @@ export function useSouls(getToken: () => Promise<string | null>, authed: boolean
         st.takes = {serverTick: stream.serverTick, chunks: [...merged.values()].sort((a,b) => a.toTick-b.toTick).slice(-12), receivedAt: performance.now()};
       },
       onWelcome: (me, w) => {
-        arrivalMark('ws-welcome');
+        arrivalMark('ws-welcome');st.awaitingWelcome=false;
         st.station?.onWelcome(w);
         if (w.epoch !== st.takeEpoch) st.takes.chunks = [];
         st.takeEpoch = w.epoch;
         acceptPrivateAuthority(st,authedRef.current,identityRef.current,me);
         // after a deploy, a page still running the old bundle: a new protocol needs the new bundle now (reload once); a
-        // compatible release keeps this viewer running (it reconnected and resumed) and swaps the bundle unseen, once the
-        // page has been hidden for a minute (lane C4: releases without visible downtime)
+        // compatible release keeps this viewer running (it reconnected and resumed) and never reloads it (#2368)
         if (w.build && w.build !== 'dev' && __BUILD__ !== 'dev' && w.build !== __BUILD__ && sessionStorage.getItem('sim.reloaded') !== w.build) staleBundle(w.build, w.proto !== undefined && w.proto !== PROTO);
       },
       onLog: (ev) => { const seen = new Set(st.log.map((e) => e.seq)); st.log = [...st.log, ...ev.filter((e) => !seen.has(e.seq))].slice(-400); },
@@ -114,17 +108,21 @@ export function useSouls(getToken: () => Promise<string | null>, authed: boolean
       const monotonicAt=performance.now();if(monotonicAt-lastProbeAt>=1000){lastProbeAt=monotonicAt;st.station?.probe(st.conn!);}
       force((n) => n + 1);
     }, 200);
-    return () => { clearInterval(t); st.conn!.close();st.station?.dispose(); };
+    // #2305: a tab hidden for five minutes lets go of its world, unless a god's edit panel (the God modal) is open
+    // (`sim.hiddenReleaseMs` in localStorage shortens the wait, for a proof clip)
+    let hiddenMs: number | undefined; try { hiddenMs = Number(localStorage.getItem('sim.hiddenReleaseMs')) || undefined; } catch { /* storage blocked */ }
+    const stopRelease = releaseWhenHidden(st.conn!, { hiddenMs, keep: () => !!document.querySelector('dialog[data-god-modal][open]') });
+    return () => { clearInterval(t); stopRelease(); st.conn!.close();st.station?.dispose(); };
   }, []);
   // signing in or out: reconnect so the server re-reads who we are
   const first = useRef(true);
-  useEffect(() => { if (first.current) { first.current = false; return; } const st=s.current;retirePrivateAuthority(st);st.conn!.rehello(); }, [authed,identity]);
+  useEffect(() => { if (first.current) { first.current = false; return; } const st=s.current;retirePrivateAuthority(st);st.awaitingWelcome=true;st.conn!.rehello(); }, [authed,identity]);
   return s.current as Souls;
 }
 
 /** Re-read who we are (the welcome's Me) without a reload: a reconnect, as signing in does. New worlds' hub never pushes
  *  an updated Me (no live private authority), so a Soul just approved in this window is not "own" until this runs. */
-export function refreshMe(sim: Souls) { retirePrivateAuthority(sim); sim.conn.rehello(); }
+export function refreshMe(sim: Souls) { retirePrivateAuthority(sim); sim.awaitingWelcome = true; sim.conn.rehello(); }
 
 export function makeApi(getToken: () => Promise<string | null>,session?:()=>number) {
   return createApiRequest(getToken,{path:apiPath,session});

@@ -4,7 +4,7 @@ import type {WorldAccounts} from './accounts/service.ts';
 import { randomBytes } from 'node:crypto';
 import {PROBE_PREFIX, PROBE_OWNER, isVerificationProbe} from './verification-probe.ts';
 import { createSoulSchema, describeIntent, intentSchema, proposeCardsSchema, steerSchema, type EventKind, type MandateRule, type AgendaStep, type BirthPayload, type DeckPayload, type IntentPayload, type LogEvent, type WireIntent } from '@souls/protocol';
-import { blockedArrivalNear } from './arrival-placement.ts';
+import { arrivalPointNear, blockedArrivalNear, crowdedArrivalNear } from './arrival-placement.ts';
 import {mandateOf,explicitTrigger} from './mandate.ts';
 import {clockAt} from '@souls/brain';
 import { deckView } from './deck.ts';
@@ -59,8 +59,12 @@ export class Souls {
       },
     });
     this.carryOverDirections();
-    setInterval(() => { const now = Date.now(); for (const [k, p] of this.pairings) if (p.expires < now) this.pairings.delete(k); }, 60_000).unref();
+    this.pruneTimer = setInterval(() => { if (host.silent?.()) return;   // #2303: memory only, and every use checks `expires`
+      const now = Date.now(); for (const [k, p] of this.pairings) if (p.expires < now) this.pairings.delete(k); }, 60_000); this.pruneTimer.unref();
   }
+  private pruneTimer: ReturnType<typeof setInterval>;
+  /** #2444: a stopped world's Souls run nothing on in the program it shared (a shard). */
+  stopTimers() { clearInterval(this.pruneTimer); }
 
   // ------------------------------------------------------------ access
   invited(u: UserRow): boolean { return !this.cfg.inviteRequired || u.role === 'admin' || !!u.invited_by; }
@@ -208,11 +212,30 @@ export class Souls {
     const id = newId('s'); const entityId = `h_${id.slice(2)}`;
     this.db.createSoul({ id, worldId: this.host.worldId, owner, entityId, name: p.data.name, description: p.data.description, native });
     // arrival-search/1: a direct (non-lifecycle) birth also moves off an arrival point the world blocks (cheap check
-    // only, no birth probe); otherwise the default stays as it was.
-    let near: { at: [number, number]; first: true } | undefined;
-    if (!native) try { near = blockedArrivalNear(this.host); } catch { near = undefined; }
+    // only, no birth probe), or off one bodies have nearly filled; otherwise the default stays as it was.
+    let near: BirthPayload['near'];
+    if (!native) try { near = blockedArrivalNear(this.host) ?? crowdedArrivalNear(this.host); } catch { near = undefined; }
     await this.host.enqueue('birth', native ? 'world' : `soul:${id}`, { soulId: id, entityId, name: p.data.name, description: p.data.description, owner, ...(near ? { near } : {}) } satisfies BirthPayload);
     return this.db.soul(id)!;
+  }
+  /** Every Soul whose birth threw or a rewind left out (WorldHost.unbornV1) is born again: the same ids, a new journaled birth
+   *  with birth-near/1 at the arrival point (rings first, then the nearest free standing ground). Retired, native and already
+   *  embodied Souls are skipped. Returns how many births were queued. */
+  rebirthUnborn(): number {
+    let n = 0;
+    for (const id of [...this.host.unbornV1]) {
+      this.host.unbornV1.delete(id);
+      const s = this.db.soul(id);
+      if (!s || s.retired_at != null || s.native || s.world_id !== this.host.worldId || this.host.minds.has(id) || this.host.engine.world.entities[s.entity_id]) continue;
+      let near: BirthPayload['near'];
+      try { near = blockedArrivalNear(this.host) ?? crowdedArrivalNear(this.host) ?? arrivalPointNear(this.host); } catch { near = undefined; }
+      try { this.host.enqueue('birth', `soul:${id}`, { soulId: id, entityId: s.entity_id, name: s.name, description: s.description, owner: s.owner, ...(near ? { near } : {}) } satisfies BirthPayload)
+        .catch((e) => console.warn(`[souls] ${id}: the birth again failed:`, String(e).slice(0, 200))); }
+      catch (e) { this.host.unbornV1.add(id); console.warn(`[souls] ${id}: no birth again yet:`, String(e).slice(0, 200)); continue; }
+      n++;
+    }
+    if (n) console.warn(`[souls] ${n} Soul(s) without a body after a failed birth: born again`);
+    return n;
   }
   async retire(soul: SoulRow) {
     this.db.retireSoul(soul.id);
@@ -429,8 +452,8 @@ export class Souls {
     return {
       id: soul.id, name: soul.name, description: soul.description, in_world: true, tick: e.world.tick, time: e.world.env.datetime,
       position: { x: ent.pose.p[0], z: ent.pose.p[2], region: location?.region?.id??s.region }, activity: ent.human!.activity, doing: this.host.doingOfV1(m), body: this.host.bodyOfV1(m),
-      mood: m.mood, energy: energyWord(m.energy), wants_company: m.wantsCompany,
-      ...(m.life ? { needs: m.life.needs, journal: m.life.journal, reflected_day: m.life.reflectedDay, customs: this.host.living?.customs } : {}),
+      mood: m.mood, energy: energyWord(this.host.energyOf(m)), wants_company: m.wantsCompany,
+      ...(m.life ? { needs: this.host.needsOf(m), journal: m.life.journal, reflected_day: m.life.reflectedDay, customs: this.host.living?.customs } : {}),
       mandate:mandateOf(this.host.kernel,soul.id),
       intent: m.intent, intent_text: describeIntent(m.intent, nameOf), agenda: m.agenda.map((a, i) => ({ card: a.card, target: a.target ? this.host.nameOf(a.target) : null, done: i < m.agendaPos })), recent: m.recent, nearby: s.nearby, happening: s.happening,
       storyteller_suggests: m.nudge?.text ?? null,

@@ -1,3 +1,5 @@
+// Legal by construction 1b: under legal-edits/1 nobody is walked out; the planner below only names the residents an edit
+// would have moved, and the edit is refused (engine-bridge.ts legalCheck). Worlds and history before that rule keep G1:
 // G1 "god rules" (Gene, 2026-10-15): a god edit is never refused or delayed because a resident is in, on, asleep in or
 // holding what it changes. Before the edit applies, each resident in its way stands up or wakes, sets down what it
 // holds, and walks to the nearest clear standing point outside the affected footprint (outside the building for a

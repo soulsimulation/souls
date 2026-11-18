@@ -2,5 +2,13 @@
 // Rebuilt and compared in the package tests. Historical order is frozen in legacy.ts.
 import { FAMILY_KITS as historical } from './legacy.ts';
 import type { DefInput } from '../schemas.ts';
-
-export const FAMILY_KITS: DefInput[] = historical;
+import meshLods from '../core-mesh-lods.json' with { type: 'json' };
+import family0 from './families/switchable-lamp-buildings.family.ts';
+import family1 from './families/television.family.ts';
+import family2 from './families/wall-doorways-all.family.ts';
+import family3 from './families/wall-doorways.family.ts';
+const additions: DefInput[] = [...family0, ...family1, ...family2, ...family3].map(def => {
+  const lod = def.make.kind === 'mesh' ? (meshLods as Record<string, { lod1: string }>)[def.make.asset] : undefined;
+  return lod ? { ...def, make: { ...def.make, ...lod } } as DefInput : def;
+});
+export const FAMILY_KITS: DefInput[] = [...historical, ...additions];

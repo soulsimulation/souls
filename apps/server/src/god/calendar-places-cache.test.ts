@@ -13,10 +13,11 @@ import { humanTitle } from './meaning.ts';
 import { GodPlaces, type PlacesHost } from './places.ts';
 import { GodPlaces as LegacyPlaces } from './places-membership-reference.fixture.ts';
 import { GodNav, type Thing } from './nav.ts';
+import { doorAt } from '../edge/catalog/catalog.ts';
 
-// The frozen writer predates meaning. Compare every physical field, then assert
-// the new generic-vocabulary classification explicitly below.
-const physical = (places: ReturnType<GodPlaces['list']>) => places.map(({name: _n, aliases: _a, genericAliases: _g, semanticParent: _p, semanticRole: _r, semanticKind: _k, salience: _s, parts: _parts, ...p}) => ({...p, ...(p.of === 'shore' ? {description: 'shore'} : {})}));
+// The frozen writer predates meaning and a building's doors (#2261). Compare every other physical field, then assert
+// the new generic-vocabulary classification and the doors explicitly below.
+const physical = (places: ReturnType<GodPlaces['list']>) => places.map(({name: _n, aliases: _a, genericAliases: _g, semanticParent: _p, semanticRole: _r, semanticKind: _k, salience: _s, parts: _parts, doors: _doors, ...p}) => ({...p, ...(p.of === 'shore' ? {description: 'shore'} : {})}));
 
 type Lookup = (e: Entity) => { id: string; name: string } | null;
 function fixture(memo = true) {
@@ -258,6 +259,12 @@ test('shared membership retains full legacy places, calendar identities, and cur
     }
     const actual = f.places.list();
     assert.deepEqual(physical(actual), physical(expected), 'geometry, physical parent, seats and schedules match the frozen writer; labels and shore prose now carry meaning');
+    // #2261: a building place carries exactly its Thing's doors to the outside; no other place has any
+    for (const p of actual) {
+      const t = p.of === 'building' ? nav.things().find(x => x.kind === 'building' && x.ref === p.ref) : undefined;
+      assert.deepEqual(p.doors, t?.doors?.length ? t.doors.map(d => doorAt(d.at, d.out, t.level)) : undefined, p.ref);
+    }
+    assert.ok(actual.some(p => p.doors?.length), 'the roundhouse has a door');
     for (const ref of ['alpha', 'beta']) assert.deepEqual(actual.find(p => p.ref === ref)!.genericAliases, ['plaza', 'paving', 'place']);
     assert.deepEqual(actual.find(p => p.ref === 'gazebo')!.genericAliases, ['civic', 'garden', 'shade', 'park', 'structure']);
     for (const p of actual.filter(p => p.of === 'room' || p.of === 'shore')) {

@@ -275,10 +275,16 @@ test('unselected speakers stay quiet until the model explicitly chooses nearby s
  }finally{f.stop.abort();await running;}
 });
 test('the earlier deadline wakes a listener before its ambient batch cadence',async t=>{
- const f=setup(t),owner=f.journal.control.claim('setup'),started=Date.now(),wakeAt=new Date(started+200).toISOString();f.journal.control.save(owner,0,{listenTo:['s_presenter'],wakeAt,lastAmbientDeliveryAt:started});f.journal.control.release(owner);
+ // Mocked clock (#2007): with real time a slow runner could spend the 200 ms
+ // before the first decision committed, which correctly consumes a due wake.
+ const started=Date.parse('2026-10-30T05:00:00.000Z');
+ t.mock.timers.enable({apis:['Date','setTimeout','setInterval'],now:started});
+ const f=setup(t),owner=f.journal.control.claim('setup'),wakeAt=new Date(started+200).toISOString();f.journal.control.save(owner,0,{listenTo:['s_presenter'],wakeAt,lastAmbientDeliveryAt:started});f.journal.control.release(owner);
  const running=runSupervisor({...f,signal:f.stop.signal,ambientWakeMs:1000});
  try{
-  await until(()=>f.host.calls.length===1);f.host.finish(waitDecision);await until(()=>f.journal.control.checkpoint().value.lastCall?.type==='wait');f.journal.ingest({source:'world',after:null,cursor:'ambient',events:[ambient('ambient')]});await until(()=>f.host.calls.length===2);assert.ok(Date.now()-started<800);assert.equal(f.host.calls[1].scheduledWakeAt,wakeAt);assert.ok(f.host.calls[1].pending.some(f=>f.event.id==='ambient'));assert.deepEqual(f.host.calls[1].listenTo,['s_presenter']);
+  await flushTurns();assert.equal(f.host.calls.length,1);f.host.finish(waitDecision);await flushTurns();assert.equal(f.journal.control.checkpoint().value.lastCall?.type,'wait');f.journal.ingest({source:'world',after:null,cursor:'ambient',events:[ambient('ambient')]});
+  for(let n=0;n<19;n++){t.mock.timers.tick(10);await flushTurns();}assert.equal(f.host.calls.length,1,'neither the deadline nor the ambient batch is due yet');
+  t.mock.timers.tick(10);await flushTurns();assert.equal(f.host.calls.length,2);assert.ok(Date.now()-started<800);assert.equal(f.host.calls[1].scheduledWakeAt,wakeAt);assert.ok(f.host.calls[1].pending.some(f=>f.event.id==='ambient'));assert.deepEqual(f.host.calls[1].listenTo,['s_presenter']);
  }finally{f.stop.abort();await running;}
 });
 test('saved future deadline steers active inference before completion without replacing owner intent',async t=>{

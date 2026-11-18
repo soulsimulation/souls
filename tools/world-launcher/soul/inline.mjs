@@ -3,11 +3,32 @@
 // block of it. Edit the module, then run this. `--check` changes nothing and fails on a stale block (the test does that).
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { stripTypeScriptTypes } from "node:module";
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 const mark = (file) => file.split("/").pop();
 /** module file -> the name eden.mjs knows it by. A module comes after anything it imports. */
-export const MODULES = [["home.mjs", "soulHome"], ["../../edge-skill/memory-folder.mjs", "soulRecords"], ["brief.mjs", "soulBrief"], ["people.mjs", "soulPeople"], ["consolidate.mjs", "soulConsolidate"], ["memory.mjs", "soulMemory"], ["../../edge-skill/client-body-kit.mjs", "soulBodyKit"], ["catalog.mjs", "soulCatalog"]];
+export const MODULES = [
+  ["home.mjs", "soulHome"],
+  ["memory-folder.mjs", "soulRecords"],
+  ["brief.mjs", "soulBrief"],
+  ["people.mjs", "soulPeople"],
+  ["consolidate.mjs", "soulConsolidate"],
+  ["memory.mjs", "soulMemory"],
+  ["digest.mjs", "soulDigest"],
+  ["client-body-kit.mjs", "soulBodyKit"],
+  ["catalog.mjs", "soulCatalog"],
+  ["live.mjs", "soulLive"],
+  ["wake.mjs", "soulWake"],
+  // SA-C3: the rules package as the world runs it (its TypeScript with the types taken out), then the client's own use of it
+  ["../../../packages/form-rules/src/rules.ts", "formRules"],
+  ["can-i.mjs", "soulCanI"],
+  ["how.mjs", "soulHow"],
+  ["room.mjs", "soulRoom"],
+  ["net.mjs", "soulNet"],
+  ["dashboard.mjs", "soulDashboard"],
+  ["render.mjs", "soulRender"],
+];
 
 /** A module as a generated block: node imports hoisted under private names, another inlined module read from its closure,
  *  its exports returned from one closure. */
@@ -33,7 +54,7 @@ export function inlineBlock(source, file, name) {
     body.replace(/^export /gm, "").trim(), `return { ${[...new Set(exported)].join(", ")} };`, "})();", `// </inline ${mark(file)}>`].join("\n");
 }
 
-export function withBlocks(cli, read = (f) => readFileSync(here(f), "utf8")) {
+export function withBlocks(cli, read = (f) => { const text = readFileSync(here(f), "utf8"); return f.endsWith(".ts") ? stripTypeScriptTypes(text) : text; }) {
   let out = cli;
   for (const [file, name] of MODULES) {
     const block = inlineBlock(read(file), file, name);

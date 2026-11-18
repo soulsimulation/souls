@@ -2,9 +2,10 @@
 // world-database reads/writes the launcher needs for ownership (god tokens, owner). Nothing here deletes world data:
 // an archived world's folder is moved, whole, under <data>/archive/<id>/world and comes back with one command.
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { SNAPSHOT_EPOCH_FILE } from '../../apps/server/src/edge-snapshot.ts';
 
 export const ARCHIVE_SCHEMA = 'world-archive/1';
 const ID_RE = /^[a-z][a-z0-9-]{0,31}-\d{8}T\d{6}Z(-\d+)?$/;
@@ -73,6 +74,7 @@ export function restoreWorld({ registry, dataDir }, id, by) {
     mkdirSync(join(registry.dataDir, 'worlds'), { recursive: true });
     renameSync(data, target);
   } else if (!existsSync(target)) return [409, { ok: false, code: 'no-data', message: `${id} holds no world data` }];
+  rmSync(join(target, SNAPSHOT_EPOCH_FILE), { force: true });   // E6: a new snapshot key at its next boot (edge-snapshot.ts)
   registry.add({ ...rec.entry, slug: rec.slug, port: null });
   writeJson(recFile, { ...rec, restoredAt: new Date().toISOString(), restoredBy: by });
   audit(dataDir, { op: 'restore', slug: rec.slug, id, by });

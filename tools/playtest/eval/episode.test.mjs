@@ -1,0 +1,151 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { runEpisode, runCase, prepareFolder, readCatalog, setupStep } from './episode.mjs';
+import { createSeat, planWake } from '../arena/seat.mjs';
+
+// A stand-in client: `serve` starts a detached process and logs its pid, `serve --stop` ends it, `listen` logs its pid and blocks.
+const FAKE_CLI = `import { spawn } from 'node:child_process';
+import { writeFileSync, appendFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+const [cmd, arg] = process.argv.slice(2), out = (o) => console.log(JSON.stringify(o));
+if (cmd === 'status') out({ paired: true, soul: { id: 's_test', name: 'Wren' } });
+else if (cmd === 'serve' && arg === '--stop') { if (existsSync('.serve.pid')) { try { process.kill(Number(readFileSync('.serve.pid', 'utf8')), 'SIGTERM'); } catch {} rmSync('.serve.pid'); } out({ serving: false }); }
+else if (cmd === 'serve') { const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)'], { detached: true, stdio: 'ignore' }); c.unref(); writeFileSync('.serve.pid', String(c.pid)); appendFileSync('pids.log', 'serve ' + c.pid + '\\n'); out({ serving: true }); }
+// #2157: a world still starting gives a catalog with no acts; LOOKS_BARE=n makes the first n looks see one
+else if (cmd === 'look') { const n = existsSync('looks.log') ? readFileSync('looks.log', 'utf8').length : 0; appendFileSync('looks.log', '.');
+  const acts = n < Number(process.env.LOOKS_BARE ?? 0) ? [] : [{ id: 'eat:eat.t1', verb: 'eat', place: 'field' }];
+  writeFileSync('world-catalog.json', JSON.stringify({ catalog: { places: [{ id: 'field', kind: 'walkable' }], things: [], acts } })); out({ ok: true }); }
+else if (cmd === 'listen') { appendFileSync('pids.log', 'listen ' + process.pid + '\\n'); setInterval(() => {}, 1e6); }
+else if (cmd === 'register' && process.cwd().includes('-second')) process.exit(3);
+// #2440: CREATES_LOST=n makes the first n creates get no answer, as a loaded world's reset connection does
+else if (cmd === 'create') { appendFileSync('creates.log', process.argv.slice(2).join(' ') + '\\n');
+  if (readFileSync('creates.log', 'utf8').trim().split('\\n').length <= Number(process.env.CREATES_LOST ?? 0)) { console.error('error: create: unreachable — the world did not answer (read ECONNRESET). Not retried: this write has no safe retry.'); process.exit(75); }
+  out({ created: true }); }
+else out({ ok: true });
+`;
+
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+async function gone(pid) { for (let i = 0; i < 40 && alive(pid); i++) await new Promise((ok) => setTimeout(ok, 50)); return !alive(pid); }
+const pids = (folder) => (existsSync(join(folder, 'pids.log')) ? readFileSync(join(folder, 'pids.log'), 'utf8').trim().split('\n').map((l) => l.split(' ')).map(([k, p]) => ({ k, pid: Number(p) })) : []);
+
+test('an episode that throws after wakeLoop() still stops its seat and its serve (#1989)', { timeout: 30000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'episode-test-')), folder = join(root, 'folder'), dir = join(root, 'run');
+  mkdirSync(folder); mkdirSync(dir);
+  writeFileSync(join(folder, 'eden.mjs'), FAKE_CLI);
+  writeFileSync(join(folder, 'skill.md'), 'version: "0"\n');
+  // The world shows the Soul in the field and refuses the owner's message, so sendCard throws after the wake loop started.
+  const server = createServer((req, res) => {
+    const json = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+    if (req.method === 'GET' && req.url.startsWith('/v1/edge/public/souls/')) return json(200, { self: { placePath: [{ id: 'field' }] }, receipts: [] });
+    json(500, { code: 'test.refused' });
+  });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  try {
+    const item = { id: 'walk', instruction: 'Walk to the field.', check: { place: ['field'] }, timeoutSec: 5 };
+    const seatCfg = { adapter: 'scripted-owner', script: { rules: [{ match: '.', do: [['status']] }] } };
+    await assert.rejects(runEpisode({ dir, base: `http://127.0.0.1:${server.address().port}`, item, seatCfg, folder }), /POST .*\/inbox → 500 test\.refused/);
+    const started = pids(folder);
+    assert.ok(started.some((p) => p.k === 'serve'), 'serve started');
+    for (const p of started) assert.ok(await gone(p.pid), `${p.k} (pid ${p.pid}) is still running`);
+  } finally {
+    for (const p of pids(folder)) { try { process.kill(p.pid, 'SIGKILL'); } catch { /* gone */ } }
+    server.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a case that throws during setup still stops every serve it started (#1950 review)', { timeout: 30000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'case-test-')), dir = join(root, 'run');
+  mkdirSync(dir);
+  // The world serves the stand-in client; the case's second folder cannot register, so setup throws after Wren's serve started.
+  const server = createServer((req, res) => {
+    if (req.url === '/eden.mjs') { res.writeHead(200); return res.end(FAKE_CLI); }
+    if (req.url === '/skill.md') { res.writeHead(200); return res.end('version: "0"\n'); }
+    res.writeHead(404); res.end('{}');
+  });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  const folder = join(dir, 'seats', 'wren', 'folder');
+  try {
+    const item = { id: 'double-claim', bar: 'test', souls: [{ id: 'wren', name: 'Wren', folders: ['second'], script: [{ run: ['status'], expect: 'ok' }] }] };
+    await assert.rejects(runCase({ dir, base: `http://127.0.0.1:${server.address().port}`, item, seatCfg: { adapter: 'scripted-owner' } }), /wren second: register exited 3/);
+    const started = pids(folder);
+    assert.ok(started.some((p) => p.k === 'serve'), 'serve started');
+    for (const p of started) assert.ok(await gone(p.pid), `${p.k} (pid ${p.pid}) is still running`);
+  } finally {
+    for (const p of pids(folder)) { try { process.kill(p.pid, 'SIGKILL'); } catch { /* gone */ } }
+    server.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#2157: setup asks again while the world copy has no acts, so a seat never starts on a world still laying out', { timeout: 30000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'prepare-test-')), folder = join(root, 'folder');
+  mkdirSync(folder);
+  const server = createServer((req, res) => {
+    if (req.url === '/eden.mjs') { res.writeHead(200); return res.end(FAKE_CLI); }
+    if (req.url === '/skill.md') { res.writeHead(200); return res.end('version: "0"\n'); }
+    res.writeHead(404); res.end('{}');
+  });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  process.env.LOOKS_BARE = '2';   // the world's 30 s bound passed before its spots: two looks get a catalog with no acts
+  try {
+    const seat = { folder, base: `http://127.0.0.1:${server.address().port}`, info: {}, save() {} };
+    const setup = await prepareFolder(seat, { name: 'Wren' });
+    assert.equal(readFileSync(join(folder, 'looks.log'), 'utf8').length, 3, 'looked until the copy had acts');
+    assert.equal(readCatalog(folder, setup.soulId).acts[0].verb, 'eat');
+  } finally {
+    delete process.env.LOOKS_BARE;
+    for (const p of pids(folder)) { try { process.kill(p.pid, 'SIGKILL'); } catch { /* gone */ } }
+    server.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#2440: a create that got no answer is asked again, moving the pairing, a bounded number of times', { timeout: 30000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'setup-step-test-')), folder = join(root, 'folder');
+  mkdirSync(folder);
+  writeFileSync(join(folder, 'eden.mjs'), FAKE_CLI);
+  const creates = () => readFileSync(join(folder, 'creates.log'), 'utf8').trim().split('\n');
+  try {
+    process.env.CREATES_LOST = '1';
+    await setupStep(folder, ['create', 'Wren'], { pauseMs: 0 });
+    assert.deepEqual(creates(), ['create Wren', 'create Wren --move']);
+    rmSync(join(folder, 'creates.log'));
+    process.env.CREATES_LOST = '9';
+    await assert.rejects(setupStep(folder, ['create', 'Wren'], { pauseMs: 0 }), /setup create exited 75: .*did not answer.*\(try 3 of 3\)/);
+    assert.equal(creates().length, 3);
+  } finally {
+    delete process.env.CREATES_LOST;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// #2498 F3 (the Eden harder-v1 errand, r2): serve logged plan-stopped and plan-finished, the harness listen ended on them with no
+// message, and the seat took no turn, so the agent could not recover or tell its owner. The eval now hands those wakes on.
+const PLAN_FINISHED = JSON.stringify({ messages: [], wakes: [{ id: 'plan-finished', kind: 'plan-finished', why: 'plan p_1 ended failed', at: '2026-11-16T03:32:23.769Z', count: 1 }], next: 'Your wake rules fired' });
+test('#2498 A2: a listen that ends on serve\'s plan-stopped or plan-finished wake is a turn for the eval\'s seat', { timeout: 20000 }, async () => {
+  assert.equal(planWake(PLAN_FINISHED), true);
+  assert.equal(planWake(JSON.stringify({ messages: [], plan: { id: 'p_1', state: 'stopped', next: 'Step 1 was refused.' } })), true, 'a stopped plan');
+  assert.equal(planWake(JSON.stringify({ messages: [], wakes: [{ id: 'plan-stopped', kind: 'plan-stopped', count: 1 }] })), true);
+  assert.equal(planWake(JSON.stringify({ messages: [], wakes: [{ id: 'act-ended', kind: 'act-ended', count: 1 }] })), false, 'other wakes are not handed on');
+  assert.equal(planWake('listen: 503, retrying'), false);
+  for (const planWakes of [true, false]) {
+    const run = mkdtempSync(join(tmpdir(), 'episode-planwake-'));
+    try {
+      const s = createSeat({ runDir: run, seat: { id: 'soul', adapter: 'scripted-owner', script: { rules: [] } }, worldBase: 'http://127.0.0.1:9', rails: { planWakes } });
+      writeFileSync(join(s.folder, 'eden.mjs'), `console.log(${JSON.stringify(PLAN_FINISHED)});`);
+      const turns = []; s.chat = async (text, o) => { turns.push({ text, reason: o.reason }); };
+      s.info.wake = true; s.wakeLoop();
+      await new Promise((ok) => setTimeout(ok, 1500));
+      await s.stop();
+      if (planWakes) {
+        assert.equal(turns.length, 1, 'one turn for the wake');
+        assert.equal(turns[0].reason, 'wake');
+        assert.match(turns[0].text, /^\[background task\] node eden\.mjs listen exited with output:\n.*plan-finished/s);
+      } else assert.equal(turns.length, 0, 'without the rail, a seat takes no turn for it, as before');
+    } finally { rmSync(run, { recursive: true, force: true }); }
+  }
+});

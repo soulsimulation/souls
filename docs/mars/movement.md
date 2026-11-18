@@ -53,6 +53,25 @@ hit, so the hard separation layer rarely fires.
   next `LOOK` = 2.5 m and the other walker's ~1 s path chord.
 - Within 1.5 m of a driven vehicle a walker slows to 0.5 m/s (never stops; the vehicle stops for people).
 - A mutual single-file wait is released once both sides have waited `RELEASE_AFTER` (3 s).
+- **wait-bound/1** (#1952, a logged runtime policy adopted at boot): off a stair flight, a programme step's walk whose body
+  has not left a 0.5 m disc or changed level for 1,200 ticks (a minute) ends `route.blocked`, naming the last wait and whom
+  it was for. Named waits (`traffic.yield` included) do not pause it, and a walk re-issued for the same step after a step-back keeps its clock;
+  a walk retried after a timeout (a spread or shared-water re-choice) starts its own (#2032).
+- **wait-bound/2** (#1288, adopted at boot after wait-bound/1): the same bound for a step that swims or travels through
+  water (`swim_to`, `ground_travel`, `swim_in`), so a swim held behind a body treading in its way (`swim.occupied`) ends
+  `route.blocked` through the swim's own cancel, leaving the swimmer treading or standing where it is.
+- **wait-bound/3** (#2155, adopted at boot last): the same bound for the approach walk a `take_item` or `put_item` runs as
+  its child. The item's own record reads `running` while it walks, so wait-bound/1 never read that walk; a held approach
+  (waiting, not named a deadlock) kept its receipt `started`. Now the bound stops only the approach walk, and the item step
+  fails `route.blocked` with the walk's reason ("wait-bound/3: the walk made no headway for a minute: ...").
+- **cede-passage/1** (#2426, adopted at boot after wait-bound/3): a walker at the end of its walk leg does not take up a single-file
+  passage it does not hold while the body standing there is yielding to it (W38's own test). Before it, two walkers whose
+  legs ended in one passage, each waiting for such a body, took turns holding it: one let it go for the body to make way,
+  and the other took it the same tick, so the bodies always found it held and never moved (a shared bay's joist crew
+  stalled at 22 of 32 for good). A walker whose spot is held by a body yielding to anyone else enters as before.
+- **cycle-recover/1** (#2596, adopted at boot after cede-passage/1): a two-body wait cycle asks the deadlock recovery for its
+  attempt after 3 s unchanged instead of 10 s, and when routing round the other does not break it, one of the pair steps
+  aside and walks on once the other has passed (see "Persistent waits and bounded recovery").
 
 ## Speed limits and invariants
 
@@ -83,9 +102,28 @@ End-of-tick invariants (`runtime/invariants.ts`):
 to the load, rides alias the rider to the vehicle. A cycle with unchanged dependencies and poses for `DEADLOCK_TICKS`
 (200 ticks, 10 s) reports `deadlock.cycle`; a persistent acyclic wait reports `deadlock.stalled`. Each episode may request
 one extra validated planner attempt within existing budgets; unsupported phases report
-`deadlock.recovery-unavailable`. The detector never forces a release. `SequenceRunner` returns `blocked` early only when
-every live action certifies its movers exhausted and no future cue or timeout could change that; it does not settle the
-blocked actions, and `execute` refuses to commit the unsettled result.
+`deadlock.recovery-unavailable`. Under `cycle-recover/1` (#2596, a logged runtime policy adopted at boot after
+`cede-passage/1`; history before it replays without it), a cycle that has stood unchanged for `CYCLE_RECOVER_TICKS` (60
+ticks, 3 s) rarely clears by itself (in the 12-variant fire-ring jam, one did, at 70 ticks), so its members request that
+attempt then; the report still waits for `DEADLOCK_TICKS`. Every action's recovery hook (walks, carries, rides) and the
+`SequenceRunner`'s exhausted-wait timer move with it for cycles. For a walker in a
+two-body cycle (one waits at its walk's end for the other to leave its spot, the other for it to get out of the way, or
+two face to face) that routing round the other does not break, one of the pair steps aside to the nearest free spot clear
+of the other's way, as an entity world's face-off does, and walks on once the other has passed (`deadlock.stepped-aside`):
+the one at the end of its walk first, since it comes back to the same spot. The detector never forces a release.
+`SequenceRunner` returns `blocked` early only when every live action certifies its movers exhausted and no future cue or
+timeout could change that; it does not settle the blocked actions, and `execute` refuses to commit the unsettled result.
+
+## Stall releases upstairs
+
+The edge stall guard (`apps/server/src/edge/ledger/stall-guard.ts`) releases a body whose hold stopped making progress
+(engine `stallReleaseV1`, folded from the logged `edge-stop`). Upstairs, body-step-guard/1 stands it on the nearest clear
+spot of its own floor within 2 m. With nothing clear there it used to stand the body where it was, which for a walk stuck
+cancelling mid-flight is off any floor (#447: the next tick faulted `collision.human-static`). Under
+`stallReleaseSupportV1` (stall-release-support/1, prospective, hashed; every world adopts it at boot) it then goes to the
+nearer clear landing of the flight its walk is on, on that landing's level; with neither, nothing is released: the body
+stays in its native hold and the guard tells the owner once (`stall.no-floor-spot`). This is a logged set-down of at most
+a flight's length, the stall guard's sanctioned release, never a respawn. Histories before the policy replay as before.
 
 ## Live stair-link changes
 
@@ -106,6 +144,19 @@ climber resumes when the landing clears. A body on the destination level can sti
 whose last stretch runs under that floor (the commons deck's front flight): neither walk avoidance nor the invariant
 sees the climber there until it changes level. Carry climbs keep the direction-only check. The policy is prospective. Edge worlds log it at startup (`operator:stair-landing-clearance`)
 after the other stair-traffic rules, except the Little Martians worlds. History before that event replays the old rule.
+
+The `2r − 0.02` ellipsoid weights height by half, so on a steep or turning flight a follower could close to about 0.99 m
+under a climber waiting ahead, at about 0.2 m across. `collision.human-human` flags that pair, and hold-settle/1 then
+settled the follower off the flight. Under the runtime policy `climb-spacing/1` (`climbSpacingV1`, #1530),
+`stairBlocker` also refuses any climbing step that the invariant's own read would flag against a body of the same level
+id: within 1.0 m in height and horizontally closer than the two radii less 0.08 m, with a 2 cm margin. The only
+exception is a step that widens the horizontal gap between two bodies the invariant already flags. A step from just
+outside the height band into it is refused, however the gap moves. The follower waits behind (`climb-wait`), and a way
+that never clears ends its walk by the usual blocked-walk bound. Under the same policy a stopped (cancelled) climb backing
+off to its landing asks an idle body standing on that landing's floor, which holds its last step, to make way, as
+`stair-landing-clearance/1` does for the landing itself. So a climber with a body at the stair foot behind it can still
+step off and walk again. Edge worlds log the policy at startup, last (`operator:climb-spacing`); history before that
+event replays the old rule.
 
 ## Approximations
 

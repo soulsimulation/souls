@@ -4,11 +4,11 @@
 // bucket under contention (`soul.slow-down`); a job whose deadline passes is answered `world.busy` unrun, and a job
 // whose client went away is dropped. It queues, delays and refuses; it never chooses or retries an act for a Soul.
 import {createHash} from 'node:crypto';
+import {performance as perf} from 'node:perf_hooks';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
-import {apiRoute, handlerMsOf, recordApi} from './api-times.ts';
-import {noteAnswer} from './stall-log.ts';
+import {actPartsOf, actTiming, apiRoute, handlerMsOf, newActTiming, recordApi, recordCharge, type ActTiming} from './api-times.ts';
 import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
@@ -30,7 +30,6 @@ export function classify(method: string, path: string): RouteClass | null {
     // `around` explores: it records the places found and invalidates menus (around.ts), so it is a write (C1), not a read
     if (method === 'GET' && path === '/v1/edge/around') return {cls: 'C1', id: 'edge:around', god: false, deadlineMs: C1_MS};
     if (method === 'GET' && (m = EDGE_READ.exec(path))) return {cls: 'C2', id: 'edge:' + m[1].replace(/\/.*/, '/:id'), god: false, deadlineMs: C2_MS};
-    if (method === 'POST' && path === '/v1/edge/resolve') return {cls: 'C2', id: 'edge:resolve', god: false, deadlineMs: C2_MS};
     if (method !== 'GET' && (m = EDGE_WRITE.exec(path))) return {cls: 'C1', id: 'edge:' + m[1].replace(/\/[^/]+/, '/:id'), god: false, deadlineMs: C1_MS};
     return null;
   }
@@ -75,7 +74,55 @@ export type Ticket = {refusal: Refusal} | {turn: Promise<'run' | 'dropped' | Ref
 
 export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>;
   /** The quiet tick ms (default: the monitor's, from the process's shared numbers, S.quietTickMs). */
-  quietTickMs?: () => number};
+  quietTickMs?: () => number;
+  /** #2440: monotonic ms of completed ticks (default: the monitor's, S.tickSpentMs). */
+  tickSpentMs?: () => number;
+  /** #2440: the share of the recent loop time the thread sat idle, 0..1 (default: event-loop utilization over the last
+   *  ~250-500 ms; with an injected clock, 0: a test's fake time has no real loop to measure). */
+  idleShare?: () => number;
+  /** #2440: the tick service over the last 5 s, 0..1 (default: the monitor's, S.service5s; with an injected clock, 1). */
+  tickService?: () => number;
+  /** #2440 review: the heap's used share of its limit, 0..1 (default: the monitor's, S.heapUsedMb / S.heapLimitMb; with an
+   *  injected clock, 0). */
+  heapFrac?: () => number;
+  /** #2440: the ticks are on time right now: the 1 s tick service is at least SPARE_SERVICE_1S and the last tick is under
+   *  SPARE_TICK_AGE_MS old while the clock owes ticks (default: the monitor's S.service1s, S.tickAt, S.stallMs; with an
+   *  injected clock, true). */
+  ticksOnTime?: () => boolean;
+  /** #2416: this world's API times (default: the program's, for tests). */
+  api?: Float64Array;
+  /** #2416, #2470: this world's shared load numbers, which its monitor writes (default: the program's, for tests). The
+   *  #2440 signals above read their defaults from it, never from another world's. */
+  shared?: Float64Array};
+/** #2440: spare time. While the loop has been idle at least this share of the last ~250-500 ms, requests are not held
+ *  for the frame credit or a Soul's bucket: the thread has room, so a queued act runs now instead of waiting for a
+ *  budget sized for a busy world. Below it (the thread genuinely full) the credit and the buckets bind as before, and
+ *  black never runs requests. The reserve keeps a fifth of the thread for the tick's own peaks, and spare time needs the
+ *  ticks served (5 s tick service >= SPARE_SERVICE, amber's own leave band): a burst that idles the loop between long
+ *  jobs yet lets ticks fall behind is held to the budgets (the harsh eval-load arm: service 0.66-0.76 for ~30 s without it). */
+export const SPARE_IDLE = 0.2, SPARE_SERVICE = 0.9, IDLE_WINDOW_MS = 250;
+/** #2440 review: spare time also needs the heap below red's own threshold (monitor.ts: red above 0.85): a world red for
+ *  heap with an idle loop and light GC must not admit unbudgeted, allocating requests. */
+export const SPARE_HEAP = 0.85;
+/** #2440: and the ticks on time now, not only over 5 s: spare time must never cost world time (at 100 Souls the 5 s gate
+ *  alone let the candidate serve 10-15 % fewer ticks than base). */
+export const SPARE_SERVICE_1S = 0.98, SPARE_TICK_AGE_MS = 100;
+/** #2440: the monitor's view of the ticks right now (before its first sample, on time). A clock that owes no ticks
+ *  (paused, stopped, rate 0: stallMs 0) is on time. */
+export function ticksOnTimeNow(a: Float64Array = sharedLoad, now = Date.now()): boolean {
+  if (!(a[S.sampledAt] > 0)) return true;
+  if (a[S.service1s] < SPARE_SERVICE_1S) return false;
+  return !(a[S.stallMs] > 0) || !(a[S.tickAt] > 0) || now - a[S.tickAt] < SPARE_TICK_AGE_MS;
+}
+/** The loop's idle share over the last IDLE_WINDOW_MS or more (event-loop utilization), refreshed when asked. */
+export function loopIdle(): () => number {
+  let prev = perf.eventLoopUtilization(), at = perf.now(), idle = 0;
+  return () => {
+    const now = perf.now(); if (now - at < IDLE_WINDOW_MS) return idle;
+    const cur = perf.eventLoopUtilization(); idle = 1 - perf.eventLoopUtilization(cur, prev).utilization; prev = cur; at = now;
+    return idle;
+  };
+}
 export class Admission {
   level: Level = 'green';
   readonly queue: Job[] = [];
@@ -89,6 +136,10 @@ export class Admission {
    *  budget, and every job's measured time is debited, so a job longer than the budget is paid back by the frames
    *  after it. Whatever the sum of the per-Soul budgets, requests never take more than budget/50 of the thread. */
   private credit = FRAME_BUDGET_MS.green; private creditAt = 0;
+  /** #2440: spare time's own credit: it accrues only from the idle share above the reserve (SPARE_IDLE), at most one
+   *  frame, and pays what a job run on spare time took past the frame credit, so spare time uses the idle thread and
+   *  keeps the reserve free for the tick and the bookkeeping calls (#1750 A4) instead of running acts back to back. */
+  private spareCredit = 0; private spareAt = 0;
   /** Per principal: strike times, the cool-down's end, and when the Retry-After it was last given elapses (retryUntil). */
   private strikes = new Map<string, Strikes>();
   private share = {god: 0, souls: 0};   // decaying ms spent, for the god's reserve
@@ -96,7 +147,24 @@ export class Admission {
   private now: () => number;
   private o: AdmissionOpts;
   private quietTick: () => number;
-  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]); }
+  private tickSpent: () => number;
+  private idleShare: () => number;
+  private tickService: () => number;
+  private heapFrac: () => number;
+  private ticksOnTime: () => boolean;
+  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); const a = o.shared ?? sharedLoad; this.quietTick = o.quietTickMs ?? (() => a[S.quietTickMs]);
+    this.tickSpent = o.tickSpentMs ?? (() => a[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle());
+    // the tick service is 1 until the monitor's first sample
+    this.tickService = o.tickService ?? (o.now ? () => 1 : () => a[S.sampledAt] > 0 ? a[S.service5s] : 1);
+    this.heapFrac = o.heapFrac ?? (o.now ? () => 0 : () => a[S.heapLimitMb] > 0 ? a[S.heapUsedMb] / a[S.heapLimitMb] : 0);
+    this.ticksOnTime = o.ticksOnTime ?? (o.now ? () => true : () => ticksOnTimeNow(a)); }
+  /** #2440: the world is green, the thread has spare time (SPARE_IDLE), its ticks are served (SPARE_SERVICE over 5 s, on
+   *  time now) and the heap is below red's (SPARE_HEAP): queued requests are not held for budget. Never at amber, red or
+   *  black: with spare time at amber and red, 100 Souls on a 2-core world served 4-15 % fewer ticks than without. */
+  spare() { return this.level === 'green' && this.heapFrac() < SPARE_HEAP && this.tickService() >= SPARE_SERVICE && this.ticksOnTime() && this.idleShare() >= SPARE_IDLE; }
+  /** #2416: this world's stall log hears each answer (set by startWorld when the log runs). */
+  onAnswer?: (route: string, t0: number, t1: number) => void;
+  get api(): Float64Array | undefined { return this.o.api; }
   /** This level's frame budget (request ms per 50 ms frame), calibrated from the measured quiet tick (frameBudgetMs). */
   frameBudget(level: Level = this.level) { return frameBudgetMs(level, this.quietTick()); }
 
@@ -106,6 +174,9 @@ export class Admission {
   /** Principals (Souls + god) with a heavy request in the last minute: the `awake` of the refill formula. */
   active() { const now = this.now(); let n = 0; for (const b of this.buckets.values()) if (now - b.seen < ACTIVE_MS) n++; return Math.max(1, n); }
   estimate(id: string) { return this.est.get(id) ?? DEFAULT_EST_MS; }
+  /** What a principal's bucket must hold to be served under contention: the route estimate, but never more than a
+   *  bucket can hold (#2080: one cold 2.1 s act set the estimate above capacity, and no contended act could run again). */
+  private need(id: string) { return Math.min(CAPACITY_MS, this.estimate(id)); }
   /** Refill of one principal's bucket, ms per s. A Soul: min(200, 20 × frameBudget / awake), so the Souls' buckets together
    *  refill at the frame budget's own throughput (20 frames/s × budget ms) and a crowd never earns more than the dispatcher
    *  can serve (srv-admission-calib: the old 500/awake × {1, .5, .25} was the laptop's green budget at every box). The god:
@@ -142,13 +213,13 @@ export class Admission {
     const b = this.bucket(r.key, r.god, now); b.seen = now;
     const est = this.estimate(r.route.id);
     if (read && this.level === 'black') { this.shed.reads++; return this.told(r.key, r.god, now, busyRefusal(this.level)); }
-    if (read && b.tokens < est && this.contended(r.key)) {
+    if (read && b.tokens < this.need(r.route.id) && this.contended(r.key) && !this.spare()) {
       // §2b strike only for an impolite request: one that came back before the Retry-After it was last given had
       // elapsed. A Soul that waited and is still over budget is refused again with a Retry-After, but not struck
       // (eden2, 2026-10-31: honest Souls collected 3 strikes and a 60 s cool-down, 45-59 % of all read wall time)
       this.shed.slow++; this.shed.reads++; if (this.impolite(r.key, now)) this.strike(r.key, r.god, 'slow', now);
       const rate = this.refill(r.god);
-      return this.told(r.key, r.god, now, {status: 429, code: 'soul.slow-down', retryAfterS: Math.min(COOL_MS / 1000, Math.max(1, Math.ceil((est - b.tokens) / Math.max(rate, 1e-6) / 1000))), message: 'this Soul has asked for a lot in a short time; the world can answer it again shortly'});
+      return this.told(r.key, r.god, now, {status: 429, code: 'soul.slow-down', retryAfterS: Math.min(COOL_MS / 1000, Math.max(1, Math.ceil((this.need(r.route.id) - b.tokens) / Math.max(rate, 1e-6) / 1000))), message: 'this Soul has asked for a lot in a short time; the world can answer it again shortly'});
     }
     const deadline = now + Math.min(r.route.deadlineMs, r.hintMs && r.hintMs > 0 ? r.hintMs : Infinity);
     // a read that cannot start before its deadline (the time already queued, paid at the frame budget) is answered now,
@@ -170,20 +241,29 @@ export class Admission {
     // amber (a boot or creation spike still stepping down) is not slowed; red/black always queue (budgets bind).
     // Charged when it answers.
     if (!this.queue.length && !this.draining && this.outstanding.size === 1 && (this.level === 'green' || this.level === 'amber') && this.creditNow(now) > 0) {
-      settle('run'); ranAt = now;
-      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, this.now() - now, now); finish(); this.kick(); }};
+      settle('run'); ranAt = now; const ticks = this.tickSpent();
+      // #2440 review: as in the dispatcher, the ticks that ran while the job was timed are the tick's, not the job's
+      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now); finish(); this.kick(); }};
     }
     this.queue.push(job); this.kick();
     return {turn, waitedMs: () => (ranAt || this.now()) - now, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
   }
 
+  private spareNow(now: number) {
+    this.spareCredit = Math.min(FRAME_MS, this.spareCredit + Math.max(0, now - this.spareAt) * Math.max(0, this.idleShare() - SPARE_IDLE)); this.spareAt = Math.max(this.spareAt, now);
+    return this.spareCredit;
+  }
   private creditNow(now: number) { const budget = this.frameBudget(); this.credit = Math.min(budget, this.credit + (now - this.creditAt) * budget / FRAME_MS); this.creditAt = now; return this.credit; }
   /** Debit a job's measured time: the world credit, the god/Souls shares, the principal's bucket, the route estimate. */
-  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number) {
-    this.creditNow(startedAt); this.credit -= ms; this.spentMs += ms;
+  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number, free = false, onSpare = false) {
+    // #2440: a job run on spare time (the frame credit spent) is paid from the spare credit and leaves the frame credit no
+    // debt: once the thread is busy again, the budgets start from even, not from the idle time the requests used meanwhile
+    if (onSpare) { this.spareNow(startedAt); this.spareCredit -= ms; } else { this.creditNow(startedAt); this.credit -= ms; }
+    this.spentMs += ms;
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
-    const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms;
+    const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms; if (free) b.tokens = Math.max(0, b.tokens);
     const e = this.est.get(id); this.est.set(id, e === undefined ? ms : e * 0.8 + ms * 0.2);
+    if (id === 'edge:act') recordCharge(ms, this.o.api);   // #2508: the act meter's check against admission's own count
   }
   /** §2b cool-down: over budget impolitely 3× (or 20 refusals for overlapping requests) in a minute → 60 s of slow-down.
    *  The god is never cooled (it is never starved; its share is the reserve). */
@@ -217,16 +297,19 @@ export class Admission {
   }
   /** Next job: writes before reads, FIFO across Souls (each Soul has at most one), the god's reserve under contention. */
   private pick(now: number): number {
-    const godTurn = this.share.god <= GOD_SHARE * (this.share.god + this.share.souls);
+    const godTurn = this.share.god <= GOD_SHARE * (this.share.god + this.share.souls), spare = this.spare();
     let best = -1, bestScore = Infinity;
     for (let i = 0; i < this.queue.length; i++) {
-      const j = this.queue[i];
+      const j = this.queue[i]; let over = false;
       if (j.route.cls === 'C1') {
         if (this.level === 'black') continue;   // black: budget 0; acts wait for their deadline answer
         const b = this.bucket(j.key, j.god, now);
-        if (b.tokens < this.estimate(j.route.id) && this.contended(j.key)) continue;   // short of budget: the act waits
+        if (b.tokens < this.need(j.route.id) && this.contended(j.key)) {
+          if (!spare) continue;   // short of budget: the act waits (#2440: unless the thread has spare time)
+          over = true;   // #2440: on spare time it still runs, but after every Soul within its budget (a flood never queues ahead of bystanders)
+        }
       }
-      const score = (j.route.cls === 'C1' ? 0 : 1e12) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
+      const score = (j.route.cls === 'C1' ? 0 : 1e12) + (over ? 1e10 : 0) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
       if (score < bestScore) { bestScore = score; best = i; }
     }
     return best;
@@ -246,13 +329,27 @@ export class Admission {
         let now = this.now();
         this.sweep(now);
         const budget = this.frameBudget();
-        if (this.creditNow(now) <= 0) { this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
+        const free = this.spare();
+        if (!free) this.spareAt = now;   // spare time accrues only while there is spare time
+        const onSpare = this.creditNow(now) <= 0;
+        if (onSpare && !(free && this.spareNow(now) > 0)) {
+          const creditMs = budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS, rate = this.idleShare() - SPARE_IDLE;
+          this.later(free && rate > 0 ? Math.min(creditMs, FRAME_MS, -this.spareCredit / rate + 1) : creditMs); return;
+        }
         const i = this.pick(now);
         if (i < 0) { this.later(FRAME_MS); return; }
-        const [j] = this.queue.splice(i, 1);
+        const [j] = this.queue.splice(i, 1), ticks = this.tickSpent();
         j.settle('run');
         await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
-        this.charge(j.key, j.god, j.route.id, this.now() - now, now);
+        // #2440: the turn waited on spans the next loop pass, whose timers phase runs the tick (and its long holds): those
+        // are the tick's, not this job's (charged, they cost the requests ~20 s of credit after a 3 s hold)
+        this.charge(j.key, j.god, j.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now, free, onSpare);
+        // #2440: on spare time no credit spaces the jobs, and a job that finished inside its turn resumes this loop in the
+        // same check phase: without a turn of the loop between them, a queue of acts ran back to back and held the C0
+        // bookkeeping routes (#1750 A4: receipt p95 265 ms against 50). Let the poll phase in before the next one: a 1 ms
+        // timer, so the poll waits for a call already on its way, then the check phase, so the timers due in that pass
+        // (a long poll's return) run before the next act, not after it.
+        if (free && this.queue.length && !this.o.yieldTurn) await new Promise<void>(r => setTimeout(() => setImmediate(r), 1));
       }
     } finally { this.draining = false; }
   }
@@ -299,11 +396,20 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
   // #1750 A2: and the same two numbers go into the route's histograms (api-times.ts), for /healthz and live.json
   // A serving-warm wait (http.ts servingWait, before this middleware) is part of the world's time and of the wait:
   // `warm;dur`, counted in `world` and in the route's queue time
-  const timed = (c: Context, t0: number, queued = 0) => {
+  // #1944 A1: an act whose handler ran (`act`: its marks, actTiming) also says its parts after admission, which sum with
+  // `queue` to `world` (less `warm`): handler, wait, commit; and inside handler, bind, check and the route searches that
+  // missed the per-epoch memo (`route-miss;desc=<n>`)
+  const timed = (c: Context, t0: number, queued = 0, act?: ActTiming) => {
     const warm = Number((c.get as (k: string) => unknown)(WARM_WAIT_KEY)) || 0, ms = performance.now() - t0;
-    c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}`);
+    const p = act ? actPartsOf(act, t0 + queued, t0 + ms) : undefined;
+    c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}${p ? `, handler;dur=${p.handler.toFixed(1)}, wait;dur=${p.wait.toFixed(1)}, commit;dur=${p.commit.toFixed(1)}, bind;dur=${p.bind.toFixed(1)}, check;dur=${p.check.toFixed(1)}, route-miss;desc=${p.routeMisses}` : ''}`);
     const route = apiRoute(c.req.method, c.req.path);
-    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k))); noteAnswer(route, t0 + queued, t0 + ms); }
+    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k)), undefined, adm.api, p); adm.onAnswer?.(route, t0 + queued, t0 + ms); }
+  };
+  /** The handler, inside an act's timing scope when it is POST /v1/edge/act (one lookup otherwise). */
+  const run = (c: Context, next: () => Promise<void>): {act?: ActTiming; done: Promise<void>} => {
+    if (c.req.method !== 'POST' || c.req.path !== '/v1/edge/act') return {done: next()};
+    const act = newActTiming(); return {act, done: actTiming.run(act, next)};
   };
   return async (c, next) => {
     const path = c.req.path, edge = path.startsWith('/v1/edge/') || path.startsWith('/v1/god/') || path.startsWith('/v1/world/');
@@ -313,8 +419,8 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     const r = classify(c.req.method, path), token = bearer(c);
     // admitted already by the MessagePort front end (a read worker's forward, admissionPort below); the env is set
     // only by an in-process app.fetch, never by a client
-    if ((c.env as {simAdmitted?: boolean} | undefined)?.simAdmitted === true) { await next(); stamp(c, lv, token); timed(c, t0); return; }
-    if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { await next(); stamp(c, lv, token); timed(c, t0); return; }
+    if ((c.env as {simAdmitted?: boolean} | undefined)?.simAdmitted === true) { const h = run(c, next); await h.done; stamp(c, lv, token); timed(c, t0, 0, h.act); return; }
+    if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { const h = run(c, next); await h.done; stamp(c, lv, token); timed(c, t0, 0, h.act); return; }
     // waking limit (dark): a Soul waiting its turn has its acts answered world.crowded; its reads still answer
     const line = r.cls === 'C1' && !r.god ? crowded?.(token) : null;
     if (line) { adm.refused('soul:' + token, false, 'world.crowded', Math.max(1, Math.min(line.eta_s, 60))); stamp(c, lv, token); timed(c, t0); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
@@ -332,8 +438,9 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (v === 'dropped') return c.body(null, 499 as never);
     if (v !== 'run') return refuse(v);
     const queued = t.waitedMs();
-    try { await next(); } finally { t.done(); }
-    stamp(c, lv, token); timed(c, t0, queued);
+    let act: ActTiming | undefined;
+    try { const h = run(c, next); act = h.act; await h.done; } finally { t.done(); }
+    stamp(c, lv, token); timed(c, t0, queued, act);
   };
 }
 

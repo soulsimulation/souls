@@ -34,6 +34,9 @@ present the work as based on main.
 
 ## 1. Acceptance before the first edit
 
+A task issue dispatched by a coordinator already carries its Acceptance, Touches and ceiling. Copy the acceptance
+as written; do not rewrite it, add to it or widen it. The rest of this section is for issues that have none.
+
 Read the issue (`gh api repos/$REPO/issues/$N --jq .body`). Its **Acceptance criteria** must be pass/fail
 statements someone else can check, one box each, with ids (`- [ ] **A1** ...`). Where they are missing or vague,
 write them now, before you touch code, and put them in the issue: edit the body's Acceptance section

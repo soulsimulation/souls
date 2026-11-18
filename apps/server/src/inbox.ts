@@ -29,7 +29,9 @@ export type Ticket = InboxMessage & {focus?: TicketFocus; touched?: number};
 export type Presence = 'listening' | 'working' | 'recent' | 'away';
 /** `listenedAt`: a God's last poll start; a Soul's last open/close (now while open). Both durable; null = never.
  *  God lease deadlines let the owner page expire stale responses without confusing listening with command work. */
-export type InboxView = {connected: boolean; lastSeenAt: number | null; listenedAt?: number | null; listenerExpiresAt?: number | null; workingUntil?: number | null; latest: InboxMessage | null; queued?: number; presence?: Presence; log?: Ticket[]};
+/** `waiting` (a Soul's box, #2452): the ids of the messages not acknowledged, oldest first, so its client leaves out of its
+ *  waiting line the ones its agent already holds. */
+export type InboxView = {connected: boolean; lastSeenAt: number | null; listenedAt?: number | null; listenerExpiresAt?: number | null; workingUntil?: number | null; latest: InboxMessage | null; queued?: number; waiting?: string[]; presence?: Presence; log?: Ticket[]};
 type QRow = {n: number; id: string; text: string; sent_at: number; delivered_at: number | null; acknowledged_at: number | null; reply: string | null; outcome: Outcome | null; touched: string | null; focus: string | null; result: string | null; result_by?: string | null; result_at: number | null; progress?: string | null};
 export const INBOX_CONNECTED_MS = 120_000;
 export const INBOX_TEXT_MAX = 1000;
@@ -158,7 +160,8 @@ export class AgentInbox {
   view(s: InboxScope): InboxView {
     const {lastSeenAt, listenedAt} = this.seen(s), head = this.head(s), shown = head ?? this.newest(s), presence = this.presence(s, lastSeenAt, listenedAt, head);
     const listened = this.god(s) ? {listenedAt, ...this.godLeases(lastSeenAt, listenedAt, head)} : {listenedAt: this.listeners.get(this.key(s)) ? this.now() : listenedAt};
-    return {connected: presence !== 'away', lastSeenAt, ...listened, latest: shown ? this.message(shown) : null, queued: head ? this.waiting(s) : 0, presence};
+    const ids = head && !this.god(s) ? this.all(s, 'AND acknowledged_at IS NULL ORDER BY n').map(r => r.id) : null;
+    return {connected: presence !== 'away', lastSeenAt, ...listened, latest: shown ? this.message(shown) : null, queued: ids ? ids.length : head ? this.waiting(s) : 0, ...(ids ? {waiting: ids} : {}), presence};
   }
   /** #1278: messages acked with no result yet, newest first: a request another harness can finish. `latest` can't show them once a newer one comes. */
   unfinished(s: InboxScope) { return this.all(s, 'AND acknowledged_at IS NOT NULL AND outcome IS NULL AND result IS NULL ORDER BY n DESC LIMIT ?', UNFINISHED_VIEW).map(r => ({id: r.id, text: r.text})); }

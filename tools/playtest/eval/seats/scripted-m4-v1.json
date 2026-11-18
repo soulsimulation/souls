@@ -1,0 +1,158 @@
+{
+ "adapter": "scripted-owner",
+ "note": "$0 dry run of battery m4-v1 through the new client's look/find/act, one rule per instruction, looking before it finds as the skill's loop does. It proves the measuring, not an agent.",
+ "script": {
+  "rules": [
+   {
+    "match": "^Walk to the bandstand",
+    "do": [
+     [
+      "act",
+      "walk:eden-bandstand",
+      "--wait",
+      "60"
+     ]
+    ]
+   },
+   {
+    "match": "^Sit down\\.?$",
+    "do": [
+     [
+      "act",
+      "sit-ground:here"
+     ]
+    ]
+   },
+   {
+    "match": "^Go to the windmill, then sit",
+    "do": [
+     [
+      "plan",
+      "[\"walk:eden-windmill\",\"sit-ground:here\"]",
+      "--for",
+      "{id}"
+     ]
+    ]
+   },
+   {
+    "match": "^(Go|Fly) to the windmill",
+    "do": [
+     [
+      "act",
+      "walk:eden-windmill",
+      "--wait",
+      "60"
+     ]
+    ]
+   },
+   {
+    "match": "^Go somewhere to eat",
+    "do": [
+     [
+      "look"
+     ],
+     [
+      "find",
+      "eat",
+      "--verb",
+      "eat"
+     ],
+     [
+      "act",
+      "{{prev.found[0].act}}"
+     ]
+    ]
+   },
+   {
+    "match": "^Go to the library and read",
+    "do": [
+     [
+      "look"
+     ],
+     [
+      "find",
+      "read",
+      "--verb",
+      "read",
+      "--in",
+      "eden-library-1"
+     ],
+     [
+      "act",
+      "{{prev.found[0].act}}"
+     ]
+    ]
+   },
+   {
+    "match": "^Sit on a bench",
+    "do": [
+     [
+      "look"
+     ],
+     [
+      "find",
+      "bench"
+     ],
+     [
+      "act",
+      "{{prev.found[0].act}}"
+     ]
+    ]
+   },
+   {
+    "match": "^Play some music",
+    "do": [
+     [
+      "look"
+     ],
+     [
+      "find",
+      "music",
+      "--verb",
+      "play-music"
+     ],
+     [
+      "act",
+      "{{prev.found[0].act}}"
+     ]
+    ]
+   },
+   {
+    "match": "^Walk to the fire circle",
+    "do": [
+     [
+      "act",
+      "walk:place-social-eden-fire-circle",
+      "--wait",
+      "60"
+     ]
+    ]
+   },
+   {
+    "match": "^What is on in the next hour",
+    "do": [
+     [
+      "whatson",
+      "--hours",
+      "1"
+     ],
+     [
+      "calendar",
+      "interest",
+      "{{prev.on[0].id}}"
+     ]
+    ]
+   },
+   {
+    "match": "^Go into the West Lake",
+    "do": [
+     [
+      "act",
+      "walk:land-west-lake"
+     ]
+    ]
+   }
+  ],
+  "unmatched": "No scripted response."
+ }
+}

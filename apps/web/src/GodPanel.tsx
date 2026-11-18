@@ -154,7 +154,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   // Lane HF (Gene 2026-10-20): the approval stays on screen and on top for everyone, the god included, whatever loads or
   // settles later (Clerk, the god's status, God Mode, the arrival), until approved, refused or closed. Closing drops the link.
   // Lane PUX: a request the person's agent addressed to this window (its window code) shows here too, with no navigation.
-  const waiting = useWindowApprovals(signedIn && session.mode !== 'dev');
+  const waiting = useWindowApprovals(signedIn && session.mode !== 'dev', true);   // #2245: with login and retire requests
   const [windowId, setWindowId] = useState<string | null>(null);
   useEffect(() => { if (!windowId) setWindowId(pickWindowApproval(waiting, closedApprovals())); }, [waiting, windowId]);
   const shownId = approvalId ?? windowId;
@@ -257,9 +257,9 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     )}
     {note && <p className={'gm-banner gm-note ' + (note.bad ? 'gp-bad' : 'gp-ok')} role="status">{note.text}</p>}
   </>;
-  // until the agent is connected (never paired, or paired and away): the one line to give it, naming this world's skill
+  // until the agent is connected (never paired, paired and away, or its inbox not known yet): the gateway, naming this world's skill
   const connected = !!god.inbox?.connected;
-  const connectUrl = !agentsPaired || (god.inbox && !connected) ? `${status.base || location.origin + apiPath('')}/SKILL.md` : null;
+  const connectUrl = !agentsPaired || !connected ? `${status.base || location.origin + apiPath('')}/SKILL.md` : null;
   const tools = <>
     <div className="gm-tool-group" role="group" aria-label="Undo and redo">
       <button type="button" className="gm-tool" data-undo="1" disabled={!canUndo || !!busy} onClick={() => undoRedo('undo')} title="Undo the newest edit">{UNDO}Undo</button>

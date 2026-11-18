@@ -40,18 +40,18 @@ test('hand-operated fire and festoon lights: words, contact, refusal, interrupti
  assert.ok(edge.capabilities(soul).some(c=>c.id===`object:${id('lights')}:switch-on`)&&contact('lights','switch-on'),'string lights offer a hand switch');
  const act=async(words,accepted=true)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:words})}));const b=await r.json();assert.equal(b.accepted,accepted,words+' '+JSON.stringify(b).slice(0,300));return b;};
  const finish=async(r,name,want,limit=600)=>{let contact=false,early=false;for(let n=0;n<limit;n++){const m=body().human?.handActuator;if(m){contact=true;if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<0.6&&state(name).on===want)early=true;}const ph=edge.receipt(soul.soulId,r.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {contact,early,phase:edge.receipt(soul.soulId,r.receipt.id).phase};};
- await act('put out the candle',false);
+ await act(`object:${id('candle')}:put-out`,false);
  // interruption before contact: nothing changes
- const cut=await act('light the campfire');for(let n=0;n<400&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('campfire').on,false,'interrupted before contact: the fire stays out');
+ const cut=await act(`object:${id('campfire')}:light`);for(let n=0;n<400&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('campfire').on,false,'interrupted before contact: the fire stays out');
  const results={};
- for(const [name,words,want] of [['candle','light the candle',true],['lights','switch on the string lights',true],['campfire','light the campfire',true],['candle','put out the candle',false],['campfire','put out the campfire',false],['lights','switch off the string lights',false],['campfire','light the campfire',true]]){
+ for(const [name,words,want] of [['candle',`object:${id('candle')}:light`,true],['lights',`object:${id('lights')}:switch-on`,true],['campfire',`object:${id('campfire')}:light`,true],['candle',`object:${id('candle')}:put-out`,false],['campfire',`object:${id('campfire')}:put-out`,false],['lights',`object:${id('lights')}:switch-off`,false],['campfire',`object:${id('campfire')}:light`,true]]){
   const r=await act(words);assert.match(r.receipt.capability,new RegExp(`object:${id(name)}:${name==='lights'?(want?'switch-on':'switch-off'):(want?'light':'put-out')}$`),words+' resolved to '+r.receipt.capability);
   assert.notEqual(state(name).on,want,'admission changes nothing remotely');const x=await finish(r,name,want);
   assert.equal(x.phase,'completed',JSON.stringify(edge.receipt(soul.soulId,r.receipt.id)).slice(0,400));assert.ok(x.contact,'actual hand contact ran');assert.equal(x.early,false,'nothing changes before contact');assert.equal(state(name).on,want);
   const e=god.model.get(name),wp=god.model.worldPose(e),p=body().pose.p;x.standFromCentre=+Math.hypot(p[0]-wp.x,p[2]-wp.z).toFixed(2);results[`${Object.keys(results).length+1}:${words}`]=x;
   assert.equal(body().human?.handActuator,undefined);
  }
- assert.ok(results['3:light the campfire'].standFromCentre>0.85+0.28,'crouches outside the stone ring');
+ assert.ok(results[`3:object:${id('campfire')}:light`].standFromCentre>0.85+0.28,'crouches outside the stone ring');
  for(const n of ['core/candle@1','core/campfire@1'])assert.ok(!contact(n,'light')&&!contact(n,'put-out'),n+' keeps its remote toggle');
  for(const [n,a,b] of [['candle','light','put-out'],['lights','switch-on','switch-off'],['campfire','light','put-out']])assert.ok(contact(n,a)&&contact(n,b),n+' is a hand contact');
  const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.equal(restored.get('campfire').state.on,true);assert.equal(restored.get('candle').state.on,false);

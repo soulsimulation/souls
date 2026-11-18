@@ -34,7 +34,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 jobs:
   proof-ok:
-    if: github.event_name == 'merge_group' || github.event.pull_request.draft == false
+    # An edit to a closed PR (a link fixed long after the merge) has nothing left to prove.
+    if: github.event_name == 'merge_group' || (github.event.pull_request.draft == false && (github.event.action != 'edited' || github.event.pull_request.state == 'open'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

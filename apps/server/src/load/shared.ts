@@ -2,7 +2,8 @@
 // One small Float64Array over a SharedArrayBuffer. The main thread writes it every 250 ms (monitor.ts), on boot
 // milestones (boot-progress.ts) and, through the monitor, after ticks; the worker only reads it. A torn read of one
 // float is harmless here (each slot is an independent gauge), so there is no lock.
-import {attachBootSlots, BOOT_SLOT, readBootProgress} from './boot-progress.ts';
+import {attachBootSlots, BOOT_SLOT, BootProgress, readBootProgress} from './boot-progress.ts';
+import {newSharedApi} from './api-times.ts';
 export const LEVELS = ['green', 'amber', 'red', 'black'] as const;
 export type Level = typeof LEVELS[number];
 export type Phase = 'boot:restore' | 'boot:replay' | 'boot:projection' | 'boot:prepare' | 'serving' | 'stopping';
@@ -34,7 +35,16 @@ export const S = {
   tickAt: 31,      // epoch ms of the last completed tick (0 = none yet)
   stallMs: 32,     // the tick age past which the clock counts as stalled; 0 = it owes no ticks (paused, stopped, halted, rate 0)
   clockRate: 33, baseRate: 34,   // the effective clock rate (lower while dilated) and the rate an admin set
-  size: 35,
+  still: 35,       // #2303: 1 while the world is silent (still and unwatched): the watchdog writes live.json less often
+  // #2378 A2: the step a tick is in (written by the main thread, WorldHost.tickOnceInner): the listener's stable id + 1 (world.ts stepIdOf; 0 = none)
+  // and its tick. The watchdog's kill names it (live.json `killed.step`), so a restart loop is seen and that step quarantined.
+  stepTick: 36, step: 37,
+  // #2440: the ms of every completed tick so far (monotonic, monitor.ts tickDone): admission subtracts the ticks that ran
+  // while it timed a job, so a request is charged its own time, not the tick's
+  tickSpentMs: 38,
+  // #2440: the tick service over the last ~1 s (monitor.ts sample): spare time needs the ticks on time now, not 5 s ago
+  service1s: 39,
+  size: 40,
 } as const;
 
 export type LiveJson = {
@@ -53,6 +63,8 @@ export type LiveJson = {
   /** Stage B: the first read worker's port (the launcher routes C2 reads here); present only with read workers. */
   readPort?: number;
   read?: {ports: number[]; workers: number; lagGens: number; subset: boolean; routes: string[]};
+  /** #2378 A2: the step the main thread is in (a listener's afterTick at that tick); present only while it is in one. */
+  step?: {tick: number; id: number};
   /** The world's clock has stopped; present only then (#1150). */
   halted?: true;
   /** #1326: the clock owes ticks and none has completed for longer than its threshold; present only then. */
@@ -78,13 +90,21 @@ export function clockBlockOf(c: ClockState | null | undefined): {stalled: true; 
 }
 
 /** The routes a read worker answers itself, by mode (S.readMode): what the launcher may route to its port. */
-export const READ_ROUTES: Record<number, string[]> = {1: ['here', 'capabilities'], 2: ['here', 'observe', 'capabilities', 'resolve', 'view']};
+export const READ_ROUTES: Record<number, string[]> = {1: ['here', 'capabilities'], 2: ['here', 'observe', 'capabilities', 'view']};
 
 export const newSharedLoad = () => new Float64Array(new SharedArrayBuffer(S.size * Float64Array.BYTES_PER_ELEMENT));
-/** The process's one shared array (the watchdog gets this buffer). Tests make their own with newSharedLoad(). */
+/** The program's default array, for tests and tools. A started world has its own (newWorldLoad, #2416). */
 export const sharedLoad = newSharedLoad();
 sharedLoad[S.lastTurnAt] = Date.now();
 attachBootSlots(sharedLoad, S.boot);   // boot-progress.ts writes phase + replay progress straight into this buffer
+
+/** #2416: one world's load gauges: its shared numbers (live.json, the health checks and the watchdog read them), its
+ *  API times and its boot progress. Every world makes its own; two worlds in one program never share a gauge. */
+export type WorldLoad = {shared: Float64Array; api: Float64Array; boot: BootProgress};
+export function newWorldLoad(now = Date.now()): WorldLoad {
+  const shared = newSharedLoad(); shared[S.lastTurnAt] = now;
+  return {shared, api: newSharedApi(), boot: new BootProgress(shared, S.boot)};
+}
 
 function r1(x: number) { return Math.round(x * 10) / 10; }
 function r2(x: number) { return Math.round(x * 100) / 100; }
@@ -111,6 +131,7 @@ export function liveOf(a: Float64Array, pid: number, now: number): LiveJson {
     out.read = {ports, workers: a[S.readWorkers], lagGens: a[S.readLagGens], subset: mode === 1, routes: READ_ROUTES[mode] ?? []};
   }
   if (a[S.halted]) out.halted = true;
+  if (a[S.step] > 0) out.step = {tick: a[S.stepTick], id: a[S.step] - 1};   // #2378 A2
   if (a[S.rewinds]) out.rewinds = a[S.rewinds];
   return out;
 }

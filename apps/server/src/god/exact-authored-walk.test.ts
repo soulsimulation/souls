@@ -13,6 +13,7 @@ import {registerEdgeComms} from '../edge/comms/index.ts';
 import {edgeSoulResolver} from '../edge/routes.ts';
 import {readHumanCapabilitiesV1} from '../human-capabilities.ts';
 import type {EdgeSoul} from '../edge/contract.ts';
+import {menuStats,PLAN_ONCE,PLAN_ONCE_ORACLE} from '../edge/ledger/menu-stats.ts';
 
 async function setup(t:test.TestContext){
  const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();
@@ -81,10 +82,10 @@ test('default native fixture uses exact walk projection with capability/plan par
  assert.ok(admission.length>0);assert.ok(admission.every(label=>label===original.plan!.label),'ordinary native launch admission still executes');
  assert.deepEqual(out.receipt.chosen,{capability:'walk:eden-library-1',target:'g-eden-library-1',kind:'place',place:'g-eden-library-1'});
  const count=f.db.db.prepare('SELECT COUNT(*) n FROM edge_receipts_v1').get() as {n:number};
- edge.knowledge.setSecret('g-eden-library-1',true);edge.addCapabilityProvider(()=>{throw Error('replay must not discover capabilities');});
+ edge.addCapabilityProvider(()=>{throw Error('replay must not discover capabilities');});
  const replay=await edge.act(soul,{capability:'walk:eden-library-1',clientRef:'one-native-walk'});assert.equal(replay.accepted,true);if(replay.accepted)assert.equal(replay.receipt.id,out.receipt.id);assert.deepEqual(f.db.db.prepare('SELECT COUNT(*) n FROM edge_receipts_v1').get(),count,'replay creates no receipt');
  // The original full listing remains available, with unrelated offers intact.
- (edge as any).binds=binds;edge.knowledge.setSecret('g-eden-library-1',false);const all=edge.capabilities(soul);assert.ok(all.some(c=>c.verb==='read'));assert.ok(all.some(c=>c.verb==='sit'));assert.ok(all.length>20);
+ (edge as any).binds=binds;const all=edge.capabilities(soul);assert.ok(all.some(c=>c.verb==='read'));assert.ok(all.some(c=>c.verb==='sit'));assert.ok(all.length>20);
 });
 test('native exact walk selector reuses original anchor steps and skips unrelated native admission',async t=>{
  const {f,soul}=await setup(t),mind=f.host.minds.get(soul.soulId)!;
@@ -103,9 +104,8 @@ test('unknown profiles/providers, provider drift, aliases and parameter-bearing 
  const unknown=await setup(t);unknown.edge.addCapabilityProvider(()=>[]);assert.equal(unknown.sparse('walk:eden-library-1'),null);
  const before=unknown.full('walk:eden-library-1');const out=await accept(unknown.f.host,unknown.edge.act(unknown.soul,{capability:'walk:eden-library-1',params:{via:['field']}}));assert.equal(out.accepted,true,JSON.stringify(out));assert.ok(before.plan);
 });
-test('secret ancestors, inherited private room and coordinate construction closure cannot be bypassed',async t=>{
+test('inherited private room and coordinate construction closure cannot be bypassed',async t=>{
  const w=await setup(t),{edge,bridge,soul}=w;
- edge.knowledge.setSecret('g-eden-library-1',true);const secretRoom=bridge.nav.things().find(x=>x.ref.startsWith('eden-library-1/')&&x.kind==='room')!;assert.ok(secretRoom);assert.equal(w.sparse('walk:'+secretRoom.ref),null,'secret ancestor also hides exact child room');assert.equal(w.full('walk:'+secretRoom.ref).cap,undefined);assert.equal(w.sparse('walk:eden-library-1'),null);assert.equal(w.full('walk:eden-library-1').cap,undefined);edge.knowledge.setSecret('g-eden-library-1',false);
  const room=bridge.nav.things().find(x=>x.ref.startsWith('private-house/')&&x.kind==='room')!;assert.ok(room);
  for(const asked of ['walk:private-house','walk:'+room.ref]){assert.equal(w.sparse(asked),null);const b=w.full(asked);assert.equal(b.cap?.blocked?.code,'object.private');assert.equal(b.plan,undefined);}
  const active=bridge.layers.active.bind(bridge.layers),refuse=bridge.layers.constructionRefusal.bind(bridge.layers);bridge.layers.active=()=>true;
@@ -169,8 +169,7 @@ test('canonical omitted area keeps exact legacy on-demand cap/plan and native re
  const prior=(edge as any).exactWalkBindings,repeatOf=(edge as any).repeatOf;(edge as any).exactWalkBindings=()=>null;(edge as any).repeatOf=()=>null;   // #1272: the walk is under way, and this asks the legacy path itself
  const legacy=await accept(f.host,edge.act(soul,{capability:'walk:place-field',clientRef:'legacy-area'}));assert.equal(legacy.accepted,true,JSON.stringify(legacy));if(legacy.accepted)assert.deepEqual(legacy.receipt.chosen,out.receipt.chosen);
  (edge as any).exactWalkBindings=prior;(edge as any).repeatOf=repeatOf;(edge as any).binds=binds;
- edge.knowledge.setSecret('g-place-field',true);const replay=await edge.act(soul,{capability:'walk:place-field',clientRef:'omitted-area'});assert.equal(replay.accepted,true);if(replay.accepted)assert.equal(replay.receipt.id,out.receipt.id);
- assert.equal(w.sparse('walk:place-field'),null,'unknown secret area cannot use sparse admission');edge.knowledge.setSecret('g-place-field',false);
+ const replay=await edge.act(soul,{capability:'walk:place-field',clientRef:'omitted-area'});assert.equal(replay.accepted,true);if(replay.accepted)assert.equal(replay.receipt.id,out.receipt.id);
  const active=bridge.layers.active.bind(bridge.layers),refuse=bridge.layers.constructionRefusal.bind(bridge.layers);bridge.layers.active=()=>true;bridge.layers.constructionRefusal=()=>({code:'site.under-construction',reason:'Native fixture closes this route'});
  assert.equal(w.sparse('walk:place-field'),null,'on-demand area still runs coordinate construction safety');bridge.layers.active=active;bridge.layers.constructionRefusal=refuse;
  const aboard=(edge as any).aboard,stepOut=(edge as any).stepOutRefusal;(edge as any).aboard=()=>({phase:'aloft',label:'native ride'});(edge as any).stepOutRefusal=()=>null;assert.equal(w.sparse('walk:place-field'),null);(edge as any).aboard=aboard;(edge as any).stepOutRefusal=stepOut;
@@ -219,4 +218,21 @@ test('god object capability wrapper preserves a selected object and its place ou
  assert.deepEqual([...places.keys()],['projection-object'],'the caller receives the selected object place');
  assert.equal(typeof places.get('projection-object'),'string');
  assert.equal(tableReads,0,'selected-object lookup never reads the whole object table');
+});
+test('#2527: an exact walk takes the strict gate\'s bind from the same turn and builds no second copy',{skip:!PLAN_ONCE&&'SIM_PLAN_ONCE=0 turns the reuse off'},async t=>{
+ const {f,edge,soul}=await setup(t),L=edge as any;let builds=0;
+ const build=L.exactWalkBuild.bind(L);L.exactWalkBuild=(...args:any[])=>{builds++;return build(...args);};
+ const miss0=menuStats.one.oracleMiss;
+ // as the act route runs it: the gate, then the act, with no await in between
+ edge.invalidateBodies();assert.equal(edge.offerGate(soul,{capability:'walk:eden-library-1'}),null);
+ const exact0=menuStats.one.exact,turn0=menuStats.one.exactTurn,pending=edge.act(soul,{capability:'walk:eden-library-1',clientRef:'gate-then-act'});
+ assert.equal(menuStats.one.exactTurn-turn0,1,'the gate\'s bind is taken');assert.equal(menuStats.one.exact,exact0,'not counted as a projection built');
+ assert.equal(builds,PLAN_ONCE_ORACLE?1:0,'no second build (the oracle alone builds one, to compare)');
+ const out=await accept(f.host,pending);assert.equal(out.accepted,true,JSON.stringify(out));if(!out.accepted)return;
+ assert.deepEqual(out.receipt.chosen,{capability:'walk:eden-library-1',target:'g-eden-library-1',kind:'place',place:'g-eden-library-1'});
+ // an await between the gate and the act ends the turn: the act projects its walk as before
+ edge.invalidateBodies();assert.equal(edge.offerGate(soul,{capability:'walk:place-field'}),null);await Promise.resolve();
+ const exact1=menuStats.one.exact,turn1=menuStats.one.exactTurn,b1=builds,again=await accept(f.host,edge.act(soul,{capability:'walk:place-field',clientRef:'gate-await-act'}));
+ assert.equal(again.accepted,true,JSON.stringify(again));assert.equal(menuStats.one.exactTurn,turn1,'no reuse across an await');assert.equal(menuStats.one.exact-exact1,1);assert.equal(builds-b1,1);
+ assert.equal(menuStats.one.oracleMiss,miss0,'no reuse differed from the projection it replaces');
 });

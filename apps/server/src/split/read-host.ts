@@ -113,7 +113,7 @@ export function readLedger(host: ReadOnlyHost, placeData?: unknown, env: NodeJS.
       const r = q?.get(host.worldId, id) as {state: string; doing: string | null; since: number} | undefined;
       return r ? {state: r.state, doing: r.doing, since: r.since} : null;
     };
-    L.bodyRule = {view, reflexOwns: () => false, poke() {}, touch() {}, listen() {}, sweep() {}, restoreAsleep() {}} as never;
+    L.bodyRule = {view, reflexOwns: () => false, tick() {}, applied() {}, nextMoveTick: () => null, restoreAsleep() {}} as never;
   }
   // the god-fed reads, from what main's pump shipped (absent key = main has no such provider)
   const E = host.rw.ledgerEnv as {weather?: unknown; strikes?: Strike[] | null; spots?: unknown};

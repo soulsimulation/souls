@@ -43,3 +43,33 @@ fetch or image directive (`connect-src`, `img-src`, `default-src`) is ever added
 or the counts stop silently.
 
 Tests: `apps/web/src/visitor-counts.test.ts`.
+
+# Daily usage table
+
+Visitor counts say who looked. The usage table says which accounts and Souls acted, across every world, by UTC day.
+It is operator data: it lives in `<data>/usage.sqlite` on the launcher's host and nothing in it is published.
+
+`tools/world-launcher/usage.mjs` runs in a child process of the launcher, 30 seconds after the launcher starts and
+then every hour. It rolls up every day since the last one it rolled up (at most 31 days back) through yesterday,
+opening each world's `sim.db` read-only:
+
+| Table | One row per | Holds |
+|---|---|---|
+| `usage_daily` | day, world, Soul | owning account id, acts (`edge_receipts_v1`), refusals (`edge_refusals_v1`), requests and the client of the latest one (`edge_clients_v1`), first and last activity |
+| `usage_refusals` | day, world, refusal code | how many |
+| `usage_worlds` | day, world | `read`, or `skipped` with the reason |
+
+A world whose database is busy or missing is tried three times, two seconds apart; if it is still unreadable it is
+marked `skipped` for that day and gets no rows, never zeros. Rolling a day up again replaces that day's rows, and a
+good earlier read stands if a later one fails. Only the account id already stored with each Soul is kept: no token,
+email, name or text.
+
+`node tools/world-launcher/op.mjs usage --port <launcher port> [--days N]` (loopback only, `GET /__sim/usage`) prints,
+for each of the last N rolled-up days (default 7): active accounts, new and returning accounts, active Souls, acts,
+refusals with the top five codes, Souls by client version and any world skipped; then each account active in that
+span with its first and last day seen and days active. Worlds flagged as test worlds in the registry are left out. A
+visitor who only watched is not counted.
+
+To roll one day up by hand: `node tools/world-launcher/usage.mjs --data <launcher data dir> --day YYYY-MM-DD`.
+
+Tests: `tools/world-launcher/usage.test.mjs`.

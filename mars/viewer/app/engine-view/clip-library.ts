@@ -40,7 +40,7 @@ export type PickContext = {
 };
 
 /** Activities whose whole-body procedural frame (activity-poses.ts) the library clip replaces. Others keep theirs. */
-export const CLIP_BODY = new Set(['rest','lie', 'nap', 'listen', 'dance', 'sit-ground', 'cheer', 'nod', 'shake-head', 'pick-up', 'put-down', 'eat', 'drink']);
+export const CLIP_BODY = new Set(['rest','lie', 'nap', 'listen', 'dance', 'sit-ground', 'cheer', 'nod', 'shake-head', 'pick-up', 'put-down', 'drink']);
 
 export function libraryPick(c: PickContext): LibraryPick | null {
   if (c.sleep !== undefined) return { clip: 'LayToIdle', mode: 'phase', body: 'lie' };
@@ -67,7 +67,8 @@ export function libraryPick(c: PickContext): LibraryPick | null {
     case 'shake-head': return { clip: 'Idle_No_Loop', mode: 'loop', body: 'stand', rate: 1.6 };
     case 'pick-up': return { clip: 'PickUp_Kneeling', mode: 'once', fit: 1.5, body: 'stand' };
     case 'put-down': return { clip: 'PickUp_Kneeling', mode: 'once', fit: 1.5, reverse: true, body: 'stand' };
-    case 'eat': return { clip: 'Consume', mode: 'loop', rate: 0.6, body: 'stand' };
+    // eat has no clip (#2197): Consume held the hand out half a metre in front of the face; the procedural frame
+    // (activity-poses.ts) brings the food to this rig's own mouth, standing and seated alike
     case 'drink': return { clip: 'Drink', mode: 'loop', body: 'stand' };
     case 'talk': case 'converse': return { clip: 'Idle_Talking_Loop', mode: 'loop', body: 'stand' };
     case 'listen': case 'watch': return { clip: 'Idle_FoldArms_Loop', mode: 'loop', body: 'stand', alt: ['Idle_FoldArms_Loop', 'Idle_LookAround_Loop'] };

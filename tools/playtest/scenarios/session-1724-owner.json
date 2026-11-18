@@ -1,0 +1,51 @@
+{
+ "name": "session-1724-owner",
+ "version": 1,
+ "note": "#1774 A8: #1724's five instructions with a persona as the owner on an ephemeral Eden 2026 world, every seat on the client's full record (#1773). The persona sends each errand word for word, so the run judges it with #1752's battery check.",
+ "seed": 1774,
+ "world": {
+  "kind": "dev",
+  "genesis": "worlds/templates/eden-2026.json",
+  "slug": "pt-session-1724",
+  "port": 4974
+ },
+ "battery": { "file": "tools/playtest/eval/battery/m4-v1.json" },
+ "durationSec": 900,
+ "seats": [
+  {
+   "id": "wren",
+   "adapter": "claude-headless",
+   "model": "sonnet",
+   "effort": "medium",
+   "persona": "owner-1724",
+   "personaModel": "haiku",
+   "startOffsetSec": 0,
+   "soulName": "Wren"
+  }
+ ],
+ "god": null,
+ "director": {
+  "mode": "persona",
+  "requestsTarget": 5,
+  "glanceSec": [15, 30],
+  "goal": null,
+  "script": null
+ },
+ "observer": {
+  "mode": "passive",
+  "sampleSec": 1,
+  "viewport": [1024, 640]
+ },
+ "review": {
+  "mode": "deterministic",
+  "developer": false
+ },
+ "rails": {
+  "maxTurnsPerRequest": 6,
+  "maxTurnWallSec": 300,
+  "quotaStopPct": 90,
+  "onboardWallSec": 600,
+  "onboardTimeoutSec": 540,
+  "worldBudgetUsd": 0.5
+ }
+}

@@ -27,8 +27,8 @@ async function site(t: { after: (f: () => unknown) => void }) {
     return { identity, user: f.db.user(identity.id)! };
   };
   const app = buildApp({ cfg: f.souls.cfg, db: f.db, host: f.host, souls: f.souls, brain: f.brain, auth: f.auth, hub: { clients: new Map(), refreshMe() {} } as unknown as Hub });
-  const listener = getRequestListener(app.fetch), me: { seen?: string[] } = {};
-  const server = createServer((req, res) => { if (req.url!.endsWith('/approval/souls')) me.seen?.push(req.url!); req.url = req.url!.replace(/^\/w\/test/, '') || '/'; listener(req, res); });
+  const listener = getRequestListener(app.fetch), me: { seen?: string[]; failSouls?: boolean } = {};
+  const server = createServer((req, res) => { if (req.url!.endsWith('/approval/souls')) me.seen?.push(req.url!); if (me.failSouls && req.url!.endsWith('/approval/souls')) { res.writeHead(500, { 'content-type': 'application/json' }); res.end('{"code":"boom"}'); return; } req.url = req.url!.replace(/^\/w\/test/, '') || '/'; listener(req, res); });
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
   const root = mkdtempSync(join(tmpdir(), 'cli-recovery-'));
   t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(root, { recursive: true, force: true }); f.host.stop(); f.db.close(); });
@@ -37,7 +37,7 @@ async function site(t: { after: (f: () => unknown) => void }) {
   const code = async (name = 'gene') => (await (await owner(name, '/v1/account/window-code')).json() as { code: string }).code;
   const folder = (name: string) => {
     const dir = join(root, name); mkdirSync(dir, { recursive: true }); copyFileSync(CLI, join(dir, 'eden.mjs'));
-    const raw = (...args: string[]) => new Promise<{ code: number; out: string; err: string }>(resolve => execFile(process.execPath, ['eden.mjs', ...args], { cwd: dir }, (e, out, err) => resolve({ code: e ? (e.code as number) ?? 1 : 0, out, err })));
+    const raw = (...args: string[]) => new Promise<{ code: number; out: string; err: string }>(resolve => execFile(process.execPath, ['eden.mjs', ...args], { cwd: dir, env: { ...process.env, HOME: dir } }, (e, out, err) => resolve({ code: e ? (e.code as number) ?? 1 : 0, out, err })));
     const run = async (...args: string[]) => { const r = await raw(...args); assert.equal(r.code, 0, `${args.join(' ')}: ${r.err || r.out}`); return JSON.parse(r.out) as Record<string, any>; };
     return { dir, raw, run };
   };
@@ -58,7 +58,10 @@ test('create in a fresh folder for a Soul the account owns reconnects it; anyone
   assert.notEqual(noCode.code, 0); assert.match(noCode.err, /name-taken/); assert.ok(!noCode.err.includes(wren.id), 'no code, no id');
   const stranger = await fresh.raw('create', 'Wren', '--for', await s.code('ana'));
   assert.notEqual(stranger.code, 0); assert.match(stranger.err, /name-taken/); assert.ok(!stranger.err.includes(wren.id), "another account's code, no id");
-  const asked = await fresh.run('create', 'Wren', '--for', await s.code());
+  // #1875: a Soul another folder holds now is never taken over unasked; that folder keeps working
+  const held = await fresh.raw('create', 'Wren', '--for', await s.code());
+  assert.equal(held.code, 1); assert.match(held.err, /soul\.held-elsewhere: Wren is controlled from another folder .*--move/); assert.equal((await first.run('status')).paired, true);
+  const asked = await fresh.run('create', 'Wren', '--for', await s.code(), '--move');
   assert.equal(asked.soulId, wren.id, 'the same Soul'); assert.match(asked.reconnects, /nothing new/);
   assert.equal((await s.owner('gene', `/v1/account/approvals/${asked.approvalId}/approve`)).status, 200);
   const ready = await fresh.run('approval', 'wait');
@@ -68,7 +71,7 @@ test('create in a fresh folder for a Soul the account owns reconnects it; anyone
   // and the home it left says so, with the way back, which works
   const left = await first.run('status');
   assert.equal(left.paired, false); assert.match(left.next, new RegExp(`adopt ${wren.id} --for`));
-  const back = await first.run('adopt', wren.id, '--for', await s.code());
+  const back = await first.run('adopt', wren.id, '--for', await s.code(), '--move');
   assert.equal((await s.owner('gene', `/v1/account/approvals/${back.approvalId}/approve`)).status, 200);
   assert.equal((await first.run('approval', 'wait')).soul.id, wren.id);
   assert.equal((await first.run('status')).paired, true); assert.equal((await fresh.run('status')).paired, false);
@@ -78,10 +81,10 @@ for (const [name, typed] of [['Мира', ['мира', ' Мира']], ['Zoë', [
   const s = await site(t), soul = await s.make(s.folder('one'), name);
   for (const [i, asked] of typed.entries()) {
     const fresh = s.folder(`fresh-${i}`); await fresh.run('register', s.world);
-    assert.equal((await fresh.run('create', asked, '--for', await s.code())).soulId, soul.id, JSON.stringify(asked));
+    assert.equal((await fresh.run('create', asked, '--for', await s.code(), '--move')).soulId, soul.id, JSON.stringify(asked));
   }
   const adopter = s.folder('adopter'); await adopter.run('register', s.world);
-  assert.equal((await adopter.run('adopt', typed[0], '--for', await s.code())).soulId, soul.id, 'adopt folds the same way');
+  assert.equal((await adopter.run('adopt', typed[0], '--for', await s.code(), '--move')).soulId, soul.id, 'adopt folds the same way');
 });
 
 test('adopt finds a Soul by name with a window code, and never creates one', async t => {
@@ -94,7 +97,7 @@ test('adopt finds a Soul by name with a window code, and never creates one', asy
   assert.equal(s.f.db.soulByName(s.f.host.worldId, 'Nobody'), undefined, 'adopt made nothing');
   const theirs = await fresh.raw('adopt', 'Wren', '--for', await s.code('ana'));
   assert.notEqual(theirs.code, 0); assert.match(theirs.err, /holds no Soul called Wren/);
-  const asked = await fresh.run('adopt', 'Wren', '--for', await s.code());
+  const asked = await fresh.run('adopt', 'Wren', '--for', await s.code(), '--move');
   assert.equal(asked.soulId, wren.id);
 });
 
@@ -129,7 +132,7 @@ test('a retried create stays the request it was, before and after its approval',
   assert.equal(again.approvalId, asked.approvalId, 'approved and not yet collected: the same request');
   const wren = (await first.run('approval', 'wait')).soul;
   const fresh = s.folder('two'); await fresh.run('register', s.world);
-  const reconnect = await fresh.run('create', 'Wren', '--for', code), twice = await fresh.run('create', 'Wren', '--for', code);
+  const reconnect = await fresh.run('create', 'Wren', '--for', code, '--move'), twice = await fresh.run('create', 'Wren', '--for', code);
   assert.equal(twice.approvalId, reconnect.approvalId); assert.equal(twice.soulId, wren.id);
 });
 
@@ -138,7 +141,7 @@ test('adopt keeps to the world it is in, and a window code goes only to its own 
   const wrenB = await b.make(b.folder('there'), 'Wren');
   await h.run('register', b.world);
   const code = await b.code();
-  const asked = await h.run('adopt', 'Wren', '--for', code);
+  const asked = await h.run('adopt', 'Wren', '--for', code, '--move');
   assert.equal(asked.soulId, wrenB.id, "the world this home is in, not the Wren it holds safely elsewhere"); assert.notEqual(wrenA.id, wrenB.id);
   assert.equal((await h.run('wren@test', 'status')).soul.id, wrenA.id, 'that Wren is untouched');
   const seen: string[] = []; a.seen = seen;
@@ -146,7 +149,7 @@ test('adopt keeps to the world it is in, and a window code goes only to its own 
   assert.deepEqual(seen, [], "the other world never saw this world's code");
   // The home's Wren loses control. An id still goes to its own world; a bare name asks which, and sends the code nowhere.
   rmSync(join(h.dir, '.souls/credentials.json'));
-  const byId = await h.run('adopt', wrenA.id, '--for', await a.code());
+  const byId = await h.run('adopt', wrenA.id, '--for', await a.code(), '--move');
   assert.equal(byId.soulId, wrenA.id, 'by id, from a seat in the other world');
   await h.run('register', b.world);
   const which = await h.raw('adopt', 'Wren', '--for', await b.code());
@@ -169,7 +172,7 @@ test('a home that lost its tokens names the Soul and adopt, and keeps its memory
   assert.deepEqual(doctor.controlLost.map((c: { id: string }) => c.id), [wren.id]);
   const out = JSON.stringify([st, doctor]), token = /sim_[A-Za-z0-9_-]{8,}/;
   assert.ok(!token.test(out), 'no token in the output'); assert.ok(kept.length);
-  const asked = await h.run('adopt', wren.id, '--for', await s.code());
+  const asked = await h.run('adopt', wren.id, '--for', await s.code(), '--move');
   assert.equal((await s.owner('gene', `/v1/account/approvals/${asked.approvalId}/approve`)).status, 200);
   await h.run('approval', 'wait');
   assert.equal((await h.run('status')).paired, true);
@@ -201,7 +204,7 @@ test('an imported Soul knows itself, reads its memory and is adopted by name wit
   assert.ok((await two.run('memory', 'bees')).matches.length, 'memory on disk, no token');
   const doctor = await two.run('doctor');
   assert.deepEqual(doctor.unpaired.map((u: { id: string }) => u.id), [wren.id]); assert.equal(doctor.healthy, false);
-  const asked = await two.run('adopt', 'wren', '--for', await s.code());
+  const asked = await two.run('adopt', 'wren', '--for', await s.code(), '--move');
   assert.equal(asked.soulId, wren.id);
   assert.equal((await s.owner('gene', `/v1/account/approvals/${asked.approvalId}/approve`)).status, 200);
   await two.run('approval', 'wait');
@@ -212,4 +215,39 @@ test('an imported Soul knows itself, reads its memory and is adopted by name wit
   assert.deepEqual(home.trustedOrigins ?? [], [], 'a url out of an imported file earns no trust');
   await two.run('register');
   assert.deepEqual(JSON.parse(readFileSync(join(two.dir, '.souls/config.json'), 'utf8')).trustedOrigins ?? [], [], 'nor does a bare register of the url it left behind');
+});
+
+test('#1875 A6: two sibling folder homes: create, pair and adopt without --move change nothing; --move takes over and says the other is disconnected', async t => {
+  const s = await site(t), a = s.folder('a'), lune = await s.make(a, 'Lune');
+  const b = s.folder('b'); await b.run('register', s.world);
+  for (const args of [['create', 'Lune'], ['pair', lune.id], ['adopt', 'Lune'], ['adopt', lune.id]]) {
+    const r = await b.raw(...args, '--for', await s.code());
+    assert.equal(r.code, 1, `${args}: ${r.out}`); assert.match(r.err, /soul\.held-elsewhere: Lune is controlled from another folder/); assert.match(r.err, /--move/);
+  }
+  const st = await a.run('status'); assert.equal(st.paired, true, 'A keeps working'); assert.equal(st.soul.id, lune.id);
+  assert.equal(s.f.db.soulByName(s.f.host.worldId, 'Lune')?.id, lune.id);
+  const moved = await b.run('create', 'Lune', '--for', await s.code(), '--move');
+  assert.equal(moved.soulId, lune.id, JSON.stringify(moved)); assert.match(moved.moves, /disconnected/, JSON.stringify(moved));
+  assert.equal((await s.owner('gene', `/v1/account/approvals/${moved.approvalId}/approve`)).status, 200);
+  const ready = await b.run('approval', 'wait');
+  assert.equal(ready.soul.id, lune.id); assert.match(ready.moved, /disconnected/);
+  assert.equal((await b.run('status')).paired, true); assert.equal((await a.run('status')).paired, false, 'A was disconnected, as said');
+});
+
+test('#1875 A6: the world itself refuses a takeover without move: no code, or the Souls list failing, still ends in soul.held-elsewhere and nothing reaches the window', async t => {
+  const s = await site(t), a = s.folder('a'), lune = await s.make(a, 'Lune');
+  const b = s.folder('b'); await b.run('register', s.world);
+  const waiting = async () => ((await (await fetch(`${s.world}/v1/account/approvals`, { headers: { authorization: 'Bearer owner:gene' } })).json()) as { approvals: { soulId?: string }[] }).approvals;
+  const noCode = await b.raw('pair', lune.id);
+  assert.equal(noCode.code, 1, noCode.out); assert.match(noCode.err, /soul\.held-elsewhere/);
+  s.failSouls = true;
+  for (const args of [['create', 'Lune'], ['pair', lune.id], ['adopt', 'Lune']]) {
+    const r = await b.raw(...args, '--for', await s.code());
+    assert.equal(r.code, 1, `${args}: ${r.out}`); assert.match(r.err, /soul\.held-elsewhere/);
+  }
+  s.failSouls = false;
+  assert.deepEqual((await waiting()).filter(x => x.soulId === lune.id), [], 'no request reached the window');
+  assert.equal((await a.run('status')).paired, true, 'A stays paired');
+  const raw = await (await fetch(`${s.world}/v1/agent/approval/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentLabel: 'x', soulId: lune.id, idempotencyKey: 'held-check-key-0001', pollSecret: 'a'.repeat(43) }) })).json() as Record<string, unknown>;
+  assert.equal(raw.code, 'soul.held-elsewhere'); assert.ok(!/since|listening|connected at|stopped|revoked|\d{10}/.test(JSON.stringify(raw)), 'held, nothing more');
 });

@@ -75,16 +75,16 @@ test('storage inside containers: words, refusals, real contents, lip-clear arcs,
  const insideDrawer = h => Math.abs(h[0]) <= 0.4 && h[2] >= 0.13 && h[2] <= 0.55 && h[1] >= 1.0 && h[1] <= 1.21;
 
  // Ana takes the bowl from the table; the drawer is shut
- results.pickUp = await done('pick up the bowl');
+ results.pickUp = await done(`pick-up:${id('bowl')}`);
  assert.equal(item('bowl').support.kind, 'in-hand');
- await refuse('put the bowl in the drawer', 'container.closed');
- results.open = await done('open the drawer');
+ await refuse(`put-in:${id('chest')}`, 'container.closed');
+ results.open = await done(`object:${id('chest')}:open`);
  assert.equal(state('chest').open, true);
  const holdingNear = await here();
  const putCap = edge.capabilities(soul).find(c => c.id === `put-in:${id('chest')}`);
  assert.ok(putCap?.available, 'put-in offered while holding near the open chest ' + JSON.stringify(edge.capabilities(soul).filter(c => /put|pick/.test(c.verb)).map(c => [c.id, c.label, c.available, c.blocked?.code])));
  // in: up over the drawer front and down to its place; the same bowl rests inside
- const put = await done('put the bowl in the drawer', soul, {item: bowl, fr: chest, isize: bowlSize, mouthX: 0, mouthHalf: 0.42});
+ const put = await done(`put-in:${id('chest')}`, soul, {item: bowl, fr: chest, isize: bowlSize, mouthX: 0, mouthHalf: 0.42});
  assert.match(put.capability, new RegExp(`put-in:${id('chest')}$`));
  assert.equal(item('bowl').support.kind, 'resting-on'); assert.equal(item('bowl').support.on, id('chest')); assert.equal(item('bowl').support.slot, 'in-1');
  assert.equal(ent('bowl').id, bowl); assert.equal(ent('bowl').in.parent, id('chest')); assert.equal(ent('bowl').in.slot, 'in-1');
@@ -93,41 +93,42 @@ test('storage inside containers: words, refusals, real contents, lip-clear arcs,
  results.put = {lipMargin: +put.lip.min.toFixed(4), releaseHand: release.hand, samples: put.track.length};
  const openWith = await here(), row = openWith.objects.find(o => o.id === id('chest'));
  assert.deepEqual(row?.state, {open: true, holds: ['bowl']}, 'the open drawer shows what is in it');
- results.close = await done('close the drawer');
+ results.close = await done(`object:${id('chest')}:close`);
  const shut = await here(), shutText = JSON.stringify(shut);
  assert.deepEqual(shut.objects.find(o => o.id === id('chest'))?.state, {open: false}, 'a shut chest shows only that it is shut');
  assert.ok(!shutText.includes(bowl) && !shutText.includes('holds'), 'nothing about the bowl while the drawer is shut');
  assert.ok(!edge.capabilities(soul).some(c => c.target?.id === bowl), 'no offer for the hidden bowl');
- await refuse('take the bowl out of the chest', 'container.closed');
+ // #1911: the hidden bowl has no offer, so its id is refused before anything is tried
+ await refuse(`pick-up:${id('bowl')}`, 'capability.unknown');
 
  // Bea, another Soul with access, opens it and takes Ana's bowl out
  await join('bea', 'Bea');
- await refuse('open the private chest', 'object.private', souls.Bea);
- results.beaOpen = await done('open the drawer', souls.Bea);
- const take = await done('take the bowl out of the chest', souls.Bea, {item: bowl, fr: chest, isize: bowlSize, mouthX: 0, mouthHalf: 0.42});
+ await refuse(`object:${id('private-chest')}:open`, 'object.private', souls.Bea);
+ results.beaOpen = await done(`object:${id('chest')}:open`, souls.Bea);
+ const take = await done(`pick-up:${id('bowl')}`, souls.Bea, {item: bowl, fr: chest, isize: bowlSize, mouthX: 0, mouthHalf: 0.42});
  assert.match(take.capability, new RegExp(`pick-up:${bowl}$`));
  assert.equal(item('bowl').support.kind, 'in-hand'); assert.equal(item('bowl').support.by, souls.Bea.entityId);
  assert.ok(take.lip.min >= 0, 'hand and bowl pass over the drawer front: ' + JSON.stringify(take.lip));
  const grasp = take.track.find(s => s.held); assert.ok(grasp && insideDrawer(grasp.hand), 'the hand takes it inside the drawer ' + JSON.stringify(grasp));
  results.take = {lipMargin: +take.lip.min.toFixed(4), graspHand: grasp.hand, samples: take.track.length};
- await refuse('put the bowl in the private chest', 'object.private', souls.Bea);
+ await refuse(`put-in:${id('private-chest')}`, 'object.private', souls.Bea);
  // interrupted before the release: the bowl stays in her hand, the drawer stays empty
- {const r = await act('put the bowl in the drawer', true, souls.Bea); for (let n = 0; n < 600 && !body(souls.Bea).human?.itemTransferV1?.reachTick; n++) await tick(1); await tick(6);
+ {const r = await act(`put-in:${id('chest')}`, true, souls.Bea); for (let n = 0; n < 600 && !body(souls.Bea).human?.itemTransferV1?.reachTick; n++) await tick(1); await tick(6);
   await accept(f.host, edge.act(souls.Bea, {capability: 'stand:here'})); await tick(60);
   assert.equal(edge.receipt(souls.Bea.soulId, r.receipt.id).phase, 'replaced'); assert.equal(item('bowl').support.kind, 'in-hand', 'interrupted: still in her hand');
   assert.equal(ent('bowl').in.parent, souls.Bea.entityId); results.interrupted = 'bowl stayed in hand, drawer empty';}
  // contention: Ana cannot shut the drawer on Bea's hand
- {const r = await act('put the bowl in the drawer', true, souls.Bea); for (let n = 0; n < 600 && !body(souls.Bea).human?.itemTransferV1?.reachTick; n++) await tick(1);
+ {const r = await act(`put-in:${id('chest')}`, true, souls.Bea); for (let n = 0; n < 600 && !body(souls.Bea).human?.itemTransferV1?.reachTick; n++) await tick(1);
   await refuse(`object:${id('chest')}:close`, 'container.in-use');   // (exact id: the private chest is open too, so the words alone are ambiguous while both refuse)
   const x = await finish(r, souls.Bea); assert.equal(x.phase, 'completed'); assert.equal(item('bowl').support.on, id('chest'));}
 
  // the lantern: too tall for the drawer, kept in the locker instead (same mechanism, a hinged door and a shelf)
- results.lanternUp = await done('pick up the lantern');
- await refuse('put the lantern in the drawer', 'item.does-not-fit');
- await refuse('put the lantern in the locker', 'container.closed');
- results.lockerOpen = await done('open the locker');
+ results.lanternUp = await done(`pick-up:${id('lantern')}`);
+ await refuse(`put-in:${id('chest')}`, 'item.does-not-fit');
+ await refuse(`put-in:${id('locker')}`, 'container.closed');
+ results.lockerOpen = await done(`object:${id('locker')}:open`);
  const lantern = id('lantern'), lanternSize = [0.22, 0.453, 0.22];
- const inLocker = await done('put the lantern in the locker', soul, {item: lantern, fr: locker, isize: lanternSize, mouthX: -0.3, mouthHalf: 0.135});
+ const inLocker = await done(`put-in:${id('locker')}`, soul, {item: lantern, fr: locker, isize: lanternSize, mouthX: -0.3, mouthHalf: 0.135});
  assert.equal(item('lantern').support.on, id('locker')); assert.equal(ent('lantern').in.slot, 'in-1');
  assert.ok(inLocker.lip.min >= 0, 'the lantern passes over the shelf edge: ' + JSON.stringify(inLocker.lip));
  const lockRelease = inLocker.track.filter(s => !s.held)[0], inCompartment = h => h[0] >= -0.435 && h[0] <= -0.165 && h[2] >= -0.21 && h[2] <= 0.236 && h[1] >= 1.05 && h[1] <= 1.76;
@@ -135,17 +136,17 @@ test('storage inside containers: words, refusals, real contents, lip-clear arcs,
  results.locker = {lipMargin: +inLocker.lip.min.toFixed(4), releaseHand: lockRelease.hand};
  const lockerOpen = await here();
  assert.deepEqual(lockerOpen.objects.find(o => o.id === id('locker'))?.state, {open: true, locked: false, holds: ['lantern']});
- results.lockerClose = await done('close the locker');
+ results.lockerClose = await done(`object:${id('locker')}:close`);
  const lockerShut = await here();
  {const txt = JSON.stringify(lockerShut), i = txt.indexOf(lantern); assert.ok(i < 0, 'a lantern in a shut locker is not seen: ' + txt.slice(Math.max(0, i - 400), i + 200));}
  // a lit light is not put away (fixture: switched on by the world, as a lamp left lit)
- results.lockerReopen = await done('open the locker');
- results.lanternOut = await done('take the lantern out of the locker', soul, {item: lantern, fr: locker, isize: lanternSize, mouthX: -0.3, mouthHalf: 0.135});
+ results.lockerReopen = await done(`object:${id('locker')}:open`);
+ results.lanternOut = await done(`pick-up:${id('lantern')}`, soul, {item: lantern, fr: locker, isize: lanternSize, mouthX: -0.3, mouthHalf: 0.135});
  ok(god.act({ops: [{op: 'set', id: lantern, state: {on: true}}]})); await tick(5);
- await refuse('put the lantern in the locker', 'item.lit');
+ await refuse(`put-in:${id('locker')}`, 'item.lit');
  ok(god.act({ops: [{op: 'set', id: lantern, state: {on: false}}]})); await tick(5);
- results.lanternBack = await done('put the lantern in the locker', soul, {item: lantern, fr: locker, isize: lanternSize, mouthX: -0.3, mouthHalf: 0.135});
- results.close2 = await done('close the drawer', souls.Bea);
+ results.lanternBack = await done(`put-in:${id('locker')}`, soul, {item: lantern, fr: locker, isize: lanternSize, mouthX: -0.3, mouthHalf: 0.135});
+ results.close2 = await done(`object:${id('chest')}:close`, souls.Bea);
 
  // persistence: the world model and the engine checkpoint keep the contents
  const restored = WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())), undefined, god.model.library);

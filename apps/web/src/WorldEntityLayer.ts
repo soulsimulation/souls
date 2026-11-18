@@ -47,7 +47,7 @@ import { keySeen, shapeWedgeDistance, viewFirst, viewWedge, type ViewWedge } fro
 import { WorldBuildSites, SITE_REFINEMENT, type PublicSite } from './WorldBuildSites.ts';
 import { GroundCover, coverSetting } from './gen-mesh/ground-cover.ts';
 import { isRideBalloonDef, rideMotionDef } from './gen-mesh/kits/ride-balloon.ts';
-import { isRideCarrierDef, carrierIdOf } from './ride-carriers.ts';
+import { isRideCarrierDef, carrierIdOf, hasOwnCars } from './ride-carriers.ts';
 import { holdRainbow, isRainbowDef } from './atmosphere/rainbow-things.ts';
 import {WorldEntityStairs,pendingStairDiff} from './WorldEntityStairs.ts';
 import { ScatterPools } from './ScatterPools.ts';
@@ -454,7 +454,7 @@ export class WorldEntityLayer {
   private plantTweens = new Map<string, { from: PlantLook; to: PlantLook; t0: number; dur: number }>();
   private pours = new Map<string, THREE.Points>();
   /** Entry 43: steam over kettles and cups of tea (world space, placed each frame); the depicted tick their heat is read at. */
-  private steamers = new Map<string, { pts: THREE.Points; kind: 'kettle' | 'cup'; lamp?: THREE.Mesh }>();
+  private steamers = new Map<string, { pts: THREE.Points; kind: 'kettle' | 'cup' | 'part'; lamp?: THREE.Mesh; part?: THREE.Object3D }>();
   private depictedTick = Infinity;
   private figures = new Map<string, Figure>();
   private now = 0;
@@ -808,9 +808,24 @@ export class WorldEntityLayer {
   rideCars(): string[] {
     if (!this.model) return [];
     const out: string[] = [], m = this.model;
-    for (const e of m.entities.values()) { if (e.in.parent !== 'world') continue; const def = m.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideCarrierDef(def) && !isRideBalloonDef(def)) out.push(carrierIdOf(e, id => m.entities.has(id))); }
+    for (const e of m.entities.values()) { if (e.in.parent !== 'world') continue; const def = m.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideCarrierDef(def) && !isRideBalloonDef(def) && !hasOwnCars(def)) out.push(carrierIdOf(e, id => m.entities.has(id))); }
     return out;
   }
+  /** #1976: of rideCars, the ferris wheels (their car is fixed to the rim): native carrier id → the wheel's world x, z. */
+  rideCarWheels(): Map<string, [number, number]> {
+    const out = new Map<string, [number, number]>(), m = this.model; if (!m) return out;
+    for (const e of m.entities.values()) { if (e.in.parent !== 'world') continue; const def = m.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideCarrierDef(def) && !isRideBalloonDef(def) && !hasOwnCars(def) && (def.tags ?? []).includes('ferris-wheel')) { const wp = m.worldPose(e); out.set(carrierIdOf(e, id => m.entities.has(id)), [wp.x, wp.z]); } }
+    return out;
+  }
+  /** #2198: world-level god rides ridden in their own cars (a big wheel's gondolas): native carrier id → the thing's id. */
+  rideWheels(): Map<string, string> {
+    const out = new Map<string, string>(), m = this.model; if (!m) return out;
+    for (const e of m.entities.values()) { if (e.in.parent !== 'world') continue; const def = m.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideCarrierDef(def) && hasOwnCars(def)) out.set(carrierIdOf(e, id => m.entities.has(id)), e.id); }
+    return out;
+  }
+  /** #2198: where the ride on this wheel is now (its floor point, world metres) and whether it is going round; null when
+   *  nobody rides. The wheel turns its gondola to it (gen-mesh/motion.ts rideTurn). */
+  wheelRide(id: string, ride: { p: readonly number[]; aloft: boolean } | null) { const d = this.drawn.get(id); if (d) d.obj.userData.wheelRide = ride ?? undefined; }
   /** PERF-STREAM: top-level things by name, rebuilt when the world's records change (poseOverride ran a find over every
    *  record for every ride on every frame: 4 s of a 50,000-thing world's first half minute). */
   private names: { key: object; size: number; map: Map<string, Entity> } | null = null;
@@ -1118,7 +1133,10 @@ export class WorldEntityLayer {
       const d = this.drawn.get(id), e = this.model.entities.get(id);
       if (!d || !e || d.removing || !d.obj.visible) { setSteam(st.pts, 0); if (st.lamp) st.lamp.visible = false; continue; }
       const s = d.obj.scale.x, q = d.obj.quaternion;
-      if (st.kind === 'kettle') {
+      if (st.kind === 'part') {   // SA-D2: a looks-table steam row: the plume leaves the named part, as strong as the row says
+        const v = (st.part?.userData.lookSteam as number | undefined) ?? 0;
+        st.pts.position.copy(st.part?.getWorldPosition(_vs) ?? d.obj.position); setSteam(st.pts, v / 1000, _vs.set(0, 0.02, 0));
+      } else if (st.kind === 'kettle') {
         const k = kettleHeat(e.state, this.depictedTick), o = KETTLE_SPOUT;
         st.pts.position.set(o[0], o[1], o[2]).multiplyScalar(s).applyQuaternion(q).add(d.obj.position);
         const jet = _vs.set(Math.cos(KETTLE_SPOUT_ANGLE), Math.sin(KETTLE_SPOUT_ANGLE), 0).applyQuaternion(q).multiplyScalar(0.3 + 0.5 * k.steam);
@@ -1174,7 +1192,11 @@ export class WorldEntityLayer {
     // Z2: no extent yet (only frame hooks, whose geometry is one point: a mesh with a distant version picks and loads its
     // model from its hook, mesh-lod.ts) = nothing to cull by. A zero-radius sphere was always "under cullPx", so the hook
     // never ran and the thing never appeared on phones.
-    d.sphere = _box.isEmpty() || _box.min.equals(_box.max) ? undefined : _box.getBoundingSphere(new THREE.Sphere());
+    // #1265: a mesh with frustumCulled off is placed by its shader (the panorama follows the camera; its buffer holds
+    // directions and heights, not positions), so no box of its buffer bounds what it draws: nothing to cull by either.
+    // Culling it by that box hid it on every frame without a shadow pass and kept it on the others (a strobe).
+    let unbounded = false; d.obj.traverse((o) => { if ((o as THREE.Mesh).isMesh && !o.frustumCulled) unbounded = true; });
+    d.sphere = unbounded || _box.isEmpty() || _box.min.equals(_box.max) ? undefined : _box.getBoundingSphere(new THREE.Sphere());
     d.frozen = list;
     if (this.scatterPooling && d.world) this.scatterPools.add(d.obj.uuid, d.obj);   // PERF-BATCH round 2: its instances draw from the shared pools
     if (!d.cut) delete d.obj.userData.renderDynamic; this.staticRevision++;
@@ -1622,6 +1644,8 @@ export class WorldEntityLayer {
     // #1664: a newly admitted surface child is already supported, not an airborne God creation.
     // Preserve construction refinement and all births without a parent that existed before this update.
     if (!existing && existingParent && !refinement && parent && pdef?.slots.some(slot => slot.id === e.in.slot && slot.kind === 'surface')) ease = false;
+    // Completed native work already committed this ordinary ground output at full size. God edits retain their creation ease.
+    if (!existing && !isWorld && !refinement && e.by === 'engine' && e.in.parent === 'world' && wp.y === 0 && !def.components.body) ease = false;
     if (existing && existing.defHash === defHash && !existing.removing && !force) {
       if (isWorld) return;
       // The parent or slot can change without changing the world pose. Resolve its host again even when no easing is needed.
@@ -1642,13 +1666,17 @@ export class WorldEntityLayer {
       if (jets?.userData.waterJet === 'stream') this.tapJets.set(e.id, jets as THREE.Points); else this.tapJets.delete(e.id); }
     // Entry 34: a growing planter's plants, eased from how they were last drawn to what the state now asks for; a can
     // carried by its handle (a `carry` slot) is posed from the hand every frame, so never instanced
-    if (isGrowingDef(def as never)) {
-      const look = plantLookOf(e.state, def as never), shown = this.plantShown.get(e.id) ?? look;
+    if (isGrowingDef(def as never) || built.userData.lookGrowth !== undefined) {   // SA-D2: or a looks-table grow row
+      const look = plantLookOf(e.state, def as never); if (built.userData.lookGrowth !== undefined) look.g = Math.min(4, (built.userData.lookGrowth as number) / 1000); const shown = this.plantShown.get(e.id) ?? look;
       built.add(plantGroup(seedOf(e.id), shown)); delete built.userData.instanceKey; setPatch(built, shown.m); this.growing.add(e.id);
       if (!sameLook(shown, look)) this.plantTweens.set(e.id, { from: shown, to: look, t0: this.now, dur: lookSeconds(shown, look) * 1000 }); else this.plantTweens.delete(e.id);
       this.plantShown.set(e.id, shown);
     }
     { const grip = (def as unknown as { slots?: { kind: string; p: number[] }[] }).slots?.find((x) => x.kind === 'carry'); if (grip) { built.userData.handleGrip = [...grip.p]; delete built.userData.instanceKey; } }
+    // SA-D2: a thing whose looks table has a steam row steams from that part (by the table, not by what the thing is called)
+    { const sp = built.userData.lookSteamPart as THREE.Object3D | undefined, old = this.steamers.get(e.id);
+      if (sp) { delete built.userData.instanceKey; if (old) old.part = sp; else { const pts = steam('cup'); this.thingsGroup.add(pts); this.steamers.set(e.id, { pts, kind: 'part', part: sp }); } }
+      else if (old?.kind === 'part') { old.pts.removeFromParent(); (old.pts.material as THREE.Material).dispose(); this.steamers.delete(e.id); } }
     // Entry 43: a kettle is filled through its lid and pours from its spout (a can: its filler and its rose); kettles and
     // cups of tea steam (a plume placed each frame from their state and the depicted tick)
     if (isKettleDef(def as never)) built.userData.vessel = { opening: KETTLE_OPENING, outlet: KETTLE_SPOUT, angle: KETTLE_SPOUT_ANGLE, pour: 'spout' };

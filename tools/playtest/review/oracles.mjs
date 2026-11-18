@@ -1,8 +1,12 @@
 // Deterministic oracles over one request's evidence pack (DESIGN §4.4, spec §2.4). Code only: pass | fail | unknown
 // with pointers, never a score. Facts after the request's cutoff are excluded (late diagnostics never grant hits).
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { seatActs, xz } from './run.mjs';
 import { journeyOracles } from './journey-oracles.mjs';
 import { expectFor, expectOracles } from './expect-oracles.mjs';
+import { templateNames } from '../scenarios/lib/world-names.mjs';
 
 export const ORACLE_IDS = ['ack-latency', 'result-sent', 'listen-open', 'arrival', 'posture', 'duration-held', 'inside-solid', 'no-progress', 'oscillation', 'stuck-receipt', 'truthfulness-basic', 'vocabulary', 'duplicate-acts', 'server-errors', 'first-body-change'];
 export const PHYSICAL = ['arrival', 'posture', 'truthfulness-basic', 'inside-solid', 'no-progress'];
@@ -13,6 +17,15 @@ const secs = (a, b) => Math.round((b - a) / 100) / 10;
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const norm = (s) => String(s ?? '').toLowerCase().replace(/^the\s+/, '').replace(/[^a-z0-9]+/g, '');
 const o = (id, status, detail, pointers = []) => ({ id, status, detail, pointers });
+
+const REPO = resolve(fileURLToPath(new URL('.', import.meta.url)), '../../..');
+const GENESIS = new Map();
+/** The placed things of a run's genesis template (repo-relative path), read once per file; null when it cannot be read. */
+export function genesisThings(genesis) {
+  if (!genesis) return null;
+  if (!GENESIS.has(genesis)) { const f = resolve(REPO, genesis); let names = null; try { if (existsSync(f)) names = templateNames(f); } catch { names = null; } GENESIS.set(genesis, names); }
+  return GENESIS.get(genesis);
+}
 
 function postureWanted(text) {
   const t = String(text).toLowerCase();
@@ -111,21 +124,24 @@ export function claimsIn(text, { soulName = null, others = [] } = {}) {
   return found;
 }
 
-/** runOracles(evidence, ctx) — ctx: {acts?: seat tool calls with outputs, godSlice?, run?, expect?} (acts are read from the run when
- *  absent; expect from the run's script entry when absent). A request with an `expect` also gets the scenario-truth oracles
+/** runOracles(evidence, ctx) — ctx: {acts?: seat tool calls with outputs, godSlice?, run?, expect?, things?} (acts are read from the
+ *  run when absent; expect from the run's script entry when absent; things, for near answers, from the run's genesis). A request with an `expect` also gets the scenario-truth oracles
  *  of expect-oracles.mjs after the fifteen ORACLE_IDS; requests without one get exactly ORACLE_IDS. */
 export function runOracles(ev, ctx = {}) {
   const P = `evidence/${ev.requestId}.json`;
   const expect = ctx.expect !== undefined ? ctx.expect : expectFor(ctx.run, ev);
-  const acts = ctx.acts ?? (ctx.run ? seatActs(ctx.run, ev.seat, ev.chatTurns) : []);
   const sent = ms(ev.sentAt), cutoff = ms(ev.cutoffAt) ?? Infinity;
+  // #1774: a card request reaches the seat through its listen, so no chat turn carries it: its acts are those of the
+  // turns that started in its window (the wake turns), not none.
+  const turnIds = ev.chatTurns?.length ? ev.chatTurns : (ctx.run?.seats?.[ev.seat]?.turns ?? []).filter((t) => { const a = ms(t.startedAt); return a != null && a >= sent && a <= cutoff; }).map((t) => t.turn);
+  const acts = ctx.acts ?? (ctx.run ? seatActs(ctx.run, ev.seat, turnIds) : []);
   const all = (ev.samples ?? []).map((s, i) => ({ ...s, i, ms: ms(s.t), p: xz(s.pos) }));
   const timely = all.filter((s) => s.ms <= cutoff);
   const late = all.length - timely.length;
   const last = timely.at(-1);
   const sp = (s) => `${P}#samples[${s.i}]`;
   const receipts = ev.receipts ?? [];
-  const acted = acts.filter((a) => /\beden(-agent)?\.mjs act\b/.test(a.cmd));
+  const acted = acts.filter((a) => /\beden(-agent)?\.mjs (?:act|plan)\b/.test(a.cmd));   // #1774: a plan is acts too
   const pool = seatSamples(ctx.run, ev.seat) ?? all;
   const clk = tickClock(pool.length >= 2 ? pool : all);
   const SLACK = 1500; // tick→time estimate tolerance
@@ -235,13 +251,19 @@ export function runOracles(ev, ctx = {}) {
   out.push(!checked.length ? o('truthfulness-basic', 'pass', `no completion claim in ${ev.channel === 'chat' ? 'the chat reply' : 'ack/result'}`) : unsupported.length ? o('truthfulness-basic', 'fail', `claims ${[...new Set(unsupported.map((u) => u.id))].join(', ')} not supported by the body or a completed receipt when written: ${unsupported.slice(0, 2).map(wrote).join('; ')}`, [...new Set(unsupported.map((u) => u.ptr))]) : o('truthfulness-basic', 'pass', `claims ${[...new Set(checked)].join(', ')} supported when written`, replies.map((r) => r.ptr).slice(0, 3)));
 
   // vocabulary
-  const unk = acts.filter((a) => a.output?.code === 'capability.unknown');
+  // #1774: the new loop's words are looked up locally (`find`, `query`) and acted on by id; an act on words the world does
+  // not offer is refused `act.not-an-id` (or `capability.unknown` from an older client). The world offered a match when
+  // the refusal names one (did_you_mean, alternatives) or a lookup in the window found something.
+  const unk = acts.filter((a) => ['capability.unknown', 'act.not-an-id'].includes(a.output?.code ?? a.output?.error?.code));
   if (!unk.length) out.push(o('vocabulary', 'pass', 'no unknown capability'));
   else {
-    const offered = unk.some((a) => a.output.did_you_mean?.length) || acts.some((a) => /caps\b.*--search/.test(a.cmd) && (a.output?.matches?.length || a.output?.length));
+    const offered = unk.some((a) => a.output.did_you_mean?.length || a.output.alternatives?.length || a.output.error?.did_you_mean?.length)
+      || acts.some((a) => /\beden(-agent)?\.mjs (?:find|query)\b/.test(a.cmd) && (a.output?.found?.length || a.output?.answers?.some?.((x) => Object.values(x ?? {}).some((v) => Array.isArray(v) && v.length))))
+      || acts.some((a) => /caps\b.*--search/.test(a.cmd) && (a.output?.matches?.length || a.output?.offers?.length || a.output?.length));
     out.push(offered ? o('vocabulary', 'pass', 'unknown wording, but the world offered a match') : o('vocabulary', 'fail', `capability.unknown with no match for the player's wording "${ev.text}"`, unk.map((a) => `seats/${ev.seat}/transcript.jsonl#turn${a.turn}`)));
   }
-  const keys = acted.map((a) => a.cmd.replace(/\s+--wait(\s+\d+)?/, '').trim());
+  // #1774: a refused act that is sent again is a retry, not a duplicate; only acts the world took count
+  const keys = acted.filter((a) => a.output?.accepted !== false).map((a) => a.cmd.replace(/\s+--wait(\s+\d+)?/, '').replace(/\s+--for\s+\S+/, '').trim());
   const dup = keys.filter((k, i) => keys.indexOf(k) !== i);
   const dupR = receipts.filter((r, i) => receipts.findIndex((x) => x.capability === r.capability) !== i);
   out.push(dup.length || dupR.length ? o('duplicate-acts', 'fail', `${dup.length + dupR.length} repeated act(s): ${[...new Set([...dup, ...dupR.map((r) => r.capability)])].join('; ')}`) : o('duplicate-acts', 'pass', `${acted.length} act(s), none repeated`));
@@ -250,7 +272,10 @@ export function runOracles(ev, ctx = {}) {
   const fb = ms(ev.firstBodyChangeAt);
   out.push(fb && fb <= cutoff ? o('first-body-change', 'pass', `first visible body change after ${secs(sent, fb)} s`, [`${P}#firstBodyChangeAt`]) : accepted ? o('first-body-change', 'fail', 'an action was accepted but no visible body change before cutoff', [`${P}#firstBodyChangeAt`]) : o('first-body-change', 'unknown', 'no body action was started'));
   if (expect?.journey) out.push(...journeyOracles({ ev, journey: expect.journey, receipts, replies, acts, acceptedMs: r => acceptedMs(r, clk), endedMs: r => endedMs(r, clk) }));
-  if (expect && expect.kind !== 'journey') out.push(...expectOracles({ ev, expect, timely, replies, receipts, acts, inWindow, P }));
+  if (expect && expect.kind !== 'journey') {
+    const things = expect.kind !== 'near' ? null : ctx.things !== undefined ? ctx.things : genesisThings(ctx.run?.scenario?.world?.genesis);
+    out.push(...expectOracles({ ev, expect, timely, replies, receipts, acts, inWindow, P, things }));
+  }
   if (late) out.forEach((r) => { r.lateSamplesExcluded = late; });
   return out.map((r) => ({ requestId: ev.requestId, ...r }));
 }

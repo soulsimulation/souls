@@ -94,7 +94,7 @@ test('addressing: name, id, name@world; twins and retired Souls are not guessed'
   assert.throws(() => selectSoul(cfg, 'ivo'), /ivo@b, ivo@a/);
   assert.throws(() => selectSoul(cfg, 'gone'), /retired/);
   assert.equal(selectSoul(cfg, 'nobody'), null);
-  assert.throws(() => chooseContext(cfg, { cmd: 'here' }), /Several Souls live here/);
+  assert.throws(() => chooseContext(cfg, { cmd: 'here' }), /^Error: soul\.ambiguous: several Souls live here: old-mira@a, ivo@b, ivo@a\./);
   assert.deepEqual(chooseContext({ ...cfg, default: 's_1' }, { cmd: 'here' }), { soul: 's_1' });
   assert.deepEqual(chooseContext(cfg, { cmd: 'create' }), { seat: 'b' });
   assert.deepEqual(chooseContext(cfg, { cmd: 'create', selector: '@a' }), { seat: 'a' });
@@ -116,7 +116,7 @@ test('A1 A5 A8: two Souls in two worlds in one folder, addressed by name, every 
   assert.equal((await run('mira', 'here')).d.me.id, 's_a1');
   assert.equal((await run('ivo', 'here')).d.me.id, 's_b1');
   assert.equal((await run('mira@a', 'here')).d.me.id, 's_a1');
-  const bare = await run('here'); assert.equal(bare.code, 1); assert.match(bare.err, /Several Souls live here: mira, ivo/);
+  const bare = await run('here'); assert.equal(bare.code, 1); assert.match(bare.err, /soul\.ambiguous: several Souls live here: mira@a, ivo@b\./);
   assert.equal((await run('default', 'ivo')).d.default.id, 's_b1');
   assert.equal((await run('here')).d.me.id, 's_b1');
   // a new chat in a subfolder finds the same home

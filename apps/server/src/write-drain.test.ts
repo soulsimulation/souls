@@ -5,8 +5,9 @@
 // test checks the write is still open at that moment. A fixed 200 ms was not enough on a busy runner (CI server-3,
 // 2026-11-10), and neither was waiting for 100 Continue (#1778's merge group: the world had no write in flight at SIGTERM).
 import test from 'node:test';import assert from 'node:assert/strict';import {spawn} from 'node:child_process';import {connect} from 'node:net';
-import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import {mkdtempSync,readFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
+const readOr=(f:string)=>{try{return readFileSync(f,'utf8');}catch{return '';}};
 
 async function stopWithWriteInFlight(t:import('node:test').TestContext,port:number,extra:Record<string,string>){
  const data=mkdtempSync(join(tmpdir(),'write-drain-')),logs:string[]=[];
@@ -26,7 +27,12 @@ async function stopWithWriteInFlight(t:import('node:test').TestContext,port:numb
  assert.match(before,/write in flight: 1\b/,`the world counted the write before SIGTERM: ${before}`);
  assert.doesNotMatch(before,/write closed:/,`the write is still open at SIGTERM (answered early: ${JSON.stringify(answer)}): ${before}`);
  child.kill('SIGTERM');
- await delay(300);                       // the world is stopping; the rest of the body arrives late
+ // the rest of the body arrives late: only once the world has begun to stop (live.json says so; shutdown writes it before
+ // it counts its writes in flight). A fixed 300 ms let a world busy for longer (#2012: CI server-3, a 338 ms stall) read the
+ // rest first, answer the write as usual and so take no drain at all.
+ const live=join(data,'live.json');
+ for(let i=0;i<500&&!/"phase":"stopping"/.test(readOr(live));i++)await delay(20);
+ assert.match(readOr(live),/"phase":"stopping"/,`the world began to stop: ${logs.join('')}`);
  sock.write(body.slice(half));
  await Promise.race([closed,delay(5000)]);sock.destroy();
  return {answer,code:await exited,logs:logs.join('')};

@@ -10,6 +10,10 @@
 #   unlabeled            removing merge:ready takes the PR out of the queue, or disables its auto-merge
 #   dequeued             a PR the queue drops without merging loses merge:ready and gets a comment with the reason
 #   A red head check does not eject in this mode: auto-merge waits, and a fix enters the queue by itself.
+#   mixed cap            a PR with any file outside the low-risk paths (LOW_RISK in .github/scripts/ci-scope.mjs) waits,
+#                        keeping merge:ready, while MIXED_CAP (4, merge-train.mjs) such PRs are queued or set to
+#                        auto-merge; low-risk PRs enqueue up to the queue's own limit. Every queue exit (unlabeled,
+#                        dequeued, merged) starts the train, which then enqueues a waiting PR
 #
 # Without the rule, everything below applies as written.
 #
@@ -31,6 +35,14 @@
 #                        While main is red every PR is strict, and the
 #                        train says so once per red streak on the coordination issue (repo variable
 #                        MERGE_TRAIN_NOTIFY_ISSUE, default 755; a failed notice is logged and the train goes on)
+#
+# Release freeze (#1838; docs/release.md#release-freeze)
+#   RELEASE_FREEZE       repo variable, the release pin's sha (optionally followed by a note). While it is set, the pick
+#                        merges and enqueues nothing: every merge:ready PR waits with its label, a PR already in the
+#                        queue or waiting there through auto-merge is taken back out (a dequeue during the freeze does
+#                        not eject), and the run's summary names the freeze. The release owner sets it at the pin and
+#                        deletes it at dispatch, each followed by a dispatch of this workflow, which then picks as usual.
+#                        release.yml refuses to run while it is set to anything but main's HEAD
 #
 # Label flow
 #   merge:ready          the author (or an agent) adds it when the PR is done; the train takes the oldest eligible one
@@ -126,7 +138,8 @@ jobs:
         run: gh workflow run merge-train.yml --repo "$REPO" --ref "$DEFAULT_BRANCH" -f exit="$ACTION" -f pr="$PR" -f reason="$REASON"
 
   # The queue's way back to the author (queue mode, see the header). Runs main's script; no PR code. A dequeue is read
-  # after a short wait, so a PR that merged or that the queue re-entered is left alone.
+  # after a short wait, so a PR that merged or that the queue re-entered is left alone. A PR leaving the queue makes
+  # room for one the mixed cap held, so the job then starts the train.
   queue-exit:
     if: github.event_name == 'workflow_dispatch' && inputs.exit != ''
     runs-on: ubuntu-latest
@@ -135,12 +148,14 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      actions: write
     env:
       GH_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}
       REPO: ${{ github.repository }}
       PR: ${{ inputs.pr }}
       ACTION: ${{ inputs.exit }}
       REASON: ${{ inputs.reason }}
+      RELEASE_FREEZE: ${{ vars.RELEASE_FREEZE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -156,6 +171,11 @@ jobs:
             sleep 20
             node .github/scripts/merge-train.mjs dequeued --repo "$REPO" --pr "$PR" --reason "$REASON"
           fi
+      - name: Start the train
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: gh workflow run merge-train.yml --repo "$REPO" --ref "$DEFAULT_BRANCH" || echo "::warning::could not start the train"
 
   train:
     if: github.event_name == 'workflow_dispatch' && inputs.exit == ''
@@ -193,6 +213,7 @@ jobs:
         id: pick
         env:
           NOTIFY_ISSUE: ${{ vars.MERGE_TRAIN_NOTIFY_ISSUE || '755' }}
+          RELEASE_FREEZE: ${{ vars.RELEASE_FREEZE }}
         run: node .github/scripts/merge-train.mjs next --repo "$REPO" --maintainer "$MAINTAINER" --notify-issue "$NOTIFY_ISSUE" --output "$GITHUB_OUTPUT"
 
       - name: Rebase onto main
@@ -230,7 +251,7 @@ jobs:
         id: resolve
         if: steps.rebase.outputs.status == 'conflict' && env.HAS_CLAUDE == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1.0.266
+        uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |

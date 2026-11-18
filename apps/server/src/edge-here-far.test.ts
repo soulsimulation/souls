@@ -60,9 +60,14 @@ test('#1281 H3: a walk offered only on demand is route-checked too: none from a 
 });
 
 test('#1281 H1: a water place keeps its walk, though the walk aims at its shore', {timeout: 300000}, async t => {
-  const {put, here, ids} = await world(t, marsTwo);
+  // The water is built here: Mars College has no pond (#1984), so the template's old one goes first while it still has it.
+  const {w, put, here, ids} = await world(t, marsTwo);
+  w.god.act({ops: [{op: 'remove', id: 'campus-swimming-pond'}]} as never);
+  const built = w.god.act({ops: [{op: 'place', def: 'core/pond@1', name: 'test-pond', params: {level: -0.2, depth: 2.6, edge: 6}, shape: {area: [[-34, -20], [-39, -13], [-44, -12], [-49, -13], [-54, -20], [-49, -27], [-44, -28], [-39, -27]]}},
+    {op: 'set', id: 'test-pond', about: {title: 'Test Pond', what: 'A body of water beside the main campus.', aliases: ['water'], kind: 'pond', role: 'landmark', salience: 3}}]} as never);
+  assert.equal(built.accepted, true, JSON.stringify(built)); await w.settle(8); w.edge.map();
   await put([450, 2]);
-  assert.ok(ids(here()).includes('walk:campus-swimming-pond'), JSON.stringify(here().far));
+  assert.ok(ids(here()).includes('walk:test-pond'), JSON.stringify(here().far));
 });
 
 test('#1281: on a replica no route issue is not remembered, so a verdict that arrives later counts', {timeout: 300000}, async t => {
@@ -80,26 +85,6 @@ test('#1281: a far line repeats neither an exit nor the place she stands in', {t
   const h = here(), exits = new Set(h.exits.map((e: any) => e.walk));
   for (const id of ids(h)) assert.ok(!exits.has(id), id);
   assert.ok(!(h.far as string[]).some(x => / · been.* · walk:/.test(x) && x.includes(' 0m')), JSON.stringify(h.far));
-});
-
-test('#1281 H4: a flag in a secret place is not named until she knows the place', {timeout: 300000}, async t => {
-  const {w, here} = await world(t);
-  for (const op of [{op: 'place', def: 'core/zone@1', name: 'hidden-grove', shape: {area: [[60, 60], [90, 60], [90, 90], [60, 90]]}, params: {use: 'park'}}, {op: 'place', def: 'core/flag@1', name: 'grove-flag', p: [75, 75], state: {label: 'the hidden grove'}}]) assert.equal(w.god.act({ops: [op]} as never).accepted, true);
-  await w.settle(8); w.edge.map();
-  const grove = [...w.edge.places.byId.values()].find(p => /hidden-grove/.test(p.id))!;
-  assert.ok((here().flags as string[]).some(l => l.startsWith('the hidden grove')), 'a public place: named');
-  assert.equal(w.edge.knowledge.setSecret(grove.id, true), true); await w.settle(3);
-  assert.ok(!JSON.stringify(here().flags).includes('hidden grove'), JSON.stringify(here().flags));
-});
-
-test('#1281 H4: a flag in a secret room upstairs is not named either', {timeout: 300000}, async t => {
-  const {w, here} = await world(t, new URL('../../../worlds/templates/eden-2026.json', import.meta.url));
-  const edge = w.edge as any, room = [...w.edge.places.byId.values()].find(p => (p.level ?? 0) >= 1 && !p.carrier && p.polygon.length)!; assert.ok(room, 'an upstairs room');
-  const at = room.polygon.reduce((s, q) => [s[0] + q[0] / room.polygon.length, s[1] + q[1] / room.polygon.length], [0, 0]) as [number, number];
-  const flags = edge.namedFlagsV1; edge.namedFlagsV1 = () => [{name: 'the hidden study', walk: 'walk:flag-study', at}]; t.after(() => {edge.namedFlagsV1 = flags;});
-  assert.ok((here().flags as string[]).some(l => l.startsWith('the hidden study')), 'a public room: named');
-  assert.equal(w.edge.knowledge.setSecret(room.id, true), true); await w.settle(3);
-  assert.equal(here().flags, undefined, JSON.stringify(here().flags));
 });
 
 test('#1281: what far and flags name leaves the room for what can be done here as it was', {timeout: 300000}, async t => {

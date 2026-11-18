@@ -74,8 +74,8 @@ export function setDownFrom(rt: Rt, actor: string): { at: [number, number]; y?: 
 }
 
 /** The world ends whatever holds the body (no def asked: a refused or deferred stop is what stalled it), clears the body's
- *  hold markers and frees its carrier seat and door, then stands it at `spot`. Returns what was released. */
-export function releaseBody(rt: Rt, actor: string, spot: [number, number, number] | null, reason: { code: string; message: string }): { released: string[]; markers: string[]; at: [number, number, number] } | null {
+ *  hold markers and frees its carrier seat and door, then stands it at `spot` (on `level`, when given: a flight's landing). Returns what was released. */
+export function releaseBody(rt: Rt, actor: string, spot: [number, number, number] | null, reason: { code: string; message: string }, level?: number): { released: string[]; markers: string[]; at: [number, number, number] } | null {
   const before = probeBody(rt, actor); if (!before || before.exempt) return null;
   for (const x of before.holders) rt.forceCancel(x.id, reason);
   const a = rt.world.entities[actor], h = a.human as Record<string, unknown> & { carrier?: { id: string } };
@@ -83,6 +83,6 @@ export function releaseBody(rt: Rt, actor: string, spot: [number, number, number
   if (cs) { for (const k of Object.keys(cs.seats)) if (cs.seats[k] === actor) cs.seats[k] = null; if (cs.doorBy === actor) cs.doorBy = null; }
   for (const k of ['carrier', 'task', 'berth', 'seatHeight', 'baseActivity', 'speed']) delete h[k];
   h.activity = 'idle';
-  if (spot) { a.pose.p = [spot[0], spot[1], spot[2]]; a.pose.pitch = 0; a.pose.roll = 0; acknowledgeRelocation(rt, actor); }
+  if (spot) { a.pose.p = [spot[0], spot[1], spot[2]]; a.pose.pitch = 0; a.pose.roll = 0; if (level !== undefined) h.level = level; acknowledgeRelocation(rt, actor); }
   return { released: before.verbs, markers: before.markers, at: [a.pose.p[0], a.pose.p[1], a.pose.p[2]] };
 }

@@ -4,6 +4,7 @@
 // worker (worker.ts), served at a short-lived unguessable URL, cached by (Soul, tick bucket, gaze, size, pose),
 // rate limited per Soul and globally. Without a worker (or while it restarts) the answer is 503 with the caption,
 // and ?alt=only never renders at all.
+import {worldConfig} from '../../config.ts';
 import {randomBytes} from 'node:crypto';
 import type {Context, Hono} from 'hono';
 import {EDGE_CONTRACT, EdgeError, edgeBody, type EdgeDeps, type EdgeSoul} from '../contract.ts';
@@ -20,7 +21,6 @@ export type EyesOptions = {
 };
 type Frame = {key: string; img: string; tick: number; alt: string; heading: unknown; gaze: unknown; seen: unknown; at: number; expires: number; ms: number; frameTick: number | null};
 const num = (v: string | undefined, d: number) => {const n = Number(v); return v !== undefined && v !== '' && Number.isFinite(n) ? n : d;};
-const envNum = (k: string, d: number) => num(process.env[k], d);
 /** Explicit `world` opt-in derives this child's exact path, including a launcher's /worlds prefix. */
 export function eyesViewerUrl(setting: string | undefined, cfg: {worldPath: string; publicUrl: string}): string | undefined {
   if (!setting || setting === 'off') return undefined;
@@ -54,7 +54,8 @@ export const viewSummary = (p: ViewPlan) => ({tick: p.tick, heading: p.sight.hea
 export function mountEdgeEyes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}, options: EyesOptions = {}) {
   let loadPaused = false;
   const now = options.now ?? Date.now;
-  const viewerUrl=eyesViewerUrl(process.env.EDGE_EYES,deps.souls.cfg),problem=viewerUrl?(eyesViewerProblem(viewerUrl,deps.souls.cfg)??eyesWorkerProblem()):null;
+  const env = worldConfig(deps.host).env, envNum = (k: string, d: number) => num(env[k], d);
+  const viewerUrl=eyesViewerUrl(env.EDGE_EYES,deps.souls.cfg),problem=viewerUrl?(eyesViewerProblem(viewerUrl,deps.souls.cfg)??eyesWorkerProblem()):null;
   const refused:EyesRenderer={status:()=>({...NO_RENDERER.status(),detail:problem}),render:()=>Promise.reject(new EyesUnavailable(problem!)),close(){}};
   const renderer: EyesRenderer = options.renderer ?? (problem?refused:viewerUrl ? new EyesWorker({viewerUrl, timeoutMs: envNum('EDGE_EYES_TIMEOUT_SECONDS', 90) * 1000}) : NO_RENDERER);
   // Operators may tighten these budgets, never exceed the published 30 s / 12 per minute bounds.

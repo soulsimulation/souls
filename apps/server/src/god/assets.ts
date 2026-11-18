@@ -31,8 +31,9 @@ import { ApiError } from '../souls.ts';
 import type { GodMode } from './god.ts';
 import { FOOTPRINT_BYTES, godBodyLimit } from './ingestion.ts';
 import { godTokenLimiter } from './rate-limit.ts';
+import { refuseWhenDiskLow } from '../load/disk-headroom.ts';
 import { intakeUpload, recordIntake } from '../moderation/intake.ts';
-import { moderationFor } from '../moderation/store.ts';
+import { defaultSiteLog, moderationFor } from '../moderation/store.ts';
 import { assetPolicy, UploadRejected, validateUpload } from '../moderation/validate.ts';
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -561,7 +562,7 @@ const noStore = { 'cache-control': 'no-store' };
  */
 export function mountAssetRoutes(app: Hono, d: AssetDeps): AssetStore {
   const limitGod = godTokenLimiter(d.requireGod);
-  const store = d.store ?? (d.god as { assets?: AssetStore }).assets ?? new AssetStore({ dir: d.dir ?? defaultAssetDir(), db: d.god.db, worldId: d.god.opts.worldId });
+  const store = d.store ?? (d.god as { assets?: AssetStore }).assets ?? new AssetStore({ dir: d.dir ?? defaultAssetDir(d.god.opts.env), db: d.god.db, worldId: d.god.opts.worldId });
   d.god.model.assets = store.lookup;
   const budget = (): Budget => ({ ...DEFAULT_BUDGET, ...d.god.model.constants.limits.budget });
   // a def that extends another (a preset of a generator: corner-shop of shop) is listed as it resolves (its make, slots, params)
@@ -593,6 +594,7 @@ export function mountAssetRoutes(app: Hono, d: AssetDeps): AssetStore {
 
   app.post('/v1/god/assets', godBodyLimit(budget), async (c) => {
     limitGod(c, 'asset-upload', L.assetUploadsPerMinute);
+    refuseWhenDiskLow(c, (...a) => new ApiError(...a));   // #2538
     const ct = c.req.header('content-type') ?? '';
     const q = (k: string) => c.req.query(k);
     let bytes: Uint8Array | null = null, footprint: Uint8Array | null = null;
@@ -633,7 +635,7 @@ export function mountAssetRoutes(app: Hono, d: AssetDeps): AssetStore {
     store.checkWorldBudget([admitted, ...(footprint ? [inspectAsset(footprint, { kind: 'footprint' })] : []), ...(scaledFootprint ? [inspectAsset(scaledFootprint, { kind: 'footprint' })] : [])]);
     if (admitted.kind === 'mesh') { const v = await validateGlb(bytes); if (v) throw new ApiError(400, 'asset.invalid', `the GLB does not parse: ${v}`, { field: 'file', measured: { problem: v, bytes: bytes.byteLength }, allowed: { format: 'valid self-contained GLB 2.0' }, fix: 'Export a valid self-contained binary glTF 2.0 file.' }); }
     // G8 moderation after release 2's structured admission: metadata stripped, words and classifier checked
-    const moderation = moderationFor(d.god.db.db, d.god.opts.worldId);
+    const moderation = moderationFor(d.god.db.db, d.god.opts.worldId, defaultSiteLog(d.god.opts.env));
     const intake = await intakeUpload(moderation, bytes, { surface: 'asset', policy: assetPolicy(budget()), words: [name, field.source, field.license, field.description, field.tags], actor: 'god' })
       .catch((e) => { if (e instanceof UploadRejected) throw new ApiError(e.status, e.code, e.message); throw e; });
     bytes = intake.upload.bytes;
@@ -695,6 +697,7 @@ export function mountAssetRoutes(app: Hono, d: AssetDeps): AssetStore {
   });
   app.post('/v1/god/defs/*', async (c) => {
     limitGod(c, 'thumbnail-upload', L.thumbnailUploadsPerMinute);
+    refuseWhenDiskLow(c, (...a) => new ApiError(...a));   // #2538
     const rest = decodeURIComponent(c.req.path.replace(/^.*\/v1\/god\/defs\//, ''));
     if (!rest.endsWith('/thumb.png')) throw new ApiError(404, 'not-found', 'POST /v1/god/defs/<ref>/thumb.png with a PNG body');
     const def = findDef(rest.slice(0, -'/thumb.png'.length));

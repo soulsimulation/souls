@@ -56,8 +56,8 @@ import type {EdgeLedger} from '../edge/ledger/ledger.ts';
 import type {EdgeSoul} from '../edge/contract.ts';
 import type {DeltaTap, StreamMessage} from './delta.ts';
 
-export type ReadName = 'here' | 'observe' | 'capabilities' | 'resolve' | 'around';
-export const READS: readonly ReadName[] = ['here', 'observe', 'capabilities', 'resolve', 'around'];
+export type ReadName = 'here' | 'observe' | 'capabilities' | 'around';
+export const READS: readonly ReadName[] = ['here', 'observe', 'capabilities', 'around'];
 export type Soak = {startedAt: number; rounds: number; /** thread CPU ms of the replica's per-round god-layer sync */ syncCpuMs: number; /** thread CPU ms of the after-delta warm-up (as a worker's background) */ bgCpuMs: number; bgRuns: number; skipped: Record<string, number>; reads: Record<ReadName, OracleTally & {mainOnly: Record<string, number>; liveMs: number; replicaMs: number; paths: Record<string, number>; lateDelta?: number}>; replica: unknown};
 
 const cpu = () => {const u = threadCpuUsage(); return (u.user + u.system) / 1000;};
@@ -86,7 +86,6 @@ export async function installReadOracle(host: WorldHost, L: EdgeLedger, src: {ta
     here: (l, s) => hereFrame(l, s),
     observe: (l, s) => l.observe(s, new Set()),
     capabilities: (l, s) => l.capabilitiesPage(s, {}),
-    resolve: (l, s, i) => l.intents.dryRun(s, (i % 2 ? {capability: 'walk to the pond'} : {capability: 'sit on a bench'}) as never),
     around: (l, s) => aroundFrame(l, s),
   };
   /** the body facts a place answer depends on (dump only) */

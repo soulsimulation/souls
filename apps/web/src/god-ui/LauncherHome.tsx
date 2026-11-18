@@ -4,9 +4,12 @@
 import type { ClerkSatellite } from '../clerk-satellite.ts';
 import { EdenMark } from '../EdenMark.tsx';
 import { BASE } from '../base-path.ts';
+import { whenVisible } from '../poll-pace.ts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './launcher-home.css';
 import { useSession, userAuthHeaders } from '../auth-session.ts';
+import { AccountPicture } from '../AccountPicture.tsx';
+import { HomeSouls } from './HomeSouls.tsx';
 
 export type LauncherTemplate = { id: string; name: string; description: string; batches: number; ops?: number };
 export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
@@ -17,8 +20,8 @@ export type LauncherList = { contract: 'local-worlds/1'; launcher: string; world
 const ago = (t: number) => { const s = Math.max(0, (Date.now() - t) / 1000); if (s < 90) return 'just now'; if (s < 3600) return `${Math.round(s / 60)} minutes ago`; if (s < 86400 * 2) { const h = Math.round(s / 3600); return `${h} hour${h === 1 ? '' : 's'} ago`; } return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); };
 const STATUS: Record<string, string> = { running: 'Live', starting: 'Waking up…', restarting: 'Waking up…', stopped: 'Asleep', asleep: 'Asleep', failed: 'Could not start' };
 
-/** Top right: who is signed in, behind one round button; the menu holds the address and Sign out. */
-function AccountMenu({ label, onSignOut }: { label: string | null; onSignOut: () => void }) {
+/** Top right: who is signed in, behind one round button (their picture, as on a world page); the menu holds the address and Sign out. */
+function AccountMenu({ label, avatarUrl, onSignOut }: { label: string | null; avatarUrl?: string | null; onSignOut: () => void }) {
   const [open, setOpen] = useState(false), root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -27,10 +30,9 @@ function AccountMenu({ label, onSignOut }: { label: string | null; onSignOut: ()
     addEventListener('mousedown', away); addEventListener('keydown', esc);
     return () => { removeEventListener('mousedown', away); removeEventListener('keydown', esc); };
   }, [open]);
-  const initial = (label ?? '?').replace(/^dev:/, '').trim().charAt(0).toUpperCase() || '?';
   return (
     <div className="lh-account" ref={root} data-signed-in="1">
-      <button className="lh-avatar" aria-label={`Account: ${label ?? 'signed in'}`} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}>{initial}</button>
+      <button className="lh-avatar" aria-label={`Account: ${label ?? 'signed in'}`} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}><AccountPicture avatarUrl={avatarUrl} label={label}/></button>
       {open && <div className="lh-menu" role="menu">
         <p className="lh-menu-who">{label ?? 'Signed in'}</p>
         <button role="menuitem" onClick={onSignOut}>Sign out</button>
@@ -55,9 +57,12 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
     setDialogRaw(open);
   };
   useEffect(() => { if (dialog && needsSignIn && session.ready) setDialogRaw(false); }, [dialog, needsSignIn, session.ready]);
+  // #2305: every 6 s while the page is shown; a hidden page does not poll, and reads once as soon as it is shown again
   useEffect(() => {
-    const t = setInterval(() => { void fetch(`${BASE}/__sim/worlds.json`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.launcher) setList(d); }).catch(() => {}); }, 6000);
-    return () => clearInterval(t);
+    let t: ReturnType<typeof setTimeout> | undefined, cancel = () => {}, stopped = false;
+    const poll = () => { cancel = whenVisible(() => { void fetch(`${BASE}/__sim/worlds.json`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.launcher && !stopped) setList(d); }).catch(() => {}).finally(() => { if (!stopped) t = setTimeout(poll, 6000); }); }); };
+    t = setTimeout(poll, 6000);
+    return () => { stopped = true; clearTimeout(t); cancel(); };
   }, []);
   // the fullest worlds first; a world whose count is unknown goes last
   const worlds = [...list.worlds].sort((a, b) => (b.entities ?? -1) - (a.entities ?? -1));
@@ -68,8 +73,7 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
       <header className="lh-bar">
         <div className="lh-title"><EdenMark/><span className="lh-wordmark">Souls</span></div>
         <div className="lh-actions">
-          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
-          {session.authed ? <AccountMenu label={session.label} onSignOut={() => void session.logout()}/>
+          {session.authed ? <AccountMenu label={session.label} avatarUrl={session.avatarUrl} onSignOut={() => void session.logout()}/>
             : session.mode === 'clerk' ? (!session.ready ? <span className="dim">Signing in…</span>
               : <button className="lh-signin" data-home-signin="1" onClick={() => setDialog(true)}>Sign in</button>)
             : session.mode === 'dev' && <button className="lh-signin" data-home-signin="1" onClick={() => session.login()}>Sign in</button>}
@@ -79,10 +83,14 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
         <div className="lh-empty">
           <p>No worlds yet. Be the first.</p>
           <p className="dim">Name it, pick how it starts, and hand your agent one line. About a minute.</p>
-          <button className="lh-new" onClick={() => setDialog(true)}>+ New world</button>
+          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
         </div>
       )}
-      {worlds.length > 0 && <h1 className="lh-h">Worlds <span className="lh-count">{worlds.length}</span></h1>}
+      {/* #2465: New world sits with the list it adds to, across from the count; the empty state above has its own */}
+      {worlds.length > 0 && <div className="lh-list-head">
+        <h1 className="lh-h">Worlds <span className="lh-count">{worlds.length}</span></h1>
+        <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
+      </div>}
       <div className="lh-cards">
         {worlds.map((w) => (
           <a key={w.slug} href={w.url} data-world={w.slug} className="lh-card" title={`${w.slug} · made ${ago(w.createdAt)}`}>
@@ -101,6 +109,8 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
           </a>
         ))}
       </div>
+      {/* #2466: the signed-in person's own Souls, below the worlds, only when they have some */}
+      <HomeSouls/>
       <ForAgents/>
       {/* #388: the public changelog, a static page the launcher serves beside this list (apps/web/changelog.html); #897: the docs */}
       <footer className="lh-footer">

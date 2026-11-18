@@ -15,11 +15,13 @@
 //     high ground, frogs sing at ponds by night and gulls call over the sea by day.
 // Everything is quiet by default (MASTER_DEFAULT) and ambient music is opt-in.
 import type { Entity, StoredDef, WorldModel } from '@souls/world-compiler';
+import type { LookRow } from '../../../../packages/form-rules/src/looks.ts';
 
 export type SoundKind =
   | 'water' | 'stream' | 'fire' | 'wind' | 'creak' | 'birds' | 'bell' | 'hum' | 'engine' | 'chime' | 'frogs' | 'music'
   | 'waves' | 'crickets' | 'chatter' | 'footsteps' | 'leaves' | 'flag' | 'waterfowl' | 'bees' | 'kettle';
-export type SoundSpec = { kind: SoundKind; radius: number; volume: number; when?: string; mode?: 'loop' | 'change'; variant?: number };
+/** `tune` / `mood` (SA-D7): a music spec from a looks-table sound row that plays notes from content/tunes (sound.ts playTunes), not a loop. */
+export type SoundSpec = { kind: SoundKind; radius: number; volume: number; when?: string; mode?: 'loop' | 'change'; variant?: number; tune?: string; mood?: string };
 export type Source = 'object' | 'ambient' | 'resident' | 'visitor';
 /** `cloud`: pts is a set of separate points (a cluster of trees); the distance is to the nearest one. */
 /** `follow`: an ambience that goes where the listener goes (the sea along a shore): heard at its level wherever the
@@ -73,6 +75,21 @@ export function distanceTo(e: Pick<Emitter, 'pts' | 'area'>, x: number, y: numbe
 /** Loudness 0..1 heard from distance d (smooth quadratic fall-off to 0 at the radius). */
 export const falloff = (d: number, radius: number, volume: number) => (d >= radius ? 0 : volume * (1 - d / radius) ** 2);
 
+/** The looks table a kind carries in its def (`make.args.looks_table`, as the picture reads it). */
+export const tableOf = (def: unknown): LookRow[] => { const t = (def as { make?: { args?: { looks_table?: unknown } } } | undefined)?.make?.args?.looks_table; return Array.isArray(t) ? (t as LookRow[]) : []; };
+/** Sound specs from the sound rows of a looks table: what is heard, how far (`reach_mm`), driven by a field. A tune row is a music spec
+ *  that sound.ts plays from the tunes list; another sound follows a boolean field (`when`). Event rows are played from the record (V21). */
+function tableSpecs(def: unknown): SoundSpec[] {
+  const out: SoundSpec[] = [];
+  for (const r of tableOf(def)) {
+    if (r.do !== 'sound' || r.event !== undefined || typeof r.field !== 'string' || !Number.isInteger(r.reach_mm)) continue;
+    const loud = Math.max(0, ...Object.values(r.at ?? {}).concat(r.to ?? []).filter((v): v is number => typeof v === 'number')) / 1000;
+    const radius = Math.max(1, Math.min(120, (r.reach_mm as number) / 1000)), volume = Math.min(1, loud);
+    if (r.sound === 'tune') out.push({ kind: 'music', radius, volume, mode: 'loop', ...(r.tune !== undefined ? { tune: r.tune } : { mood: r.mood }) });
+    else if (isKind(r.sound) && r.at && Object.keys(r.at).every((k) => k === 'true' || k === 'false') && r.at.false === 0 && Number(r.at.true) > 0) out.push({ kind: r.sound, radius, volume, mode: r.mode === 'once' ? 'change' : 'loop', when: r.field });
+  }
+  return out;
+}
 /** A def's sound specs: `components.sound` and its `also` list (at most 4 in all). Unknown kinds are dropped. */
 export function specsOf(def: Pick<StoredDef, 'components'> | undefined): SoundSpec[] {
   const raw = (def?.components as { sound?: unknown } | undefined)?.sound;
@@ -82,7 +99,7 @@ export function specsOf(def: Pick<StoredDef, 'components'> | undefined): SoundSp
     if (!s || !isKind(s.kind)) continue;
     out.push({ kind: s.kind, radius: Math.max(1, Math.min(120, num(s.radius, 14))), volume: Math.max(0, Math.min(1, num(s.volume, 0.5))), when: typeof s.when === 'string' ? s.when : undefined, mode: s.mode === 'change' ? 'change' : 'loop', ...(typeof s.variant === 'number' ? { variant: s.variant } : {}) });
   }
-  return out;
+  return [...out, ...tableSpecs(def)].slice(0, 4);
 }
 
 // ---------------------------------------------------------------- implied sounds (from what a thing is)
@@ -118,15 +135,28 @@ export function impliedSpecs(def: DefLike | undefined): SoundSpec[] {
   return out.slice(0, 4);
 }
 
+/** #1571: a def's own and implied specs, made once per def object (frozen; the scan copies before it changes one). A merged
+ *  (extending) def is a fresh object per resolve, so it misses and is derived as before. */
+const defSpecCache = new WeakMap<object, { own: readonly SoundSpec[]; implied: readonly SoundSpec[] }>();
+export function defSpecs(def: StoredDef): { own: readonly SoundSpec[]; implied: readonly SoundSpec[] } {
+  let hit = defSpecCache.get(def);
+  if (!hit) {
+    const freeze = (l: SoundSpec[]) => Object.freeze(l.map((x) => Object.freeze(x)));
+    hit = { own: freeze(specsOf(def)), implied: freeze(impliedSpecs(def as DefLike)) };
+    defSpecCache.set(def, hit);
+  }
+  return hit;
+}
 /** Every entity's sounds in the model, with position(s), current state (def defaults filled) and a chosen variant.
  *  Implied sounds of kinds in CLUSTERED are merged per cell into one `cloud` emitter (a wood rustles as one). */
 export function emittersOf(model: WorldModel): Emitter[] {
   const out: Emitter[] = [], clusters = new Map<string, Emitter>();
   for (const e of model.entities.values()) {
-    const def = model.resolvedDef(e.def), own = specsOf(def), implied = impliedSpecs(def as DefLike | undefined);
-    if (!def || (!own.length && !implied.length)) continue;
+    const def = model.resolvedDef(e.def); if (!def) continue;
+    let { own, implied } = defSpecs(def);
+    if (!own.length && !implied.length) continue;
     // a fountain's own water is the splashing voicing (its drip and pigeons come as extra sounds)
-    if (own[0] && own[0].variant === undefined && ((def as DefLike).tags ?? []).includes('fountain')) own[0] = { ...own[0], variant: 0 };
+    if (own[0] && own[0].variant === undefined && ((def as DefLike).tags ?? []).includes('fountain')) own = [{ ...own[0], variant: 0 }, ...own.slice(1)];
     const specs = own.length ? [...own, ...implied].slice(0, 4) : implied.filter((s) => !CLUSTERED.has(s.kind));
     if (!own.length) for (const spec of implied) {
       if (!CLUSTERED.has(spec.kind)) continue;

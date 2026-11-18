@@ -63,7 +63,10 @@ test('a far act whose thing turned private or whose policy changed during the wa
   const priv = { code: 'object.private', reason: 'the desk lamp is Ben\'s and private.' }, locked = { code: 'door.locked', reason: 'It is locked.' };
   assert.deepEqual(farOutcome(far, true, soul, find, { ...base, access: () => priv } as never), priv, 'made private on the way');
   assert.deepEqual(farOutcome(far, true, soul, find, { ...base, policy: (_id: string, _s: unknown, action: string) => action === 'switch-off' ? locked : null } as never), locked, 'its policy changed on the way');
-  assert.equal(commits.length, 0, 'neither changed the world');
+  // #1859: someone else's hand started on it during the walk
+  const inUse = { code: 'container.in-use', reason: 'Someone\'s hand is in the desk lamp; wait until they are done.' };
+  assert.deepEqual(farOutcome(far, true, soul, find, { ...base, busy: (id: string, action: string) => id === 'e_l' && action === 'switch-off' ? inUse : null } as never), inUse, 'busy on arrival');
+  assert.equal(commits.length, 0, 'none changed the world');
 });
 
 test('a far act is held and a held one dropped only when the act\'s transaction commits: a newer act that rolls back leaves it held', () => {
@@ -79,5 +82,20 @@ test('a far act is held and a held one dropped only when the act\'s transaction 
     assert.deepEqual(held.map((h) => (h as { capability?: string } | null)?.capability ?? null), [null, 'object:e_l:switch-off'], 'committed: the old one dropped, this one held');
     assert.throws(() => tx(db, () => { act(); throw Error('newer admission rolled back'); }), /rolled back/);
     assert.equal(held.length, 2, 'a newer act that rolled back leaves the earlier far act held');
+  } finally { db.close(); }
+});
+
+test('#1859: inside a transaction afterCommit cannot track, a far act is neither held nor dropped, and that is logged', () => {
+  const db = new DatabaseSync(':memory:'), held: unknown[] = [], logs: string[] = [];
+  try {
+    const objects = { act: () => ({ accepted: true }), core: { db } };
+    const host = { bodyAt: () => [300, 0], thingAt: () => [0, 0], deferFar: (_s: unknown, far: unknown) => held.push(far), commit: () => ({ accepted: true }) } as never;
+    wrapAct(objects, () => ({ def: lamp, state: { on: true }, name: 'the desk lamp' }), host, (m) => logs.push(m));
+    const soul = { soulId: 's_a', entityId: 'h_a' } as never;
+    db.exec('BEGIN');   // an outer transaction not opened by tx(): afterCommit throws edge-comms.untracked-outer-transaction
+    (objects as { act(id: string, s: unknown, i: unknown): unknown }).act('e_l', soul, { action: 'switch-off' });
+    db.exec('ROLLBACK');
+    assert.deepEqual(held, [], 'nothing held or dropped');
+    assert.equal(logs.length, 2, 'the drop and the hold each logged'); assert.match(logs[0]!, /untracked-outer-transaction/);
   } finally { db.close(); }
 });

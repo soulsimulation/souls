@@ -13,6 +13,7 @@ import { tableObject } from './items.ts';
 import { chessBoardObject } from './chess.ts';
 import { workstationObject, type WorkstationVisual, type WorkstationAppearanceOptions } from './workstation.ts';
 import { rendererColor } from './palette.ts';
+import { drawTvPicture, isTvPicture } from './tv-pictures.ts';
 import { createCommonsPrefab, type PrefabKind } from './content/assets/commons-prefabs.ts';
 import {createCommonsContrast,COMMONS_FACTORY_SHA256} from './content/assets/commons-contrast/contrast.mjs';
 const COMMONS_APPEARANCE:Readonly<Record<string,PrefabKind>>=Object.freeze({
@@ -24,7 +25,7 @@ import {rowingPuntObject,type RowingPuntVisual} from './rowing-punt.ts';
 
 /** A bundle / stack's pieces (rebuilt when `contents.count` changes). */
 type Stack = { group: THREE.Group; count: number | null };
-type Screen = { geometry: THREE.PlaneGeometry; canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; material: THREE.MeshBasicMaterial; key: string };
+type Screen = { geometry: THREE.PlaneGeometry; canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; material: THREE.MeshBasicMaterial; key: string; /** classroom-tv/1: the soft light a TV gives the room while on */ light: THREE.PointLight };
 type Pose = { p: [number, number, number]; yaw: number; pitch: number; roll: number };
 const poseOf = (e: Entity): Pose => ({ p: [...e.pose.p], yaw: e.pose.yaw, pitch: e.pose.pitch ?? 0, roll: e.pose.roll ?? 0 });
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -163,7 +164,11 @@ export class FixtureViews {
     const panel = new THREE.Mesh(geometry, material);
     panel.position.set(0, sy * 0.68, sz * 0.29);
     g.add(panel);
-    v.screen = { geometry, canvas, texture, material, key: '' };
+    // classroom-tv/1 (#2302): a TV that is on lights the room softly in front of it (cool white, as core-television@2)
+    const light = new THREE.PointLight('#cfe0ff', 0, 5, 2);
+    light.position.set(0, sy * 0.68, sz * 0.29 + 0.4);
+    g.add(light);
+    v.screen = { geometry, canvas, texture, material, key: '', light };
     return g;
   }
 
@@ -171,12 +176,16 @@ export class FixtureViews {
     const c = e.equipment?.kind === 'display' ? e.equipment.config : {};
     const on = c.mode === 'on' && c.available !== false;
     const content = typeof c.content === 'string' ? c.content : '';
-    const key = `${on}:${content}`;
+    // classroom-tv/1 (#2302): a TV shows its picture (or the lesson) and glows while on; off, it is dark glass
+    const tv = c.tv === true, picture = tv && isTvPicture(c.picture) ? c.picture : null;
+    const key = `${on}:${tv}:${picture}:${content}`;
     if (key === screen.key) return;
     screen.key = key;
+    screen.light.intensity = tv && on ? 1.6 : 0;
     const ctx = screen.canvas.getContext('2d');
     if (!ctx) return;
-    ctx.fillStyle = on ? '#d9e6e3' : '#15212a';
+    if (on && picture) { drawTvPicture(ctx, picture, 512, 288); screen.texture.needsUpdate = true; return; }
+    ctx.fillStyle = on ? '#d9e6e3' : tv ? '#0d1114' : '#15212a';
     ctx.fillRect(0, 0, 512, 288);
     if (on) {
       ctx.fillStyle = '#183c4d';

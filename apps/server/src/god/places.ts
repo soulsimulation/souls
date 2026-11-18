@@ -21,10 +21,12 @@ import type { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { decorateMeaning, humanTitle } from './meaning.ts';
 import type { Place } from '../edge/ledger/places.ts';
 import type { GodNav, Thing } from './nav.ts';
+import { doorAt, type CatalogDoor } from '../edge/catalog/catalog.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Vec2 = [number, number];
-export type GodPlace = Place & { ref: string; of: 'area' | 'water' | 'shore' | 'building' | 'room' | 'thing' | 'landmark' | 'landform' | 'land'; entity: string };
+export type GodPlace = Place & { ref: string; of: 'area' | 'water' | 'shore' | 'building' | 'room' | 'thing' | 'landmark' | 'landform' | 'land'; entity: string;
+  /** #2261: a building's doors to the outside, as the catalog and `inspect` give them. */ doors?: CatalogDoor[] };
 type StructureStamp = { model: object | undefined; revision: number | string | undefined };
 const sortPlaces = (list: GodPlace[]) => list.sort((a, b) => (a.id < b.id ? -1 : 1));
 function placeIndex(list: GodPlace[]) {
@@ -286,7 +288,8 @@ export class GodPlaces {
       const rooms = out.filter((p) => p.of === 'room' && p.entity === t.id && p.level === t.level);
       const pts = rooms.flatMap((p) => p.polygon); if (pts.length < 3) continue;
       const poly = grow(hull(pts), 0.4); if (poly.length < 3) continue;
-      push({ ...base, id: GodPlaces.idOf(t.ref), ref: t.ref, of: 'building', entity: t.id, name: t.ref, kind: 'building', polygon: poly, level: t.level });
+      push({ ...base, id: GodPlaces.idOf(t.ref), ref: t.ref, of: 'building', entity: t.id, name: t.ref, kind: 'building', polygon: poly, level: t.level,
+        ...(t.doors?.length ? { doors: t.doors.map((d) => doorAt(d.at, d.out, t.level)) } : {}) });
     }
     // things whose def says they are a place (a gazebo, a pergola, a pavilion, a dome; a pier's deck): their footprint
     for (const t of things) {

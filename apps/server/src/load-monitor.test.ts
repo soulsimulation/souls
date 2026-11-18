@@ -1,20 +1,26 @@
 // srv-load: load levels with hysteresis (LOAD-CONTRACT §1), live.json from the shared numbers (§4).
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {BASELINE_CAP_MS, LevelState, LoadMonitor, QUIET_TICK_ALPHA, QuietBaseline, QuietTick, STEP_DOWN_MS, type Signals} from './load/monitor.ts';
+import {AMBER_BLIP_MS, BASELINE_CAP_MS, LevelState, LoadMonitor, QUIET_TICK_ALPHA, QuietBaseline, QuietTick, STEP_DOWN_MS, type Signals} from './load/monitor.ts';
+import {frameBudgetMs, ticksOnTimeNow} from './load/admission.ts';
 import {liveOf, newSharedLoad, S} from './load/shared.ts';
+import {newSharedApi} from './load/api-times.ts';
 import {attachBootSlots, bootPhase, bootSlots, bootTick} from './load/boot-progress.ts';
 
 const calm: Signals = {service: 1, loopP99Ms: 5, heapFrac: 0.2, gcFrac: 0.01, oldestMs: 0};
 const at = (s: Partial<Signals>) => ({...calm, ...s});
+/** Amber's conditions enter amber once they have held AMBER_BLIP_MS: two samples that far apart, from t (#2124). */
+const held = (l: LevelState, s: Signals, t = 0) => { l.update(s, t); return l.update(s, t + AMBER_BLIP_MS); };
+const amberOf = (s: Signals) => held(new LevelState(), s);
 
-test('levels: enter on any condition, at once and straight to the highest that holds', () => {
+test('levels: enter on any condition, straight to the highest that holds (red and black at once, amber once it has held 12 s)', () => {
   const l = new LevelState();
   assert.equal(l.update(calm, 0), 'green');
-  assert.equal(l.update(at({loopP99Ms: 250}), 1), 'amber');
+  assert.equal(l.update(at({loopP99Ms: 250}), 1), 'green', 'amber waits for its condition to hold');
+  assert.equal(l.update(at({loopP99Ms: 250}), 1 + AMBER_BLIP_MS), 'amber');
   assert.equal(new LevelState().update(at({heapFrac: 0.86}), 0), 'red');
-  assert.equal(new LevelState().update(at({oldestMs: 6500}), 0), 'amber', 'queue age alone is amber (the hint), never red');
-  assert.equal(new LevelState().update(at({service: 0.79}), 0), 'amber');
+  assert.equal(amberOf(at({oldestMs: 6500})), 'amber', 'queue age alone is amber (the hint), never red');
+  assert.equal(amberOf(at({service: 0.79})), 'amber');
   assert.equal(new LevelState().update(at({heapFrac: 0.93, gcFrac: 0.41}), 0), 'black');
   assert.equal(new LevelState().update(at({heapFrac: 0.93, gcFrac: 0.2}), 0), 'red', 'a full heap alone is red, not black');
 });
@@ -26,7 +32,83 @@ test('levels: a queue red itself starves cannot hold red (the red lock): service
   l.update(at({oldestMs: 6100}), t += STEP_DOWN_MS); assert.equal(l.level, 'amber', 'service/loop/heap calm: down one step despite the queue');
   l.update(at({oldestMs: 2500}), t += 1000); assert.equal(l.level, 'amber', 'a 2.5 s queue is between the amber bands: calm starts');
   l.update(at({oldestMs: 2500}), t += STEP_DOWN_MS); assert.equal(l.level, 'green', 'and the queue cannot hold amber either');
-  assert.equal(new LevelState().update(at({oldestMs: 2500}), 0), 'amber', 'a 2 s queue still raises the hint');
+  assert.equal(amberOf(at({oldestMs: 2500})), 'amber', 'a 2 s queue still raises the hint');
+});
+
+test('levels: the queue amber left behind does not raise amber again until it has cleared (#2124)', () => {
+  const l = new LevelState(); let t = AMBER_BLIP_MS;
+  held(l, at({oldestMs: 5000})); assert.equal(l.level, 'amber', 'a fresh queue raises the hint');
+  l.update(at({oldestMs: 5000}), t += 1000); l.update(at({oldestMs: 5000}), t += STEP_DOWN_MS); assert.equal(l.level, 'green', '30 s calm: down');
+  for (let i = 0; i < 20; i++) l.update(at({oldestMs: 5000}), t += 250);
+  assert.equal(l.level, 'green', 'the same old queue does not re-enter amber (it entered on every next sample)');
+  const m = new LevelState(); let u = AMBER_BLIP_MS;
+  held(m, at({oldestMs: 5000})); m.update(at({oldestMs: 5000}), u += 1000); m.update(at({oldestMs: 5000}), u += STEP_DOWN_MS);
+  held(m, at({service: 0.7, oldestMs: 5000}), u += 250); assert.equal(m.level, 'amber', 'with the queue disarmed, the thread signals still raise amber');
+  l.update(at({oldestMs: 1500}), t += 250); assert.equal(l.level, 'green', 'the queue clears');
+  held(l, at({oldestMs: 2500}), t += 250); assert.equal(l.level, 'amber', 'a new queue past 2 s raises the hint again');
+});
+
+test('levels: the step down to green disarms queue age only when the queue is past 2 s on that sample (#2124 nit, PR #2191)', () => {
+  const down = (oldestMs: number) => { const l = new LevelState(); let t = AMBER_BLIP_MS; held(l, at({oldestMs: 5000})); l.update(at({oldestMs}), t += 1000); l.update(at({oldestMs}), t += STEP_DOWN_MS); assert.equal(l.level, 'green'); return {l, t}; };
+  const fresh = down(1900);
+  assert.equal(held(fresh.l, at({oldestMs: 2100}), fresh.t + 250), 'amber', 'a 1.9 s queue on the step-down sample stays armed: a fresh queue past 2 s raises the hint');
+  const old = down(2500);
+  assert.equal(held(old.l, at({oldestMs: 2600}), old.t + 250), 'green', 'a 2.5 s queue on the step-down sample is disarmed');
+});
+
+test('levels: each entry into amber names its signals; what holds amber is the band a signal is not under, else the dwell (#2124)', () => {
+  const l = new LevelState();
+  held(l, at({loopP99Ms: 250, oldestMs: 3000})); assert.deepEqual(l.amberEntry, ['loop', 'queue']);
+  assert.deepEqual(l.amberHolds(at({loopP99Ms: 150})), ['loop']);
+  assert.deepEqual(l.amberHolds(at({service: 0.85, heapFrac: 0.65})), ['service', 'heap']);
+  assert.deepEqual(l.amberHolds(at({oldestMs: 9000})), ['dwell'], 'the queue never holds amber');
+  const r = new LevelState(); let t = 0;
+  r.update(at({service: 0.3}), t); r.update(calm, t += 1000); r.update(calm, t += STEP_DOWN_MS);
+  assert.equal(r.level, 'amber'); assert.deepEqual(r.amberEntry, ['red'], 'the step down from red');
+});
+
+test('the tick window carries the seconds at amber per holding signal and the entries per cause (#2124)', () => {
+  let wall = 1_000_000, oldestMs = 3000;
+  const host = {engine: {world: {tick: 0}}, tickMs: [] as number[], paused: false, pace: 1, baseRate: 1, running: false, clockAvailable: true};
+  const m = new LoadMonitor({host, now: () => wall, shared: newSharedLoad(), api: newSharedApi(), queue: () => ({depth: 1, oldestMs})});
+  assert.equal(m.sample(), 'green'); wall += 6000; assert.equal(m.sample(), 'green', 'the queue has not held 12 s');
+  wall += 6000; assert.equal(m.sample(), 'amber');
+  oldestMs = 0; wall += 4000; m.sample(); wall += 6000; m.sample();
+  assert.deepEqual(m.tickWindow?.amberEntries, {service: 0, loop: 0, heap: 0, queue: 1, red: 0});
+  assert.deepEqual(m.tickWindow?.amberS, {service: 0, loop: 0, heap: 0, dwell: 10});
+  assert.equal(m.tickWindow?.levels.amber, 1);
+});
+
+test('levels: a world with spare capacity returns to green through single slow acts; real overload still enters and holds amber (#2124)', () => {
+  // one slow act: a tick gap lowers the 5 s tick service for 5 s and raises the loop p99 (max of two 5 s windows) up to 10 s
+  const blip = (l: LevelState, t: number) => { for (let k = 0; k < 40; k++) l.update(at({service: k < 20 ? 0.75 : 1, loopP99Ms: 230}), t + 250 * k); return t + 10_000; };
+  const g = new LevelState(); let t = 0;
+  for (let i = 0; i < 6; i++) { t = blip(g, t); for (let k = 0; k < 40; k++) g.update(calm, t += 250); }
+  assert.equal(g.level, 'green', 'a 10 s blip every 20 s never enters amber');
+  const a = new LevelState(); t = 0;
+  held(a, at({service: 0.7}), t); t += AMBER_BLIP_MS; assert.equal(a.level, 'amber');
+  for (let i = 0; i < 3; i++) { for (let k = 0; k < 40; k++) a.update(calm, t += 250); t = blip(a, t); }
+  assert.equal(a.level, 'amber', 'the blips pause the calm: 30 s of it has not passed');
+  for (let k = 0; k < 4; k++) a.update(calm, t += 250);
+  assert.equal(a.level, 'green', 'blips between calm stretches no longer restart it: green once 30 s of calm is in');
+  // sustained overload: the loop p99 over amber's enter band enters, and over its lower band holds amber
+  const o = new LevelState(); t = 0;
+  for (let k = 0; k < 44; k++) o.update(at({loopP99Ms: 250}), t += 250);
+  assert.equal(o.level, 'green', 'not yet: 11 s');
+  for (let k = 0; k < 5; k++) o.update(at({loopP99Ms: 250}), t += 250);
+  assert.equal(o.level, 'amber', 'a loop p99 over 200 ms for 12 s enters amber');
+  for (let k = 0; k < 4 * 120; k++) o.update(at({loopP99Ms: 150}), t += 250);
+  assert.equal(o.level, 'amber', 'a loop p99 over the lower band for 2 min holds it');
+  const v = new LevelState(); t = 0;
+  for (let k = 0; k < 49; k++) v.update(at({service: 0.78}), t += 250);
+  for (let k = 0; k < 4 * 120; k++) v.update(at({service: 0.85}), t += 250);
+  assert.equal(v.level, 'amber', 'tick service under 0.8 enters, under 0.9 holds');
+  // red and black are unchanged: at once, and a single sample over red's band restarts its calm
+  assert.equal(new LevelState().update(at({service: 0.45}), 0), 'red');
+  assert.equal(new LevelState().update(at({heapFrac: 0.93, gcFrac: 0.41}), 0), 'black');
+  const r = new LevelState(); t = 0; r.update(at({service: 0.45}), t);
+  r.update(calm, t += 1000); r.update(at({service: 0.6}), t += 20_000); r.update(calm, t += 250); r.update(calm, t += STEP_DOWN_MS - 1000);
+  assert.equal(r.level, 'red', 'at red one sample over the band still restarts the calm');
 });
 
 test('levels: black on tick service < 0.2 only after 30 s of it', () => {
@@ -47,8 +129,8 @@ test('levels: leave one step at a time after 30 s below the lower band; a signal
   l.update(at({loopP99Ms: 150}), t += STEP_DOWN_MS - 1); assert.equal(l.level, 'red');
   l.update(at({loopP99Ms: 150}), t += 1); assert.equal(l.level, 'amber', 'one step down');
   l.update(at({loopP99Ms: 150}), t += STEP_DOWN_MS + 5000); assert.equal(l.level, 'amber', '150 ms is not below the amber band (100)');
-  l.update(calm, t += 1000); l.update(at({loopP99Ms: 120}), t += 20_000); l.update(calm, t += 1000);
-  l.update(calm, t += STEP_DOWN_MS - 2000); assert.equal(l.level, 'amber', 'a sample above the band restarts the 30 s');
+  l.update(calm, t += 1000); l.update(at({loopP99Ms: 120}), t += 20_000); l.update(at({loopP99Ms: 120}), t += AMBER_BLIP_MS); l.update(calm, t += 1000);
+  l.update(calm, t += STEP_DOWN_MS - 2000); assert.equal(l.level, 'amber', 'a crossing of the band that lasts 12 s restarts the 30 s');
   l.update(calm, t += 2000); assert.equal(l.level, 'green');
 });
 
@@ -56,16 +138,16 @@ test('levels: loop bands are relative to the quiet baseline (a 170 ms-quiet worl
   const l = new LevelState(); l.baselineMs = 170; let t = 0;
   assert.equal(l.update(at({loopP99Ms: 190}), t), 'green', 'its own quiet ticks are not load (amber enters at 2 × 170)');
   assert.equal(l.update(at({loopP99Ms: 330}), t += 250), 'green');
-  assert.equal(l.update(at({loopP99Ms: 350}), t += 250), 'amber', 'above 2 × baseline');
+  assert.equal(held(l, at({loopP99Ms: 350}), t += 250), 'amber', 'above 2 × baseline'); t += AMBER_BLIP_MS;
   l.update(at({loopP99Ms: 180}), t += 1000); l.update(at({loopP99Ms: 180}), t += STEP_DOWN_MS);
   assert.equal(l.level, 'green', 'leaves below 1.2 × baseline (204 ms), where the fixed 100 ms band never would');
-  const fixed = new LevelState(); fixed.update(at({loopP99Ms: 350}), 0); fixed.update(at({loopP99Ms: 180}), 1000); fixed.update(at({loopP99Ms: 180}), 1000 + STEP_DOWN_MS);
+  const fixed = new LevelState(); held(fixed, at({loopP99Ms: 350})); fixed.update(at({loopP99Ms: 180}), 11_000); fixed.update(at({loopP99Ms: 180}), 11_000 + STEP_DOWN_MS);
   assert.equal(fixed.level, 'amber', 'the absolute bands (no baseline) hold it at amber: the defect');
   const small = new LevelState(); small.baselineMs = 20;
-  assert.equal(small.update(at({loopP99Ms: 210}), 0), 'amber', 'a small world keeps the absolute floor');
+  assert.equal(held(small, at({loopP99Ms: 210})), 'amber', 'a small world keeps the absolute floor');
   const red = new LevelState(); red.baselineMs = BASELINE_CAP_MS;
-  assert.equal(red.update(at({loopP99Ms: 900}), 0), 'amber', 'a capped baseline keeps amber below red');
-  assert.equal(red.update(at({loopP99Ms: 1100}), 1), 'red');
+  assert.equal(held(red, at({loopP99Ms: 900})), 'amber', 'a capped baseline keeps amber below red');
+  assert.equal(red.update(at({loopP99Ms: 1100}), AMBER_BLIP_MS + 1), 'red');
 });
 
 test('quiet baseline: a decaying peak of quiet windows (the live Eden pattern: ~30 ms, a 150 ms window every 10-15 s)', () => {
@@ -74,7 +156,7 @@ test('quiet baseline: a decaying peak of quiet windows (the live Eden pattern: ~
   for (const x of quietEden) b.window(x, true);
   assert.ok(b.value > 140 && b.value <= 159, `holds the quiet peaks: ${b.value}`);
   const l = new LevelState(); l.baselineMs = b.value; let t = 0;
-  l.update(at({loopP99Ms: 600}), t); assert.equal(l.level, 'amber');
+  held(l, at({loopP99Ms: 600})); t = AMBER_BLIP_MS; assert.equal(l.level, 'amber');
   for (const x of [159, 159, 32, 145, 145, 32, 150, 150]) l.update(at({loopP99Ms: x}), t += 5000);   // max of two windows
   assert.equal(l.level, 'green', 'max-of-two-windows signal of a quiet Eden stays under 1.2 × the peak: green after 30 s');
   const before = b.value; for (let i = 0; i < 50; i++) b.window(5000, false);
@@ -126,6 +208,24 @@ test('monitor: tick service counts dilation and slow frames as missed, a paused 
   assert.equal(m.health().level, 'red');
 });
 
+test('monitor: a clock just started owes nothing until its first frame decides; one that then falls behind still reads red', () => {
+  let now = 0; const host = {engine: {world: {tick: 0}}, tickMs: [1], paused: false, pace: 1, baseRate: 1, running: false, clockAvailable: true, sleeping: false};
+  const m = new LoadMonitor({host, now: () => now, shared: newSharedLoad()});
+  m.sample();
+  // a still world started on a busy host: its first frame owes no tick, a sample catches it awake, then it sleeps unticked
+  host.running = true; now += 100; m.sample();
+  assert.equal(m.signals.service, 1, 'just started: nothing owed yet'); assert.equal(m.level, 'green');
+  host.sleeping = true; for (let i = 0; i < 6; i++) { now += 1000; m.sample(); }
+  assert.equal(m.signals.service, 1, 'asleep: the ticks it put into its lag are not missed'); assert.equal(m.level, 'green');
+  // a world that is not still and starts but never ticks: owing once the grace is over
+  const fresh = () => { const w = {...host, running: false, sleeping: false, engine: {world: {tick: 0}}}; const mon = new LoadMonitor({host: w, now: () => now, shared: newSharedLoad()}); mon.sample(); w.running = true; return {w, mon}; };
+  const a = fresh(); for (let i = 0; i < 8; i++) { now += 250; a.mon.sample(); }
+  assert.equal(a.mon.signals.service, 0, 'started 2 s ago and never ticked'); assert.equal(a.mon.level, 'red');
+  // and one that ticks from its first frame but falls behind (8 ticks/s of 20 owed)
+  const b = fresh(); for (let i = 0; i < 20; i++) { now += 250; b.w.engine.world.tick += 2; b.mon.sample(); }
+  assert.ok(Math.abs(b.mon.signals.service - 0.4) < 0.01, String(b.mon.signals.service)); assert.equal(b.mon.level, 'red');
+});
+
 test('monitor: dials hear the level at once and on every change; black for the limit asks for the planned restart', () => {
   let now = 0, restarts = 0; const heard: string[] = [];
   const host = {engine: {world: {tick: 0}}, tickMs: [], paused: false, pace: 1, baseRate: 1, running: true, clockAvailable: true};
@@ -135,6 +235,37 @@ test('monitor: dials hear the level at once and on every change; black for the l
   m.sample(); for (let i = 0; i < 4 * 95; i++) { now += 250; m.sample(); }   // no ticks at all for 95 s
   assert.deepEqual(heard, ['green', 'red', 'black']);
   assert.equal(restarts, 1, 'black from 30 s, restart at 90 s');
+});
+
+/** #2622: a world whose clock owes 5 ticks per 250 ms sample and completes `per4` of them every 4 samples (3 → service 0.15). */
+const busy = () => {
+  let now = 0, restarts = 0, i = 0;
+  const host = {engine: {world: {tick: 0}}, tickMs: [], paused: false, pace: 1, baseRate: 1, running: true, clockAvailable: true};
+  const m = new LoadMonitor({host, now: () => now, shared: newSharedLoad(), blackLimitMs: 60_000, onBlackTooLong: () => restarts++});
+  m.sample();
+  const run = (ms: number, per4: number) => { for (const end = now + ms; now < end;) { now += 250; if (++i % 4 === 0) host.engine.world.tick += per4; m.sample(); } };
+  return {m, run, restarts: () => restarts};
+};
+
+test('monitor: a busy world at service 0.1-0.2 whose ticks still complete is black but never restarted (#2622)', () => {
+  const b = busy();
+  b.run(120_000, 3);   // black from ~30 s: 90 s at black
+  assert.ok(b.m.signals.service > 0.1 && b.m.signals.service < 0.2, String(b.m.signals.service));
+  assert.equal(b.m.level, 'black'); assert.equal(b.restarts(), 0, 'slow but progressing: no planned restart');
+});
+
+test('monitor: a black world whose ticks stop is restarted once no tick has completed for the limit (#2622)', () => {
+  const b = busy();
+  b.run(90_000, 3); assert.equal(b.m.level, 'black'); assert.equal(b.restarts(), 0);
+  b.run(59_000, 0); assert.equal(b.restarts(), 0, 'black for two minutes, but its last tick is under 60 s old');
+  b.run(2000, 0); assert.equal(b.restarts(), 1, 'no tick for 60 s: the planned restart, as before');
+});
+
+test('monitor: a busy black world back above the starvation band leaves black, never restarted (#2622)', () => {
+  const b = busy();
+  b.run(100_000, 3); assert.equal(b.m.level, 'black');
+  b.run(40_000, 20); assert.equal(b.m.signals.service, 1);
+  assert.notEqual(b.m.level, 'black', 'service >= 0.4 for 30 s leaves black'); assert.equal(b.restarts(), 0);
 });
 
 test('live.json: phases, boot progress through the absorbed L5 slots, and the turn age of a stuck thread', () => {
@@ -161,9 +292,23 @@ test('quiet tick (srv-admission-calib): an EWMA over quiet windows; a provisiona
   assert.equal(q.window(30, false, true), 30, 'never quiet yet: a served window seeds it provisionally');
   assert.equal(q.window(40, false, false), 30, 'an unserved, loaded window teaches nothing');
   assert.equal(q.window(12, true, true), 12, 'the first quiet window replaces the provisional seed');
-  assert.equal(q.window(50, false, true), 12, 'after that, loaded windows teach nothing');
+  assert.equal(q.window(50, false, true), 12, 'after that, a loaded window with heavier ticks teaches nothing');
   assert.ok(Math.abs(q.window(22, true, true) - (12 + QUIET_TICK_ALPHA * 10)) < 1e-9, 'quiet windows move it by alpha');
   assert.equal(q.window(Number.NaN, true, true), 13);
+});
+
+test('#2559: a quiet tick learned from heavy setup ticks follows loaded windows down, served or not, so acts get a budget again', () => {
+  const q = new QuietTick();
+  assert.equal(q.window(60, true, true), 60, 'the first quiet window caught the heavy setup ticks (Souls joining, viewers arriving)');
+  assert.equal(frameBudgetMs('green', q.value), 2, 'which leaves requests the floor budget');
+  // a busy world: acts queued, so no window is quiet again, and its 5 s service is under 0.95 in most windows
+  for (let i = 0; i < 40; i++) q.window(9, false, i % 3 === 0);   // 200 s of 5 s windows
+  assert.ok(q.value < 11, `loaded windows whose own ticks averaged 9 ms bring it down (${q.value})`);
+  assert.ok(frameBudgetMs('green', q.value) > 20, 'and the frame budget back to 0.6 × what the tick leaves of the frame');
+  const v = q.value;
+  assert.equal(q.window(40, false, false), v, 'a heavier loaded window never moves it up');
+  const fresh = new QuietTick();
+  assert.equal(fresh.window(9, false, false), 0, 'nothing learned yet: an unserved window does not seed it');
 });
 
 test('monitor: the quiet tick is the window\'s own tick average, learned only in quiet windows, and published', () => {
@@ -233,4 +378,25 @@ test('monitor: overdue sample waits for SIGCONT delivery and stop cancels the qu
     assert.equal(cancelled, true);
     assert.equal(process.listenerCount('SIGCONT'), listeners);
   } finally { m.stop(); }
+});
+
+test('#2440 review: a hold longer than 1 s reads as missed 1 s tick service, so spare time stops', () => {
+  let now = 0;
+  const host = {engine: {world: {tick: 0}}, tickMs: [1], paused: false, pace: 1, baseRate: 1, running: true, clockAvailable: true};
+  const shared = newSharedLoad(), m = new LoadMonitor({host, now: () => now, shared});
+  m.sample();
+  for (let i = 0; i < 8; i++) { now += 250; host.engine.world.tick += 5; m.sample(); }   // on time: 5 ticks per 250 ms
+  assert.equal(shared[S.service1s], 1);
+  assert.equal(ticksOnTimeNow(shared, now), true);
+  now += 3000; host.engine.world.tick += 1; m.sample();   // a 3 s hold with one tick in it
+  assert.ok(shared[S.service1s] < 1, `1 s service after the hold: ${shared[S.service1s]}`);
+  assert.equal(ticksOnTimeNow(shared, now), false, 'not on time: admission gives no spare time');
+});
+
+test('#2440 review: each completed tick adds its own ms to the shared tickSpentMs', () => {
+  const host = {engine: {world: {tick: 0}}, tickMs: [] as number[], paused: false, pace: 1, baseRate: 1, running: true, clockAvailable: true};
+  let mono = 0; const shared = newSharedLoad(), m = new LoadMonitor({host, now: () => 0, mono: () => mono, shared});
+  host.tickMs.push(7); host.engine.world.tick++; mono += 50; m.tickDone();
+  host.tickMs.push(5); host.engine.world.tick++; mono += 50; m.tickDone();
+  assert.equal(shared[S.tickSpentMs], 12);
 });

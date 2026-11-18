@@ -55,7 +55,6 @@ test('pantry: stock and draw by hand, food eaten bite by bite, a kept mug is not
  const done = async (words, each = null) => {const r = await act(words), rc = await finish(r, each); assert.equal(rc.phase, 'completed', words + ' ' + JSON.stringify(rc).slice(0, 600)); return {...rc, capability: r.receipt.capability};};
  const refusals = {}, results = {};
  const refuse = async (words, code) => {const b = await act(words, false); refusals[words] = {code: b.code, reason: b.reason}; if (code) assert.equal(b.code, code, words + ' ' + JSON.stringify(b)); return b;};
- const resolved = async words => {const r = await (await app.request('/v1/edge/resolve', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability: words})})).json(); return r.resolve?.would?.capability ?? null;};
  const held = n => item(n).support?.kind === 'in-hand' && item(n).support.by === soul.entityId;
 
  // ---- P6: the words for a food not in the hand; a pantry has no door
@@ -63,87 +62,79 @@ test('pantry: stock and draw by hand, food eaten bite by bite, a kept mug is not
  assert.equal(row(await here())?.state?.holds, undefined, 'an empty pantry says nothing');
 
  // ---- P1: stocking by plain words
- await done('pick up the apple'); assert.ok(held('apple'));
+ await done(`pick-up:${id('apple')}`); assert.ok(held('apple'));
  const holdingApple = await here();
  assert.deepEqual(holdingApple.objects.find(o => o.id === id('apple'))?.state, {bites: 3}, 'P4 a held food says its bites');
- results.stock = await done('stock the pantry with the apple');
+ results.stock = await done(`put-in:${pantryId}`);
  assert.match(results.stock.capability, new RegExp(`put-in:${pantryId}$`));
  assert.equal(item('apple').support.kind, 'resting-on'); assert.equal(item('apple').support.on, pantryId); assert.match(item('apple').support.slot, /^in-\d$/);
  assert.equal(ent('apple').in.parent, pantryId);
  const withApple = await here();
  assert.deepEqual(row(withApple)?.state, {holds: ['apple']}, 'P4 nearby: what is in the pantry, by name');
  assert.equal(withApple.objects.find(o => o.id === id('apple'))?.state, undefined, 'a whole apple put down says nothing');
- await done('pick up the bun'); results.putBun = await done('put the bun in the pantry'); assert.equal(item('bun').support.on, pantryId);
+ await done(`pick-up:${id('bun')}`); results.putBun = await done(`put-in:${pantryId}`); assert.equal(item('bun').support.on, pantryId);
  assert.deepEqual([...row(await here()).state.holds].sort(), ['apple', 'bun']);
  // persists across a restored snapshot
  {const restored = WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())), undefined, god.model.library), rget = n => [...restored.entities.values()].find(e => e.name === n);
   assert.equal(rget('apple').in.parent, pantryId); assert.equal(rget('apple').in.slot, ent('apple').in.slot);}
 
  // ---- P6: a loaf does not fit; a full pantry
- await done('pick up the loaf');
- {const b = await refuse('put the loaf in the pantry', 'item.does-not-fit'); assert.match(b.reason, /does not fit in pantry \(up to 0\.20 × 0\.28 × 0\.30 m\)/);}
- await done('put the loaf on the table');
+ await done(`pick-up:${id('loaf')}`);
+ {const b = await refuse(`put-in:${pantryId}`, 'item.does-not-fit'); assert.match(b.reason, /does not fit in pantry \(up to 0\.20 × 0\.28 × 0\.30 m\)/);}
+ await done(`put-on:${id('table')}`);
  {const free = ['in-1', 'in-2', 'in-3', 'in-4'].filter(s => !inside().some(e => e.in.slot === s)); ok(god.act({ops: free.map((slot, i) => ({op: 'place', def: 'core/bowl@2', name: `fill-${i + 1}`, in: {parent: 'pantry', slot}, p: [0, 0]}))})); await tick(10);}
- await done('pick up the book');
- await refuse('put the book in the pantry', 'container.full');
+ await done(`pick-up:${id('book')}`);
+ await refuse(`put-in:${pantryId}`, 'container.full');
  ok(god.act({ops: inside().filter(e => /^fill-/.test(e.name)).map(e => ({op: 'remove', id: e.id}))})); await tick(10);
- results.bookDown = await done('put the book on the table');
+ results.bookDown = await done(`put-on:${id('table')}`);
 
  // ---- P2: take it out, three bites at the lips; `left` moves only at each bite's moment
- results.take = await done('take the apple from the pantry');
+ results.take = await done(`pick-up:${id('apple')}`);
  assert.equal(results.take.capability, `pick-up:${id('apple')}`); assert.ok(held('apple')); assert.ok(!inside().some(e => e.name === 'apple'));
- {const seen = [], hand = []; const r = await done('eat the apple', () => {const left = ent('apple').state?.left ?? 1; if (seen.at(-1)?.left !== left) {const m = body().human?.cupV1; seen.push({left, tick: f.host.engine.world.tick, sinceStart: m ? +((f.host.engine.world.tick - m.startTick) * 0.05).toFixed(2) : null});} if (body().human?.cupV1) hand.push(1);});
+ {const seen = [], hand = []; const r = await done(`object:${id('apple')}:eat`, () => {const left = ent('apple').state?.left ?? 1; if (seen.at(-1)?.left !== left) {const m = body().human?.cupV1; seen.push({left, tick: f.host.engine.world.tick, sinceStart: m ? +((f.host.engine.world.tick - m.startTick) * 0.05).toFixed(2) : null});} if (body().human?.cupV1) hand.push(1);});
   assert.deepEqual(seen.map(s => s.left), [1, 0.667, 0.333, 0], 'left falls in thirds, once per bite: ' + JSON.stringify(seen));
   assert.ok(hand.length > 100, 'the cup motion ran'); results.eat = {capability: r.capability, summary: r.result?.summary ?? r.summary ?? null, bites: seen};
   assert.ok(JSON.stringify(r).includes('apple'), 'the receipt says what was eaten ' + JSON.stringify(r).slice(0, 400));}
  assert.ok(held('apple'), 'what is left stays in the hand');
  const eatenRow = await here();
  assert.deepEqual(eatenRow.objects.find(o => o.id === id('apple'))?.state, {eaten: true}, 'P4 then it says eaten');
- await refuse('eat the apple', 'food.eaten');
- results.down = await done('put the apple on the table'); assert.equal(item('apple').support.on, id('table'));
+ await refuse(`object:${id('apple')}:eat`, 'food.eaten');
+ results.down = await done(`put-on:${id('table')}`); assert.equal(item('apple').support.on, id('table'));
  assert.equal(ent('apple').state.left, 0, 'put down, still eaten');
 
  // ---- P7 and P9: the bun, a different def with no code naming it; a bite, an interrupted eat, a second eat
- results.takeBun = await done('take the bun out of the pantry'); assert.ok(held('bun'));
- assert.equal(await resolved('take a bite of the bun'), `object:${id('bun')}:bite`);
- for (const [w, a] of [['eat it', 'eat'], ['eat the bun', 'eat'], ['finish the bun', 'eat'], ['have the bun', 'eat'], ['eat', 'eat'], ['have a bite', 'bite'], ['bite the bun', 'bite']]) assert.equal(await resolved(w), `object:${id('bun')}:${a}`, w);
- assert.notEqual(await resolved('have a look'), `object:${id('bun')}:eat`); assert.notEqual(await resolved('eat the book'), `object:${id('book')}:eat`);
- assert.notEqual(await resolved('eat the book'), `object:${id('bun')}:eat`, 'a named thing that is not this food is not an eat of it');
+ results.takeBun = await done(`pick-up:${id('bun')}`); assert.ok(held('bun'));
  assert.deepEqual((await here()).objects.find(o => o.id === id('bun'))?.state, {bites: 2});
  // interrupted before the first bite's moment: nothing changes; it stays in the hand
- {const r = await act('eat the bun'); for (let n = 0; n < 200 && !body().human?.cupV1; n++) await tick(1); await tick(10);
+ {const r = await act(`object:${id('bun')}:eat`); for (let n = 0; n < 200 && !body().human?.cupV1; n++) await tick(1); await tick(10);
   await accept(f.host, edge.act(soul, {capability: 'stand:here'})); const rc = await finish(r); assert.equal(rc.phase, 'replaced', JSON.stringify(rc).slice(0, 300));
   await tick(60); assert.equal(ent('bun').state?.left ?? 1, 1, 'interrupted before the bite: nothing eaten'); assert.ok(held('bun'), 'still in the hand');}
  // interrupted between bites: left is what the finished bites wrote
- {const r = await act('eat it'); for (let n = 0; n < 900 && (ent('bun').state?.left ?? 1) === 1; n++) await tick(1); assert.equal(ent('bun').state.left, 0.5); await tick(10);
+ {const r = await act(`object:${id('bun')}:eat`); for (let n = 0; n < 900 && (ent('bun').state?.left ?? 1) === 1; n++) await tick(1); assert.equal(ent('bun').state.left, 0.5); await tick(10);
   await accept(f.host, edge.act(soul, {capability: 'stand:here'})); const rc = await finish(r); assert.equal(rc.phase, 'replaced', JSON.stringify(rc).slice(0, 300));
   await tick(60); assert.equal(ent('bun').state.left, 0.5, 'interrupted between bites: the finished bite stands'); assert.ok(held('bun')); results.interrupted = {left: ent('bun').state.left, phase: rc.phase};}
  assert.deepEqual((await here()).objects.find(o => o.id === id('bun'))?.state, {bites: 1});
- results.finish = await done('finish the bun'); assert.equal(ent('bun').state.left, 0); assert.ok(held('bun'));
- results.bunDown = await done('put the bun on the table');
+ results.finish = await done(`object:${id('bun')}:eat`); assert.equal(ent('bun').state.left, 0); assert.ok(held('bun'));
+ results.bunDown = await done(`put-on:${id('table')}`);
  // one bite means one
  ok(god.act({ops: [{op: 'place', def: 'core/apple@1', name: 'second-apple', in: {parent: 'table', slot: 'top'}, p: [0.4, 0.2]}]})); await tick(10);
  await done(`pick-up:${id('second-apple')}`);
- assert.equal(await resolved('have a bite'), `object:${id('second-apple')}:bite`);
- results.bite = await done('have a bite'); assert.equal(ent('second-apple').state.left, 0.667);
+ results.bite = await done(`object:${id('second-apple')}:bite`); assert.equal(ent('second-apple').state.left, 0.667);
  assert.deepEqual((await here()).objects.find(o => o.id === id('second-apple'))?.state, {bites: 2});
- results.down2 = await done('put the apple on the table');
-
- // ---- P8: with no food held the old meanings stand
- assert.equal(await resolved('eat it') === `object:${id('second-apple')}:eat`, false, '"eat it" with nothing held is not the apple on the table');
+ results.down2 = await done(`put-on:${id('table')}`);
 
  // ---- P2: a food not in the hand is taken first, from a table or the pantry, as one act; a bare word means the one in the hand
- results.eatFromTable = await done('eat the apple'); assert.equal(results.eatFromTable.capability, `object:${id('second-apple')}:eat`);
+ results.eatFromTable = await done(`object:${id('second-apple')}:eat`); assert.equal(results.eatFromTable.capability, `object:${id('second-apple')}:eat`);
  assert.ok(held('second-apple')); assert.equal(ent('second-apple').state.left, 0);
  ok(god.act({ops: [{op: 'place', def: 'core/bun@1', name: 'kept-bun', in: {parent: 'pantry', slot: inside().length ? ['in-1', 'in-2', 'in-3', 'in-4'].find(s => !inside().some(e => e.in.slot === s)) : 'in-1'}, p: [0, 0]}]})); await tick(60);
  // another thing in her hand (the eaten apple) is set down at her feet first, rather than a refusal
  results.eatHandsFull = await done(`object:${id('kept-bun')}:eat`);
  assert.ok(held('kept-bun')); assert.equal(ent('kept-bun').state.left, 0); assert.notEqual(item('second-apple').support?.kind, 'in-hand', 'the apple was set down first'); assert.equal(item('second-apple').support?.on, id('table'), 'on the table');
- await done('put the bun on the table');
+ await done(`put-on:${id('table')}`);
  ok(god.act({ops: [{op: 'place', def: 'core/bun@1', name: 'larder-bun', in: {parent: 'pantry', slot: ['in-1', 'in-2', 'in-3', 'in-4'].find(s => !inside().some(e => e.in.slot === s))}, p: [0, 0]}]})); await tick(60);
- results.eatFromPantry = await done('eat the bun'); assert.equal(results.eatFromPantry.capability, `object:${id('larder-bun')}:eat`);
+ results.eatFromPantry = await done(`object:${id('larder-bun')}:eat`); assert.equal(results.eatFromPantry.capability, `object:${id('larder-bun')}:eat`);
  assert.ok(held('larder-bun')); assert.equal(ent('larder-bun').state.left, 0); assert.ok(!inside().some(e => e.name === 'larder-bun'));
- await done('put the bun on the table');
+ await done(`put-on:${id('table')}`);
  // in someone else's hand: this is the one food refusal that stays, with nothing left to eat
  ok(god.act({ops: [{op: 'place', def: 'core/apple@1', name: 'her-apple', in: {parent: 'table', slot: 'top'}, p: [0.1, 0.25]}]})); await tick(60);
  await invite(f, 'bea');
@@ -159,16 +150,16 @@ test('pantry: stock and draw by hand, food eaten bite by bite, a kept mug is not
   {op: 'place', def: 'core/kettle@2', name: 'kettle', in: {parent: 'counter', slot: 'top'}, p: [0.3, 0], state: {level: 1}},
   {op: 'place', def: 'core/camp-sink@1', name: 'sink', p: [ax - 5, az + 1.2]},
  ]})); await tick(60);
- await refuse('pour the tea', 'tea.no-cup');
+ await refuse(`object:${id('kettle')}:pour`, 'tea.no-cup');
  const freeSlot = () => ['in-1', 'in-2', 'in-3', 'in-4'].find(s => !inside().some(e => e.in.slot === s));
  ok(god.act({ops: [{op: 'place', def: 'core/cup@2', name: 'mug', in: {parent: 'pantry', slot: freeSlot()}, p: [0, 0]}]})); await tick(60);
  assert.ok(inside().some(e => e.name === 'mug'));
- results.brew = await done('make a cup of tea'); assert.equal(results.brew.capability, `object:${id('mug')}:brew`);
+ results.brew = await done(`object:${id('mug')}:brew`); assert.equal(results.brew.capability, `object:${id('mug')}:brew`);
  assert.equal(item('mug').support.on, id('counter'), 'the mug came out of the pantry onto the counter'); assert.equal(ent('mug').state.tea, 1, 'tea in the mug, by the faculty');
  assert.ok(!inside().some(e => e.name === 'mug'), 'and it is no longer in the pantry');
  // the kettle is hot now: "pour the tea" takes the next kept mug the same way, by the pour's own steps
  ok(god.act({ops: [{op: 'place', def: 'core/cup@2', name: 'mug-two', in: {parent: 'pantry', slot: freeSlot()}, p: [0, 0]}]})); await tick(60);
- results.pour = await done('pour the tea'); assert.equal(item('mug-two').support.on, id('counter')); assert.equal(ent('mug-two').state.tea, 1);
+ results.pour = await done(`object:${id('kettle')}:pour`); assert.equal(item('mug-two').support.on, id('counter')); assert.equal(ent('mug-two').state.tea, 1);
  // a mug behind a shut door or in a private pantry is not taken: those are other refusals' business
  ok(god.act({ops: [
   {op: 'place', def: 'core/lost-and-found@1', name: 'lost-and-found', p: [ax - 2.2, az - 1.6]},
@@ -176,13 +167,13 @@ test('pantry: stock and draw by hand, food eaten bite by bite, a kept mug is not
   {op: 'place', def: 'core/drawer-chest@2', name: 'shut-chest', p: [ax - 2.2, az + 4], state: {open: false}},
   {op: 'place', def: 'core/cup@2', name: 'shut-mug', in: {parent: 'shut-chest', slot: 'in-1'}, p: [0, 0]},
  ]})); await tick(60);
- await refuse('pour the tea', 'tea.no-cup');
+ await refuse(`object:${id('kettle')}:pour`, 'tea.no-cup');
  assert.equal(item('beas-mug').support.on, id('lost-and-found'), "Bea's mug in the lost-and-found is not hers to take");
  ok(god.act({ops: [
   {op: 'place', def: 'core/pantry@1', name: 'private-pantry', p: [ax - 5, az + 4], access: 'private'},
   {op: 'place', def: 'core/cup@2', name: 'private-mug', in: {parent: 'private-pantry', slot: 'in-1'}, p: [0, 0]},
  ]})); await tick(60);
- await refuse('pour the tea', 'tea.no-cup');
+ await refuse(`object:${id('kettle')}:pour`, 'tea.no-cup');
 
  // ---- persistence and replay; a clean engine
  const clone = factory.restore(f.host.engine.snapshot()); assert.equal(clone.stateHash(), f.host.engine.stateHash());

@@ -78,7 +78,7 @@ function loadFiles() {
       const index = (idx as { default: import('./music-file.ts').FileIndex }).default ?? (idx as unknown as import('./music-file.ts').FileIndex);
       setOrder(playlist); fileIndexSize = Object.keys(index.pieces ?? {}).length;
       file = new mod.FilePlayer(mod.browserEnv(), index, (e) => onFileEvent(e));
-      file.fadeS = FADE_S; file.prefetchS = PREFETCH_S; file.trackS = trackS; file.setVolume(musicDb(volume), 0.01);
+      file.fadeS = FADE_S; file.prefetchS = PREFETCH_S; file.trackS = trackS; file.setVolume(musicDb(volume), 0.01); file.onMedia = fileMedia;
       if (!fileIndexSize) fileOff = true;
       loading = false; note({ ev: 'loaded', reason: `file index, ${fileIndexSize} of ${order.length} pieces` });
     }, (e) => { loading = false; fileOff = true; note({ ev: 'error', reason: 'file index: ' + String(e).slice(0, 200) }); loadTone(); });
@@ -221,12 +221,22 @@ function setLevel(db: number, rampS: number) {
   if (Tone) { try { Tone.getDestination().volume.rampTo(db, rampS); } catch { /* gone */ } }
 }
 
+/** #2467: the playing file's media events. In a hidden tab the sound layer's tick can be throttled to about once a minute,
+ *  so `timeupdate` (when no tick ran for 250 ms) and `ended` run the scheduler too: the next file is prefetched and
+ *  crossfades in on time, and starts at the latest when the playing one ends; when the next piece has no file, the
+ *  playlist's own gap is waited out on a timer of its own. */
+let lastSync: Parameters<typeof syncMusic>[0] | null = null, lastSyncAt = 0;
+function fileMedia(ended: boolean) {
+  if (!lastSync || (!ended && performance.now() - lastSyncAt < 250)) return;
+  syncMusic(lastSync);
+  if (ended && !playing && !starting) setTimeout(() => { if (lastSync) syncMusic(lastSync); }, GAP_S * 1000 + 10);
+}
 /** Called by the sound layer every tick (100 ms) with the visitor's settings and whether sound is unlocked. `audible`:
  *  whether this tab may sound now (audio focus); false ducks the music for a grace, then stops it, remembering its place. */
 export function syncMusic(o: { on: boolean; volume: number; unlocked: boolean; audible?: boolean; station?: string }) {
   const selected=musicStation(o.station);
   if(selected!==station){stop('station');station=selected;order=stationPlaylist(fullOrder,station);index=-1;paused=null;gapUntil=0;}
-  want = o.on; unlockedNow = o.unlocked;
+  want = o.on; unlockedNow = o.unlocked; lastSync = o; lastSyncAt = performance.now();
   const hear = o.audible ?? true, now = performance.now();
   try { syncInner(o, hear, now); } finally { publish(now); }
 }

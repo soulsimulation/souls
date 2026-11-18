@@ -19,7 +19,7 @@ test('wakeLook: the place, what is done here, who is near and what was said, wit
     near: [{id: 's_a', name: 'Ada', metres: 1, doing: 'idle'}], said: [{who: 'Ada', text: 'hello', where: 'Green field', secondsAgo: 3}], saidNote: 'their words', asOf: {secondsAgo: 2, tick: 9}};
   const o = wakeLook(full);
   assert.deepEqual(o, {at: 'World > Green field', doing: 'idle', here: {id: 'field', canDo: {attend: 'attend:a.1'}, things: {'core-bench': 2}}, onTheSpot: 'dance, nap: send as <verb>:here',
-    near: [{name: 'Ada', metres: 1, doing: 'idle'}], said: [{who: 'Ada', text: 'hello'}], saidNote: 'their words', secondsOld: 2});
+    near: [{name: 'Ada', metres: 1, doing: 'idle', untrusted: true}], said: [{who: 'Ada', text: 'hello'}], saidNote: 'their words', secondsOld: 2});
   const big = {...full, said: Array.from({length: 3}, () => ({who: 'Ada', text: 'x'.repeat(400)})), near: Array.from({length: 9}, (_, i) => ({name: `N${i}`, metres: i, doing: 'y'.repeat(200)}))};
   const cut = wakeLook(big);
   assert.ok(JSON.stringify(cut).length <= WAKE_LOOK_BYTES, String(JSON.stringify(cut).length));

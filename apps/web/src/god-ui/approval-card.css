@@ -52,3 +52,7 @@
 .ap-warn { margin: 0; font-size: 12.5px; color: var(--dim); }
 .ap-embedded .ap-head { padding-right: 40px; }
 .ap-embedded .ap-name { font-size: 20px; }
+/* #2245: the account request card. The confirm code stands out; Retire is the danger button. */
+.ap-code b { font: 650 15px/1 ui-monospace, monospace; letter-spacing: .12em; }
+.ap-btn.ap-danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+.ap-btn.ap-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 86%, transparent); }

@@ -1,3 +1,4 @@
+import {appendFileSync} from 'node:fs';
 import {tx} from './edge/comms/store.ts';
 import { SoulNow, type SoulNowLine } from './soul-now.ts';
 import type {CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
@@ -36,7 +37,8 @@ import {
   type PlayPayload, type PlayView, type PublicSoul, type ScenePayload, type Snapshot, type WireIntent,
 } from '@souls/protocol';
 import type { Db } from './db.ts';
-import { advanceNeeds, DAY_TICKS, newLife, type Life } from '@souls/brain';
+import type { Config } from './config.ts';
+import { advanceNeedAnchor, advanceNeeds, DAY_TICKS, needRates, needsAt, newLife, type Life, type Needs } from '@souls/brain';
 import { REAL_DAY_TICKS } from './god/real-clock.ts';
 import { arrivalPlace, baseVocabulary, codeVocabulary, foldEvent, initKernel, pinnedVocabulary, soulThing, type Vocabulary, type FoldResult } from './fold.ts';
 import { frontier, stepIndex, belongsTo } from './deck.ts';
@@ -45,8 +47,10 @@ import { emptyIntentHistoryV2, foldIntentHistoryV2, type IntentHistoryV2 } from 
 import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
-import { bootPhase, bootTick } from './load/boot-progress.ts';
-import { countGlitch, faultFacts, faultKeys, glitchLine, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
+import { BootProgress } from './load/boot-progress.ts';
+import { S } from './load/shared.ts';
+import { RECOVERY_STEP_ID } from './load/restart-loop.ts';
+import { countGlitch, faultFacts, faultKeys, glitchLine, THROWN_RULE, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
 
@@ -83,6 +87,8 @@ export type RecoveryRecipe = { baseline: SnapshotBody; events: LogEvent[]; until
 /** #1369: how often a world under quarantine/1 looks for a broken body that nothing has faulted on yet (one second). */
 const BROKEN_SWEEP_TICKS = 20;
 const REWIND_COOLDOWN_TICKS = 1200;
+/** #2458 A3: a recovery tries no further plan replay after it has held the main thread this long (the hang limit is 10 s). */
+const RECOVERY_REPLAY_BUDGET_MS = 3000;
 /** #1440: holds of one body within a cooldown before quarantine-mark/1 holds it by a standing mark. */
 const MARK_AFTER = 3;
 /** #1250: a stop that gave up, and the crews it let go, are no glitch: nothing broke. */
@@ -117,7 +123,7 @@ export class PersistedIntentAdmissionFault extends Error {
   constructor(decisionSeq:number) { super('decision and admission persisted; physical application requires reconciliation'); this.decisionSeq=decisionSeq; }
 }
 type Pending = { kind: EventKind; author: string; payload: any; resolve?: (e: LogEvent) => void; guard?: AcceptanceGuard; journal?: AcceptanceJournal; reject?: (error: unknown) => void; purpose?: PurposeRef; stationEra?:boolean; atomicObjectDecision?:boolean };
-export type BootStats = { from: 'genesis' | 'snapshot'; restoreMs: number; readMs: number; replayMs: number; baselineMs: number; replayTicks: number; replayEvents: number; fromTick: number; toTick: number; minds: number };
+export type BootStats = { from: 'genesis' | 'snapshot'; /** the restored snapshot's state hash */ fromStateHash?: string; restoreMs: number; readMs: number; replayMs: number; baselineMs: number; replayTicks: number; replayEvents: number; fromTick: number; toTick: number; minds: number };
 export type SnapshotBody = { runtime: EngineSnapshot; minds: Mind[]; seq: number; extra: Record<string, unknown>; kernel?: KState; counts?: Record<string, number>; faultedHeadV1?: true };
 export type HostListener = {
   onBatch?(b: Batch): void;
@@ -137,15 +143,48 @@ export type HostListener = {
   /** Notification only: the clock was stopped; no queued work is drained. */
   onStop?(): void;
   onClockUnavailable?():void;
+  /** #2297: what this listener keeps outside the engine that can change the world, from stored state only: `busy` (it has
+   *  work under way, so the world is not still) and its deadlines, each the next tick at which it changes something (`move`
+   *  when that change moves a body). A periodic check that would find nothing is not a deadline. */
+  stillness?(tick: number): StillPart[];
+  /** #2366: a stable name for this listener's afterTick step (fault logs, the fault storm's record); default: its source. */
+  name?: string;
 };
+/** #2366: a listener's afterTick step by a stable identity: its `name`, else its function's source, as a 32-bit hash (`id`, the
+ *  same on every boot of a build, whatever the listener's place in `host.listeners`) and a short readable `name`. */
+export type StepId = { id: number; name: string };
+const stepIds = new WeakMap<HostListener, StepId>();
+export function stepIdOf(l: HostListener): StepId {
+  let s = stepIds.get(l); if (s) return s;
+  const text = l.name ?? String(l.afterTick ?? '');
+  let h = 0x811c9dc5; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  s = { id: h, name: l.name ?? `afterTick ${h.toString(16).padStart(8, '0')} (${text.replace(/\s+/g, ' ').slice(0, 60)})` };
+  stepIds.set(l, s); return s;
+}
+/** #2297: one deadline (or a busy flag) a part of the world reports to `WorldHost.stillUntil`. */
+export type StillPart = { name: string; tick?: number | null; move?: boolean; busy?: boolean };
+/** #2297 the still contract (#2241) as the host answers it: `untilTick` the earliest deadline, `moveTick` the earliest at
+ *  which the world itself moves a body; the step that reaches either tick may change the world, every step before it
+ *  changes only the clock. `parts` names what set them (and what keeps the world busy), for the check and reports. */
+export type StillAnswer = { still: boolean; tick: number; untilTick: number | null; moveTick: number | null; why?: string; due: StillPart[] };
 
 const TICK_MS = 50;
+/** #2384: the input queue. A push wakes a sleeping still world (`WorldHost.wake`), wherever it comes from. */
+class InputQueue extends Array<Pending> {
+  static get [Symbol.species]() { return Array; }
+  onPush: (() => void) | null = null;
+  push(...items: Pending[]): number { const n = super.push(...items); this.onPush?.(); return n; }
+}
+/** #2384: the longest one sleep's timer is set for (a Node timer's limit is about 24.8 days); a longer horizon sleeps again. */
+const SLEEP_MAX_MS = 2 ** 31 - 1;
 const BATCH_TICKS = 10;      // 500 ms at rate 1
 const HEARTBEAT_TICKS = 100; // 5 s at rate 1
 const RING_BATCHES = 600;
 
 export class WorldHost {
   engine!: Engine;
+  /** Shards (#2389): the world's own config, set by startWorld (world-main.ts). Read it through worldConfig(host). */
+  config?: Config;
   /** Meaning: things, links, vocabulary, decks. Replays from the log without the engine. */
   kernel!: KState;
   counts: Record<string, number> = {};       // successful plays per card
@@ -172,17 +211,27 @@ export class WorldHost {
    *  of its interval). `snapshotEvery` ticks stays the ceiling. A boot that replayed more than `snapshotAfterReplayTicks`
    *  (0 = off; main.ts sets SNAPSHOT_AFTER_REPLAY_TICKS) snapshots on its first tick, so a second crash does not replay the gap again. */
   snapshotDebtMs = 0; snapshotMinGapMs = 20_000; snapshotAfterReplayTicks = 0;
-  /** Engine-step time of the live ticks since the last snapshot: what a boot after a kill would replay. */
+  /** Main-thread time of the live ticks since the last snapshot (#2458: the whole tick): what a boot after a kill, or a recovery, would replay. */
   replayDebtMs = 0;
+  /** #2458: the running average of a computed tick's whole main-thread time, ms: what each jumped tick adds to the debt. */
+  tickCostMs = 0;
   private lastSnapshotWall = performance.now();
   private snapshotSoon: string | null = null;
   /** Main-thread ms of the last completed snapshot (capture + finish + serialize + persist). */
   lastSnapshotCostMs = 0;
   extra: Record<string, unknown> = {};       // module state persisted with snapshots (narrator schedule etc.)
   tickMs: number[] = [];
+  /** #1961: span timers of each live tick, off unless SOULS_TICK_SPANS names a file. One JSON line per tick, appended
+   *  every 100 ticks after the tick ends: [tick, total, drain, step, clock, listeners, broadcast, snapshot 0|1], ms.
+   *  drain = queued inputs (both drains), step = the engine's step, clock = the durable clock write, listeners = runtime
+   *  events, afterTick and afterTickComplete, broadcast = flush and heartbeat; everything else is total minus those. */
+  tickSpans: { file: string; rows: string[] } | null = process.env.SOULS_TICK_SPANS ? { file: process.env.SOULS_TICK_SPANS, rows: [] } : null;
   /** The last boot's phases (lane L5): restore = snapshot read + decode + engine restore; replay = stepping logged history to its head. */
   bootStats: BootStats | null = null;
-  private queue: Pending[] = [];
+  /** Asked at each snapshot's capture (same tick); what it returns runs once that snapshot is saved (the god bridge's boot
+   *  record beside it: engine-bridge.ts bootRecord). */
+  snapshotSidecar: (() => (at: { tick: number; stateHash: string }) => void) | null = null;
+  private queue: Pending[] = Object.assign(new InputQueue(), { onPush: () => this.wake() });
   private intentControllerFaults = new Set<string>();
   private intentObservations: IntentObservations;
   private acc = { paths: [] as PathCommit[], changes: [] as ChangeEvent[], log: [] as LogEvent[], dirty: new Set<string>(), removed: [] as string[], plays: [] as PlayView[], fromTick: 0 };
@@ -233,7 +282,7 @@ export class WorldHost {
   private bootSkippedV1: {tick: number; seq: number; reason: string; error: unknown}[] | null = null;
   private bootV1(): { from: 'genesis' | 'snapshot'; replayed: number } {
     this.bootSkippedV1 = null;
-    const tBoot = performance.now(); bootPhase('boot:restore');
+    const tBoot = performance.now(); this.bootProgress.phase('boot:restore');
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; this.nonFiniteBase = null;
     let w = this.db.world(this.worldId);
     if (!w) {
@@ -302,8 +351,8 @@ export class WorldHost {
     const stepReplay=()=>{
       const before=this.engine.runtime.violations.length;
       let out:ReturnType<Engine['step']>;
-      try{out=this.stepEngine();}catch(error){if(!this.repairRules)throw error;if(!replayThrew)console.warn('[world] a replayed step threw; the repair in the log follows it:',String(error).slice(0,200));replayThrew=true;replayTicks++;bootTick(this.engine.world.tick);if(this.durableClockV1){this.kernel.tick=this.engine.world.tick;sweep(this.kernel);}return;}   // #1150: as the live tick did
-      this.advanceLives();replayTicks++;bootTick(this.engine.world.tick);
+      try{out=this.stepEngine();}catch(error){if(!this.repairRules)throw error;if(!replayThrew)console.warn('[world] a replayed step threw; the repair in the log follows it:',String(error).slice(0,200));replayThrew=true;replayTicks++;this.bootProgress.tick(this.engine.world.tick);if(this.durableClockV1){this.kernel.tick=this.engine.world.tick;sweep(this.kernel);}return;}   // #1150: as the live tick did
+      this.advanceLives();replayTicks++;this.bootProgress.tick(this.engine.world.tick);
       replayedRefusals+=out.refusals?.length??0;
       if(this.durableClockV1){
         if(this.engine.runtime.violations.length>before&&!this.repairRules)throw new Error('clock-frontier.replay-violates');   // #1150: a repair in the log follows it
@@ -335,11 +384,11 @@ export class WorldHost {
       later=later.slice(repaired+1);
     }
     const target = Math.max(this.engine.world.tick, later.length ? later[later.length - 1].tick : 0, clock && !checkedClock ? clock.tick : 0);
-    bootPhase('boot:replay', this.engine.world.tick, target);
+    this.bootProgress.phase('boot:replay', this.engine.world.tick, target);
     for (const e of later) {
       if(clock&&!checkedClock&&e.seq>clock.throughSeq)verifyClock();
       while (this.engine.world.tick < e.tick) stepReplay();
-      try { this.apply(e, true); } catch (error) { if (!this.repairRules) throw error; console.warn(`[world] replayed event ${e.seq} threw, as it did live:`, String(error).slice(0, 200)); }
+      try { this.apply(e, true); } catch (error) { if (!this.repairRules) throw error; console.warn(`[world] replayed event ${e.seq} threw, as it did live:`, String(error).slice(0, 200)); if (e.kind === 'birth' && !this.minds.has(e.payload?.soulId)) this.unbornV1.add(e.payload.soulId); }
       this.seq = e.seq;
     }
     verifyClock();
@@ -364,7 +413,7 @@ export class WorldHost {
     if (!this.db.hasVocabulary(this.worldId)) void this.enqueue('rules', 'system', { vocabulary: structuredClone(baseVocabulary(this.kernel)), why: 'the vocabulary this world began with' });
     if (this.pendingBootstrap) { void this.enqueue('rules', 'system', { kernelBootstrap: this.pendingBootstrap, why: 'the kernel begins here for a world that predates it' }); this.pendingBootstrap = null; }
     const end = performance.now();
-    const stats: BootStats = { from, restoreMs: Math.round(restoredAt - tBoot), readMs: Math.round(readMs), replayMs: Math.round(replayedAt - restoredAt), baselineMs: Math.round(end - replayedAt),
+    const stats: BootStats = { from, ...(snap ? { fromStateHash: snap.stateHash } : {}), restoreMs: Math.round(restoredAt - tBoot), readMs: Math.round(readMs), replayMs: Math.round(replayedAt - restoredAt), baselineMs: Math.round(end - replayedAt),
       replayTicks, replayEvents: later.length, fromTick, toTick: this.engine.world.tick, minds: this.minds.size };
     this.bootStats = stats;
     console.log(`[boot] restore ${stats.restoreMs} ms from ${from} tick ${fromTick} (snapshot read+decode ${stats.readMs} ms, ${stats.minds} minds)`);
@@ -518,6 +567,10 @@ export class WorldHost {
     return best ?? this.engine.regionAt(e.pose.p);
   }
 
+  /** #2501 follow-up: ticks a boot catch-up still owed when it stopped (a host slower than the wall never quite closes the
+   *  gap) are run by the clock's first frames instead of dropped: world time never stops. Past a frame's cap they meet
+   *  the clock's own overload rule (dilation, logged), as any frame that falls behind does. */
+  oweToClock(ticks: number) { if (ticks > 0 && !this.paused) this.carry += Math.floor(ticks); }
   start() {
     if (this.timer) return;
     this.last = performance.now();
@@ -534,27 +587,223 @@ export class WorldHost {
     if (this.frameImmediate) clearImmediate(this.frameImmediate);
     this.frameImmediate = null; this.frameBatch = null;
   }
-  stop() { if (this.timer) clearInterval(this.timer); this.timer = null; this.clockGeneration++; this.cancelFrameBatch(); this.cancelPeriodicSnapshot(); for (const l of this.listeners) { try { l.onStop?.(); } catch { /* observers cannot prevent stopping */ } } }
+  stop() {
+    // #2298 A4: a still world catches up the ticks it counted, and its durable clock is written as it stops
+    try { this.settle(); if (this.durableClockV1 && this.stillStretch && this.clockAvailable && this.frontierSeq >= 0) { this.stillStretch = false; this.persistClockFrontier(); } } catch (error) { console.error('[clock] the still world could not be brought to now as it stopped:', String(error).slice(0, 200)); }
+    if (this.timer) clearInterval(this.timer); this.timer = null; this.sleptAt = 0; this.clockGeneration++; this.cancelFrameBatch(); this.cancelPeriodicSnapshot(); for (const l of this.listeners) { try { l.onStop?.(); } catch { /* observers cannot prevent stopping */ } } }
   /** The world's own clock loop is running (start(); a served world). False while stepped by hand (tests, tools): lane P5
    *  defers some boot-time derived work only in a served world, so a stepped one sees it at the same tick as before. */
   get running(): boolean { return this.timer !== null; }
-  /** Wall pace of the clock (attention.ts): 1 while anyone watches or acts here, lower while nobody does (an unwatched
-   *  world advances fewer ticks per wall second, and wakes its loop less often). The same ticks run in the same order with
-   *  the same inputs, so schedules (in world time) and takes (cut every 20 ticks) are unchanged; only how fast world time
-   *  passes against the wall clock changes, as while asleep. Not logged, not persisted, not part of `clockRate`. */
+  /** Wall pace of the clock: 1. #2235: a served world never runs slower than the wall, watched or not (the unwatched
+   *  quarter pace is gone); lower values remain only for measurement harnesses. Not logged, not persisted, not part of
+   *  `clockRate`. */
   pace = 1;
   setPace(pace: number) {
     if (!(pace > 0 && pace <= 1) || pace === this.pace) return;
+    this.wake();
     const now = performance.now();
     if (this.timer && !this.paused) this.carry += (Math.min(1000, now - this.last) * this.clockRate * this.pace) / TICK_MS;  // the time so far, at the old pace
     this.last = now; this.pace = pace;
     if (this.timer) { clearInterval(this.timer); this.startFrameTimer(); }
+  }
+  /** #2235: ticks still owed to the wall while `catchUp` runs (the real-time keeper reads the clock as already caught up). */
+  owedTicks = 0;
+  /** #2297 A1: am I still, and until which tick? Still only when the engine is still (#2294), no input is queued, no
+   *  catch-up runs, the clock is not paused or halted and no listener is busy. `untilTick` is the earliest deadline of the
+   *  engine and of every listener (`HostListener.stillness`), or null; `moveTick` the earliest at which the world itself
+   *  moves a body (the engine's held ends and programme waits, the body rule's next step), or null. Reads only; skips nothing. */
+  stillUntil(o: { advancing?: boolean; inputsAtTarget?: boolean } = {}): StillAnswer {
+    const tick = this.engine.world.tick, due: StillPart[] = [];
+    const not = (why: string): StillAnswer => ({ still: false, tick, untilTick: null, moveTick: null, why, due });
+    const eng = (this.engine as unknown as { stillnessV1?(): { still: boolean; untilTick: number | null } }).stillnessV1?.();
+    if (!eng?.still) return not('engine');
+    if (this.queue.length && !o.inputsAtTarget) return not('queued');
+    if (this.owedTicks > 0 && !o.advancing) return not('catching-up');
+    if (this.paused || !this.clockAvailable) return not('paused');
+    if (eng.untilTick !== null) due.push({ name: 'engine.held', tick: eng.untilTick, move: true });
+    const gaze = (this.engine as unknown as { attentionDueV1?(): number | null }).attentionDueV1?.() ?? null;
+    if (gaze !== null) due.push({ name: 'engine.gaze', tick: gaze });
+    for (const l of this.listeners) for (const p of l.stillness?.(tick) ?? []) { if (p.busy) return not(p.name); if (p.tick != null) due.push(p); }
+    let untilTick: number | null = null, moveTick: number | null = null;
+    for (const p of due) p.tick = Math.max(tick + 1, p.tick!);   // a deadline already passed is due at the next step
+    for (const p of due) { untilTick = untilTick === null ? p.tick! : Math.min(untilTick, p.tick!); if (p.move) moveTick = moveTick === null ? p.tick! : Math.min(moveTick, p.tick!); }
+    return { still: true, tick, untilTick, moveTick, due: due.filter((p) => p.tick === untilTick) };
+  }
+  /** #2297 A6: the still check, off unless SIM_STILL_CHECK=1 (or set by a test). Once the world claims still until a tick,
+   *  every step before that tick is checked: it grew no log, drew no world RNG and changed the engine state hash only in its
+   *  clock fields, and left nothing queued (a listener's enqueue is logged only at the next tick's drain). The claim is asked
+   *  again when it ends, when an input is queued or after a breach. `closed`: no input comes from outside (a test), so an
+   *  input queued between two ticks inside a claim (a listener's deferred work) is a breach too. `fell` counts the deadlines that fell due, by name. */
+  stillCheck: { claimed: number; failures: { tick: number; what: string; why: string }[]; fell: Map<string, number>; every: number; closed?: boolean; claim?: { until: number | null; due: string[]; at?: { hash: string; rng: string } } | null } | null =
+    process.env.SIM_STILL_CHECK === '1' ? { claimed: 0, failures: [], fell: new Map(), every: 1 } : null;
+  private stillCheckBefore() {
+    const chk = this.stillCheck!, tick = this.engine.world.tick;
+    let c = chk.claim;
+    if (c && this.queue.length && chk.closed && (c.until === null || tick + 1 < c.until)) { chk.failures.push({ tick, what: 'an input was queued between ticks', why: c.due.join(',') || 'none' }); if (chk.failures.length <= 20) console.error(`[still-check] tick ${tick}: an input was queued between ticks inside a claimed horizon`); }
+    if (!c || this.queue.length || (c.until !== null && tick + 1 >= c.until)) {
+      if (c && c.until !== null && tick + 1 >= c.until) for (const n of c.due) chk.fell.set(n, (chk.fell.get(n) ?? 0) + 1);
+      const s = this.stillUntil();
+      c = chk.claim = s.still && (s.untilTick === null || tick + 1 < s.untilTick) ? { until: s.untilTick, due: s.due.map((p) => p.name) } : null;
+      if (!c) return null;
+    }
+    const hash = chk.every <= 1 || tick % chk.every === 0;
+    c.at ??= (this.engine as unknown as { stillCheckV1(): { hash: string; rng: string } }).stillCheckV1();
+    return { tick, seq: this.seq, hash, at: c.at };
+  }
+  private stillCheckAfter(b: NonNullable<ReturnType<WorldHost['stillCheckBefore']>>) {
+    const chk = this.stillCheck!; chk.claimed++;
+    const now = (this.engine as unknown as { stillCheckV1(): { hash: string; rng: string } }).stillCheckV1();
+    let failed = false;
+    const fail = (what: string) => { failed = true; chk.failures.push({ tick: b.tick, what, why: chk.claim?.due.join(',') || 'none' }); if (chk.failures.length <= 20) console.error(`[still-check] tick ${b.tick}: ${what} inside a claimed horizon (until ${chk.claim?.until ?? 'none'})`); };
+    if (this.seq !== b.seq) fail('the log grew');
+    if (now.rng !== b.at.rng) fail('the world RNG drew');
+    if (b.hash && now.hash !== b.at.hash) fail('the state hash changed beyond the clock');
+    if (this.queue.length) fail('an input was queued');
+    if (failed) chk.claim = null; else if (chk.claim) chk.claim.at = now;
+  }
+  /** #2298: a still world's clock is set forward, not stepped (SIM_SKIP=0: every world ticks as before). */
+  skip = process.env.SIM_SKIP !== '0';
+  /** #2298 A5: ordinary ticks run, ticks jumped over, jumps, and the horizon the last jump stopped at (null: none). */
+  skipStats = { ticksComputed: 0, ticksJumped: 0, jumps: 0, lastHorizon: null as number | null };
+  /** #2298 A4: the ticks an unwatched world found still after an ordinary tick counts before its first jump (1.5 s). After
+   *  that jump it sleeps to its horizon (#2384 A1). */
+  jumpCap = 30;
+  /** #2520: every connected viewer, the hub's and the anonymous fanout's (set by the Hub). */
+  viewerCount: () => number = () => 0;
+  /** #2298 A4b: true while a viewer is connected. Then a jump covers at most one broadcast batch
+   *  and lands on its boundary, so batches and the time of day go out as often as when every tick ran. */
+  watched?: () => boolean = () => this.viewerCount() > 0;
+  private jumpFrom = 0;
+  /** #2298: while true the world has been still since its last jump (no ordinary tick outside a jump's landing). */
+  stillStretch = false;
+  /** #2303: still since its last jump and nobody watching. A wall timer with nothing due then returns at once. */
+  silent(): boolean { return this.skip && this.stillStretch && !this.paused && this.clockAvailable && !this.watched?.(); }
+  private landing = false;
+  /** #2298 A4: the live clock's ticks owed while still (counted per frame, run as one jump), and until which tick the
+   *  last answer said the world stays still (Infinity: no deadline). */
+  private lag = 0;
+  private stillClaim: number | null = null;
+  private frontierSeq = -1;
+  /** A world found not still is asked again only from this tick (the answer reads every live action and listener). */
+  private askAfter = 0;
+  private snapshotSeq = -1;
+  /** #2298 A2: one move of the clock towards `target`: when the world is still, a jump to the earlier of its horizon and
+   *  the target (the engine skips to the tick before, then the ordinary tick runs the landing tick, listeners, log and all);
+   *  otherwise one ordinary tick. Returns the ticks advanced. `inputsAtTarget`: queued inputs arrived at the target (the
+   *  live clock), so they drain at the landing tick, not the next. A Soul whose needs still add up every tick (before
+   *  need-anchor/1) keeps the world ticking. */
+  advanceStep(target: number, o: { inputsAtTarget?: boolean; cap?: number; align?: number } = {}): number {
+    const tick = this.engine.world.tick;
+    if (target <= tick) return 0;
+    if (this.skip && target - tick >= 2 && tick >= this.askAfter && !this.paused && this.clockAvailable && this.needsJumpable()) {
+      const s = this.stillUntil({ advancing: true, inputsAtTarget: o.inputsAtTarget });
+      if (!s.still) this.askAfter = tick + 10;
+      else {
+        let land = target; if (s.untilTick !== null) land = Math.min(land, s.untilTick); if (o.cap) land = Math.min(land, tick + o.cap);
+        if (o.align && land < target) { const a = land - (land % o.align); if (a - 1 > tick) land = a; }
+        const skip = land - 1 > tick ? (this.engine as unknown as { skipToV1?(t: number): { ok: boolean } }).skipToV1?.(land - 1) : undefined;
+        if (skip?.ok) {
+          const st = this.skipStats; st.ticksJumped += land - 1 - tick; st.jumps++; st.lastHorizon = s.untilTick;
+          this.replayDebtMs += (land - 1 - tick) * this.tickCostMs;   // #2458: a recovery replays jumped ticks one by one
+          this.stillStretch = true; this.stillClaim = s.untilTick ?? Infinity; this.jumpFrom = tick;
+          this.landing = true; try { this.tickOnce(); } finally { this.landing = false; }
+          if (this.stillClaim !== null && this.engine.world.tick >= this.stillClaim) this.stillClaim = null;   // #2384: landed on the claim: it is spent, ask again
+          return this.engine.world.tick - tick;
+        }
+      }
+    }
+    // #2303: the one tick a jump leaves before its target, inside the horizon it claimed and with nothing queued, keeps the
+    // still stretch (an ordinary tick otherwise ends it, and the world's timers wake for nothing)
+    if (this.stillStretch && this.stillClaim !== null && tick + 1 < this.stillClaim && !this.queue.length) { this.jumpFrom = tick; this.landing = true; try { this.tickOnce(); } finally { this.landing = false; } return this.engine.world.tick - tick; }
+    this.tickOnce();
+    return this.engine.world.tick - tick;
+  }
+  /** #2298: advance to `target` now (jumps and ordinary ticks, synchronously). */
+  advanceTo(target: number, o: { inputsAtTarget?: boolean; cap?: number; align?: number } = {}) {
+    while (this.engine.world.tick < target && !this.paused && this.clockAvailable) if (!this.advanceStep(target, o)) break;
+  }
+  /** #2384 A1: the wall time (performance.now) a still, unwatched world went to sleep at; 0 while awake. While asleep its
+   *  frame timer is off and one timer is set for the wall time of its horizon. */
+  private sleptAt = 0;
+  /** #2384: true while the world sleeps to its horizon (the load monitor counts it as owing no tick, not as stalled). */
+  get sleeping(): boolean { return this.sleptAt > 0; }
+  /** #2384 A1: stop the frame timer and set one timer for the horizon (`stillClaim`, at the clock's rate and pace). The
+   *  ticks owed since the last frame are in `lag`; `wake` adds the wall time slept. */
+  private sleep(now: number) {
+    if (!this.timer || this.sleptAt) return;
+    clearInterval(this.timer);
+    const rate = this.clockRate * this.pace, toGo = (this.stillClaim ?? Infinity) - this.engine.world.tick - this.lag - this.carry;
+    const ms = Number.isFinite(toGo) && rate > 0 ? Math.max(0, Math.ceil((toGo * TICK_MS) / rate)) : SLEEP_MAX_MS;
+    const generation = this.clockGeneration;
+    this.sleptAt = now;
+    const timer = setTimeout(() => { if (generation === this.clockGeneration && this.timer === timer) this.wake(); }, Math.min(ms, SLEEP_MAX_MS));
+    this.timer = timer;
+  }
+  /** #2384 A1: a sleeping world wakes (its horizon's timer, a request, a viewer, a queued input): the wall time it slept is
+   *  owed as ticks (`lag`, exactly, as a boot catch-up owes them) and the frame timer runs again; the next frame lands. */
+  wake() {
+    if (!this.sleptAt) return;
+    const now = performance.now(), owed = ((now - this.sleptAt) * this.clockRate * this.pace) / TICK_MS + this.carry, whole = Math.floor(owed);
+    this.lag += whole; this.carry = owed - whole; this.sleptAt = 0; this.last = now;
+    if (this.timer) clearTimeout(this.timer);
+    this.startFrameTimer();
+  }
+  /** #2384: the tick the wall has reached: the world's tick plus what it owes (a catch-up, a still stretch's lag, sleep). */
+  wallTick(): number {
+    const slept = this.sleptAt ? Math.floor(((performance.now() - this.sleptAt) * this.clockRate * this.pace) / TICK_MS + this.carry) : 0;
+    return this.engine.world.tick + this.owedTicks + this.lag + slept;
+  }
+  /** #2298 A4: any request first brings a still world's clock to now (the ticks it owes the wall since its last jump). */
+  settle() {
+    this.wake();
+    this.stillClaim = null;   // a request may change what is due (a reminder, a plan): the next frame asks again
+    if (!this.lag || this.frameBatch || !this.timer || this.paused || !this.clockAvailable) return;
+    if (this.holdClock?.()) return;
+    const target = this.engine.world.tick + this.lag; this.lag = 0;
+    this.advanceTo(target, { inputsAtTarget: true });
+  }
+  private needsJumpable(): boolean {
+    if ((this.extra.runtimePolicy as { needAnchorsV1?: boolean } | undefined)?.needAnchorsV1 === true) return true;
+    for (const m of this.minds.values()) if (m.life) return false;
+    return true;
+  }
+  /** #2235: run `ticks` ticks the world missed while it had no process (restart, deploy, eviction), before its clock
+   *  starts: the ordinary tick, listeners and all, yielding a turn between ticks exactly as the frame loop does. What the
+   *  boot itself queued (the bridge's projection, a keeper event) drains at the first of them, as it would have long ago in
+   *  a world that never stopped; outside writes wait at the HTTP edge until the catch-up is done (main.ts). */
+  async catchUp(ticks: number, turn: () => Promise<unknown> = () => new Promise((r) => setImmediate(r))): Promise<number> {
+    if (this.timer) throw new Error('catch-up.clock-running');
+    let done = 0; const generation = this.clockGeneration;   // stop() (a shutdown during the catch-up) ends it
+    this.owedTicks = Math.max(0, Math.floor(ticks));
+    try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable && generation === this.clockGeneration) { const n = Math.max(1, this.advanceStep(this.engine.world.tick + this.owedTicks)); this.owedTicks -= n; done += n; await turn(); } }
+    finally { this.owedTicks = 0; }
+    return done;
   }
 
   // ------------------------------------------------------------ the loop
   /** When it answers true the frame is skipped and its wall time carried to the next one (the hub, while a visitor's join set
    *  is still going out: lane P5). Holds stay well under the 1 s elapsed cap, so the same ticks run, only later. */
   holdClock?: () => boolean;
+  /** #2366 A1: a served world's tick that throws past the engine's own fault handling (#1150: a listener, the drain, the
+   *  broadcast) is reported here and the clock goes on with the next frame. Unset (tests, tools): it throws, as before. */
+  onFault?: (name: string, error: unknown, step?: StepId & { tick: number }) => void;
+  /** #2366: a halt was recorded by name in this process (a glitch of rung `halt`): the launcher restarts a halted world. */
+  haltNamed = false;
+  /** #2378 A2: the shared load numbers (load/shared.ts), where each tick names the step it is in (its stable id) for the
+   *  watchdog. Unset: none. */
+  stepSlots?: Float64Array;
+  /** #2416: this world's boot progress (startWorld gives its load array's slots; tests get private ones). */
+  bootProgress = new BootProgress();
+  /** #2378 A2: a step (a listener's afterTick, by its stable id: stepIdOf) that ended the process on two boots in a row
+   *  (load/restart-loop.ts): skipped from `fromTick` until `untilTick`, named once in the log and the glitch counts
+   *  (`world.step-quarantined`), so the world comes up and runs on. By id, not by place: `listeners` changes at runtime. */
+  quarantinedStep?: { id: number; name: string; fromTick: number; untilTick: number; deaths: number };
+  private quarantineSkips = 0;
+  private skipQuarantinedStep(q: { id: number; name: string; fromTick: number; untilTick: number; deaths: number }, tick: number, step: StepId) {
+    if (this.quarantineSkips++) return;
+    console.error(`[world] step quarantined: ${step.name} skipped from tick ${tick} until tick ${q.untilTick} (it ended the world on ${q.deaths} boots in a row: ${q.name}); the rest of the tick runs`);
+    this.recordGlitch('contained', new Error(`world.step-quarantined: ${step.name}`), { rule: 'world.step-quarantined', tick, evidence: { step: step.name, id: q.id, fromTick: q.fromTick, untilTick: q.untilTick, deaths: q.deaths } });
+  }
   private frame() {
     if (!this.timer) return;
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); this.last = performance.now(); return; }
@@ -577,6 +826,22 @@ export class WorldHost {
       this.overruns = 0;
       if (this.clockRate < this.baseRate && ++this.calm >= 200) { this.calm = 0; this.clockRate = Math.min(this.baseRate, this.clockRate * 2); void this.enqueue('rules', 'system', { clockRate: this.clockRate, why: 'recovered' }); }
     }
+    if (due > 0 && this.skip) {
+      // #2298 A4: a still world only counts what it owes until a second has gone, its horizon nears or an input waits
+      if (this.stillClaim === null && this.engine.world.tick >= this.askAfter && this.needsJumpable()) { const s = this.stillUntil(); if (s.still) this.stillClaim = s.untilTick ?? Infinity; else this.askAfter = this.engine.world.tick + 10; }
+      const t = this.engine.world.tick + this.lag + due;
+      if (this.stillClaim !== null && !this.queue.length && t < this.stillClaim) {
+        // #2384 A1: unwatched and still since its last jump, the world sleeps to its horizon: no frame timer, no landing
+        if (this.stillStretch && !this.watched?.() && this.clockRate >= this.baseRate) { this.lag += due; this.sleep(now); return; }   // (a slowed clock recovers in frames)
+        if (this.lag + due < (this.watched?.() ? BATCH_TICKS : this.jumpCap)) { this.lag += due; return; }
+      } else if (this.stillClaim !== null && !this.queue.length && this.stillStretch && !this.watched?.() && Number.isFinite(this.stillClaim) && this.stillClaim > this.engine.world.tick) {
+        // #2384 A1: woken at its horizon, the world lands there exactly; what the wall owes past it stays owed, and the next
+        // frame asks again (and sleeps again while still)
+        const owed = this.lag + due; due = this.stillClaim - this.engine.world.tick; this.lag = owed - due; this.stillClaim = null;
+        this.frameBatch = { remaining: due, generation: this.clockGeneration }; this.pumpFrame(this.frameBatch); return;
+      }
+      due += this.lag; this.lag = 0; this.stillClaim = null;
+    }
     if (due > 0) {
       this.frameBatch = { remaining: due, generation: this.clockGeneration };
       this.pumpFrame(this.frameBatch);
@@ -587,12 +852,11 @@ export class WorldHost {
     if (this.frameBatch !== batch || batch.generation !== this.clockGeneration || !this.timer) return;
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
     if (this.holdClock?.()) return; // park; the interval polls the hold without an immediate spin
-    batch.remaining--;
-    try { this.tickOnce(); }
-    catch (error) { this.cancelFrameBatch(); throw error; }
+    try { batch.remaining -= this.skip ? Math.max(1, this.advanceStep(this.engine.world.tick + batch.remaining, this.watched?.() ? { inputsAtTarget: true, cap: BATCH_TICKS, align: BATCH_TICKS } : { inputsAtTarget: true })) : (this.tickOnce(), 1); }
+    catch (error) { this.cancelFrameBatch(); if (!this.onFault) throw error; this.onFault('world.fault.tick', error); return; }   // #2366 A1: the next frame goes on
     if (this.frameBatch !== batch) return; // a listener may have stopped/restarted or paused the host
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
-    if (!batch.remaining) { this.frameBatch = null; return; }
+    if (batch.remaining <= 0) { this.frameBatch = null; return; }
     this.frameImmediate = setImmediate(() => {
       if (this.frameBatch !== batch || batch.generation !== this.clockGeneration) return;
       this.frameImmediate = null;
@@ -602,17 +866,27 @@ export class WorldHost {
 
   tickOnce() {
     this.assertClockReady();
+    this.skipStats.ticksComputed++;
+    if (!this.landing) { this.stillStretch = false; this.stillClaim = null; }
+    const still = this.stillCheck ? this.stillCheckBefore() : null;   // #2297 A6 (off: one null test)
+    if (still) { try { this.tickOnceInner(); } finally { this.stillCheckAfter(still); } return; }
+    this.tickOnceInner();
+  }
+  private tickOnceInner() {
     const t0 = performance.now();
     const tick = this.engine.world.tick;
     if (this.recoveryForEdge) this.validPoses = { tick, poses: this.soulPoses() };
+    const sp = this.tickSpans, span = sp ? [0, 0, 0, 0, 0, 0] : null;   // #1961: drain, step, clock, listeners, broadcast, snapshot
+    let ts = sp ? performance.now() : 0;
     // 1. apply queued inputs at this tick, logging them
     this.drainInputs();
+    if (span) span[0] += performance.now() - ts;
     if (this.repairRules && !this.clockAvailable) return;   // a repair in that drain couldn't be written: a named halt, not a throw
     // 2. step the engine
     let out: ReturnType<Engine['step']>;
     const previousViolations = this.engine.runtime.violations.length;
     const tStep = performance.now();
-    try { out = this.stepEngine(); if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
+    try { out = this.stepEngine(); if (span) span[1] = performance.now() - tStep; if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
     catch (error) { for (const r of out!?.refusals ?? []) if (glitchy(r)) this.countRefusal(r); if (this.repairRules) { this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.faultedPrograms = out!?.programs ?? null; } this.noteFaultedTick(error); const head = this.engine; this.recoverFault(error); this.faultedPrograms = null; if (this.repairRules) this.afterFaultedTick(head, out!?.refusals); if (this.stepFailing && this.clockAvailable && this.snapshotDue()) this.snapshotFaultedHead(); return; }
     this.noteCleanTick();
     this.advanceLives();
@@ -627,26 +901,58 @@ export class WorldHost {
     if (out.refusals) this.noteRefusals(out.refusals);
     if (this.quarantineRule) { this.noteWholePoses(); if (this.engine.world.tick % BROKEN_SWEEP_TICKS === 0) this.sweepBrokenBodies(); }
     if (this.repairRules && !this.clockAvailable) return;
-    this.replayDebtMs += performance.now() - tStep;
     if(this.durableClockV1){
       // Derived effects become durable before this elapsed body tick is sent.
       // Listener-generated next inputs retain their ordinary queue semantics.
+      if (span) ts = performance.now();
       this.drainInputs();
+      if (span) span[0] += performance.now() - ts;
       if(this.repairRules&&!this.clockAvailable)return;
-      this.persistClockFrontier();
+      if (span) ts = performance.now();
+      if (!this.landing || this.seq !== this.frontierSeq) this.persistClockFrontier();   // #2298 A4
+      if (span) span[2] = performance.now() - ts;
     }
+    if (span) ts = performance.now();
     for (const ev of out.events) for (const l of this.listeners) l.onRuntimeEvent?.(ev);
     const now = this.engine.world.tick;
     const tickContext = Object.freeze({ startedAtMs: t0 });
-    for (const l of this.listeners) l.afterTick?.(now, tickContext);
+    // #2366: each listener's afterTick is its own step: one that throws is reported by its stable identity and the rest of the
+    // tick (the other listeners, the broadcast, the heartbeat, the snapshot) runs on. Without onFault (tests, tools) it throws.
+    // #2378 A2: the watchdog sees which step a stuck tick is in (S.step: its id + 1), and a quarantined step is skipped.
+    const sh = this.stepSlots, q = this.quarantinedStep;
+    for (const l of this.listeners) { if (!l.afterTick) continue;
+      const step = sh || q ? stepIdOf(l) : null;
+      if (q && step!.id === q.id && now >= q.fromTick && now < q.untilTick) { this.skipQuarantinedStep(q, now, step!); continue; }
+      if (sh) { sh[S.stepTick] = now; sh[S.step] = step!.id + 1; }
+      try { l.afterTick(now, tickContext); }
+      catch (error) { if (!this.onFault) throw error; this.onFault('world.fault.step', error, { ...(step ?? stepIdOf(l)), tick: now }); }
+      finally { if (sh) sh[S.step] = 0; } }
+    if (span) { span[3] = performance.now() - ts; ts = performance.now(); }
     // 3. broadcast
-    if (now % BATCH_TICKS === 0) this.flush();
-    if (now % HEARTBEAT_TICKS === 0) this.heartbeat();
-    if (this.snapshotDue(now)) this.schedulePeriodicSnapshot();
+    // #2298: a jump's landing sends what the ticks it covered would have (a batch, a heartbeat, the periodic kernel view)
+    const prev = this.landing ? this.jumpFrom : now - 1, crossed = (n: number) => Math.floor(now / n) > Math.floor(prev / n);
+    if (this.landing && crossed(200)) this.kernelDirty = true;
+    if (crossed(BATCH_TICKS)) this.flush();
+    if (crossed(HEARTBEAT_TICKS)) this.heartbeat();
+    if (span) span[4] = performance.now() - ts;
+    // #2458 A3: the debt is the whole tick (its inputs, step, listeners, broadcast), not the step alone: a recovery replays
+    // the logged inputs and every tick's lives and programmes too, and at 24 to 100 Souls cost 4 to 6 ms a replayed tick
+    // where the step alone measured 0.6, so the step-only debt let 1800 to 4800 ticks build up between snapshots. A jump
+    // (a still world, as during setup) adds its ticks at the running average whole tick, `tickCostMs`: a recovery steps
+    // through them one by one (on souls-timed at 100 Souls, 1715 of 1836 setup ticks were jumped and counted nothing)
+    const tickMs = performance.now() - t0; this.replayDebtMs += tickMs; this.tickCostMs += (tickMs - this.tickCostMs) * 0.05;
+    // #2298 A4: nothing new since the last. #2406: a landing's snapshot is taken on the next turn, not in the landing's own
+    if (this.snapshotDue(now) && !(this.landing && this.seq === this.snapshotSeq)) { if (span) span[5] = 1; if (this.landing) this.deferLandingSnapshot(); else this.schedulePeriodicSnapshot(); }
     this.tickMs.push(performance.now() - t0);
     if (this.tickMs.length > 400) this.tickMs.splice(0, 200);
     if (this.splitTap) this.splitTap(now, out); // never throws (DeltaTap.onTick); reads only
+    if (span) ts = performance.now();
     for (const l of this.listeners) { try { l.afterTickComplete?.(now); } catch { /* observers cannot undo a completed tick */ } }
+    if (sp && span) {
+      const end = performance.now(); span[3] += end - ts;
+      sp.rows.push(JSON.stringify([now, end - t0, ...span].map((x) => Math.round(x * 1000) / 1000)));
+      if (sp.rows.length >= 100) { try { appendFileSync(sp.file, sp.rows.join('\n') + '\n'); } catch { /* a measurement never stops the clock */ } sp.rows.length = 0; }
+    }
   }
 
   /** Accept queued inputs without advancing the engine or starting new mind work. */
@@ -790,6 +1096,11 @@ export class WorldHost {
   }
 
   // ------------------------------------------------------------ inputs
+  /** Souls whose birth was logged and threw (at boot under repair rules) or was left out by a rewind: a row with no body and
+   *  no mind. Souls.rebirthUnborn() gives each a new birth; until then the Soul cannot act and its owner sees no body. */
+  readonly unbornV1 = new Set<string>();
+  /** Births queued and not yet applied (a direct create counts them against the arrival point's free spots). */
+  queuedBirthsV1(): number { let n = 0; for (const p of this.queue) if (p.kind === 'birth') n++; return n; }
   /** Queue an input; it is logged and applied at the next tick. Resolves with the logged event. */
   enqueue(kind: EventKind, author: string, payload: unknown): Promise<LogEvent> {
     this.assertClockReady();
@@ -1226,7 +1537,7 @@ export class WorldHost {
           if(profile.worldId!==this.worldId||!m||m.owner!==profile.owner||m.entityId!==profile.entityId||m.name!==profile.fromName
             ||(previous?.revision??0)!==profile.fromRevision||(previous?.birthName??profile.birthName)!==profile.birthName)throw Error('soul-profile.identity');
           if(profile.fromName!==profile.name){const claims=(this.extra.soulNameClaimsV1??={}) as Record<string,string[]>;const key=profile.fromName.trim().normalize('NFKC').toLowerCase();claims[key]=[...new Set([...(claims[key]??[]),profile.soulId])];}
-          m.name=profile.name;m.description=profile.description;
+          m.name=profile.name;m.description=profile.description;this.minds.set(m.soulId,m);/* #1903: set again, so a roster reader (the live picture) sees the rename */
           ((this.extra.soulProfilesV1??={}) as Record<string,SoulProfileFactV1>)[profile.soulId]=structuredClone(profile);
           this.acc.dirty.add(m.soulId);this.kernelDirty=true;
         }
@@ -1333,11 +1644,30 @@ export class WorldHost {
   /** #1428 stair-way/1, one logged rules event (prospective): a walk's way on a link leg (a stair) is the link's exit, so another
    *  walker's make-way test never throws on a climber. History before the event replays as it was. Main adopts it at boot. */
   enableStairWayV1(author='operator:stair-way'){if((this.extra.runtimePolicy as {stairWayV1?:boolean}|undefined)?.stairWayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stairWayV1:true},why:'stair-way/1 (#1428): a walk on a stair has the stair exit as its way, so a make-way test reading it never throws; retain historical replay before this event'});}
+  /** #1530 climb-spacing/1, one logged rules event (prospective): a climber's step is refused where collision.human-human would
+   *  flag it against another body on its level (|dy| <= 1 m, closer than both radii), so a follower waits behind on the stair and
+   *  is never settled off it. History before the event replays as it was. Main adopts it at boot. */
+  enableClimbSpacingV1(author='operator:climb-spacing'){if((this.extra.runtimePolicy as {climbSpacingV1?:boolean}|undefined)?.climbSpacingV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,climbSpacingV1:true},why:'climb-spacing/1 (#1530): a climber waits behind a body ahead on the stair rather than stepping where the separation invariant flags them; retain historical replay before this event'});}
+  /** #1216 item-approach/1, one logged rules event (prospective): a take_item / put_item approach walk blocked for a minute ends
+   *  route.blocked, and a ground take tries wider rings of stands. History before the event replays as it was. Main adopts it at boot. */
+  enableItemApproachV1(author='operator:item-approach'){if((this.extra.runtimePolicy as {itemApproachV1?:boolean}|undefined)?.itemApproachV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,itemApproachV1:true},why:'item-approach/1 (#1216): an item step\'s approach walk is limited like a walk, and a ground take tries wider stands; retain historical replay before this event'});}
+  /** #1952 wait-bound/1, one logged rules event (prospective): off a stair flight, a walk whose body has not left a 0.5 m disc
+   *  or changed level for a minute ends route.blocked, named waits included; a forced release leaves no walk exec. Main adopts it at boot. */
+  enableWaitBoundV1(author='operator:wait-bound'){if((this.extra.runtimePolicy as {waitBoundV1?:boolean}|undefined)?.waitBoundV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,waitBoundV1:true},why:'wait-bound/1 (#1952): a walk that makes no headway for a minute ends route.blocked and names what it waited for, and a released walk leaves nothing behind; retain historical replay before this event'});}
+  /** #1288 wait-bound/2, one logged rules event (prospective): wait-bound/1's bound for a swim or a journey through water too
+   *  (swim_to, ground_travel, swim_in), so a swim held behind a body in the water ends route.blocked. Main adopts it at boot, after wait-bound/1. */
+  enableWaitBoundV2(author='operator:wait-bound'){if((this.extra.runtimePolicy as {waitBoundV2?:boolean}|undefined)?.waitBoundV2)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,waitBoundV2:true},why:'wait-bound/2 (#1288): a swim or a journey through water that makes no headway for a minute ends route.blocked and names what it waited for; retain historical replay before this event'});}
+  /** #2155 wait-bound/3, one logged rules event (prospective): wait-bound/1's bound for the approach walk a take_item or put_item
+   *  runs as its child, so an approach held waiting (not blocked) ends route.blocked and fails its item step. Main adopts it at boot, last. */
+  enableWaitBoundV3(author='operator:wait-bound'){if((this.extra.runtimePolicy as {waitBoundV3?:boolean}|undefined)?.waitBoundV3)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,waitBoundV3:true},why:'wait-bound/3 (#2155): a take or put whose approach walk makes no headway for a minute ends route.blocked and names what it waited for; retain historical replay before this event'});}
   /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
    *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
   /** #1521 stand-height/2 (prospective): a level-0 stall release on a world with no ground field stands at its floor's height.
    *  Its adoption also stands, once, any free body already left more than a step above its floor (the plan is read when the event
    *  is accepted and logged in it, with each body's Soul, so a replay stands the same bodies in the same places). */
+  /** #2133 stall-release-support/1 (prospective): a stall release upstairs stands a body only on a floor (its own, else its flight's
+   *  nearer clear landing), else leaves it held; never where it stands mid-flight. */
+  enableStallReleaseSupportV1(author='operator:stall-release-support'){if((this.extra.runtimePolicy as {stallReleaseSupportV1?:boolean}|undefined)?.stallReleaseSupportV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stallReleaseSupportV1:true},why:'stall-release-support/1 (#2133): a stall release upstairs stands a body on its own floor near it, else on the nearer clear landing of the flight it is on, else leaves it held and says so; never where it stands mid-flight (#447: the next tick faulted collision.human-static); retain historical replay before this event'});}
   enableStandHeightV2(author='operator:stand-height'){
     if((this.extra.runtimePolicy as {standHeightV2?:boolean}|undefined)?.standHeightV2)return Promise.resolve();
     const payload:Record<string,unknown>={runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV2:true},why:'stand-height/2 (#1521): a body the engine sets down on the ground floor of a world without a ground field stands at its floor height, never in the air at the height it had; any body already left in the air is stood on its floor once; retain historical replay before this event'};
@@ -1345,6 +1675,33 @@ export class WorldHost {
     return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload,guard,resolve,reject}));
   }
   enableStandHeightV1(author='operator:stand-height'){if((this.extra.runtimePolicy as {standHeightV1?:boolean}|undefined)?.standHeightV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV1:true},why:'stand-height/1 (#1454): a body the engine places upstairs stands at its floor height, never in the air at the height it had; retain historical replay before this event'});}
+  /** #2294 held-activity/1, one logged rules event (prospective): an activity in place started after it (a solo pose, a mat
+   *  sleep) keeps a start and an end tick instead of a running sum; seats, slots and circles once taken are held with no end;
+   *  the engine reads whether the world is still and until which tick. History before the event replays as it was. Main adopts it at boot. */
+  /** #2302 classroom-tv/1: the installed lecture screen becomes a TV (on or off; a picture or the lesson), once, at this event;
+   *  the screens it marks are logged with it. A world without a lecture adopts the flag and changes nothing. */
+  /** #2426 cede-passage/1, one logged rules event (prospective): a walker at the end of its walk leg does not take up a
+   *  single-file passage it does not hold while the body standing there yields to it, so that body can walk out through it.
+   *  Main adopts it at boot, last. */
+  enableCedePassageV1(author='operator:cede-passage'){if((this.extra.runtimePolicy as {cedePassageV1?:boolean}|undefined)?.cedePassageV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,cedePassageV1:true},why:'cede-passage/1 (#2426): a walker at the end of its walk leg leaves a single-file passage to the body standing there while that body yields to it, so it can make way; retain historical replay before this event'});}
+  /** #2596 cycle-recover/1, one logged rules event (prospective): a two-body wait cycle asks for recovery after 3 s, not 10 s,
+   *  and when routing round the other does not break it one of the pair steps aside. Main adopts it at boot, after cede-passage/1. */
+  enableCycleRecoverV1(author='operator:cycle-recover'){if((this.extra.runtimePolicy as {cycleRecoverV1?:boolean}|undefined)?.cycleRecoverV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,cycleRecoverV1:true},why:'cycle-recover/1 (#2596): a two-body wait cycle asks for recovery after 3 s, and one of the pair steps aside and walks on once the other has passed; retain historical replay before this event'});}
+  enableClassroomTvV1(author='operator:classroom-tv'){
+    if((this.extra.runtimePolicy as {classroomTvV1?:boolean}|undefined)?.classroomTvV1)return Promise.resolve();
+    const payload:Record<string,unknown>={runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,classroomTvV1:true},why:'classroom-tv/1 (#2302): the lecture screen is a TV a Soul in the room switches on or off and changes the picture of (garden, sea, stars, test card, or the lesson); a running class still puts its lesson on it; retain historical replay before this event'};
+    const guard:AcceptanceGuard=()=>{payload.classroomTvV1={screens:this.engine.classroomTvScreensV1?.()??[]};return true;};
+    return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload,guard,resolve,reject}));
+  }
+  enableHeldActivitiesV1(author='operator:held-activity'){if((this.extra.runtimePolicy as {heldActivitiesV1?:boolean}|undefined)?.heldActivitiesV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,heldActivitiesV1:true},why:'held-activity/1 (#2294): an activity in place has a start and an end tick and costs nothing between them; retain historical replay before this event'});}
+  /** #2196 park-away/1, one logged rules event (prospective): an empty ride that landed away from its home parks where it landed and
+   *  offers its seats there, never flying itself back with nobody aboard; the next rider flies it home. History before the event
+   *  replays as it was. Main adopts it at boot. */
+  enableCarrierParkAwayV1(author='operator:park-away'){if((this.extra.runtimePolicy as {carrierParkAwayV1?:boolean}|undefined)?.carrierParkAwayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,carrierParkAwayV1:true},why:'park-away/1 (#2196): a ride never moves with nobody aboard; one that landed away parks there and the next rider flies it home; retain historical replay before this event'});}
+  /** board-path/1, one logged rules event (prospective): a boarder's step into a carrier never brings it within the human-human
+   *  separation of another body; it goes round the basket the other way or waits, then gives the seat up with a named reason,
+   *  never brushing past (collision.human-human and a recovery). History before the event replays as it was. Main adopts it at boot. */
+  enableCarrierBoardPathV1(author='operator:board-path'){if((this.extra.runtimePolicy as {carrierBoardPathV1?:boolean}|undefined)?.carrierBoardPathV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,carrierBoardPathV1:true},why:'board-path/1: a boarder goes round or waits for a body in its way to the boarding step, never brushing it; retain historical replay before this event'});}
   /** #1496 nonfinite-hold/1 (prospective, needs quarantine/1): a non-finite number the frontier hash meets that quarantine/1 doesn't hold is put back to its last good value by a logged event, never a halt. */
   enableNonFiniteHoldV1(author='operator:nonfinite-hold'){if((this.extra.runtimePolicy as {nonFiniteHoldV1?:boolean}|undefined)?.nonFiniteHoldV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,nonFiniteHoldV1:true},why:'nonfinite-hold/1 (#1496): a number in the hashed head that is no number is put back to its value in the last good snapshot by a logged patch, and what it touched stops; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
@@ -1354,6 +1711,9 @@ export class WorldHost {
   /** #1440 quarantine-mark/1, one logged rules event (prospective, host-only): a body broken again and again is held by one standing
    *  mark after MARK_AFTER holds in a cooldown, not one logged hold a tick. Main adopts it at boot, after quarantine/1. */
   enableQuarantineMarkV1(author='operator:quarantine-mark'){if((this.extra.runtimePolicy as {quarantineMarkV1?:boolean}|undefined)?.quarantineMarkV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,quarantineMarkV1:true},why:'quarantine-mark/1 (#1440): a body broken again and again is held by one standing mark after 3 holds in a cooldown, not one logged hold a tick; retain historical replay before this event'});}
+  /** #1513 nonfinite-mark/1, one logged rules event (prospective, host-only): an object broken again and again is held by one standing
+   *  mark after MARK_AFTER nonfinite-hold/1 holds in a cooldown, not one logged hold a tick. Main adopts it at boot, after nonfinite-hold/1. */
+  enableNonFiniteMarkV1(author='operator:nonfinite-mark'){if((this.extra.runtimePolicy as {nonFiniteMarkV1?:boolean}|undefined)?.nonFiniteMarkV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,nonFiniteMarkV1:true},why:'nonfinite-mark/1 (#1513): an object broken again and again is held by one standing mark after 3 non-finite holds in a cooldown, not one logged hold a tick; retain historical replay before this event'});}
   enableQuarantineV1(author='operator:quarantine'){if((this.extra.runtimePolicy as {quarantineV1?:boolean}|undefined)?.quarantineV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,quarantineV1:true},why:'quarantine/1 (#1369): a rule fault the repair ladder cannot undo stops and contains only the bodies it names, and the world runs on; a halt is left for a failed write'});}
   enableReflexTimeoutV1(){if((this.extra.runtimePolicy as {reflexTimeoutV1?:boolean}|undefined)?.reflexTimeoutV1)return Promise.resolve();return this.enqueue('rules','operator:reflex-timeout',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,reflexTimeoutV1:true},why:'every reflex the runtime reports stalled on other people for 60 s (walk, seat, stair, swim, courtesy step, yield) is natively cancelled in every state, so no single body can hold another or the world; retain historical replay before this event'});}
   /** placeRegionsV1: admit W1 places (id, label, polygon) as native destination regions in one logged prospective rules fact.
@@ -1511,8 +1871,18 @@ export class WorldHost {
     const journal:AcceptanceJournal=()=>{const r=this.db.db.prepare('UPDATE worlds SET rules_version=? WHERE id=? AND rules_version=?').run(t.toRulesVersion,this.worldId,t.fromRulesVersion);if(r.changes!==1)throw Error('commons-provisions.header-moved');return true;};
     return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author:'operator:commons-provisions',payload:{commonsProvisions:t},guard,journal,resolve,reject}));
   }
+  /** A living Soul's needs now (need-anchor/1 reads them from the anchor; before it they are stored every tick). */
+  needsOf(m: Mind): Needs | undefined { return m.life ? needsAt(m.life, this.engine.world.tick) : undefined; }
+  /** A Soul's energy now: a living Soul's is its energy need. */
+  energyOf(m: Mind): number { return m.life ? needsAt(m.life, this.engine.world.tick).energy : m.energy; }
+  enableNeedAnchorsV1(author='operator:need-anchor'){if((this.extra.runtimePolicy as {needAnchorsV1?:boolean}|undefined)?.needAnchorsV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,needAnchorsV1:true},why:'need-anchor/1 (#2296): a need is a value at a tick and a rate, rewritten only when a rate changes; retain historical replay before this event'});}
+  /** need-anchor/1: what nearness last found, and the Soul bodies it was found for. Derived, never state: recomputed
+   *  whenever any of them differ, and for a Soul it holds no answer for (one that just got a life or a body), so a
+   *  restored world reads the same nearness. */
+  private nearV1: { sig: unknown[]; near: Map<string, boolean> } | null = null;
   private advanceLives() {
     const tick = this.engine.world.tick;
+    if ((this.extra.runtimePolicy as {needAnchorsV1?:boolean}|undefined)?.needAnchorsV1 === true) return this.advanceNeedAnchorsV1(tick);
     for (const m of this.minds.values()) {
       if (!m.life) continue;
       const e = this.engine.world.entities[m.entityId]; if (!e?.human) continue;
@@ -1524,6 +1894,26 @@ export class WorldHost {
       const resting=(floater||humanRest)&&!!this.engine.bodyResting?.(m.entityId),recharging=floater&&resting&&/bask|recharge/.test(m.doing);
       advanceNeeds(m.life, tick, resting?'rest':e.human.activity, nearby, recharging, floater, needsDay); m.energy = m.life.needs.energy;
     }
+  }
+  /** need-anchor/1 (#2296): an anchor is rewritten only when a rate's input changes, and nearness is tested only on a tick
+   *  where some Soul's body moved (or a Soul came or went). Nothing else is written. */
+  private advanceNeedAnchorsV1(tick: number) {
+    const w = this.engine.world, needsDay = (this.living as {zone?: string} | undefined)?.zone ? REAL_DAY_TICKS : DAY_TICKS;
+    const floaterOf = (e: unknown) => (e as {body?:{family:string}} | undefined)?.body?.family==='floater';
+    const sig: unknown[] = [];
+    for (const m of this.minds.values()) { const e = w.entities[m.entityId]; sig.push(m.soulId, m.entityId, e?.pose.p[0], e?.pose.p[1], e?.pose.p[2], floaterOf(e)); }
+    sig.push('|'); for (const o of this.mindByEntity.values()) { const b = w.entities[o.entityId]; sig.push(o.entityId, b?.pose.p[0], b?.pose.p[1], b?.pose.p[2]); }
+    const c = this.nearV1, moved = !c || c.sig.length !== sig.length || sig.some((v, i) => v !== c.sig[i]), near = moved ? new Map<string, boolean>() : c.near;
+    const humanRest=(this.extra.runtimePolicy as {humanRestNeedsV1?:boolean}|undefined)?.humanRestNeedsV1===true;
+    for (const m of this.minds.values()) {
+      if (!m.life) continue;
+      const e = w.entities[m.entityId]; if (!e?.human) continue;
+      const floater = floaterOf(e);
+      if (moved || !near.has(m.soulId)) near.set(m.soulId, [...this.mindByEntity.values()].some(other => { const b = w.entities[other.entityId]; return other !== m && b && (!floater || Math.abs(e.pose.p[1]-b.pose.p[1])<2) && Math.hypot(e.pose.p[0] - b.pose.p[0], e.pose.p[2] - b.pose.p[2]) < 4; }));
+      const resting=(floater||humanRest)&&!!this.engine.bodyResting?.(m.entityId),recharging=floater&&resting&&/bask|recharge/.test(m.doing);
+      advanceNeedAnchor(m.life, tick, needRates(resting?'rest':e.human.activity, near.get(m.soulId)!, recharging, floater), needsDay);
+    }
+    if (moved) this.nearV1 = { sig, near };
   }
 
   private captureHostState(): Omit<SnapshotBody, 'runtime'> {
@@ -1560,8 +1950,12 @@ export class WorldHost {
     // a whole body, so what precedes it is overwritten: start from it (else each level replays its chain again, 2^depth).
     let nested = -1; for (let i=0;i<recipe.events.length;i++) if (recipe.events[i].kind === 'rules' && recipe.events[i].payload?.recovery) nested=i;
     // Keep the outer recipe's original violation ceiling even when its replay prefix is superseded.
-    this.restoreBody(recipe.baseline);
+    let at = performance.now(); this.restoreBody(recipe.baseline); this.notePhase('restore', at); at = performance.now();
+    try { this.replayRecipe(recipe, nested); } finally { this.notePhase('replay', at); }
+  }
+  private replayRecipe(recipe: RecoveryRecipe, nested: number) {
     if (recipe.lastRung) return this.applyLastRung(recipe);
+    this.recoveryReplays?.push(Math.max(0, recipe.untilTick - this.engine.world.tick));
     const historicViolations=this.engine.runtime.violations.length;
     if (nested >= 0) { this.apply(recipe.events[nested],true); this.seq=recipe.events[nested].seq; }
     else {
@@ -1570,10 +1964,10 @@ export class WorldHost {
       for (const actor of recipe.edge?.stopActors ?? []) { const program=this.engine.programOf(actor); if (program) this.engine.stop(program); }
     }
     for (const e of recipe.events.slice(nested+1)) {
-      while (this.engine.world.tick < e.tick) { const out=this.engine.step(); this.advanceLives(); this.afterPrograms(out.programs,true); }
+      while (this.engine.world.tick < e.tick) { const out=this.engine.step(); this.stepFaultV1?.(this.engine.world.tick-1,true); this.advanceLives(); this.afterPrograms(out.programs,true); }
       this.apply(e,true); this.seq=e.seq;
     }
-    while (this.engine.world.tick < recipe.untilTick) { const out=this.engine.step(); this.advanceLives(); this.afterPrograms(out.programs,true); }
+    while (this.engine.world.tick < recipe.untilTick) { const out=this.engine.step(); this.stepFaultV1?.(this.engine.world.tick-1,true); this.advanceLives(); this.afterPrograms(out.programs,true); }
     this.restorePoses(recipe.edge?.poses);
     if (this.engine.runtime.violations.length > historicViolations) {
       // Name both faults (#509): CI logs and a paused world's engineFault keep only this message.
@@ -1585,20 +1979,45 @@ export class WorldHost {
     for (const m of this.minds.values()) { m.nextEvalTick=this.engine.world.tick+1; m.evalTrigger='activity-failed'; m.lastFingerprint=''; if (m.pending && recipe.excluded.includes(m.pending.card)) m.pending=null; }
     this.kernel.tick=this.engine.world.tick; sweep(this.kernel); this.kernelDirty=true;
   }
+  /** #2458 (SIM_FAULT_INJECT, tests and measurement only): run after each engine step with the tick it stepped from, and
+   *  whether a recovery is replaying it; a throw from a live step is a fault inside the tick, recovered as an engine fault is. */
+  stepFaultV1: ((tick: number, replay: boolean) => void) | null = null;
+  /** #2458: the replays the current recovery ran (each one from its baseline to the faulted tick), for its hold line. */
+  private recoveryReplays: number[] | null = null;
+  /** #2458: where the current recovery's main-thread time went, ms: the baseline read, restores, replays, the log write, the snapshot. */
+  private recoveryPhases: Record<'baseline' | 'restore' | 'replay' | 'write' | 'snapshot', number> | null = null;
+  private notePhase(k: 'baseline' | 'restore' | 'replay' | 'write' | 'snapshot', since: number) { if (this.recoveryPhases) this.recoveryPhases[k] += performance.now() - since; }
+  /** #2458: one line per recovery: how long it held the main thread and how far back it replayed. */
   private recoverFault(error: unknown, cardHint?: string, edgeHint?: {seq: number; entityId?: string}) {
+    const t0 = performance.now(), tick = this.engine.world.tick, replays: number[] = this.recoveryReplays = [], phases = this.recoveryPhases = {baseline: 0, restore: 0, replay: 0, write: 0, snapshot: 0}, debt = this.replayDebtMs, since = tick - this.lastSnapshotTick, age = t0 - this.lastSnapshotWall;
+    // the watchdog sees a recovery as its own step: a kill inside one is recorded so (restart-loop.ts), and the restart
+    // contains that fault in place instead of replaying it again (recoveryQuarantined)
+    const sh = this.stepSlots, prior = sh ? [sh[S.stepTick], sh[S.step]] : null;
+    if (sh) { sh[S.stepTick] = tick; sh[S.step] = RECOVERY_STEP_ID + 1; }
+    try { this.recoverFaultV1(error, cardHint, edgeHint); }
+    finally {
+      if (sh && prior) { sh[S.stepTick] = prior[0]; sh[S.step] = prior[1]; }
+      this.recoveryReplays = null; this.recoveryPhases = null; const ms = performance.now() - t0, ticks = replays.reduce((a, b) => a + b, 0);
+      console.log(`[world] recovery hold ${Math.round(ms)} ms at tick ${tick}: ${replays.length} replays (${replays.join(', ') || 'none'} ticks)${ticks ? `, ${(ms / ticks).toFixed(2)} ms per replayed tick` : ''}; since the last snapshot ${since} ticks, ${Math.round(age)} ms of wall, ${Math.round(debt)} ms of steps (its cost ${Math.round(this.lastSnapshotCostMs)} ms); ${Object.entries(phases).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ')} ms`);
+    }
+  }
+  private recoverFaultV1(error: unknown, cardHint?: string, edgeHint?: {seq: number; entityId?: string}) {
+    const startedAt = performance.now();
     // A pending checkpoint already owns this boundary. Materialize that same
     // capture before recovery replaces the engine; never fall back to an older head.
     let baseline: SnapshotBody | null;
     const head = this.holdHead();
-    try { baseline=this.recoveryCapture ? this.recoveryCapture() : this.recoveryBaseline; }
+    try { const at=performance.now(); baseline=this.recoveryCapture ? this.recoveryCapture() : this.recoveryBaseline; this.notePhase('baseline', at); }
     catch (failure) {
       // #1369: a baseline that won't materialize is no failed write: nothing to go back to, so the head stays
       if (this.quarantineRule) { this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; this.nonFiniteBase = null; return this.quarantine(error, failure); }
       this.failCheckpoint(failure); return;
     }
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = baseline;
+    // #1377: an invariant that throws reading one entity: only that entity is quarantined (a rewind would stop everyone and read it again)
+    if (this.quarantineRule && this.thrownOnly(error)) return this.quarantine(error);
     // #1150: nothing clean to go back to, or this just happened: the head stays and everything on it stops
-    if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error))) return this.containInPlace(error);
+    if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error) || this.recoveryQuarantined())) return this.containInPlace(error);
     if (!baseline) { if (this.edgeRecovery()) return this.haltOnFault(error, 'no resumable recovery baseline'); throw new Error(`No resumable recovery baseline: ${String(error)}`); }
     const untilTick=this.engine.world.tick, originalSeq=this.seq, all=this.db.events(this.worldId,baseline.seq);
     const pending=[...this.minds.values()].filter(m=>m.pending).map(m=>m.pending!.card);
@@ -1619,10 +2038,12 @@ export class WorldHost {
       const edge=plan.edge?{...plan.edge,...this.rewoundPoses(plan.edge, all)}:undefined;
       const recipe: RecoveryRecipe={baseline:structuredClone(baseline),events,untilTick,faults:{...faults},excluded:[...plan.excluded],reason:String(error).slice(0,800),...(edge?{edge}:{})};
       try { this.restoreRecovery(recipe); }
-      catch (replayError) { if (attempt===plans.length-1) { if (this.repairRules) return this.lastRung(error, baseline, all, untilTick, originalSeq, head); if (this.edgeRecovery()) return this.haltOnFault(replayError, 'recovery replay still faults', error, untilTick); throw replayError; } continue; }
+      // #2458 A3: under the repair rules a failed plan is not followed by another replay once this recovery has held the main
+      // thread for RECOVERY_REPLAY_BUDGET_MS: each replay costs the same again, so the last rung (no replay) ends it
+      catch (replayError) { if (attempt===plans.length-1 || (this.repairRules && performance.now() - startedAt >= RECOVERY_REPLAY_BUDGET_MS)) { if (this.repairRules) return this.lastRung(error, baseline, all, untilTick, originalSeq, head); if (this.edgeRecovery()) return this.haltOnFault(replayError, 'recovery replay still faults', error, untilTick); throw replayError; } continue; }
       this.seq=originalSeq;
       const e: LogEvent={seq:++this.seq,tick:untilTick,kind:'rules',author:'world:recovery',payload:{recovery:recipe},at:Date.now()};
-      if (!this.writeRepair(e)) return;
+      let at=performance.now(); if (!this.writeRepair(e)) return; this.notePhase('write', at);
       this.resetAcc(); this.acc.log.push(e); this.ring=[];
       this.recordGlitch('recovery', error, {tick:untilTick, bodies:[...(edgeHint?.entityId?[edgeHint.entityId]:[]),...(plan.edge?.stopActors??[])], evidence:{seq:e.seq, plan:attempt+1, plans:plans.length, excluded:plan.excluded, ...(plan.edge?{stopActors:plan.edge.stopActors, excludedSeqs:plan.edge.excludedSeqs, souls:plan.edge.souls}:{})}});
       if(this.durableClockV1)this.persistClockFrontier();
@@ -1630,9 +2051,19 @@ export class WorldHost {
       for (const l of this.listeners) l.onApplied?.(e);
       // Rebaseline at the repaired head, so the next recipe never nests this one (each carries a whole body: nested,
       // they double per fault), and snapshot it so a boot starts after it too.
-      if (!this.snapshotRepair()) return;
+      at=performance.now(); const saved=this.snapshotRepair(); this.notePhase('snapshot', at); if (!saved) return;
       this.flush(); this.heartbeat(); return;
     }
+  }
+  /** #2458 A2: a recovery that ended the last process (its watchdog killed it inside one; restart-loop.ts quarantines the
+   *  recovery step after one such death) is not run again in that window: the fault is contained where it happens, named,
+   *  and the world goes on from its head. A restart always makes progress and is never killed the same way twice. */
+  private recoveryQuarantined(): boolean {
+    const q = this.quarantinedStep, tick = this.engine.world.tick;
+    if (q?.id !== RECOVERY_STEP_ID || tick < q.fromTick || tick >= q.untilTick) return false;
+    console.error(`[world] world.recovery-quarantined: a recovery ended the last process at tick ${q.fromTick} (${q.deaths} in a row); until tick ${q.untilTick} a fault is contained where it happens, with no replay`);
+    this.recordGlitch('contained', new Error('world.recovery-quarantined'), { rule: 'world.recovery-quarantined', tick, evidence: { fromTick: q.fromTick, untilTick: q.untilTick, deaths: q.deaths } });
+    return true;
   }
   /** Rung 3s this world has had, for the launcher's ALERT (#1150). */
   get rewinds(): number { return Object.values(this.glitches.byRule).reduce((n, r) => n + (r.rewind ?? 0), 0); }
@@ -1644,13 +2075,31 @@ export class WorldHost {
   private get quarantineRule(): boolean { return this.repairRules && (this.extra.runtimePolicy as {quarantineV1?: boolean} | undefined)?.quarantineV1 === true; }
   /** #1496: nonfinite-hold/1 is adopted, on top of quarantine/1. */
   private get nonFiniteHoldRule(): boolean { return this.quarantineRule && (this.extra.runtimePolicy as {nonFiniteHoldV1?: boolean} | undefined)?.nonFiniteHoldV1 === true; }
+  /** #1513 nonfinite-mark/1 (host-only, prospective): an object held again past MARK_AFTER times in a cooldown is held by one standing mark. */
+  private get nonFiniteMarkRule(): boolean { return this.nonFiniteHoldRule && (this.extra.runtimePolicy as {nonFiniteMarkV1?: boolean} | undefined)?.nonFiniteMarkV1 === true; }
   /** #1369: what a quarantine takes: the bodies the fault names, and any body whose own state is broken (`entity.corrupt`: no
    *  rule names it, but it can make every step or the state hash throw). */
   private quarantineTargets(error: unknown): { bodies: string[]; corrupt: string[] } {
     let corrupt: string[] = [];
     try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch (failure) { console.error('[world] could not look for broken bodies:', String(failure).slice(0, 200)); }
-    return { bodies: [...new Set([...this.namedBodies(error), ...corrupt])].sort(), corrupt };
+    return { bodies: [...new Set([...this.namedBodies(error), ...corrupt, ...this.thrownSources(error)])].sort(), corrupt };
   }
+  /** #1377: an invariant that threw names nobody. What it was reading is found on the engine's own copy of the entity table
+   *  (it takes entities out there, one half at a time; #2168: so a head that won't restore or snapshot is read too), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
+  private thrownAt: {tick: number; fault: string; ids: string[]} | null = null;
+  private thrownSources(error: unknown): string[] {
+    if (!this.quarantineRule || !faultKeys(error).some(k => k.code === THROWN_RULE && !k.subjects.length)) return [];
+    const tick = this.engine.world.tick, fault = String(error);
+    if (this.thrownAt?.tick !== tick || this.thrownAt.fault !== fault) {
+      let ids: string[] = [];
+      try { ids = this.engine.thrownSourcesV1?.() ?? []; }
+      catch (failure) { console.error('[world] could not find what a thrown invariant was reading:', String(failure).slice(0, 200)); }
+      this.thrownAt = {tick, fault, ids};
+    }
+    return this.thrownAt.ids;
+  }
+  /** #1377: a fault that is only invariants that threw, and what they were reading was found: going back would read it again. */
+  private thrownOnly(error: unknown): boolean { const keys = faultKeys(error); return keys.length > 0 && keys.every(k => k.code === THROWN_RULE && !k.subjects.length) && this.thrownSources(error).length > 0; }
   /** #1369: each Soul's body's last whole pose (finite numbers), so a body whose pose breaks is held where it last stood. */
   private wholePoses = new Map<string, RecoveryPose>();
   private noteWholePoses() {
@@ -1729,7 +2178,7 @@ export class WorldHost {
    *  waits on a tick that isn't coming and a replay can't spin on one. */
   private stepEngine(): ReturnType<Engine['step']> {
     const tick = this.engine.world.tick;
-    try { return this.engine.step(); }
+    try { const out = this.engine.step(); this.stepFaultV1?.(tick, false); return out; }
     catch (error) {
       // always, even if the tick did move: this is also where the step check's memory and the bounds the step skipped are put right
       if (this.repairRules) { const to = Math.max(this.engine.world.tick, tick + 1); try { this.engine.setClockV1!(to); } catch { this.engine.world.tick = to; } }
@@ -1773,14 +2222,15 @@ export class WorldHost {
       catch (failure) { failed = failure; console.error(`[world] last rung: ${events.length} kept events would not re-apply:`, String(failure).slice(0, 300)); continue; }
       this.seq = originalSeq;
       const e: LogEvent = {seq: ++this.seq, tick: untilTick, kind: 'rules', author: 'world:recovery', payload: {recovery: recipe}, at: Date.now()};
-      if (!this.writeRepair(e)) return;
+      let at = performance.now(); if (!this.writeRepair(e)) return; this.notePhase('write', at);
       for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);
+      for (const b of all) if (b.kind === 'birth' && !this.minds.has(b.payload?.soulId)) this.unbornV1.add(b.payload.soulId);   // a birth the rewind left out
       this.resetAcc(); this.acc.log.push(e); this.ring = [];
       this.recordGlitch('rewind', error, {tick: untilTick, evidence: {seq: e.seq, kept: events.length, dropped: all.length - events.length, contained: recipe.lastRung!.contained, relocated: recipe.lastRung!.relocated, skipped: recipe.lastRung!.skipped}});
       if (this.durableClockV1) this.persistClockFrontier();
       for (const m of this.minds.values()) this.acc.dirty.add(m.soulId);
       for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a rewind:', String(failure).slice(0, 200)); }
-      if (!this.snapshotRepair()) return;
+      at = performance.now(); const saved = this.snapshotRepair(); this.notePhase('snapshot', at); if (!saved) return;
       this.flush(); this.heartbeat(); return;
     }
     // #1369: the baseline won't restore. That is no failed write (#1368 was a wait the reader rejected), so under quarantine/1 the
@@ -1823,7 +2273,7 @@ export class WorldHost {
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
     for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);   // going back didn't answer it: a return stays on the head
-    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
+    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, ...(this.thrownAt?.tick === tick && this.thrownAt.fault === String(error) && this.thrownAt.ids.length ? {thrownReading: this.thrownAt.ids} : {}), stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
     for (const id of bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a quarantine:', String(failure).slice(0, 200)); }
     if (tell) this.tellQuietly(() => { this.flush(); this.heartbeat(); });
@@ -1971,6 +2421,7 @@ export class WorldHost {
   }
   /** One record per recovery and per halt. Never throws and writes nothing to the log: whatever called it goes on as before. */
   private recordGlitch(rung: GlitchRung, fault: unknown, o: {rule?: string; tick?: number; bodies?: string[]; evidence?: Record<string, unknown>}) {
+    if (rung === 'halt') this.haltNamed = true;
     try {
       const facts = faultFacts(fault), rule = o.rule ?? facts.rule, counts = this.glitches;
       const g: GlitchRecordV1 = {rung, rule, bodies: facts.bodies.length ? facts.bodies : [...new Set(o.bodies ?? [])].sort(), tick: o.tick ?? this.engine.world.tick, at: Date.now(),
@@ -2036,7 +2487,7 @@ export class WorldHost {
       id: m.soulId, entityId: m.entityId, name: m.name, description: m.description, owner: ownerShort(m.owner), native: m.native,
       ...this.publicNameMetadata(m.soulId),
       ...(this.profilePhoto(m.soulId)?{profilePhoto:this.profilePhoto(m.soulId)!}:{}),
-      intent: publicIntent(m.intent), intentText: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(m.energy), doing: this.doingOfV1(m),
+      intent: publicIntent(m.intent), intentText: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(this.energyOf(m)), doing: this.doingOfV1(m),
       ...this.publicNow(m.soulId),
       ...(this.publicBodyOf?.(m.soulId) ? {body: this.publicBodyOf(m.soulId)!} : {}),
       ...(this.publicSlowedOf?.(m.soulId) ? {slowed: this.publicSlowedOf(m.soulId)!} : {}),
@@ -2175,7 +2626,7 @@ export class WorldHost {
     return { tick: r.tick, pending: !!r.pending };
   }
   /** A capture took the head: the replay debt starts again from here. */
-  private snapshotTaken() { this.replayDebtMs = 0; this.lastSnapshotWall = performance.now(); this.snapshotSoon = null; }
+  private snapshotTaken() { this.snapshotSeq = this.seq; this.replayDebtMs = 0; this.lastSnapshotWall = performance.now(); this.snapshotSoon = null; }
   /** Capture is synchronous (it must see one consistent tick); the database write is deferred past the current tick. */
   saveSnapshot(sync = true): { tick: number; stateHash: string; pending?: undefined } | { pending: boolean; tick: number; stateHash?: undefined } {
     this.assertClockReady();
@@ -2237,9 +2688,9 @@ export class WorldHost {
   private captureHead() {
     const t0 = performance.now();
     const runtime = this.engine.snapshot();
-    return { t0, runtime, body: this.captureBody(runtime), physicalHash: this.engine.physicalHash() };
+    return { t0, runtime, body: this.captureBody(runtime), physicalHash: this.engine.physicalHash(), sidecar: this.snapshotSidecar?.() };
   }
-  private commitHead({ t0, runtime, body, physicalHash }: ReturnType<WorldHost['captureHead']>, sync: boolean): { tick: number; stateHash: string } {
+  private commitHead({ t0, runtime, body, physicalHash, sidecar }: ReturnType<WorldHost['captureHead']>, sync: boolean): { tick: number; stateHash: string } {
     // captureBody owns every field; persistence only reads it, and restoration/
     // recovery recipes clone before mutation. Keep one immutable captured body.
     // #1150: a head captured here during a failing stretch is marked and serves a boot, never a rewind. A sliced capture
@@ -2250,10 +2701,25 @@ export class WorldHost {
     this.snapshotMs.capture = performance.now() - t0;
     this.lastSnapshotTick = runtime.tick; this.snapshotTaken();
     const generation = this.snapshotGeneration;
-    const persist = () => { if (generation !== this.snapshotGeneration) return; const t1 = performance.now(); this.db.saveSnapshot(this.worldId, meta); this.snapshotMs.persist = performance.now() - t1;
+    const persist = () => { if (generation !== this.snapshotGeneration) return; const t1 = performance.now(); this.db.saveSnapshot(this.worldId, meta); this.snapshotMs.persist = performance.now() - t1; sidecar?.(meta);
       this.lastSnapshotCostMs = this.snapshotMs.capture + this.snapshotMs.persist; };
     if (sync) persist(); else setImmediate(persist);
     return { tick: runtime.tick, stateHash: runtime.stateHash };
+  }
+  /** #2406: the turn after a landing that owed the periodic snapshot (null: none pending). */
+  private landingSnapshot: NodeJS.Immediate | null = null;
+  /** #2406: a landing after a long sleep is a long turn (the jump's catch-up work and its garbage); the periodic snapshot it
+   *  owes is captured on the next turn, at the same tick boundary, never skipped. An ordinary tick that comes first takes it
+   *  as usual, and a landing before that turn leaves this one pending; a turn with an input queued leaves it to the tick that
+   *  input wakes, so an input is never accepted outside a tick. Stop and recovery cancel it with the periodic snapshot. */
+  private deferLandingSnapshot(): void {
+    if (this.landingSnapshot || this.periodicSnapshot) return;
+    const engine = this.engine;
+    this.landingSnapshot = setImmediate(() => {
+      this.landingSnapshot = null;
+      if (this.engine !== engine || !this.clockAvailable || this.queue.length || !this.snapshotDue()) return;
+      try { this.schedulePeriodicSnapshot(); } catch (error) { this.failCheckpoint(error); }   // off the tick: fail closed, as its continuations do
+    });
   }
   /** Periodic checkpoints own a complete boundary before yielding. Only emission
    * and persistence use continuations; ordinary/manual snapshots keep their API. */
@@ -2276,11 +2742,12 @@ export class WorldHost {
       const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
       const fields = this.captureHostState();
       const physicalHash = checkpoint ? undefined : engine.physicalHash();
+      const sidecar = this.snapshotSidecar?.();
       const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
       const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
         return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
       })();
-      return { checkpoint, legacy, fields, steps };
+      return { checkpoint, legacy, fields, steps, sidecar };
     };
     // #1368: a head the engine refuses to capture (a named `snapshot.*` refusal such as `snapshot.unencodable`) is no
     // durability failure and must never take the process or the clock down: name it, skip this snapshot, keep ticking and
@@ -2297,7 +2764,7 @@ export class WorldHost {
       if (code === 'snapshot.non-finite' && this.nonFiniteHoldRule && this.holdNonFinite(error)) this.snapshotSoon ??= 'a non-finite number was put back';
       return;
     }
-    const { checkpoint, legacy, fields, steps } = parts;
+    const { checkpoint, legacy, fields, steps, sidecar } = parts;
     const tick = checkpoint?.tick ?? legacy!.tick;
     const frontier = { tick, seq: fields.seq, rulesVersion: engine.rulesVersion };
     const materialize = (): SnapshotBody => ({ runtime: checkpoint ? checkpoint.finish().snapshot : legacy!.finish(), ...fields });
@@ -2339,7 +2806,7 @@ export class WorldHost {
         const at = performance.now(), json = JSON.stringify(body);
         this.snapshotMs.serialize = performance.now() - at;
         later(() => {
-          const at = performance.now(); this.db.saveSnapshotSerialized(this.worldId, meta, json);
+          const at = performance.now(); this.db.saveSnapshotSerialized(this.worldId, meta, json); sidecar?.(meta);
           this.snapshotMs.persist = performance.now() - at;
           this.lastSnapshotCostMs = this.snapshotMs.capture + this.snapshotMs.finish + this.snapshotMs.serialize + this.snapshotMs.persist;
           this.periodicSnapshot = null;
@@ -2360,6 +2827,7 @@ export class WorldHost {
    * against an old engine or a database the owner may close next. */
   private cancelPeriodicSnapshot(): void {
     this.snapshotGeneration++;
+    if (this.landingSnapshot) { clearImmediate(this.landingSnapshot); this.landingSnapshot = null; }
     const job = this.periodicSnapshot;
     if (!job) return;
     if (job.immediate) clearImmediate(job.immediate);
@@ -2403,13 +2871,17 @@ export class WorldHost {
     if (!patches.length) return false;
     const tick = engine.world.tick, done = engine.applyNonFiniteV1(patches, NONFINITE_HELD);
     const souls = done.bodies.flatMap(id => { const m = this.mindByEntity.get(id); return m ? [m.soulId] : []; });
-    const q = {patches, bodies: done.bodies, souls, programmes: done.programmes, stopped: done.stopped, ...(done.deadlines ? {deadlines: done.deadlines} : {}), reason: String(error).slice(0, 300)};
+    const fields = patches.map(p => ({field: `${p.root}:${p.path.join('.')}`, from: p.from}));
+    const key = fields.map(f => f.field).join('|'), r = this.nonFiniteRepeats.get(key), again = r && tick - r.since < REWIND_COOLDOWN_TICKS ? r.n + 1 : 1;
+    // #1513 nonfinite-mark/1: an object held again past MARK_AFTER times in a cooldown is held from here by one standing mark the
+    // engine keeps (logged here, so a replay keeps it too), not one event a tick
+    const standing = this.nonFiniteMarkRule && engine.markNonFiniteV1 && again >= MARK_AFTER ? engine.markNonFiniteV1(patches) : [];
+    const q = {patches, bodies: done.bodies, souls, programmes: done.programmes, stopped: done.stopped, ...(done.deadlines ? {deadlines: done.deadlines} : {}), ...(standing.length ? {standing} : {}), reason: String(error).slice(0, 300)};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:nonfinite-hold', payload: {nonFiniteHoldV1: q}, at: Date.now()};
     if (!this.writeRepair(e)) return false;
     this.seq = e.seq; this.acc.log.push(e);
-    const fields = patches.map(p => ({field: `${p.root}:${p.path.join('.')}`, from: p.from}));
     // as quarantine/1 (#1377): the event every time (a replay needs it), the row at most twice a cooldown for the same fields
-    const key = fields.map(f => f.field).join('|'), r = this.nonFiniteRepeats.get(key), loud = !r || tick - r.since >= REWIND_COOLDOWN_TICKS || r.n < 2;
+    const loud = !r || tick - r.since >= REWIND_COOLDOWN_TICKS || r.n < 2;
     this.nonFiniteRepeats.set(key, r && tick - r.since < REWIND_COOLDOWN_TICKS ? {since: r.since, n: r.n + 1} : {since: tick, n: 1});
     if (this.nonFiniteRepeats.size > 256) for (const [k, v] of this.nonFiniteRepeats) if (tick - v.since >= REWIND_COOLDOWN_TICKS) this.nonFiniteRepeats.delete(k);
     if (loud) this.recordGlitch('contained', error, {rule: NONFINITE_HELD.code, tick, bodies: done.bodies, evidence: {seq: e.seq, fields, stopped: done.stopped, programmes: done.programmes, ...(patches.some(p => p.from === 'arrival') ? {arrival: patches.filter(p => p.from === 'arrival').map(p => p.path[1])} : {})}});
@@ -2424,7 +2896,7 @@ export class WorldHost {
         seedHash:hashOf(this.db.world(this.worldId)!.seed),rulesVersion:this.engine.rulesVersion,dtSeconds:this.engine.dt,
         tick:this.engine.world.tick,throughSeq:this.seq,headEventHash:this.clockFrontiers.headHash(this.worldId,this.seq),
         engineHash,kernelHash:kernelHash(this.kernel)};
-      this.clockFrontiers.write(frontier);
+      this.clockFrontiers.write(frontier);this.frontierSeq=this.seq;
     }catch(error){
       this.clockFailure=error;this.paused=true;this.stop();
       this.recordGlitch('halt',error,{rule:(error as {unhashable?:boolean})?.unhashable?'engine.unhashable':'durability.clock-frontier'});

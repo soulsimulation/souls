@@ -117,10 +117,16 @@ async function stopChrome(child: ChildProcess) {
   kill('SIGKILL'); // Dispose remaining helpers even if the browser parent closed first.
 }
 
-export async function renderLook(worldUrl: string, shot: Look, expect: number, signal: AbortSignal, context?:unknown, contextResult?:(metadata:Record<string,unknown>)=>void): Promise<Uint8Array> {
- const release=await hostRenderSlot(signal);try{return await renderIsolated(worldUrl,shot,expect,signal,context,contextResult);}finally{release();}
+export async function renderLook(worldUrl: string, shot: Look, expect: number, signal: AbortSignal, context?:unknown, contextResult?:(metadata:Record<string,unknown>)=>void, contextThumb?:(webp:Uint8Array)=>void): Promise<Uint8Array> {
+ const release=await hostRenderSlot(signal);try{return await renderIsolated(worldUrl,shot,expect,signal,context,contextResult,contextThumb);}finally{release();}
 }
-async function renderIsolated(worldUrl:string,shot:Look,expect:number,signal:AbortSignal,context?:unknown,contextResult?:(metadata:Record<string,unknown>)=>void):Promise<Uint8Array>{
+/** #2192: a RIFF/WEBP container, or nothing (Explore then shows the PNG). */
+export function webpBytes(dataUrl: unknown): Uint8Array | null {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/webp;base64,')) return null;
+  const b = Buffer.from(dataUrl.slice(23), 'base64');
+  return b.length > 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP' ? b : null;
+}
+async function renderIsolated(worldUrl:string,shot:Look,expect:number,signal:AbortSignal,context?:unknown,contextResult?:(metadata:Record<string,unknown>)=>void,contextThumb?:(webp:Uint8Array)=>void):Promise<Uint8Array>{
   // This is server configuration, never Host/X-Forwarded-Host or a request field.
   let url: URL;
   try { url = rendererWorldUrl(worldUrl, Boolean(context), process.env.SIM_SITE_URL); }
@@ -182,7 +188,7 @@ async function renderIsolated(worldUrl:string,shot:Look,expect:number,signal:Abo
     if(context){
       while(!await evaluate('typeof window.contextRender === \'function\'').catch(()=>false)){signal.throwIfAborted();await new Promise(r=>setTimeout(r,100));}
       trace('page-ready');const result=await evaluate(`window.contextRender(${JSON.stringify(context)})`);if(result?.photo&&typeof result.photo==='object')contextResult?.(result.photo);if(!result?.data)throw new ApiError(503,'context.unavailable',String(result?.reason??'empty context capture'));
-      trace('captured');const bytes=Buffer.from(String(result.data).split(',')[1]??'','base64');pngSize(bytes);return bytes;
+      trace('captured');const bytes=Buffer.from(String(result.data).split(',')[1]??'','base64');pngSize(bytes);const thumb=webpBytes(result.thumb);if(thumb)contextThumb?.(thumb);return bytes;
     }
     let stable = 0, lastDrawn = -1;
     while (stable < 2) {

@@ -23,15 +23,20 @@
 //        whole world would refuse most of N >= 50's reads before they reach main or a worker). --cpus (Linux): the world
 //        process and all its threads (tick thread + read workers) pinned with taskset as soon as its pid is known
 //        (the launcher stays outside); --world-user: the launcher (so the world) runs as that user.
-//   Soul Client (#1737): [--load client] each CLI Soul holds `serve` and `listen` and runs the 2.11 skill's minute (look and
-//        find answer from the local copy; act sends a catalog id: a far place's walk, a far spot, or sit-ground:here; say).
-//        Each Soul folder records its requests (.eden-report-on), and result.json adds `serverTiming`: per route, the
-//        world's own time from Server-Timing (n, p50, p99, max) in the active windows.
+//   Soul Client (#1737, #1945): [--load client [--profile real|stress] [--raw-from 4]] Souls 1 to --raw-from − 1 run the
+//        real client (`serve` and `listen` held, acts through `eden.mjs act <id>` then `receipt`); the rest are raw-HTTP
+//        Souls on the client's protocol (catalog and live picture once, then act by id, read the receipt, wait) with its
+//        headers (x-soul-client: bench/1) and retry rules. Every Soul first walks to one of at least ten start places.
+//        real: act gaps and act mix from live agent sessions (profiles/cadence.json); stress: 3-6 s, the earlier mix.
+//        n1 (not --short) runs until it has 300 acts. result.json adds `client` (per-route p50/p99, the act's Server-Timing
+//        parts, tick time, ticks behind, refusals by code) and REPORT.md a client-load section. result.json also adds
+//        `livePush` (#1755): bytes and frames a minute per client from each folder's world-live.json, and the world's
+//        `[live-push]` cost lines.
 // Writes <out>/<arm>-r<k>/{result.json,commands.jsonl,world.log}, <out>/receipt.json and <out>/REPORT.md (report.mjs).
 // The fixture's per-run copy is deleted after each run; the fixture itself is never written.
-import { spawn, execFile, execFileSync } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, appendFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { cpus, homedir, loadavg, release, hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -61,6 +66,13 @@ const VIEWERS = Number(opt('viewers', 6)), BUDGET = ((b) => (b === 'default' ? '
 const GREEN_GATE_S = Number(opt('green-gate-s', LOAD === 'stageb' ? 300 : 0)), GREEN_HOLD_S = Number(opt('green-hold-s', 20));
 if (!['v1', 'stageb', 'client'].includes(LOAD)) throw new Error('--load v1|stageb|client');
 const CLIENT = LOAD === 'client';
+// --load client (#1945): Souls 1 to --raw-from − 1 run the real client, the rest are raw-HTTP Souls on the client's protocol;
+// --profile real (act gaps and act mix of live agent sessions, profiles/cadence.json) or stress (3-6 s, the earlier mix)
+const PROFILE = opt('profile', 'real'), RAW_FROM = Number(opt('raw-from', 4)), BENCH_CLIENT = 'bench/1', N1_MIN_ACTS = 300;
+const CADENCE = JSON.parse(readFileSync(new URL('./profiles/cadence.json', import.meta.url), 'utf8'))[PROFILE];
+if (CLIENT && !CADENCE) throw new Error('--profile real|stress');
+if (CLIENT && !(RAW_FROM >= 1)) throw new Error('--raw-from <first raw Soul, 1-based>');
+const TOOL = { 'x-soul-client': BENCH_CLIENT };   // #1936: the bench's own Soul requests say they are the bench
 if ((RW_MODES.length || LOAD === 'stageb' || CPUS) && !VIA) throw new Error('--load stageb, --read-worker and --cpus run through the launcher: add --via-launcher');
 if (RW_MODES.some((m) => m !== 'on' && m !== 'off')) throw new Error('--read-worker off|on|off,on');
 if (CPUS && !sh0('taskset', ['-V'])) throw new Error('--cpus needs Linux taskset');
@@ -85,7 +97,7 @@ function worldIdOf(db) {   // the most common world_id in the fixture (a compact
   const py = "import sqlite3,sys,collections\nc=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True);n=collections.Counter()\nfor (t,) in c.execute(\"select name from sqlite_master where type='table'\"):\n  cols=[r[1] for r in c.execute(f'pragma table_info(\"{t}\")')]\n  if 'world_id' in cols:\n    for (w,k) in c.execute(f'select world_id,count(*) from \"{t}\" group by world_id'): n[w]+=k\nprint(n.most_common(1)[0][0] if n else '')";
   return sh('python3', ['-c', py, db]) || null;
 }
-const WORLD_ID = opt('world-id', genesis ? `${SLUG}-bench` : worldIdOf(fixtureFile));
+const WORLD_ID = opt('world-id', genesis ? `${SLUG}-${VIA ? 1 : 'bench'}` : worldIdOf(fixtureFile));   // the launcher names a genesis world <key>-1
 if (VIA && WORLD_ID !== `${SLUG}-1`) throw new Error(`--via-launcher: the launcher names the world ${SLUG}-1 but the fixture's world is ${WORLD_ID}`);
 const BASE = `http://127.0.0.1:${PORT}/w/${SLUG}`;
 const host = {
@@ -95,7 +107,7 @@ const host = {
   cli: CLI_FILE, cliSha256: await sha256File(CLI_FILE), cliVersion: /const VERSION = "([^"]+)"/.exec(readFileSync(CLI_FILE, 'utf8'))?.[1] ?? null,
   fixture: FIXTURE, fixtureSha256: await sha256File(fixtureFile), worldId: WORLD_ID, worldKey: SLUG, engine: ENGINE, phases: PH,
   viaLauncher: VIA ? { port: PORT, childRange: CHILD_RANGE, publicOrigin: `http://localhost:${PORT}` } : null,
-  load: LOAD, ...(LOAD === 'stageb' ? { stageb: { cliSouls: CLI_SOULS, viewers: VIEWERS, worldBudgetRps: BUDGET ? Number(BUDGET) : null, oracleRate: ORACLE_RATE, joinConcurrency: JOIN_PAR } } : {}),
+  load: LOAD, ...(CLIENT ? { client: { profile: PROFILE, rawFrom: RAW_FROM, header: BENCH_CLIENT, cadence: CADENCE } } : {}), ...(LOAD === 'stageb' ? { stageb: { cliSouls: CLI_SOULS, viewers: VIEWERS, worldBudgetRps: BUDGET ? Number(BUDGET) : null, oracleRate: ORACLE_RATE, joinConcurrency: JOIN_PAR } } : {}),
   readWorker: RW_MODES.length ? { modes: RW_MODES, workers: RW_N, mode: process.env.SIM_READ_MODE === '1' ? 1 : 2 } : null, cpus: CPUS || null, worldUser: WORLD_USER || null,
 };
 
@@ -233,7 +245,7 @@ async function healthz(timeoutMs = 5000) {
 }
 
 // ------------------------------------------------------------------ scripted Souls
-const CLASS = { here: 'C2', observe: 'C2', caps: 'C2', resolve: 'C2', around: 'C2', look: 'C2', find: 'C2', act: 'C1', say: 'C1', listen: 'C0' };
+const CLASS = { here: 'C2', observe: 'C2', caps: 'C2', around: 'C2', receipt: 'C2', catalog: 'C2', live: 'C2', act: 'C1', say: 'C1', listen: 'C0' };
 function runCli(soul, args, deadlineMs, rec) {
   return new Promise((done) => {
     const t = now(), p = spawn(process.execPath, ['eden.mjs', ...args], { cwd: soul.dir, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -243,7 +255,7 @@ function runCli(soul, args, deadlineMs, rec) {
       clearTimeout(k);
       // an act the world answers `accepted: false` is a refusal, whatever the exit code (#1093: words would refuse every act)
       const outcome = killed ? 'timeout' : /"accepted":\s*false/.test(out) ? 'refused' : code === 0 ? 'ok' : /unreachable/.test(err) ? 'unreachable' : BUSY.test(err) ? 'refused' : 'error';
-      const r = { soul: soul.i, cmd: args[0], cls: CLASS[args[0]] ?? 'C0', at: t, ms: now() - t, code, outcome, ...(outcome === 'refused' && out ? { refusal: /"code":\s*"([^"]+)"/.exec(out)?.[1], target: args[1] } : {}), ...(outcome === 'error' ? { err: err.trim().split('\n').at(-1)?.slice(0, 200) } : {}) };
+      const r = { soul: soul.i, cmd: args[0], cls: CLASS[args[0]] ?? 'C0', at: t, ms: now() - t, code, outcome, ...(args[0] === 'act' && /"phase":/.test(out) ? { receiptPhase: /"phase":\s*"([\w-]+)"/.exec(out)[1] } : {}), ...(outcome === 'refused' && out ? { refusal: /"code":\s*"([^"]+)"/.exec(out)?.[1], target: args[1] } : {}), ...(outcome === 'error' ? { err: err.trim().split('\n').at(-1)?.slice(0, 200) } : {}) };
       rec?.(r); done(r);
     });
   });
@@ -270,34 +282,29 @@ async function join_(run, i) {
   soul.token = JSON.parse(readFileSync(join(dir, '.eden-agent.json'), 'utf8')).token;
   return soul;
 }
-// What `go to <target>` reads as in this world, through the CLI's own resolve. Empty is an error: the bench would measure refusals.
-let WALK_IDS = [];
-async function learnWalkIds(soul) {
-  const read = (words) => new Promise((done) => execFile(process.execPath, ['eden.mjs', 'resolve', words], { cwd: soul.dir, timeout: 60_000 }, (_e, out) => { try { const d = JSON.parse(out); done({ id: (d.candidates ?? d.did_you_mean)?.find((c) => c.available !== false)?.id ?? null, why: d.code ?? null }); } catch { done({ id: null, why: String(out).slice(0, 80) }); } }));
-  // one after another, as an agent would: the world's read limits are not what this measures
-  const ids = new Set(), misses = [];
-  for (const t of TARGETS) { const r = await read(`go to ${t}`); if (r.id) ids.add(r.id); else misses.push(`${t}: ${r.why ?? 'no available candidate'}`); }
-  WALK_IDS = [...ids];
-  if (!WALK_IDS.length) throw new Error(`no offered id for any of ${TARGETS.join(', ')}: the act load would only measure refusals (${misses.join('; ')})`);
-  log(`act load walks to: ${WALK_IDS.join(', ')}${misses.length ? `; no id for ${misses.join('; ')}` : ''}`);
-}
-const MINUTE = CLIENT ? ['look', 'find', 'look', 'find', 'look', 'find', 'look', 'find', 'act', 'act', 'act', 'say'] : ['here', 'observe', 'here', 'observe', 'here', 'observe', 'caps', 'caps', 'resolve', 'resolve', 'around', 'act', 'act', 'say'];
-// --load client: what an agent on the 2.11 skill sends. Ids come from the world's catalog, as `find` gives them (no resolve)
-const FIND = ['library', 'sit on the floor', 'read a book', 'bench', 'kitchen', 'table', 'pond', 'garden'];
-let ACT_IDS = [];
+// The ids the act load sends, read once from the world's catalog before the load starts (no resolve, #1945). Empty is an
+// error: the bench would measure refusals.
+let WALK_IDS = [], ACT_IDS = [], KIND_IDS = {}, START_IDS = [];
+const MINUTE = ['here', 'observe', 'here', 'observe', 'here', 'observe', 'caps', 'caps', 'around', 'act', 'act', 'say'];
 async function learnCatalogIds() {
-  const cat = await (await fetch(`${BASE}/v1/edge/catalog`, { signal: AbortSignal.timeout(60_000) })).json();
-  const walks = cat.places.filter((p) => p.kind === 'building').map((p) => `walk:${p.id}`), spots = cat.acts.filter((a) => !a.with && !a.needs).map((a) => a.id);
+  const cat = await (await fetch(`${BASE}/v1/edge/catalog`, { headers: { 'x-soul-client': BENCH_CLIENT }, signal: AbortSignal.timeout(60_000) })).json();
   const seeded = (a, n) => a.filter((_, i) => i % Math.max(1, Math.floor(a.length / n)) === 0).slice(0, n);   // spread over the world, same every run
-  ACT_IDS = [...seeded(walks, 12), ...seeded(spots, 24)];
-  if (!ACT_IDS.length) throw new Error('the catalog names no act');
-  log(`client load: ${ACT_IDS.length} catalog ids (${Math.min(12, walks.length)} walks, ${Math.min(24, spots.length)} spots), catalog ${cat.counts.places} places, ${cat.counts.acts} acts`);
+  const walkOf = (p) => `walk:${p.ref ?? p.id}`, buildings = cat.places.filter((p) => p.kind === 'building'), spots = cat.acts.filter((a) => !a.with && !a.needs);
+  const walks = buildings.map(walkOf);
+  WALK_IDS = seeded(walks, 8); ACT_IDS = [...seeded(walks, 12), ...seeded(spots.map((a) => a.id), 24)];
+  // by kind, for the profiles' mix: a kind this world does not offer is sent as a walk, and counted (mixFallback)
+  const verb = (v) => spots.filter((a) => a.verb === v).map((a) => a.id);
+  KIND_IDS = { walk: seeded(walks, 12), spot: seeded(spots.map((a) => a.id), 24), 'sit-ground': ['sit-ground:here'],
+    sit: [...verb('sit'), ...cat.things.filter((t) => t.seat).map((t) => `sit:${t.id}`)], read: verb('read'), eat: verb('eat'), 'play-music': verb('play-music'), swim: verb('swim') };
+  // where the Souls start: at least ten places, buildings first, spread over the world
+  const others = cat.places.filter((p) => p.kind !== 'building' && !p.fixed && !p.parent).map(walkOf);
+  START_IDS = [...new Set([...seeded(walks, 16), ...seeded(others, Math.max(0, 10 - Math.min(16, walks.length)))])];
+  if (!ACT_IDS.length || !WALK_IDS.length) throw new Error('the catalog names no walk or act');
+  if (CLIENT && START_IDS.length < 10) throw new Error(`the catalog has ${START_IDS.length} places to start at; the client load spreads the Souls over at least ten`);
+  log(`act load: catalog ${cat.counts.places} places, ${cat.counts.acts} acts; ids by kind ${Object.entries(KIND_IDS).map(([k, v]) => `${k} ${v.length}`).join(', ')}; ${START_IDS.length} start places`);
 }
 function argsFor(op, n) {
-  if (op === 'find') return ['find', pick(FIND)];
-  if (CLIENT && op === 'act') return n % 3 === 2 ? ['act', 'sit-ground:here'] : ['act', pick(ACT_IDS)];
   if (op === 'caps') return ['caps', '--search', pick(SEARCH)];
-  if (op === 'resolve') return ['resolve', pick(TARGETS)];
   // CTRL-1 (#1093): the served CLI acts on offered ids only; the ids are read from the world once, before the load starts
   if (op === 'act') return n % 3 === 2 ? ['act', 'sit:here'] : ['act', pick(WALK_IDS)];
   if (op === 'say') return ['say', 'hello from the capacity bench'];
@@ -329,15 +336,136 @@ function holdServe(run, soul) {   // --load client: the resident client, as the 
   };
   start();
 }
-/** --load client: the world's own time per route (Server-Timing, as each Soul folder's request record has it) in the windows. */
-function serverTimingOf(souls, windows) {
-  const inAny = (at) => windows.some((w) => w.name !== 'warm' && w.name !== 'idle' && at >= w.from && at <= w.to), by = {};
-  for (const s of souls) {
-    let text = ''; try { text = readFileSync(join(s.dir, '.eden-report.jsonl'), 'utf8'); } catch { continue; }
-    for (const line of text.split('\n')) { let r; try { r = JSON.parse(line); } catch { continue; } if (r.kind !== 'http' || !inAny(r.at)) continue;
-      const k = `${r.method} ${r.route}`; (by[k] ??= { world: [], queue: [], client: [], noHeader: 0 }); if (r.serverMs == null) by[k].noHeader++; else by[k].world.push(r.serverMs); if (r.queuedMs != null) by[k].queue.push(r.queuedMs); by[k].client.push(r.durationMs); }
+// ------------------------------------------------------------------ client load (#1945): the client's protocol, real and raw
+// A raw Soul is an in-process loop on the client's own requests: it fetches the catalog and the live picture once, then acts
+// by catalog id (keyed: the key is also the clientRef), reads that act's receipt once and waits the profile's gap. Headers
+// and retry rules are the client's (eden.mjs call()): a designed busy or stalled answer is waited out for its Retry-After
+// (up to 20 % more) at most 3 times, no answer gets full-jitter backoff (1 s base, 60 s cap, 6 tries), 25 s per read try and
+// 40 s per act try. A real-client Soul does the same through its own `serve`: `act <id>`, then `receipt`.
+const BUSY_CODES = new Set(['world.busy', 'soul.busy', 'soul.slow-down', 'world.starting', 'world.crowded', 'rate-limited', 'client.rate', 'account.rate']);
+const STALL_CODES = new Set(['unavailable', 'world.unavailable', 'world-unavailable', 'world.stalled']);
+const fullJitter = (k) => Math.random() * Math.min(60_000, 1000 * 2 ** k), statedJitter = (ms) => Math.min(60_000, ms) * (1 + 0.2 * Math.random());
+function retryAfterMs(r, d) {
+  const h = r.headers.get('retry-after'), n = Number(h); if (h && Number.isFinite(n) && n >= 0) return n * 1000;
+  for (const v of [d?.world?.retry_after_s, d?.error?.retry_after_s, d?.retry_after_s, d?.error?.retry_after, d?.retry_after]) if (Number.isFinite(v) && v >= 0) return v * 1000;
+  return null;
+}
+const routeKey = (method, path) => `${method} ${String(path).split('?')[0].replace(/^\/w\/[^/]+/, '').replace(/\/receipts\/[^/]+$/, '/receipts/:id')}`;
+/** Server-Timing as {name: ms}: world and queue today, and the act's parts once the world sends them (#1944). */
+const timingOf = (h) => Object.fromEntries(String(h ?? '').split(',').map((x) => [x.trim().split(';')[0], /dur=([0-9.]+)/.exec(x)?.[1]]).filter(([k, v]) => k && v != null).map(([k, v]) => [k, Number(v)]));
+async function clientReq(run, soul, op, method, path, { body, key, auth = true, kind } = {}) {
+  const t = now(), headers = { 'content-type': 'application/json', 'x-soul-client': BENCH_CLIENT, 'x-forwarded-for': rawHeaders(soul)['x-forwarded-for'],
+    ...(auth ? { authorization: `Bearer ${soul.token}` } : {}), ...(key ? { 'idempotency-key': key } : {}) };
+  let r = null, d = null, failed = 0, busy = 0, waitMs = 0; const refusals = [];
+  for (;;) {
+    const t1 = now();
+    try { r = await fetch(`${BASE}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(method === 'GET' ? 25_000 : 40_000) }); d = await r.json().catch(() => ({})); }
+    catch { r = null; d = null; }
+    run.http.push({ route: routeKey(method, path), at: t1, ms: now() - t1, status: r?.status ?? 0, timing: r ? timingOf(r.headers.get('server-timing')) : {} });
+    const s = r?.status ?? 0, code = d?.error?.code ?? d?.code ?? null;
+    if (s === 0) { if (++failed < 6) { const w0 = now(); await sleep(fullJitter(failed - 1)); waitMs += now() - w0; continue; } break; }
+    const later = ((s === 503 || s === 429) && BUSY_CODES.has(code)) || (s >= 500 && STALL_CODES.has(code));
+    if (later) refusals.push(refusalTag(s, code, d));
+    if (later && busy < 3) { busy++; const w0 = now(); await sleep(statedJitter(retryAfterMs(r, d) ?? Math.max(1000, fullJitter(busy + 1)))); waitMs += now() - w0; continue; }
+    break;
   }
-  return Object.fromEntries(Object.entries(by).sort((a, b) => b[1].client.length - a[1].client.length).map(([k, v]) => [k, { n: v.client.length, noHeader: v.noHeader, worldP50: pct(v.world, 0.5), worldP99: pct(v.world, 0.99), worldMax: v.world.length ? Math.max(...v.world) : null, queueP99: pct(v.queue, 0.99), clientP50: pct(v.client, 0.5), clientP99: pct(v.client, 0.99) }]));
+  const s = r?.status ?? 0, code = d?.error?.code ?? d?.code ?? null;
+  const outcome = s === 0 ? 'unreachable' : s >= 200 && s < 300 ? (d?.accepted === false ? 'refused' : 'ok') : (s === 503 || s === 429) && BUSY_CODES.has(code) ? 'refused' : 'error';
+  run.rec?.({ soul: soul.i, cmd: op, cls: CLASS[op], at: t, ms: now() - t, code: s, outcome, raw: true, ...(kind ? { kind } : {}), ...(busy ? { busyWaits: busy, waitMs: Math.round(waitMs) } : {}),
+    ...(refusals.length ? { refusals } : {}), ...(d?.accepted === false ? { refusal: d.code ?? d.error?.code ?? null } : {}), ...(outcome === 'error' ? { err: `${s} ${code ?? ''}` } : {}) });
+  return { status: s, data: d };
+}
+const fromQuantiles = (q, u) => { for (let i = 1; i < q.length; i++) if (u <= q[i][0]) { const [p0, v0] = q[i - 1], [p1, v1] = q[i]; return v0 + (v1 - v0) * (u - p0) / (p1 - p0); } return q.at(-1)[1]; };
+const gapMs = () => { const g = CADENCE.gapS; return 1000 * (g.uniform ? g.uniform[0] + Math.random() * (g.uniform[1] - g.uniform[0]) : fromQuantiles(g.quantiles, Math.random())); };
+const firstMs = () => (CADENCE.firstActS ? 1000 * fromQuantiles(CADENCE.firstActS.quantiles, Math.random()) : Math.random() * gapMs());
+function nextAct(run) {
+  const mix = Object.entries(CADENCE.mix); let x = Math.random() * mix.reduce((s, [, w]) => s + w, 0), kind = mix.at(-1)[0];
+  for (const [k, w] of mix) if ((x -= w) < 0) { kind = k; break; }
+  if (KIND_IDS[kind]?.length) return { kind, id: pick(KIND_IDS[kind]) };
+  run.mixFallback[kind] = (run.mixFallback[kind] ?? 0) + 1; return { kind, id: pick(KIND_IDS.walk) };
+}
+async function clientAct(run, soul, kind, id) {
+  if (soul.cli) {
+    const a = await runCli(soul, ['act', id], 90_000, (r) => run.rec({ ...r, kind }));
+    if (a.outcome === 'ok') await runCli(soul, ['receipt'], 60_000, run.rec);   // the act's own receipt (the client keeps its id)
+    return;
+  }
+  const key = randomUUID(), a = await clientReq(run, soul, 'act', 'POST', '/v1/edge/act', { body: { capability: id, params: {}, strict: true, clientRef: key }, key, kind });
+  const rid = a.data?.receipt?.id;
+  if (a.status >= 200 && a.status < 300 && rid) await clientReq(run, soul, 'receipt', 'GET', `/v1/edge/receipts/${encodeURIComponent(rid)}`);
+}
+function clientLoop(run, soul) {   // one act at a time, act start to act start = the profile's gap; the first after an instruction-like delay
+  return (async () => {
+    for (let wait = firstMs(); !run.stopped; ) {
+      for (const t0 = now(); !run.stopped && now() - t0 < wait; ) await sleep(Math.min(1000, wait - (now() - t0)));
+      if (run.stopped) return;
+      const t = now();
+      if (run.mode !== 'idle') { const { kind, id } = nextAct(run); await clientAct(run, soul, kind, id); }
+      wait = Math.max(0, gapMs() - (now() - t));
+    }
+  })();
+}
+/** Before the windows: each Soul walks to its start place (Soul i to START_IDS[i mod n], at least ten places) and the
+ *  bench waits for those walks to end, up to 300 s; `reached` counts the distinct places whose walk completed. A raw Soul first fetches the catalog and live picture. */
+async function spread(run, souls) {
+  const capS = 300, t = now();
+  const ends = await Promise.all(souls.map(async (s) => {
+    const id = START_IDS[s.i % START_IDS.length];
+    if (s.cli) { const r = await runCli(s, ['act', id, '--wait', String(capS), '--json'], (capS + 120) * 1000, run.rec); return { id, ok: r.outcome === 'ok', phase: r.receiptPhase ?? null }; }
+    await clientReq(run, s, 'catalog', 'GET', '/v1/edge/catalog', { auth: false });
+    await clientReq(run, s, 'live', 'GET', '/v1/edge/live', { auth: false });
+    const key = randomUUID(), a = await clientReq(run, s, 'act', 'POST', '/v1/edge/act', { body: { capability: id, params: {}, strict: true, clientRef: key }, key, kind: 'walk' });
+    const rid = a.data?.receipt?.id; let phase = a.data?.receipt?.phase ?? null;
+    while (rid && !['completed', 'failed', 'replaced'].includes(phase) && now() - t < capS * 1000) { await sleep(5000); phase = (await clientReq(run, s, 'receipt', 'GET', `/v1/edge/receipts/${encodeURIComponent(rid)}`)).data?.receipt?.phase ?? phase; }
+    return { id, ok: a.data?.accepted === true, phase, raw: true };
+  }));
+  return { places: new Set(ends.map((e) => e.id)).size, souls: ends.length, accepted: ends.filter((e) => e.ok).length, reached: new Set(ends.filter((e) => e.phase === 'completed').map((e) => e.id)).size, completed: ends.filter((e) => e.phase === 'completed').length, seconds: +((now() - t) / 1000).toFixed(1) };
+}
+/** --load client, per run: per-route time (every try, real and raw), the act's Server-Timing parts, tick time, ticks behind
+ *  the 20 Hz schedule, refusals by code and the acts by kind, in the active windows. */
+function clientSummary({ souls, windows, cmds, health, run }) {
+  const act = windows.filter((w) => w.name.startsWith('active')), inAct = (at) => act.some((w) => at >= w.from && at <= w.to);
+  const tries = run.http.filter((x) => inAct(x.at)).map((x) => ({ route: x.route, ms: x.ms, world: x.timing.world, queue: x.timing.queue, timing: x.timing, raw: true }));
+  for (const s of souls.filter((x) => x.cli)) {   // the real client's own request record (.eden-report-on), Server-Timing per request
+    let text = ''; try { text = readFileSync(join(s.dir, '.eden-report.jsonl'), 'utf8'); } catch { continue; }
+    for (const line of text.split('\n')) { let r; try { r = JSON.parse(line); } catch { continue; } if (r.kind === 'http' && inAct(r.at)) tries.push({ route: routeKey(r.method, r.route), ms: r.durationMs, world: r.serverMs, queue: r.queuedMs, raw: false }); }
+  }
+  const q = (v) => { const a = v.filter((x) => Number.isFinite(x)); return a.length ? { n: a.length, p50: +pct(a, 0.5).toFixed(1), p99: +pct(a, 0.99).toFixed(1) } : null; };
+  const by = {}; for (const x of tries) (by[x.route] ??= []).push(x);
+  const routes = Object.fromEntries(Object.entries(by).sort((a, b) => b[1].length - a[1].length).map(([k, v]) => [k, { n: v.length, real: v.filter((x) => !x.raw).length, client: q(v.map((x) => x.ms)), world: q(v.map((x) => x.world)), queue: q(v.map((x) => x.queue)) }]));
+  const actTries = tries.filter((x) => x.raw && x.route === 'POST /v1/edge/act'), parts = [...new Set(actTries.flatMap((x) => Object.keys(x.timing)))];
+  const actSplit = Object.fromEntries(parts.map((p) => [p, q(actTries.map((x) => x.timing[p]))]));
+  const h = health.filter((x) => inAct(x.at) && x.ok), tickAvg = h.map((x) => x.tickMs?.avg).filter(Number.isFinite);
+  let behind = 0; for (let i = 1; i < h.length; i++) if (h[i].tick != null && h[i - 1].tick != null) behind += Math.max(0, Math.round((h[i].at - h[i - 1].at) / 1000 * TICK_HZ) - (h[i].tick - h[i - 1].tick));
+  const c = cmds.filter((x) => inAct(x.at)), refusals = {}, kinds = {};
+  for (const x of c) { for (const t of x.refusals ?? []) refusals[t] = (refusals[t] ?? 0) + 1; if (x.cmd === 'act' && x.outcome === 'refused') { const k = `act:${x.refusal ?? 'unknown'}`; refusals[k] = (refusals[k] ?? 0) + 1; } }
+  for (const x of c.filter((y) => y.cmd === 'act')) kinds[x.kind ?? '?'] = (kinds[x.kind ?? '?'] ?? 0) + 1;
+  return { profile: PROFILE, real: souls.filter((x) => x.cli).length, raw: souls.filter((x) => !x.cli).length, spread: run.spread ?? null, acts: c.filter((x) => x.cmd === 'act').length, actsByKind: kinds, mixFallback: run.mixFallback,
+    actMs: q(c.filter((x) => x.cmd === 'act').map((x) => x.ms)), routes, actSplit, tick: { avgMs: q(tickAvg), p99MaxMs: Math.max(0, ...h.map((x) => x.tickP99Ms ?? 0)) || null, behind, seconds: h.length }, refusals };
+}
+function clientReport(results) {
+  const rs = results.filter((r) => r.client), L = [], f = (x) => (x ? `${x.p50} / ${x.p99}` : '—');
+  if (!rs.length) return '';
+  L.push(`## Client load (#1945): profile \`${rs[0].client.profile}\`, active windows only`, '', 'Real = the real client through its own serve; raw = in-process Souls on the client\'s requests, headers and retry rules. Times in ms as p50 / p99; per-route rows count every try.', '');
+  L.push('| run | real / raw | spread: places · Souls accepted · walks completed · places reached | acts (by kind) | act p50 / p99 | tick ms p50 / p99 (avg per sample) · p99 max | ticks behind 20 Hz | refusals by code |', '|---|---|---|---|---|---|---|---|');
+  for (const r of rs) { const x = r.client, s = x.spread; L.push(`| ${r.arm} r${r.rep} | ${x.real} / ${x.raw} | ${s ? `${s.places} · ${s.accepted}/${s.souls} · ${s.completed}/${s.souls} · ${s.reached}` : '—'} | ${x.acts} (${Object.entries(x.actsByKind).map(([k, v]) => `${k} ${v}`).join(', ')}${Object.keys(x.mixFallback ?? {}).length ? `; sent as walks: ${Object.entries(x.mixFallback).map(([k, v]) => `${k} ${v}`).join(', ')}` : ''}) | ${f(x.actMs)} | ${f(x.tick.avgMs)} · ${x.tick.p99MaxMs ?? '—'} | ${x.tick.behind} in ${x.tick.seconds} s | ${Object.entries(x.refusals).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'} |`); }
+  L.push('', '| run | route | tries (real) | client | world (Server-Timing) | queue |', '|---|---|---|---|---|---|');
+  for (const r of rs) for (const [k, v] of Object.entries(r.client.routes)) L.push(`| ${r.arm} r${r.rep} | \`${k}\` | ${v.n} (${v.real}) | ${f(v.client)} | ${f(v.world)} | ${f(v.queue)} |`);
+  L.push('', 'Act time by part (raw Souls\' `POST /v1/edge/act` Server-Timing; the queue / handler / wait / commit split appears once the world sends it, #1944):', '', '| run | part | n | p50 / p99 |', '|---|---|---|---|');
+  for (const r of rs) for (const [k, v] of Object.entries(r.client.actSplit)) L.push(`| ${r.arm} r${r.rep} | ${k} | ${v?.n ?? 0} | ${f(v)} |`);
+  return L.join('\n') + '\n';
+}
+/** --load client (#1755): what the world's push cost. Per client, bytes a minute from its folder's world-live.json (the
+ *  frames serve received since it began, whole pictures included); from the world's log, its `[live-push]` minute lines. */
+function livePushOf(souls, dir) {
+  const perMin = [];
+  for (const s of souls) {
+    let p; try { p = JSON.parse(readFileSync(join(s.dir, 'world-live.json'), 'utf8')).push; } catch { continue; }
+    const mins = p?.since ? (Date.now() - Date.parse(p.since)) / 60_000 : 0; if (mins > 0.5) perMin.push({bytes: p.bytes / mins, frames: p.frames / mins, wholes: p.wholes ?? 0});
+  }
+  let lines = []; try { lines = readFileSync(join(dir, 'world.log'), 'utf8').split('\n').filter((l) => l.includes('[live-push]')).map((l) => l.slice(l.indexOf('[live-push]'))); } catch { /* none */ }
+  return {clients: perMin.length, bytesPerClientMinP50: pct(perMin.map((x) => x.bytes), 0.5), bytesPerClientMinMax: perMin.length ? Math.max(...perMin.map((x) => x.bytes)) : null,
+    framesPerClientMinP50: pct(perMin.map((x) => x.frames), 0.5), wholes: perMin.reduce((n, x) => n + x.wholes, 0), world: lines};
 }
 function holdListen(run, soul) {   // the harness keeps one listen per Soul; restarts it 1 s after it exits
   soul.listens = 0;
@@ -358,7 +486,7 @@ function waitStream(run, soul) {   // C0 long-poll, in-process (no CLI process p
   (async () => {
     let cursor = 'c_0';
     while (!run.stopped) {
-      try { const r = await fetch(`${BASE}/v1/edge/wait?timeout=55&after=${encodeURIComponent(cursor)}`, { headers: { authorization: `Bearer ${soul.token}` }, signal: AbortSignal.timeout(65_000) }); const d = await r.json().catch(() => ({})); cursor = d.cursor ?? cursor; if (!r.ok) await sleep(5000); }
+      try { const r = await fetch(`${BASE}/v1/edge/wait?timeout=55&after=${encodeURIComponent(cursor)}`, { headers: { ...TOOL, authorization: `Bearer ${soul.token}` }, signal: AbortSignal.timeout(65_000) }); const d = await r.json().catch(() => ({})); cursor = d.cursor ?? cursor; if (!r.ok) await sleep(5000); }
       catch { await sleep(5000); }
     }
   })();
@@ -371,7 +499,7 @@ function viewer(run, hello) {
   run.sockets.push(ws);
 }
 function hostile(run, soul) {   // 4 parallel loops that ignore Retry-After and retry at once
-  const H = { authorization: `Bearer ${soul.token}`, ...(VIA ? { 'x-forwarded-for': `10.66.0.${soul.i + 1}` } : {}) };   // via the launcher: one address per hostile Soul
+  const H = { ...TOOL, authorization: `Bearer ${soul.token}`, ...(VIA ? { 'x-forwarded-for': `10.66.0.${soul.i + 1}` } : {}) };   // via the launcher: one address per hostile Soul
   const reqs = [
     () => fetch(`${BASE}/v1/edge/here?include=doHere`, { headers: H, signal: AbortSignal.timeout(30_000) }),
     () => fetch(`${BASE}/v1/edge/capabilities`, { headers: H, signal: AbortSignal.timeout(30_000) }),
@@ -393,16 +521,16 @@ function hostile(run, soul) {   // 4 parallel loops that ignore Retry-After and 
 }
 
 // ------------------------------------------------------------------ Stage B load (METRICS.md v2): raw-HTTP Souls, worker stats, oracle sample
-// A raw Soul sends exactly the CLI's requests (eden.mjs here/observe/caps --search/resolve/around/act/say) with its retry
+// A raw Soul sends exactly the CLI's requests (eden.mjs here/observe/caps --search/around/act/say) with its retry
 // etiquette (6 tries with full jitter on no answer; up to 3 waits of the stated Retry-After on a designed busy answer), one
 // command at a time, from its own X-Forwarded-For address. Its time is the request's wall time incl. those waits (no CLI start).
-const SB_READS = ['here', 'observe', 'caps', 'here', 'resolve', 'observe', 'around'];
+const SB_READS = ['here', 'observe', 'caps', 'here', 'observe', 'around'];
 const RAW = {
   here: () => ['GET', '/v1/edge/here?include=doHere'], observe: () => ['GET', '/v1/edge/observe'], caps: () => ['GET', '/v1/edge/capabilities?all=1'],
-  around: () => ['GET', '/v1/edge/around'], resolve: () => ['POST', '/v1/edge/resolve', { capability: pick(TARGETS), params: {} }],
+  around: () => ['GET', '/v1/edge/around'],
   act: (n) => ['POST', '/v1/edge/act', { capability: n % 3 === 2 ? 'sit down' : `go to ${pick(TARGETS)}`, params: {} }], say: () => ['POST', '/v1/edge/say', { text: 'hello from the capacity bench' }],
 };
-const rawHeaders = (soul) => ({ authorization: `Bearer ${soul.token}`, 'content-type': 'application/json', 'x-forwarded-for': `10.77.${soul.i >> 8}.${(soul.i & 255) + 1}` });
+const rawHeaders = (soul) => ({ authorization: `Bearer ${soul.token}`, 'content-type': 'application/json', 'x-soul-client': BENCH_CLIENT, 'x-forwarded-for': `10.77.${soul.i >> 8}.${(soul.i & 255) + 1}` });
 // who refused and why: the launcher's ceilings answer with the world's slug in the body (load:<level> / ramp / boot from
 // the message), the world's own admission (soul.busy, soul.slow-down, world.busy past a deadline) without it
 function refusalTag(status, code, d) {
@@ -412,7 +540,7 @@ function refusalTag(status, code, d) {
 }
 async function rawCmd(run, soul, op, n) {
   const [method, path, body] = RAW[op](n), cls = CLASS[op], deadline = cls === 'C1' ? 90_000 : 60_000, t = now();
-  const headers = { ...rawHeaders(soul), ...(method === 'POST' && op !== 'resolve' ? { 'idempotency-key': `${soul.i}-${t}-${n}` } : {}) };
+  const headers = { ...rawHeaders(soul), ...(method === 'POST' ? { 'idempotency-key': `${soul.i}-${t}-${n}` } : {}) };
   let status = 0, code = null, worker = false, cpuMs = null, busy = 0, failed = 0, waitMs = 0, level = null; const refusals = [];
   for (;;) {
     const left = deadline - (now() - t); if (left <= 0) { status = -1; break; }
@@ -491,7 +619,7 @@ function diffFields(a, b, path = '', out = [], max = 50) {   // = apps/server/sr
 }
 async function oracleSample(run, soul) {
   const o = run.oracle, rec = worldRec(o.w.ldata), ports = readPorts(o.w); if (!rec?.port || !ports.length) { o.skipped++; return; }
-  const H = { authorization: `Bearer ${soul.token}` }, path = `/w/${SLUG}/v1/edge/here?include=doHere`;
+  const H = { ...TOOL, authorization: `Bearer ${soul.token}` }, path = `/w/${SLUG}/v1/edge/here?include=doHere`;
   const a = await getJ(`http://127.0.0.1:${rec.port}${path}`, H, 30_000), b = await getJ(`http://127.0.0.1:${pick(ports)}${path}`, H, 30_000);
   o.sampled++;
   if (a.status !== 200 || b.status !== 200 || b.headers?.get?.('x-sim-read-cpu-ms') == null) { o.notServed++; return; }
@@ -505,8 +633,8 @@ async function oracleSample(run, soul) {
 const pct = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)]; };
 async function oneRun(arm, rep, mode = null) {
   const key = mode ? `${arm}@${mode}` : arm, dir = join(OUT, `${arm}${mode ? `-${mode}` : ''}-r${rep}`); mkdirSync(dir, { recursive: true });
-  const N = arm.startsWith('n') ? Number(arm.slice(1)) : 6, hello = await helloText(), SB = LOAD === 'stageb', cliN = !SB ? N : arm === 'incident' ? N : Math.min(N, CLI_SOULS);
-  const run = { dir, stopped: false, mode: 'join', procs: new Set(), sockets: [], wsBytes: 0, maxListens: {}, listenExits: [], hostile: { ok: 0, refused: 0, error5xx: 0, other4xx: 0, failed: 0, ms: [] }, rec: null };
+  const N = arm.startsWith('n') ? Number(arm.slice(1)) : 6, hello = await helloText(), SB = LOAD === 'stageb', cliN = CLIENT ? Math.min(N, RAW_FROM - 1) : !SB ? N : arm === 'incident' ? N : Math.min(N, CLI_SOULS);
+  const run = { dir, stopped: false, mode: 'join', procs: new Set(), sockets: [], wsBytes: 0, maxListens: {}, listenExits: [], http: [], mixFallback: {}, hostile: { ok: 0, refused: 0, error5xx: 0, other4xx: 0, failed: 0, ms: [] }, rec: null };
   const cmds = [], health = [], heap = [], proc = [], wstats = [];
   const loadBefore = loadavg();
   log(`${key} r${rep}: boot`);
@@ -528,18 +656,20 @@ async function oneRun(arm, rep, mode = null) {
     for (let i = 0; i < N; i += JOIN_PAR) { const tj0 = now(); souls.push(...await Promise.all(Array.from({ length: Math.min(JOIN_PAR, N - i) }, (_, k) => join_(run, i + k)))); if (N > 18 && !VIA) await sleep(Math.max(0, 3500 * JOIN_PAR - (now() - tj0))); }
     souls.forEach((s) => { s.cli = s.i < cliN; }); run.joinS = (now() - tj) / 1000;
     log(`${key} r${rep}: ${N} Souls joined (${cliN} CLI, ${N - cliN} raw)`);
-    if (CLIENT) await learnCatalogIds(); else if (cliN) await learnWalkIds(souls.find((s) => s.cli));
-    if (CLIENT) for (const s of souls) holdServe(run, s);
+    await learnCatalogIds();
+    if (CLIENT) for (const s of souls.filter((x) => x.cli)) holdServe(run, s);
     const relaunch = souls.map((s) => s.cli ? holdListen(run, s) : (rawListen(run, s), () => {}));
     if (SB) for (let v = 0; v < VIEWERS; v++) viewer(run, hello); else for (const s of souls) { waitStream(run, s); viewer(run, hello); }
-    run.mode = 'idle'; const loops = souls.map((s) => SB ? sbLoop(run, s, arm === 'incident') : soulLoop(run, s, arm === 'incident'));
+    run.mode = 'idle'; if (CLIENT) { phase = 'spread'; run.spread = await spread(run, souls); log(`${key} r${rep}: spread ${JSON.stringify(run.spread)}`); }
+    const loops = souls.map((s) => CLIENT ? clientLoop(run, s) : SB ? sbLoop(run, s, arm === 'incident') : soulLoop(run, s, arm === 'incident'));
     if (GREEN_GATE_S > 0) { phase = 'gate'; run.gate = await greenGate(health); log(`${key} r${rep}: ${run.gate.ok ? `green for ${GREEN_HOLD_S} s after ${run.gate.waitedS} s` : `NOT green after ${run.gate.waitedS} s (levels ${JSON.stringify(run.gate.levels)}); windows start anyway, labelled`}`); }
     const relauncher = arm === 'incident' ? setInterval(() => { for (let i = 0; i < 3; i++) relaunch[i](); }, 20_000) : null;
-    const window = async (name, s, m) => { phase = name; run.mode = m; const m0 = mode ? await launcherReadMetrics() : null, t = now(); await sleep(s * 1000); const m1 = mode ? await launcherReadMetrics() : null;
+    const window = async (name, s, m, until) => { phase = name; run.mode = m; const m0 = mode ? await launcherReadMetrics() : null, t = now(); await sleep(s * 1000); while (until && !until()) await sleep(1000); const m1 = mode ? await launcherReadMetrics() : null;
       return { name, from: t, to: now(), ...(m0 && m1 ? { routed: m1.routed - m0.routed, fallback: m1.fallback - m0.fallback } : {}) }; };
     // warm-up (load on), idle (load off), then two active windows
     run.mode = 'active'; if (arm === 'hostile') for (const s of souls) hostile(run, s);
-    const windows = [await window('warm', PH.warm, 'active'), await window('idle', PH.idle, 'idle'), await window('activeA', PH.active, 'active'), await window('activeB', PH.active, 'active')];
+    const n1Floor = CLIENT && arm === 'n1' && !SHORT ? () => cmds.filter((x) => x.cmd === 'act' && x.phase.startsWith('active')).length >= N1_MIN_ACTS : null;   // #1945: n1 runs to 300 acts
+    const windows = [await window('warm', PH.warm, 'active'), await window('idle', PH.idle, 'idle'), await window('activeA', PH.active, 'active'), await window('activeB', PH.active, 'active', n1Floor)];
     if (relauncher) clearInterval(relauncher);
     run.stopped = true; phase = 'drain';
     await Promise.race([Promise.all(loops), sleep(20_000)]);
@@ -548,7 +678,7 @@ async function oneRun(arm, rep, mode = null) {
     const result = summarize({ arm, rep, N, w, windows, cmds, health, proc, run, calibration, loadBefore, loadAfter: loadavg() });
     if (SB) Object.assign(result, stagebSummary({ key, mode, cliN, windows, cmds, proc, wstats, run, w }));
     if (VIA) result.launcher = await launcherView();
-    if (CLIENT) result.serverTiming = serverTimingOf(souls, windows);
+    if (CLIENT) { result.client = clientSummary({ souls, windows, cmds, health, run }); result.livePush = livePushOf(souls, dir); }
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1));
     log(`${key} r${rep}: ${JSON.stringify(result.headline)}${result.stageb ? ` ${JSON.stringify(result.stageb.headline)}` : ''}`);
     return result;
@@ -577,7 +707,7 @@ async function calibrate(soul, w, proc, idleWin, setPhase) {   // M7: CPU-s per 
   const idle = proc.filter((p) => p.at >= idleWin.from && p.at <= idleWin.to && p.cpuS != null);
   const idleRate = idle.length > 1 ? (idle.at(-1).cpuS - idle[0].cpuS) / ((idle.at(-1).at - idle[0].at) / 1000) : 0;
   const out = { idleCpuSPerS: idleRate };
-  for (const op of ['here', 'observe', 'caps', 'resolve', 'around', 'act', 'say']) {
+  for (const op of ['here', 'observe', 'caps', 'around', 'act', 'say']) {
     setPhase(`calib-${op}`);
     const a = procStats(w.pid), t = now(), ms = [];
     let refused = 0;
@@ -632,7 +762,7 @@ function stagebSummary({ key, mode, cliN, windows, cmds, proc, wstats, run, w })
     // r3: p99/p50 = wall time incl. designed Retry-After waits and final refusals (as before); okP99 = answered (2xx) only,
     // with the waits before the answer taken out (the world's/launcher's service time as the Soul saw it)
     const okMs = (v) => v.filter((x) => x.outcome === 'ok').map((x) => x.ms - (x.waitMs ?? 0));
-    const byKind = {}; for (const k of ['here', 'observe', 'caps', 'resolve', 'around', 'act', 'say']) { const v = raw.filter((x) => x.cmd === k); if (v.length) byKind[k] = { n: v.length, p50: pct(v.map((x) => x.ms), 0.5), p99: pct(v.map((x) => x.ms), 0.99), ok: v.filter((x) => x.outcome === 'ok').length, okP50: pct(okMs(v), 0.5), okP99: pct(okMs(v), 0.99), refused: v.filter((x) => x.outcome === 'refused').length, ...(k === 'here' ? { onWorker: v.filter((x) => x.worker).length } : {}) }; }
+    const byKind = {}; for (const k of ['here', 'observe', 'caps', 'around', 'act', 'say']) { const v = raw.filter((x) => x.cmd === k); if (v.length) byKind[k] = { n: v.length, p50: pct(v.map((x) => x.ms), 0.5), p99: pct(v.map((x) => x.ms), 0.99), ok: v.filter((x) => x.outcome === 'ok').length, okP50: pct(okMs(v), 0.5), okP99: pct(okMs(v), 0.99), refused: v.filter((x) => x.outcome === 'refused').length, ...(k === 'here' ? { onWorker: v.filter((x) => x.worker).length } : {}) }; }
     const refusalsByTag = {}; for (const x of raw) for (const tag of x.refusals ?? []) refusalsByTag[tag] = (refusalsByTag[tag] ?? 0) + 1;
     const all = cmds.filter((x) => inW(x, wd)), rawC2 = all.filter((x) => x.raw && x.cls === 'C2');
     const p = proc.filter((x) => inW(x, wd) && x.cpuS != null), procCpu = p.length > 1 ? (p.at(-1).cpuS - p[0].cpuS) / ((p.at(-1).at - p[0].at) / 1000) : null;
@@ -663,7 +793,7 @@ function stagebSummary({ key, mode, cliN, windows, cmds, proc, wstats, run, w })
   }
   const A = per.activeA ?? {}, B = per.activeB ?? {}, worse = (k, hi) => { const v = [A[k], B[k]].filter((x) => x != null); return v.length ? (hi ? Math.max(...v) : Math.min(...v)) : null; };
   const sum = (k) => [A[k], B[k]].some((x) => x != null) ? (A[k] ?? 0) + (B[k] ?? 0) : null, o = run.oracle;
-  const kinds = {}; for (const k of ['here', 'observe', 'caps', 'resolve', 'around', 'act', 'say']) { const v = [A.byKind?.[k]?.p99, B.byKind?.[k]?.p99].filter((x) => x != null); if (v.length) kinds[k] = Math.max(...v); }
+  const kinds = {}; for (const k of ['here', 'observe', 'caps', 'around', 'act', 'say']) { const v = [A.byKind?.[k]?.p99, B.byKind?.[k]?.p99].filter((x) => x != null); if (v.length) kinds[k] = Math.max(...v); }
   const hereN = (A.byKind?.here?.n ?? 0) + (B.byKind?.here?.n ?? 0), hereW = (A.byKind?.here?.onWorker ?? 0) + (B.byKind?.here?.onWorker ?? 0);
   return { stageb: { key, mode, cliSouls: cliN, joinS: run.joinS ?? null, joinRetries: run.joinRetries ?? 0, windows: per, pins: w.pins ?? null,
     gate: run.gate ?? null,
@@ -699,6 +829,6 @@ for (let rep = 1; rep <= REPEATS; rep++) for (const arm of ARMS) for (const mode
 const receipt = { v: LOAD === 'stageb' ? 2 : 1, metrics: `tools/bench/capacity/METRICS.md ${LOAD === 'stageb' ? 'v2 (Stage B)' : 'v1'}`, at: new Date().toISOString(), host, arms: KEYS, repeats: REPEATS,
   results: results.map((r) => ({ arm: r.key ?? r.arm, rep: r.rep, failed: r.failed, headline: r.headline, ...(r.stageb ? { stageb: r.stageb.headline } : {}) })) };
 writeFileSync(join(OUT, 'receipt.json'), JSON.stringify(receipt, null, 1));
-writeFileSync(join(OUT, 'REPORT.md'), report(receipt, results));
+writeFileSync(join(OUT, 'REPORT.md'), report(receipt, results) + clientReport(results));
 log(`done: ${join(OUT, 'REPORT.md')}`);
 process.exit(0);

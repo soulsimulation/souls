@@ -6,18 +6,18 @@ import {pageRoute} from './page-route.ts';
 import {installAssetTransport} from './boot-assets.ts';
 import {takeConfigPrefetch} from './snapshot-prefetch.ts';
 import {takeInlineConfig} from './inline-config.ts';
-import { StrictMode, Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { StrictMode, Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { EdenMark } from './EdenMark.tsx';
 import { createRoot } from 'react-dom/client';
 const PrivyAuth=lazy(()=>import('./PrivyAuth.tsx'));
 import { Shell, type AuthCtx } from './Shell.tsx';
 import './styles.css';
 import type { ClerkSatellite } from './clerk-satellite.ts';
-import {clerkNow,clerkOriginRoute,unsignedPreviewAuth} from './auth-ui.ts';
+import {clerkNow,clerkOriginRoute,unsignedPreviewAuth,signInAsked,worldClerkNow,WORLD_SIGNIN} from './auth-ui.ts';
 // New worlds (world launcher, world engine): the launcher homepage and its sign-in. Old worlds never reach these.
 // P1 phones: the homepage (LauncherHome) and Clerk are lazy chunks, off a world page's critical path; a world's Clerk
-// loads once its arrival is over (ClerkWorld below).
+// loads only when the page needs it (ClerkWorld below).
 import type { LauncherList } from './god-ui/LauncherHome.tsx';
-import {whenArrivalCardGone} from './arrival-marks.ts';
 import {countPage} from './visitor-counts.ts';
 const LauncherRoot=lazy(()=>import('./LauncherRoot.tsx'));
 const ClerkBridge=lazy(()=>import('./ClerkBridge.tsx'));
@@ -39,20 +39,29 @@ const arrivalEnabled=typeof __SIM_ARRIVAL_ENABLED__!=='undefined'&&__SIM_ARRIVAL
 type Cfg = { clerkSatellite?:ClerkSatellite; authenticationOrigin?:string; authProvider?:'clerk'|'privy'|'none';clerkPublishableKey?:string;clerkIssuer?:string;privyAppId: string; publicUrl: string; worldId: string; authReady: boolean; devAuth: boolean;worldKey?:string;accountAuthRequired?:boolean };
 
 
+/** #2516: a sign-in asked for on this tab (auth-ui.ts WORLD_SIGNIN), kept across Clerk's sync and the sign-in page. */
+type Asked={t:number;sent:boolean};
+function readAsked():Asked|null{try{const v=JSON.parse(sessionStorage.getItem(WORLD_SIGNIN)??'null');return v&&typeof v.t==='number'?{t:v.t,sent:!!v.sent}:null;}catch{return null;}}
+function writeAsked(v:Asked|null){try{if(v)sessionStorage.setItem(WORLD_SIGNIN,JSON.stringify(v));else sessionStorage.removeItem(WORLD_SIGNIN);}catch{/* private mode: the click still signs in */}}
+
 /** A Clerk world page: the Shell renders at once; ClerkBridge (its own chunk, with clerk-js and Clerk's API calls behind
- *  it) mounts beside it once the arrival card has gone, or at once when the page came for a sign-in step (a Clerk
- *  redirect, an approval, a pairing, a join) or the browser is probably signed in. Until then a visitor sees the
- *  signed-out controls (Sign in loads Clerk and opens once it has), a probably-signed-in person "Signing in…".
- *  The Shell is never remounted. */
+ *  it) mounts beside it only when `worldClerkNow` says so (#2516): a Clerk redirect, a sign-in step in the address (an
+ *  approval, a pairing, Join, a tab), a browser that is probably signed in, or a sign-in asked for on this tab. A
+ *  signed-out satellite's Clerk leaves for the primary's sync on mount, so an anonymous visitor never loads it: one
+ *  page load and no request to the provider. Sign in (also New Soul and a claim, which call it) records the ask, then
+ *  mounts Clerk; after the sync comes back the sign-in opens, so it is one click. A sign-in step opened in the page
+ *  mounts it too. A probably-signed-in person sees "Signing in…" until Clerk knows. The Shell is never remounted. */
 function ClerkWorld({cfg,publishableKey}:{cfg:Cfg;publishableKey:string}){
  const pending=useRef(false);
- const [now]=useState(()=>clerkNow(location.href,location.hash,document.cookie));
+ const [now]=useState(()=>worldClerkNow(location.href,location.hash,document.cookie,readAsked()?.t??null,Date.now()));
  const [load,setLoad]=useState(now);
  const [auth,setAuth]=useState<AuthCtx>(()=>({mode:'clerk',ready:!now,authed:false,label:null,
-  login:()=>{pending.current=true;setLoad(true);},logout:()=>{},getToken:async()=>null,
+  login:()=>{writeAsked({t:Date.now(),sent:false});pending.current=true;setLoad(true);},logout:()=>{},getToken:async()=>null,
   debug:{privyUserId:null,accountIdentity:null,wallet:null,linked:[]}}));
- useEffect(()=>{if(load)return;let live=true;void whenArrivalCardGone({timeoutMs:20_000,fadeMs:0}).then(()=>{if(live)setLoad(true);});return()=>{live=false;};},[load]);
- const takePendingLogin=useCallback(()=>{const p=pending.current;pending.current=false;return p;},[]);
+ useEffect(()=>{if(load)return;const changed=()=>{if(clerkNow(location.href,location.hash,document.cookie))setLoad(true);};addEventListener('hashchange',changed);return()=>removeEventListener('hashchange',changed);},[load]);
+ // Once Clerk is ready: the click on this page, or an ask from before the sync that has not opened the sign-in yet,
+ // opens it (marked sent, so the return from the sign-in page does not open it again); any other ask is done.
+ const takePendingLogin=useCallback(()=>{const a=readAsked(),p=pending.current||!!a&&!a.sent&&signInAsked(a.t,Date.now());pending.current=false;if(p)writeAsked({t:a?.t??Date.now(),sent:true});else if(a)writeAsked(null);return p;},[]);
  return <>
   <Shell cfg={cfg} auth={auth} arrivalEnabled={arrivalEnabled}/>
   {load&&<Suspense fallback={null}><ClerkBridge satellite={cfg.clerkSatellite} publishableKey={publishableKey} issuer={cfg.clerkIssuer} onAuth={setAuth} takePendingLogin={takePendingLogin}/></Suspense>}
@@ -113,7 +122,12 @@ function WorldList(){
   try{const r=await fetch(BASE+'/__sim/worlds.json',{signal:AbortSignal.timeout(5000)});const data=r.ok&&r.headers.get('content-type')?.includes('application/json')?await r.json():null;if(data?.contract==='local-worlds/1'&&typeof data.launcher==='string'&&Array.isArray(data.worlds)){if(active)setLauncher(data);return;}}catch{/* show the home-page retry state */}
   if(active)setChecking(false);
  })();return()=>{active=false;};},[]);
- if(checking&&!launcher)return <main className="world-list lh"><h1>Worlds</h1><p role="status">Loading worlds…</p></main>;
- if(!launcher)return <main className="world-list lh"><h1>Worlds</h1><p role="status">The world list could not load.</p><button type="button" onClick={()=>location.reload()}>Try again</button></main>;
- return <Suspense fallback={<main className="world-list lh"><h1>Worlds</h1><p role="status">Loading worlds…</p></main>}><LauncherRoot list={launcher}/></Suspense>;
+ if(checking&&!launcher)return <HomeFrame><p className="lh-loading" role="status">Loading worlds…</p></HomeFrame>;
+ if(!launcher)return <HomeFrame><p className="lh-loading" role="status">The world list could not load.</p><button type="button" onClick={()=>location.reload()}>Try again</button></HomeFrame>;
+ return <Suspense fallback={<HomeFrame><p className="lh-loading" role="status">Loading worlds…</p></HomeFrame>}><LauncherRoot list={launcher}/></Suspense>;
+}
+/** #2464: LauncherHome's own frame (its bar with the wordmark, the Worlds header; styled in styles.css, not the lazy
+ *  chunk) while the list and the launcher's code load, so the page is drawn once in its place and the cards fill in. */
+function HomeFrame({children}:{children:ReactNode}){
+ return <main className="world-list lh"><header className="lh-bar"><div className="lh-title"><EdenMark/><span className="lh-wordmark">Souls</span></div></header><div className="lh-list-head"><h1 className="lh-h">Worlds</h1></div>{children}</main>;
 }

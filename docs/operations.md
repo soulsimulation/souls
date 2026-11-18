@@ -18,7 +18,9 @@ in the repository.
 Each stage is one systemd unit, `sim-worlds@<stage>`, running as the unprivileged `simworlds` user. The unit runs the
 keeper (`tools/world-launcher/keeper.mjs`), which holds the stage's port and runs the world launcher from the release
 the stage link `/srv/sim-worlds/<stage>` points at. The launcher runs one Souls server process per world on a private
-loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds on demand and letting idle ones sleep.
+loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds on demand. Idle worlds do not sleep:
+sleep is off by default (`SLEEP_MS = 0` in `tools/world-launcher/launcher.mjs`, #2235), because world time must never
+stop.
 
 | Stage | Public paths | Settings | Data |
 |---|---|---|---|
@@ -28,8 +30,56 @@ loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds
 
 Each settings file holds one line, `SIM_WORLDS_ARGS=...`: the port, the world port range, data directory, public
 origin, auth env file and caps (`--max-worlds`, `--max-running`, `--min-free-mb`, `--world-heap-mb`, `--create-limit`).
+`--unload-still 1` lets still worlds leave memory and come back on a request or their alarm
+([worlds](architecture/worlds.md), #2299). Off by default. Without the arg, the launcher takes the setting from
+`<data>/launcher-settings.json` (`{"unloadStill":1}`), which it reads once at its start, so a reload picks up a change.
+`install.sh unload-still <stage> <0|1>` writes or removes that file; a release sets it with
+[`unload_still`](release.md#the-release-workflow).
+Their recorded horizons are `<data>/horizons.json`.
+At most `--load-parallel` worlds load at once (default 4); the rest wait in order: a Soul's act or a god call, a
+visitor's connection, an alarm for a listening agent, a wind-down alarm, then anything else (keep-alive, monitors),
+oldest first within each. A request for a world that is unloaded, waiting or loading is held up to `--load-hold-ms`
+(default 45,000), then answered `503 world.waking` with `Retry-After`, which the Soul client waits out and asks again.
+A browser asking for the world's page gets, with that 503, a small page naming the world that reloads itself every
+`Retry-After` seconds until the world answers.
+Declared crawlers and link-preview fetchers never load a world: they get its page (the web build's, with the world's
+title and links) and `503 world.unloaded` for anything else. With `--unload-still 1` a visitor's page and the build's
+files are served the same way, and the world loads on the page's live connection or first data request (a page hidden
+for five minutes closes that connection and opens it again when shown, #2305, unless its God modal is open); nothing loads
+at start but what an alarm or a request asks for (`--eager` applies only with `0`), and a handover leaves a still world
+with no visitor unloaded instead of moving it (#2304). The loopback `/__sim/healthz` has `loads`: loads running and
+waiting, by reason, and the wait of the last 100 (median, 95th percentile, longest).
 `tools/world-launcher/deploy/install.sh` writes the production and staging files once and never edits an existing
 one. Memory limits are per-stage systemd drop-ins (`sim-worlds@<stage>.service.d/10-memory.conf`).
+
+**Memory for worlds (#2233).** `--worlds-mem-mb` is the memory all of a stage's worlds may use together. A world loads
+only while the running worlds' measured memory (Pss, read at most every 30 s) plus a fixed estimate for each world
+loading (310 MB for a small world, 650 MB for an Eden-class one, chosen by the template's size: the load peaks #2232 measured) stays under it;
+`--min-free-mb` stays a second guard, and `--max-running` no longer limits. To make room the launcher unloads a still
+world whose next event is at least 60 s away, then a world with no act and no visitor for 10 minutes (`--idle-ms`), the
+one acted in longest ago first; a world someone is acting in or watching is never unloaded. When nothing can go the load
+waits up to 20 s for room, reading each world's still answer afresh every 5 s (#2367), and is then refused with
+`503 world.waking` and `Retry-After: 15`; the world stays `unloaded`, never `failed`, and `/__sim/healthz` carries the host problem code
+`worlds.capacity` for 10 minutes. Each world's `state` (`awake`, `still`, `unloaded`, `starting`, `failed`) is in
+`/__sim/worlds.json` beside the old `status`; the health page (`/__sim/health?json=1`) adds per world its ticks computed
+and jumped in the last hour (from the world's own counters, once it reports them), seconds in memory in 24 h, Pss and
+last load reason, and in total the worlds awake, still and unloaded and the memory used against the figure.
+
+One command sets a stage's capacity: `bash install.sh capacity <stage> <GB>`, as root on the host. It rewrites the
+memory drop-in and, in `<stage>.conf`, `--worlds-mem-mb`, `--max-running`, `--range` (two ports per world that can run,
+above the stage's `--port`; it refuses a range that would reach another stage's ports) and `--max-worlds`, prints
+before and after, and takes effect at the next restart. An ordinary release never runs it; `release.sh <stage>
+--capacity <GB>` runs it once and restarts. The production host's worlds may use 24 GB of its 31 GB (#2241); the
+release owner applies it. What each figure gives (production, `--port 4620`; small and Eden worlds at their settled
+memory of 250 and 575 MB, #2240):
+
+| GB | MemoryHigh / Max | `--worlds-mem-mb` | `--max-running` | `--range` | `--max-worlds` | Small worlds settled | Eden-class settled |
+| ---: | --- | ---: | ---: | --- | ---: | ---: | ---: |
+| 8 | 8G / 10G | 6,144 | 24 | 4621-4668 | 60 | 24 | 10 |
+| 16 | 16G / 18G | 14,336 | 57 | 4621-4734 | 114 | 57 | 24 |
+| 24 | 24G / 26G | 22,528 | 90 | 4621-4800 | 180 | 90 | 39 |
+
+`--max-worlds` is at least twice `--max-running` (an existing higher value is kept): unloaded worlds cost only disk.
 
 Caddy terminates TLS and sends the canonical root site to production; `souls.game` redirects to `soul.game`.
 `sim.eden.art`, the former origin and still the Clerk primary origin, moves to the production host. There it
@@ -64,8 +114,8 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   `rewound` problem code, held for two checks so one always sees it: several in a window show as one line with the latest
   count, and it clears on its own. A world with half its ticks faulted over 10 s of world time counts as `halted` too, though
   its clock runs: it refuses acts with `world.step-failing` until the faults fall away, and the glitch rule is `engine.step-failing`.
-  The launcher restarts a halted world once per breaker window (30 min), since a restart boots from the log; a second halt
-  in the same window stays halted for an operator ([#1326](https://github.com/soulsimulation/souls/issues/1326)).
+  The launcher restarts a halted world every time, since a restart boots from its last snapshot and the log; each restart
+  counts toward the breaker ([#1326](https://github.com/soulsimulation/souls/issues/1326), [#2133](https://github.com/soulsimulation/souls/issues/2133)).
 - **What each halt becomes** ([#1511](https://github.com/soulsimulation/souls/issues/1511); each path is tested in
   `apps/server/src/halt-paths.test.ts`). Every one stops the clock (or, for step-failing, refuses acts) and sets
   `live.json` `halted`, which the launcher's guard acts on. None is silent.
@@ -73,18 +123,21 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   | Halt (glitch rule) | Where | In the process | Then |
   |---|---|---|---|
   | `durability.clock-frontier`, `engine.unhashable` | `persistClockFrontier` on the tick | the tick throws: the process exits | the launcher restarts it from the log (backoff; 5 failures in 30 min: `held`) |
-  | `durability.clock-frontier` | `snapshotFaultedHead` (the throw is not rethrown) | clock stopped, process up, `halted` | the guard restarts it within about a poll (10 s), once per 30 min |
+  | `durability.clock-frontier` | `snapshotFaultedHead` (the throw is not rethrown) | clock stopped, process up, `halted` | the guard restarts it within about a poll (10 s); each restart counts toward the breaker |
   | `durability.repair`, `durability.checkpoint` | `failCheckpoint` | clock stopped, process up, `halted` | as above |
   | `engine.halted` | `haltOnFault` (edge worlds) | clock stopped, process up, `halted` | as above |
   | `engine.step-failing` | steps faulting | clock runs, acts refused, `halted` | as above |
 
-  **Still a frozen world:** a second halt inside the same 30-minute window is not restarted. The world stays halted
-  (visitors get 503) until an operator acts or a fix ships. The alert is the only exit, so it has to be loud:
+  **A halt that repeats at once:** after 5 restarts in 30 min the breaker holds the world (`held`, last reason `halted`),
+  resting, never a silent loop. A hold ends by itself (#2378): after 10 min, doubling for each hold in a row up to 1 h,
+  the world boots again; an operator's resume ends it sooner. The alert is loud while it rests:
   - the world's `halted` problem code makes `hostOk` false;
   - `host-health.log` gets an ALERT line, and the health page shows the world as `halted`;
   - the off-box watcher (sim-watch) reads `hostOk` and `hostCodes` from `/__sim/healthz` and DMs Gene (`host-health.mjs` header).
 
-  A crash loop ends `held` (down, shown as resting) after 5 failures in 30 min, until it is resumed. Outside the launcher
+  A crash loop ends `held` (down, shown as resting) after 5 failures in 30 min, until its rest ends or it is resumed. A
+  world that dies in the same listener step on two boots in a row (a hang or a fault storm) comes up with that step quarantined for a window of ticks
+  (`world.step-quarantined`; docs/design/world-cost.md, "A world that never stays stuck"). Outside the launcher
   (local dev, tests), a halted process stays up with its clock stopped.
 - `GET /w/<slug>/healthz` also carries `tickAgeMs` (wall time since the last completed tick), `clockRate` and `baseRate`,
   `stalled` and, while the clock is dilated, `slowed`. A world is `stalled` when its clock owes ticks and the last one is
@@ -113,17 +166,76 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor
   can alert on `hostOk`.
+- **Low disk (#2378, #2538).** An overload guard against filling the disk, not a limit on visitors or agents. Each world
+  reads its free space every minute; under `SIM_DISK_MIN_FREE_MB` (default 1,024 MB) it logs `[load] disk.low`, prunes
+  by the retention rules, holds its hourly copy and refuses uploads (god assets and thumbnails, art media, bodies) with
+  `507 host.disk-low` and `Retry-After: 300`; the god's command-line tool prints the refusal and when to retry. Acts,
+  ticks, snapshots, the journal and viewing never read it. With `--disk-min-free-mb N` the launcher also refuses new
+  worlds under N MB free on its data disk (read at most every 30 s) with `503 host.disk-low` and `Retry-After: 600`,
+  and healthz raises the host code `disk` at once. It is off when absent (development machines, hosted CI);
+  `install.sh` writes `--disk-min-free-mb 4096` into a new production file, and on a host whose file already exists the
+  operator adds it to `SIM_WORLDS_ARGS` once (it takes effect at the next restart).
+
+## Soul API ceilings
+
+The launcher refuses Soul API traffic past these defaults (`SOUL_CEILINGS` in `tools/world-launcher/flood.mjs`), sized
+so 100 Souls behind one address, or under one account, each holding a listen and acting every 10 s, are never refused
+(#1949): 600 requests per address in 10 s, 202 requests in flight per address, 200 listens per address, 4 per Soul,
+200 per account, and 1,200 heavy (C1/C2) requests per account a minute. The world budget is 200 heavy requests a second.
+`node tools/world-launcher/op.mjs set-limits --port <launcher port> --slug <slug> --limits '{...}'` overrides any of
+them for one world, at once (`null` restores a default).
 
 ## Backups
 
 `sim-worlds-backup@<stage>.timer` runs nightly (`deploy/backup-restic.mjs backup <stage>`). It copies every SQLite
 database of the stage with SQLite's online backup API, checks each copy with `PRAGMA quick_check`, adds the registry,
 audit log, uploaded assets, old-world fork inputs and the stage's non-secret host settings, and takes one deduplicated
-restic snapshot. Retention keeps 7 daily, 4 weekly and 6 monthly snapshots (`SIM_BACKUP_KEEP`). An off-host copy to an
-S3-compatible bucket runs when `SIM_BACKUP_OFFSITE` is set. Every release also takes its own compact pre-release copy.
-Commands are in the [runbook](operations/runbook.md#backups). Local backup verification does not prove offsite
-recovery; [offsite setup #557](https://github.com/soulsimulation/souls/issues/557) is explicitly deferred and must be
-qualified separately.
+restic snapshot. Retention keeps 7 daily, 4 weekly and 6 monthly snapshots (`SIM_BACKUP_KEEP`), locally and
+off-site. Every release also takes its own compact pre-release copy. Commands are in the
+[runbook](operations/runbook.md#backups).
+
+**Hourly run (#2542).** `sim-worlds-backup-hourly@<stage>.timer` (minute 15 of each hour) runs
+`deploy/backup-restic.mjs backup-hourly <stage>`: it copies only the databases written since their last copy (online
+backup and `quick_check`), skips the rest, takes one snapshot tagged `<stage>,hourly` and copies it off-site. It runs no
+forget, prune or check; the nightly run keeps the newest 24 hourly snapshots (`SIM_BACKUP_KEEP_HOURLY`) beside its own
+rule, which never removes an hourly one. Each hourly snapshot holds every database, so it restores the whole stage. Once
+enabled, a dead disk loses at most about an hour (a day with the nightly run alone; the maintainer accepted the hour, with
+continuous replication as a later task). `install.sh` installs the timer on every release and never enables it:
+enabling it is the maintainer's step, `systemctl enable --now sim-worlds-backup-hourly@production.timer` on the host,
+then one restore drill from an hourly snapshot ([runbook](operations/runbook.md#hourly-run)). Each world itself keeps
+only its newest 2 in-process copies (`backup-YYYYMMDDHH.db`; it kept up to 15 before #2542).
+
+### Off-site copy
+
+Production's snapshots are also copied each night to a private S3-compatible bucket the maintainer chose (#557). The
+destination and its key pair are the repository secrets `BACKUP_OFFSITE_URL`, `BACKUP_S3_KEY_ID` and
+`BACKUP_S3_SECRET`; the `offsite-backup` workflow writes them into the host's `/etc/sim-worlds/backup.env` as
+`SIM_BACKUP_OFFSITE`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (root:simworlds 0640), and the nightly backup then
+copies each new snapshot there and applies the same retention. Nobody needs ssh for any of it:
+
+```sh
+gh workflow run offsite-backup.yml --ref main                 # write the settings, copy now, check, restore drill
+gh workflow run offsite-backup.yml --ref main -f configure=false -f copy=false            # a restore drill only
+gh workflow run offsite-backup.yml --ref main -f configure=false -f copy=false -f drill=false -f recovery_key=true
+```
+
+The copy step copies without a new local snapshot and deletes nothing, then runs `restic check` on the off-site
+repository. The drill restores the latest off-site snapshot into an empty temporary directory on the host (after a
+free-disk check, never a production path), quick-checks every database, boots the smallest world from it with fake
+minds on a free loopback port, prints its state hash and deletes the directory. The workflow prints counts and sizes
+only.
+
+**The recovery key.** The restic password (`/etc/sim-worlds/restic.pass`) lives only on the host, and without a
+password the off-site copy cannot be opened. The maintainer keeps his own: a password saved in his password manager
+and also stored as the repository secret `BACKUP_RECOVERY_PASSWORD`; the workflow's `recovery_key` step adds it as a
+second key of the off-site repository and checks that it opens it. GitHub never shows a secret again, so the password
+manager is the copy that counts. To restore after losing the host, put that password in a file and point restic at
+the bucket (`RESTIC_REPOSITORY=<the destination>`, `RESTIC_PASSWORD_FILE=<that file>`, the key pair in the
+environment), then follow [disaster recovery](operations/disaster-recovery.md#4-data).
+
+Restore drills from the off-site copy: 14 Nov 2026, first copy and drill (9 snapshots, 445 MiB stored; 13 of 13
+databases passed `quick_check`; one world booted healthy with fake minds).
+Run one again after any change to the backup settings.
 
 ## Logs
 
@@ -134,6 +246,13 @@ qualified separately.
 - Visitors' page errors: pages post to `/__sim/client-errors`; `node tools/world-launcher/op.mjs client-errors --port
   <port> --base /` summarises them on the current root-only host. Use the actual configured base for other deployments.
 - Operator actions: `<data>/audit.jsonl` (`op.mjs audit`).
+
+## Platform feed
+
+Every client pulls site news from `<base>/v1/feed?after=<id>&limit=N` (public, cached 60 s, no credentials). Post from
+the host: `op.mjs feed-post --port <port> --base / --kind announcement|release|world|event --title "…" [--body …]
+[--url https://…] [--starts-at …] [--replaces <id>]`. `<data>/feed.jsonl` is append-only: correct an item by posting one
+that replaces it. `op.mjs feed-stats` prints reads per UTC day by client version (`x-soul-client`); no ids are kept.
 
 ## CDN
 

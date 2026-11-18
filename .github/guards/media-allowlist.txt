@@ -5,6 +5,7 @@ apps/web/pwa/icon-180.png
 apps/web/pwa/icon-192.png
 apps/web/pwa/icon-512.png
 apps/web/pwa/icon-mark.png
+apps/web/pwa/icon-social.png
 apps/web/src/media/gallery-loop.mp4
 tools/god-skill/reference/kit-primitives.png
 tools/playtest/review/fixtures/runs/20261024-120000-fixture-newcomer-1/personas/pip/shown/1.png
@@ -25,3 +26,6 @@ apps/server/test/fixtures/old-world-takes/eden.jsonl.br
 apps/server/test/fixtures/old-world-takes/littlemartians.jsonl.br
 apps/server/test/fixtures/old-world-takes/mars.jsonl.br
 apps/server/test/fixtures/sample-texture.jpg
+# The released Soul client 2.32.0, gzipped, for the upgrade compatibility test (#1938).
+tools/world-launcher/soul/released/2.32.0/eden.mjs.gz
+tools/world-launcher/soul/released/2.32.0/skill.md.gz

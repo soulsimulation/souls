@@ -12,8 +12,10 @@ import { now, sleep } from '../lib/clock.mjs';
 import * as claude from './adapters/claude-headless.mjs';
 import * as codex from './adapters/codex-headless.mjs';
 import * as scriptedOwner from './adapters/scripted-owner.mjs';
-import { worldBudgetFor, priceDriftOf, callUsd } from './world-budget.mjs';
+import { worldBudgetFor, priceDriftOf, callUsd, tokensUsd, CODEX_USD_PER_MTOK } from './world-budget.mjs';
+const TOKEN_PRICED = { 'codex-headless': CODEX_USD_PER_MTOK };   // #2381: adapters that report tokens and no dollars
 import { assertSeatHome } from './seat-home.mjs';
+import { recordOn } from '../record/switch.mjs';
 
 export const ADAPTERS = { 'claude-headless': claude, 'codex-headless': codex, 'scripted-owner': scriptedOwner };
 export const LIVE_ADAPTERS = new Set(['claude-headless', 'codex-headless']);
@@ -27,6 +29,8 @@ export function listenMessages(stdout) {
   const l = d?.inbox?.latest; return l && l.state !== 'acknowledged' ? [l] : [];
 }
 
+/** #2498: a Soul CLI listen that ended on serve's plan wake (a stopped plan, plan-stopped or plan-finished), with no message. */
+export const planWake = (stdout) => { let d = null; try { d = JSON.parse(stdout); } catch { return false; } return !!d?.plan || (d?.wakes ?? []).some((w) => ['plan-stopped', 'plan-finished'].includes(w?.kind)); };
 const parseJsonStatus = (stdout, code) => { try { return { ok: code === 0, data: JSON.parse(stdout) }; } catch { return { ok: false, reason: stdout.slice(0, 300) }; } };
 /** chat-as-rendered.md → [{turn, text}] split at the `<!-- turn N (...) -->` markers each turn writes. */
 export function splitRendered(md) {
@@ -36,7 +40,7 @@ export function splitRendered(md) {
   return out.map(({ turn, text }) => ({ turn, text }));
 }
 
-export const SOUL_CLI = { file: 'eden.mjs', fallbackFile: 'eden-agent.mjs', listen: (after) => ['listen', ...(after ? ['--after', after] : [])], status: ['status'], parseStatus: parseJsonStatus };
+export const SOUL_CLI = { file: 'eden.mjs', listen: (after) => ['listen', ...(after ? ['--after', after] : [])], status: ['status'], parseStatus: parseJsonStatus };
 
 export class Seat {
   constructor({ dir, seat, worldBase, rails = {}, cli = SOUL_CLI, allowedTools, kind = 'soul', budget = null, infraFile = null }) {
@@ -47,7 +51,7 @@ export class Seat {
     this.rails = { maxTurnsPerRequest: 6, maxTurnWallSec: 240, ...rails };
     // 2026-10-26 (round 2): seats sometimes call the CLI by its absolute path and write the skill under .claude/; both were
     // refused by the allowlist and the seat never paired (fix-d3d trio r1, round2 run 1). Allow them for this folder only.
-    this.allowedTools = [...(allowedTools ?? claude.DEFAULT_ALLOWED), `Bash(node ${this.folder}/eden.mjs:*)`, `Bash(node ${this.folder}/eden-agent.mjs:*)`,
+    this.allowedTools = [...(allowedTools ?? claude.DEFAULT_ALLOWED), `Bash(node ${this.folder}/eden.mjs:*)`,
       `Write(${this.folder}/.claude/**)`, `Edit(${this.folder}/.claude/**)`, 'Write(./.claude/**)', 'Edit(./.claude/**)'];
     this.turnN = 0; this.chain = Promise.resolve(); this.listener = null; this.waking = false; this.stopped = false;
     this.lastListenId = null; this.wakesSinceRequest = 0; this.cumulative = null; this.listenFailures = 0;
@@ -87,7 +91,7 @@ export class Seat {
       let up = true;
       for (let i = 0; i < 100 && up; i++) { up = (await cli('serve', '--status')).serving; if (up) await sleep(100); }   // a stopping serve still answers
       if (up) throw new Error(`seat ${this.seat.id}: serve did not stop`);
-      if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) await cli('import');
+      if (this.seat.home && existsSync(join(this.folder, '.eden-agent.json'))) { await cli('import'); if (this.seat.record !== false) this.info.recordOn = recordOn(this.folder); }
       this.ownerSettings();
       if (!(await cli('serve')).serving) throw new Error(`seat ${this.seat.id}: serve did not come back`);
       this.info.sessionId = null; this.save();
@@ -104,7 +108,7 @@ export class Seat {
 
   /** Run the seat's own CLI in its folder (read-only commands only: status). Never logs credentials: these print none. */
   async cliJson(args, maxWallMs = 20000) {
-    const file = existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile && existsSync(join(this.folder, this.cli.fallbackFile)) ? this.cli.fallbackFile : null;
+    const file = existsSync(join(this.folder, this.cli.file)) ? this.cli.file : null;
     if (!file) return { ok: false, reason: `no ${this.cli.file} in folder` };
     const r = await run('node', [file, ...args], { cwd: this.folder, maxWallMs });
     return { file, ...(this.cli.parseStatus ?? parseJsonStatus)(r.stdout, r.code, r.stderr) };
@@ -149,8 +153,10 @@ export class Seat {
     this.inTurn = true;
     const n = ++this.turnN, started = now();
     try { onStart?.({ turn: n, reason, startedAt: started.t, startMono: started.mono }); } catch { /* observer hook is best effort */ }
-    // #1098: a live seat with no real cost report (Codex) can't be held to the world budget, so under one it is refused
-    const noCost = this.budget && this.info.adapter !== 'claude-headless' ? { ok: false, reason: `world budget: ${this.info.adapter} reports no turn cost, so it can't run under a world budget` } : null;
+    // #1098: a live seat with no cost report can't be held to the world budget, so under one it is refused; #2381: one that
+    // reports tokens (Codex) is priced from them
+    const tokenPrice = TOKEN_PRICED[this.info.adapter] ?? null;
+    const noCost = this.budget && this.info.adapter !== 'claude-headless' && !tokenPrice ? { ok: false, reason: `world budget: ${this.info.adapter} reports no turn cost, so it can't run under a world budget` } : null;
     const ctxBefore = this.info.sessionContextTokens ?? null;   // the session's context at its last call (null: no call yet)
     if (this.info.seatCheck && !this.info.seatCheck.ok) {   // #1687: a seat that failed its first-call check takes no further live turn
       const ended = now(); this.inTurn = false;
@@ -185,7 +191,7 @@ export class Seat {
     // keeps the priced last call. The limit: an in-flight call that cost more than that reads low by the difference, at most one
     // observation plus one output ($0.073 at the defaults). A kill on a seat's last turn, or a new session, stays counted.
     const sessionCost = this.info.adapter === 'claude-headless' ? r.usage?.costUsd ?? null : null;
-    let turnCost = r.usage?.costUsd ?? null;
+    let turnCost = r.usage?.costUsd ?? (tokenPrice && r.usage ? tokensUsd(r.usage, tokenPrice) : null);
     if (r.timedOut) turnCost = null;
     else if (sessionCost != null) {
       const sid = r.sessionId ?? this.info.sessionId, prev = this.info.sessionCostUsd?.[sid] ?? 0;
@@ -274,7 +280,7 @@ export class Seat {
     }
     this.rails.maxTurnWallSec = savedCap;
     this.info.onboard = { ok: !!paired, pairedWithinSec: paired ? Math.round(pairedMs / 1000) : null, timeoutSec, onboardTurnWallMs: turn?.wallMs ?? null, attempts,
-      cliFile: paired ? (existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile) : null, lastStatus: paired ? null : last };
+      cliFile: paired && existsSync(join(this.folder, this.cli.file)) ? this.cli.file : null, lastStatus: paired ? null : last };
     if (paired && paired.soul) { this.info.soulId = paired.soul.id; this.info.soulName = paired.soul.name ?? name; }
     this.save(); if (paired) this.ownerSettings();
     return { ok: !!paired, soulId: this.info.soulId, soulName: this.info.soulName, turn, status: paired ?? last };
@@ -293,8 +299,7 @@ export class Seat {
   wakeLoop() { if (!this.info.wake) return false; this.waking = true; this.startListen(); return true; }
   startListen() {
     if (this.listener || this.stopped || !this.waking) return;
-    const file = existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile;
-    const args = [file, ...this.cli.listen(this.lastListenId)];
+    const args = [this.cli.file, ...this.cli.listen(this.lastListenId)];
     const cmdLine = `node ${args.join(' ')}`;
     const startedAt = now();
     // Soul Runs diagnostics (#752): a traced seat's harness listen carries the same passive preload as its commands, so
@@ -302,12 +307,12 @@ export class Seat {
     const tr = this.seat.diagnostics?.trace;
     const h = start('node', tr ? ['--import', tr.tap, ...args] : args, { cwd: this.folder, env: tr ? { SOUL_TRACE_FILE: tr.file, SOUL_TRACE_RUN: tr.run, SOUL_TRACE_SEAT: tr.seat } : undefined, onExit: ({ code, signal, stdout, stderr }) => {
       const killed = h.killedByUs; if (this.listener === h) this.listener = null;
-      const msgs = listenMessages(stdout);
+      const msgs = listenMessages(stdout), planWoke = !msgs.length && !!this.rails.planWakes && planWake(stdout);   // #2498: as an owner's scheduler would
       appendJsonl(join(this.dir, 'listen.jsonl'), { ...now(), startMono: startedAt.mono, cmd: cmdLine, code, signal, killedByUs: !!killed, messages: msgs.map((m) => m.id), stdout: killed ? undefined : stdout, stderr: stderr.slice(-500) || undefined });
       if (killed || this.stopped) return;
       if (/superseded/i.test(stdout)) { this.supersededAt = Date.now(); if (!this.inTurn) setTimeout(() => this.startListen(), 2000); return; }
-      if (msgs.length) {
-        this.listenFailures = 0; this.lastListenId = msgs.at(-1).id;
+      if (msgs.length || planWoke) {
+        this.listenFailures = 0; if (msgs.length) this.lastListenId = msgs.at(-1).id;
         if (++this.wakesSinceRequest > this.rails.maxTurnsPerRequest) { this.info.wakeCapped = (this.info.wakeCapped ?? 0) + 1; this.save(); return; }
         this.chat(wakeText(cmdLine, stdout), { reason: 'wake' }).catch(() => {});
       } else {
@@ -324,7 +329,7 @@ export class Seat {
   /** Kept worlds only: retire the Soul as its owner. */
   async retire() {
     if (!this.info.soulId || !this.info.ownerIdentity) return { ok: false };
-    const r = await fetch(`${this.base}/v1/souls/${encodeURIComponent(this.info.soulId)}`, { method: 'DELETE', headers: { authorization: `Bearer dev:${this.info.ownerIdentity}` } });
+    const r = await fetch(`${this.base}/v1/souls/${encodeURIComponent(this.info.soulId)}`, { method: 'DELETE', headers: { 'x-soul-client': 'arena/1', authorization: `Bearer dev:${this.info.ownerIdentity}` } });
     return { ok: r.ok, status: r.status };
   }
 }
@@ -340,6 +345,8 @@ export function createSeat({ runDir, seat, worldBase, rails }) {
     const identity = newIdentity();
     writeFileSync(join(s.folder, '.eden-agent.json'), JSON.stringify({ identity }) + '\n', { mode: 0o600 });
     s.info.ownerIdentity = identity;
+    // #1774: the client's full session record (#1773), on before the seat's first command; seat.record false turns it off
+    if (seat.record !== false) s.info.recordOn = recordOn(s.folder);
   }
   s.save();
   return s;

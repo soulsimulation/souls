@@ -4,7 +4,7 @@
 //   the GOD, through its own CLI (eden-god.mjs) as at the rehearsal, builds a fountain with benches and a lamp, a sign
 //   with text, a roundhouse furnished plus two extra chairs round its table and a hearth, a pond with a jetty and a
 //   canoe moored alongside it;
-//   a SOUL (owner flow, the unchanged Soul CLI) walks to the fountain and sees it, looks at it, reads the sign, walks
+//   a SOUL (owner flow, the Soul client eden.mjs, acting by the ids the world offers) walks to the fountain and sees it, looks at it, reads the sign, walks
 //   into the cottage's living room, walks out onto the jetty, boards the canoe, sits on a bench by the fountain (the
 //   bench then shows taken), and the god's map shows her there.
 //
@@ -163,12 +163,13 @@ async function shotDuring(name, opts, run) {
 }
 
 
-// ---------- the Soul CLI (Codex's eden-agent.mjs, unchanged), in its own private folder
+// ---------- the Soul client (eden.mjs, the launcher's pinned copy), in its own private folder; HOME is the run's folder,
+// so the client never reads or writes the machine's own Souls home
 import { execFile } from 'node:child_process';
 const cliDir = resolve(out, 'soul-cli'); mkdirSync(cliDir, { recursive: true });
-const CLI = resolve(root, 'tools/edge-skill/eden-agent.mjs');
+const CLI = resolve(root, 'tools/world-launcher/soul/eden.mjs');
 function cli(...argv) {
-  return new Promise((ok) => execFile(process.execPath, [CLI, ...argv], { cwd: cliDir, timeout: 120_000, env: { ...process.env, EDEN_AGENT_NO_DASHBOARD: '1' } }, (err, stdout, stderr) => {
+  return new Promise((ok) => execFile(process.execPath, [CLI, ...argv], { cwd: cliDir, timeout: 120_000, env: { ...process.env, HOME: out } }, (err, stdout, stderr) => {
     const s = String(stdout); let data = null; try { data = JSON.parse(s.slice(s.indexOf('{'))); } catch { }
     ok({ code: err?.code ?? 0, data, stderr: String(stderr).slice(0, 400), raw: data ? undefined : s.slice(0, 400) });
   }));
@@ -251,10 +252,10 @@ try {
   }, (r) => r.token && r.at);
 
   // ---- 1. the fountain: walk there, see it, look at it
-  await step('S1 CLI: act "walk to the fountain" → she walks there', async () => {
-    const a = await cli('act', 'walk to the fountain'); const r = await follow(a.data);
+  await step('S1 CLI: act walk:fountain → she walks there', async () => {
+    const a = await cli('act', 'walk:fountain'); const r = await follow(a.data);
     const rec = (await api(`/v1/edge/receipts/${encodeURIComponent(a.data?.receipt?.id)}`, { as: 'soul' })).data?.receipt;
-    return { accepted: a.data?.accepted, resolved: a.data?.resolved?.to, phase: r.phase, dist: r.end ? +Math.hypot(r.end.p[0] - FOUNTAIN[0], r.end.p[2] - FOUNTAIN[1]).toFixed(2) : null, endedAt: rec?.endedAt?.placePath ?? rec?.endedAt?.place };
+    return { accepted: a.data?.accepted, phase: r.phase, dist: r.end ? +Math.hypot(r.end.p[0] - FOUNTAIN[0], r.end.p[2] - FOUNTAIN[1]).toFixed(2) : null, endedAt: rec?.endedAt?.placePath ?? rec?.endedAt?.place };
   }, (r) => r.accepted && r.phase === 'completed' && r.dist < 4);
   await step('S1b item 6: her arrival names the god\'s plaza (it said "World"/"field"); the Souls\' map lists it', async () => {
     const h = await cli('here'); const m = await cli('map');
@@ -265,8 +266,8 @@ try {
     const r = await cli('here'); const objs = r.data?.objects ?? [];
     return { objects: objs.map((o) => `${o.kind}:${o.name}`), has: ['fountain', 'fountain-lamp', 'welcome-sign'].filter((n) => objs.some((o) => o.name === n)) };
   }, (r) => r.has.includes('fountain') && r.has.length >= 2);
-  await step('S3 CLI: act look fountain → accepted (it was target.not-in-sight); view names the fountain', async () => {
-    const a = await cli('act', 'look', 'fountain');
+  await step('S3 CLI: act look:<fountain> → accepted (it was target.not-in-sight); view names the fountain', async () => {
+    const a = await cli('act', `look:${ids.fountain}`);
     const v = await cli('view', '--alt-only');
     const alt = JSON.stringify(v.data ?? v.raw ?? '');
     return { accepted: a.data?.accepted, code: a.data?.code, chosen: a.data?.chosen ?? a.data?.receipt?.capability, viewSaysFountain: /fountain/i.test(alt), alt: alt.slice(0, 300) };
@@ -277,24 +278,22 @@ try {
   }, (r) => r.name === 'fountain' && /fountain/.test(r.what ?? ''));
 
   // ---- 2. the sign
-  const f5 = await step('S5 CLI: act "read the welcome-sign" → read:<sign> (its words in the label); she walks round to its face and faces it; `object` gives the text', async () => {
-    const res = await cli('resolve', 'read the welcome-sign');
-    const a = await cli('act', 'read the welcome-sign'); const r = await follow(a.data);
+  const f5 = await step('S5 CLI: act read:<sign> → she walks round to its face and faces it; `object` gives the text', async () => {
+    const a = await cli('act', `read:${ids['welcome-sign']}`); const r = await follow(a.data);
     const o = (await cli('object', ids['welcome-sign'])).data?.object;
-    return { label: res.data?.would?.label, resolved: a.data?.resolved?.to ?? a.data?.receipt?.capability, phase: r.phase, text: o?.state?.text, dist: r.end ? +Math.hypot(r.end.p[0] - SIGN[0], r.end.p[2] - SIGN[1]).toFixed(2) : null, inFront: r.end ? r.end.p[2] > SIGN[1] + 0.5 : null };
-  }, (r) => /Welcome to Party Hill/.test(r.label ?? '') && r.resolved === `read:${ids['welcome-sign']}` && r.phase === 'completed' && /Welcome to Party Hill/.test(r.text ?? '') && r.dist < 2.5 && r.inFront);
+    return { accepted: a.data?.accepted, phase: r.phase, text: o?.state?.text, dist: r.end ? +Math.hypot(r.end.p[0] - SIGN[0], r.end.p[2] - SIGN[1]).toFixed(2) : null, inFront: r.end ? r.end.p[2] > SIGN[1] + 0.5 : null };
+  }, (r) => r.phase === 'completed' && /Welcome to Party Hill/.test(r.text ?? '') && r.dist < 2.5 && r.inFront);
   { const p = f5 ? (await observe()).self.position : null; if (p) await shots([{ name: 's5-reading-the-sign', eye: [p[0] + 1.5, p[1] + 2, p[2] + 4], at: [SIGN[0], 1, SIGN[1]], wait: 6000 }]); }
 
   // ---- 3. the cottage's living room (furnished + the god's extra chairs)
-  const f6 = await step('S6 act walk:moss-cottage/living (furnished, two extra chairs, a hearth) → resolve and act agree; she ends inside the living room', async () => {
-    const res = await cli('resolve', 'walk:moss-cottage/living');
+  const f6 = await step('S6 act walk:moss-cottage/living (furnished, two extra chairs, a hearth) → she ends inside the living room', async () => {
     const from = process.env.N1_PROBE_RADII ? (await observe()).self.position : null;
     const a = (await api('/v1/edge/act', { as: 'soul', body: { capability: 'walk:moss-cottage/living' } })).data;
     const r = await follow(a, { maxS: 200 });
     if (from && r.end) await probeRadii('S6', from, 0, r.end.p, 0);
     const me = (await cli('here')).data?.me;
-    return { resolveOk: res.data?.ok, available: res.data?.would?.available, accepted: a.accepted, code: a.code ?? r.code, reason: a.reason ?? r.reason, phase: r.phase, room: r.room, place: me?.place, placePath: me?.placePath, ...(a.accepted ? {} : { reason: String(a.reason ?? a.message ?? '').slice(0, 300), from: (await observe()).self?.position }) };
-  }, (r) => r.resolveOk === true && r.available === true && r.accepted && r.phase === 'completed' && r.room?.building === 'moss-cottage' && r.room.room === 'living' && r.place === 'g-moss-cottage.living');
+    return { accepted: a.accepted, code: a.code ?? r.code, reason: a.reason ?? r.reason, phase: r.phase, room: r.room, place: me?.place, placePath: me?.placePath, ...(a.accepted ? {} : { reason: String(a.reason ?? a.message ?? '').slice(0, 300), from: (await observe()).self?.position }) };
+  }, (r) => r.accepted && r.phase === 'completed' && r.room?.building === 'moss-cottage' && r.room.room === 'living' && r.place === 'g-moss-cottage.living');
   { const p = f6?.end?.p ?? (await observe()).self.position; if (p) await shots([{ name: 's6-in-the-living-room-roof-hidden', eye: [p[0] + 3, p[1] + 7, p[2] + 4], at: [p[0], p[1] + 0.8, p[2]], wait: 7000, hideRoofs: true }]); }
 
   // ---- 4. the jetty, then the canoe moored alongside it

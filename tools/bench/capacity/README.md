@@ -88,15 +88,88 @@ node bench.mjs --root /srv/sim-bench/src-<sha> --fixture /srv/sim-bench/fixtures
 
 The exact eden2 recipe for a run is `eden2/run-stageb.sh` (`run-stageb-f.sh` for part F).
 
+## Client load (`--load client`, #1945)
+
+Souls 1 to `--raw-from − 1` (default 4: three Souls) run the real client, which holds its own `serve` and `listen` and
+acts with `eden.mjs act <id>`, then `eden.mjs receipt`. The rest are raw-HTTP Souls in the bench's process, so N = 100
+is not 300 Node processes. A raw Soul speaks the client's protocol:
+
+- it fetches the catalog and the live picture once;
+- then it loops: act by catalog id (the Idempotency-Key is also the clientRef), read that act's receipt once, wait;
+- it sends the client's headers with `x-soul-client: bench/1` and its own `X-Forwarded-For`, and follows the client's
+  retry rules (a busy or stalled answer waited out for its Retry-After at most 3 times; no answer, full-jitter backoff,
+  6 tries).
+
+There is no `resolve` in the bench any more: every load reads its ids from the catalog.
+
+Before the windows every Soul walks to one of at least ten start places (Soul *i* to place *i* mod *n*), and the bench
+waits up to 300 s for those walks to end (the report counts the places reached). Two profiles (`--profile`, default `real`), both read
+from [`profiles/cadence.json`](profiles/cadence.json):
+
+| profile | gap between acts (start to start) | act mix |
+|---|---|---|
+| `real` | drawn from the act-to-act gaps of the eval's live Sonnet runs (median 61.6 s, p10 2.2 s, p90 73.0 s); the first act after the instruction-to-first-act times (median 7.4 s) | walk 48 %, sit 11 %, sit on the ground 9 %, read 15 %, eat 11 %, play music 3 %, swim 3 % |
+| `stress` | uniform 3–6 s | the earlier client load: every third act `sit-ground:here`, the rest walks and spots |
+
+A kind the world does not offer is sent as a walk and counted. The `real` cadence is an upper bound on how often a
+resident Soul acts: every Soul in those runs was in the middle of an instruction. Raw Souls each present their own
+address, so per-address limits are not exercised (#1949 tests those).
+
+`n1` (without `--short`) runs its second active window until it has 300 acts; at the `real` pace that is about four
+hours. REPORT.md adds a client-load section per run: acts by kind, act p50/p99, per-route time at p50/p99 for every try
+(client wall time, the world's `Server-Timing` and its queue), the act's `Server-Timing` parts (the queue / handler /
+wait / commit split once the world sends it, #1944), tick time from `/healthz`, ticks behind the 20 Hz schedule (the
+bench's count from one `/healthz` sample a second) and refusals by code (designed refusals by who answered, and act
+refusals as `act:<code>`).
+
+```bash
+# laptop smoke (INDICATIVE): three real and three raw Souls
+node tools/bench/capacity/bench.mjs --load client --via-launcher --arms n6 --short --out .local/bench/client-smoke
+# the measurement (#460)
+node tools/bench/capacity/bench.mjs --load client --via-launcher --arms n1,n24,n50,n100 --raw-from 4 [--profile stress] --out <dir>
+```
+
+## Load shapes (`profiles/shapes.json`, #2556)
+
+One shared, seeded description of uneven load, so every scaling measurement runs an even arm and an uneven one and
+two runs of the same shape replay the same load. The numbers are in [`profiles/shapes.json`](profiles/shapes.json),
+each with its source or marked as an estimate; they are judgement, not data, and change there with evidence, never
+in a bench. [`profiles/shapes.mjs`](profiles/shapes.mjs) turns a shape, a count of joined Souls, a window and a seed
+into a schedule:
+
+```js
+import { schedule, describe } from './profiles/shapes.mjs';
+const s = schedule('event', 100, 600, seed);   // 'uniform' takes { actSec } as a fifth argument (--act-sec)
+// s.agents[i] = { arrive, leave, stays: [[from, to)], acts: [{ at, kind, place, pick, crowd? }] }, seconds from the start
+console.log(describe(s.summary, 'event'));      // what was offered: acts a second, busiest tenth, largest burst, arrivals
+```
+
+| shape | present | rate per agent | in time | arriving and leaving | crowds | place | mix |
+|---|---|---|---|---|---|---|---|
+| `uniform` | all | equal (`--act-sec`) | today's paced loop | all from the start | none | spread | the paced loop's |
+| `everyday` | 25 % | log-normal, median 1 per 30 s, capped at 1 per 2 s | runs of 1–4 acts 2–4 s apart, then a pause | from the start | none | spread | the paced loop's |
+| `event` | 80 % | the same | the same | half ramp in over 2 min; every 5 min a tenth leave and others return | 30 % of those present act within 2 s, every 45–120 s | 60 % of walks near one named place | social: speech, gestures, sitting, short walks |
+
+The schedule is open loop: an act is due at its time whether or not the last one was answered, so a bench reports
+achieved against intended (`summary.perS` is the intended count for each second). `kind` is a kind of
+`meetup/client-soul.mjs` `catalogIds` (`walk`, `sit`, `sit-ground`, `read`, `eat`, `play-music`, `gesture`) or `say`
+(speech, sent to `SAY_PATH` with `sayBody`); `place` is `spread` (a walk target around the map), `gathered` (a walk
+target within `place.radiusM` of the bench's one named place) or null; `pick` chooses among the bench's ids for that
+kind. Agents' rates are stratified over the log-normal, so every seed carries the whole tail. At 100 joined Souls over
+10 minutes (seeds 1–40) `event` offers about 5.4 acts a second, the busiest tenth of present agents make 43 % of them
+and the largest one-second burst is 4.6 times the mean; `everyday` offers about 1.7. The `viewers` section gives
+arrival rate, waves and a heavy-tailed stay (median 60 s) for the viewer benches.
+
 ## Meetup workload (CW1, #735: 50 Souls across 10 worlds)
 
 `meetup/` is the near-term product as a workload: ten substantial worlds from `worlds/templates/` behind the
 checkout's own launcher, fifty fake-mind Souls, quiet periods and coordinated meetups. It reuses this bench's
-approach (the launcher in the path, the Soul CLI to join, raw HTTP with the CLI's requests and retry etiquette
-afterwards) without changing `bench.mjs`.
+approach (the launcher in the path, the Soul CLI to join, then #1945's raw-HTTP client Soul, `meetup/client-soul.mjs`:
+the catalog and live picture once, acts by catalog id, each act's receipt read once, no `resolve`; slopes uses it too).
 
-- `meetup/workload.mjs`: the workload as data, pure and seeded: fixtures, the two profiles (`even` = 5 per world;
-  `meetup` = 20 in world 0 and 30 across the other nine), account and address grouping (a three-Soul account in the
+- `meetup/workload.mjs`: the workload as data, pure and seeded: fixtures, the profiles (`even` = 5 per world;
+  `meetup` = 20 in world 0 and 30 across the other nine; `real100` = 10 per world, acts paced and mixed by the `real`
+  cadence of `profiles/cadence.json`, plus the meetups), account and address grouping (a three-Soul account in the
   meetup world, a three-world account, five Souls behind one network address; documentation addresses only), the
   declared demand (a rich read per Soul every 4 s; an act every 20 s cycling movement, attention, speech, a gesture, an
   interrupting act and an invitation to a shared action that the partner's driver accepts from its own stream; three
@@ -118,9 +191,8 @@ come from each Soul's own event stream (`/v1/edge/wait`, `receipt.*` events with
 activity duration is its own column. The clock check samples every world's `/healthz` tick each second against
 monotonic time at the admin rate in the world's own database; nothing is clipped or reset.
 
-Full clock comes from existing switches only, set on the launcher: `SIM_UNWATCHED_PACE=1`,
-`SIM_WORLD_IDLE_EXIT_MIN=0`, `--sleep-ms 0`. The production defaults (quarter pace unwatched, sleep, idle exit) are
-#740's subject. Eyes rendering is off: image delivery is not covered here. The run is loopback through the launcher's
+Full clock comes from existing switches only, set on the launcher: `SIM_WORLD_IDLE_EXIT_MIN=0`, `--sleep-ms 0`. Since
+#2235 these are also the defaults, and the quarter pace unwatched is gone. Eyes rendering is off: image delivery is not covered here. The run is loopback through the launcher's
 proxy with dev auth: TLS, the public proxy, Clerk and the real network are not exercised.
 
 Outputs under `--out`: `receipt.json` (source, seed, schedule sha256, fixture sha256s, configuration, coverage; no
@@ -211,13 +283,14 @@ node tools/bench/capacity/meetup/compare.mjs .local/qualify/<baseline>/capacity-
 | `inventory` | 5,000 vs 10,000 placed objects | 5 Souls registered and active, the scene and the acts |
 | `activity` | 0, 5 or 10 of 10 registered Souls active | the scene as authored |
 | `quiet` | the designated world alone, or with 9 quiet ticking worlds (CW1 fixtures 1–9, no Souls) | 5 active Souls in the designated world |
+| `walkers` (#1961, not in the default `--axis`) | 0, 25, 50 or 100 Souls each walking to another place every 8 s | 2,000 ticks with the world's tick span timers on (`SOULS_TICK_SPANS=<file>`, `world.ts`); REPORT.md tabulates tick p50/p99, each span's share, GC, snapshots and, with `--cpu-prof`, the engine step's top five functions |
 
 - **The distant inventory** (`slopes/inventory.mjs`, `cw7-distant/1`): deterministic copies of the template's own small furniture kinds, in the largest empty square at least 100 m from every authored object's edge. That is beyond sight (30 m) and go-near (60 m). The copies are applied as extra genesis batches of at most 256 ops each; the authored batches are unchanged.
 - **Per arm:**
   - boot and settle;
   - join through a loopback path-stripping proxy, because the CLI wants a `/w/<slug>` URL; the measured calls go straight to the world;
   - warm-up, then a quiet window;
-  - a per-route probe: `--probe-n` serial calls each of `here`, `observe`, `capabilities`, `resolve` and one non-moving act, one at a time and rotating over the registered Souls, each with its own CPU budget. A busy answer (`soul.slow-down`, `world.busy`) is waited out for its Retry-After, up to 3 times, as the CLI does, and the waits are counted;
+  - a per-route probe: `--probe-n` serial calls each of `here`, `observe`, `capabilities` and one non-moving act, one at a time and rotating over the registered Souls, each with its own CPU budget. A busy answer (`soul.slow-down`, `world.busy`) is waited out for its Retry-After, up to 3 times, as the CLI does, and the waits are counted;
   - an active window at CW1's per-Soul rates (a read every 4 s, an act every 20 s, one call at a time). The acts never move a Soul, so the neighbourhood is the same in every arm, and walk planning (#454) is **not** exercised.
 - **The schedule** (`cw7-slopes/2`, #951): the active window's offsets are seeded by the repeat, never the arm (`activePlan` in `slopes/report.mjs`). Within a repeat every arm replays the same phases for its first *k* Souls, so arms are compared on the same schedule, and the repeats sample different phases. The demand is strictly periodic, so a Soul's phase against the others holds for the whole window. When reads bunch, they wait for one another under the world's admission frame credit. Each `result.json` records `schedule` (the seed, each Soul's read phase, and `crowdedReadFrac`, the share of reads issued within 300 ms after another Soul's call), and REPORT.md shows the crowded share per row. Under `cw7-slopes/1`, seeded by arm, quiet10's five reads sat inside 784 ms of every period and quiet1's were spread out. In run 41972880510, a replay of those schedules through the admission frame credit, with no cost added for quiet worlds, reproduces quiet10's roughly 3× p50 and p95. A shared-schedule rerun (#443) is what confirms it.
   - **How to read it:** compare arms within a repeat. With two repeats, an absolute latency level rests on two phase samples, so read the arm-to-arm deltas, not the absolute p95s.
@@ -234,6 +307,37 @@ node tools/bench/capacity/slopes/slopes.mjs --root <built checkout> --axis inven
 - **What qualifies:** only a run on the qualifying executor that is declared quiet, full length (not `--short`) and has at least 2 repeats; every other run is labelled INDICATIVE. A failed arm or repeat is listed under "Failed runs" in REPORT.md, enters no mean (each section's `n` counts the runs its means rest on), and makes the bench exit 1.
 
 `--slice` wraps each world on its own, so a CPU quota there is per world, unlike the meetup bench. A qualifying slopes run needs no slice: it measures cost per call, not headroom.
+
+## Viewers on one world (#2308, #2511, #2512)
+
+`viewers/viewers.mjs` measures what anonymous viewers cost one Eden 2026 world (fake minds, behind the checkout's own launcher) while Souls act, from zero viewers up. Each viewer does what the web page's entry does, with no browser: it fetches the world page, the snapshot, the config and the parts the snapshot names, then holds the world's socket open. A closed socket is reopened with the product client's own backoff (`reconnectDelayMs` in `viewers/stats.mjs` mirrors `packages/client`; its test fails if the client changes). Every viewer and every Soul has its own documentation or benchmarking address.
+
+The viewers are held by `--drivers` child processes (`viewers/driver.mjs`), each with a share, so the bench reaches 10,000 viewers without one process being the limit. A viewer's socket is a raw one (`viewers/frames.mjs`): the WebSocket upgrade with compression offered, then frame headers only. It counts frames, messages and their payload bytes as sent (compressed), and never inflates or parses them; it answers pings. One viewer in a hundred (the first, then every hundredth) is the product client's own `Connection` (`packages/client`). Those full clients give first motion, the bytes they received inflated, resyncs and failed view-hash checks. Since #2512, **bytes per viewer is the compressed stream** per raw viewer (before, it was the inflated text). The full clients' inflated figure is its own column. The open-file limit and the local port range are checked at the start, and a run that would run out fails at once with what to raise.
+
+| option | meaning |
+|---|---|
+| `--viewers 0,50,200` | the arms, in rising order; `0` is the zero-viewer arm |
+| `--souls <n>` (to 100) and `--act-sec <s>` | Souls joined with the world's CLI; each acts every `s` seconds from the start of its last act (without it, 6–10 s after the last answer) |
+| `--arrive-per-sec <n>` (default 20) | the rate at which viewers arrive while fewer than the arm's count are present |
+| `--dwell-sec <median>` | each viewer leaves after a heavy-tailed stay (log-normal, sigma 1, seeded per repeat); arrivals continue all window to hold the count |
+| `--arrive-burst <n>@<s>` | `n` more viewers arrive within 5 s, `s` seconds into each window with viewers (a link was just posted); they leave by their own stay, or at the window's end |
+| `--drivers <k>` (default 1, to 16) | driver processes; viewer `i` is held by driver `i mod k` |
+| `--slow-readers <n>` | `n` more raw sockets join at each window's midpoint, read for 5 s (the join) and then stop reading, to the window's end; the report gives the world's resident memory and heap, and the launcher's memory, as the mean before they join against the peak after, per slow reader, and how many the server cut |
+| `--restart-at <s>` | `s` seconds into the first window with viewers, the world process gets SIGTERM and the launcher restarts it; the reconnect table gives the viewers back within 30 s (a new socket received its first message), later or never, where they landed (the upgrade's `x-sim-served-by`, else the world), and the world's downtime, tick and memory through it. The window needs 30 s after it |
+| `--stub` and `--stub-kb <n>` (default 50) | no world and no launcher: the drivers against `viewers/stub.mjs`, which sends each socket `n` kB/s in 10 messages a second; the timed run pins the stub to the world's cores, so the drivers' own processor use is measured alone |
+
+Per window it reports the existing columns (tick, act queue and handler time, load levels, world, launcher and driver processor use, bytes per viewer, world calls by viewers, refusals) and: viewers held, joins and leaves per second, reconnects, **first motion** (seconds from a newcomer's first socket to its first take that carries a chunk, p50 and p95; only up to 50 newcomers waiting at once read their messages' heads, and nothing else is parsed), the main thread's heap beside the process's resident memory, and acts achieved against intended. The world's log and any `stall-*.json` are kept in each repeat's folder and in the timed run's artifact.
+
+```bash
+# the timed runner (all timing): command viewers, repeats 2
+#   args: --viewers 0,50,200 --souls 24 --act-sec 10 --arrive-per-sec 20                      (even)
+#   args: --viewers 0,200 --souls 24 --act-sec 10 --dwell-sec 60 --arrive-burst 100@30        (uneven)
+#   args: --viewers 2000 --drivers 4 --slow-readers 50 --restart-at 40                       (#2512)
+#   args: --viewers 5000 --drivers 4 --stub                                                   (the drivers alone)
+```
+
+The world's own cap is 2,000 sockets (the hub's `MAX_CLIENTS`). Arms above it measure refusals until the viewer thread
+exists. On today's three-core timed runners, the drivers share one physical core with the launcher.
 
 ## Recorded baseline (2026-10-31, before the server-reliability fixes)
 

@@ -41,7 +41,7 @@ test('a change in the code shows on its page and no other', () => {
 test('every route, tool, verb and refusal code appears exactly once', () => {
   const count = (text, needle) => text.split(needle).length - 1;
   const api = routesSection(facts), mcp = toolsSection(facts), actions = actionsSection(facts);
-  assert.ok(facts.routes.length > 300 && facts.mcp.length >= 28 && facts.verbs.length > 50, 'the server answered in full');
+  assert.ok(facts.routes.length > 300 && facts.mcp.length >= 27 && facts.verbs.length > 50, 'the server answered in full');
   for (const r of facts.routes) assert.equal(count(api, `\n- \`${r.method} ${r.path}\``), 1, `${r.method} ${r.path}`);
   for (const t of facts.mcp) assert.equal(count(mcp, `\n### ${t.name}\n`), 1, t.name);
   // each table counted in its own section (sit is both an act verb and an engine verb)
@@ -49,8 +49,6 @@ test('every route, tool, verb and refusal code appears exactly once', () => {
   for (const v of facts.verbs) assert.equal(count(section('Engine verbs'), `\n| \`${v.verb}\` |`), 1, v.verb);
   for (const v of facts.edge.act.verbs) assert.equal(count(section('Act verbs'), `\n| \`${v}\` |`), 1, v);
   for (const c of facts.refusals.codes) assert.equal(count(section('Refusal codes'), `\n| \`${c.code}\` |`), 1, c.code);
-  const intents = section('Intents');
-  for (const v of facts.intentVerbs) assert.equal(count(intents, `\`${v}\``), 1, v);
   assert.ok(facts.refusals.codes.some((c) => c.code === 'conversation.not-member'), 'codes named through refuse()/fail() are collected');
   for (const e of [...facts.beside, ...facts.edge.endpoints]) assert.equal(count(api, `\n- \`${e.method} ${e.path}\``), 1, `${e.method} ${e.path}`);
   assert.ok(actions.includes('carries `alternatives`'), 'the alternatives rule is stated');

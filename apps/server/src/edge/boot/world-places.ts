@@ -20,19 +20,41 @@ export function knownBootPlaces(L:EdgeLedger,soulId?:string):KnownBootPlace[]{
   return {id:p.id,name:p.name,aliases:[...new Set([...(names[p.id]??[]),...(p.aliases??[])])],level:p.level,nativeRegion:admitted?id:null,access:p.carrier?'dynamic-carrier':admitted||god?'admitted':p.level!==0?'unsupported-floor':'scenery'};
  });
 }
+/** #2354: a Soul's walk offers, exactly as its whole menu lists them (`binds().caps.filter(walk)`: bindFocus's contract),
+ *  without building the rest of the menu (every object's actions, seats, layers: most of a far place's walk act). Other
+ *  verbs read the whole menu as before. */
+export function offersOfVerb(L:EdgeLedger,soul:EdgeSoul,verb:string):EdgeCapability[]{
+ if(verb==='walk'&&typeof L.bindFocus==='function')return L.bindFocus(soul,{ids:new Set(),verbs:new Set(['walk']),targets:new Set()}).caps;
+ return L.coreA.binds(soul).caps;
+}
 export function destinationOffers(caps:readonly EdgeCapability[],verb:string):DestinationCapability[]{return caps.filter(c=>c.verb===verb&&c.target?.kind==='place').map(c=>({id:c.id,placeId:c.target!.id,available:c.available,blocked:c.blocked}));}
 export function resolvePlaceForVerb(L:EdgeLedger,soul:EdgeSoul,input:unknown,verb='walk'){
- const caps=L.coreA.binds(soul).caps,offers=destinationOffers(caps,verb);
+ const caps=offersOfVerb(L,soul,verb),offers=destinationOffers(caps,verb);
  const places=knownBootPlaces(L,soul.soulId);
- let resolved=resolveBootPlace(input,places,offers);
+ // #2124: the tries below read only `ok` and `chosen`, so they skip the refusal's similarity hints (most of an act on a far
+ // place's id at 24 Souls: three tries, the on-demand one succeeding); a refusal returned is asked again in full, as before
+ let resolved=resolveBootPlace(input,places,offers,'auto',false);
  // F6 (SOULSIM-H): a known place the listing leaves out for distance only (a far building's room: rooms are listed within
  // 80 m) gets its one walk on demand, as words do: the capability it names is then acted as offered (see explicitPlaceCapability)
  if(!resolved.ok&&verb==='walk'&&resolved.code==='place.unwalkable'&&L.walkOnDemand){
-  const named=resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true}))),more=[...caps];
-  if(named.ok&&places.find(p=>p.id===named.chosen.place)?.access==='admitted'&&L.walkOnDemand(soul,named.chosen.place,more,new Map())){const again=resolveBootPlace(input,places,destinationOffers(more,verb));if(again.ok)resolved=again;}
+  const named=resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true})),'auto',false),more=[...caps];
+  if(named.ok&&places.find(p=>p.id===named.chosen.place)?.access==='admitted'&&L.walkOnDemand(soul,named.chosen.place,more,new Map())){const again=resolveBootPlace(input,places,destinationOffers(more,verb),'auto',false);if(again.ok)resolved=again;}
  }
- if(!resolved.ok&&verb==='walk'&&resolved.code==='place.unwalkable')return {...resolved,reason:resolved.reason+' no walk reaches it in the current offered destinations.'};
+ if(!resolved.ok)resolved=resolveBootPlace(input,places,offers);
+ // #2452: refreshing changes nothing here (the world just said what it offers now): the refusal names the nearest place a walk
+ // reaches instead, as `next`; a client whose copy is stale says to refresh itself
+ if(!resolved.ok&&verb==='walk'&&resolved.code==='place.unwalkable'){
+  const named=resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true})),'auto',false),near=named.ok?nearestOffer(L,named.chosen.place,offers):null;
+  return {...resolved,reason:resolved.reason.replace(/; refresh capabilities\.$/,'.')+` No walk reaches it from the destinations offered now${near?`; the nearest place one reaches is ${near.label} (${near.id})`:''}.`,...(near?{next:near.id}:{})};
+ }
  return resolved;
+}
+/** #2452: the offered walk whose place lies nearest the asked one (centre to centre), not the place itself. */
+function nearestOffer(L:EdgeLedger,placeId:string,offers:readonly DestinationCapability[]){
+ const centre=(id:string)=>{const p=L.places.byId.get(id)?.polygon;return p?.length?[p.reduce((s,v)=>s+v[0],0)/p.length,p.reduce((s,v)=>s+v[1],0)/p.length] as const:null;},at=centre(placeId);if(!at)return null;
+ let best:{id:string;label:string;d:number}|null=null;
+ for(const o of offers){if(o.placeId===placeId||!o.available)continue;const c=centre(o.placeId);if(!c)continue;const d=Math.hypot(c[0]-at[0],c[1]-at[1]);if(!best||d<best.d)best={id:o.id,label:L.places.byId.get(o.placeId)!.name,d};}
+ return best;
 }
 /** Identity only: for a room/waypoint whose separate native seat/route check
  * follows. It grants no action or geometric admission. */
@@ -40,7 +62,7 @@ export function lookupPlaceIdentity(L:EdgeLedger,input:unknown,soulId?:string){c
 /** Legacy go-to-object names remain distinct from authored place names. Exact
  * offered labels win over aliases, but same-stage ambiguity never picks nearest. */
 export function offeredWalkObject(L:EdgeLedger,soul:EdgeSoul,input:string){
- const q=normalizedPlaceName(input),caps=L.coreA.binds(soul).caps.filter(c=>c.verb==='walk'&&c.target?.kind==='object'),places=knownBootPlaces(L,soul.soulId);
+ const q=normalizedPlaceName(input),caps=offersOfVerb(L,soul,'walk').filter(c=>c.target?.kind==='object'),places=knownBootPlaces(L,soul.soulId);
  const exact=caps.filter(c=>normalizedPlaceName(c.label)===q),objects=exact.length?exact:caps.filter(c=>q==='the '+normalizedPlaceName(c.label));
  if(!objects.length)return null;
  const namePlaces=places.filter(p=>normalizedPlaceName(p.name)===q),aliasPlaces=places.filter(p=>p.aliases.some(a=>normalizedPlaceName(a)===q));

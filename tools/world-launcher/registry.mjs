@@ -37,6 +37,10 @@ export function slugFor(name, taken = new Set()) {
  *  `--world-heap-mb` (a default only), else 1536 MB. Eden-2026-class worlds (its template, or > 3,000 entities last seen)
  *  get at least 2048 MB: the 768 MB launcher-wide cap was what Eden 2026 hit on 10-31. */
 export const DEFAULT_WORLD_HEAP_MB = 1536, BIG_WORLD_HEAP_MB = 2048, BIG_WORLD_ENTITIES = 3000;
+/** #2444: a world may share a program with others (a shard, tools/world-launcher/shard.mjs) unless it is a fork of an old
+ *  world (its own entry point) or its registry entry says `shard: false` (the operator keeps it in a process of its own). */
+export const shardable = (w) => !!w && !w.fork && w.shard !== false;
+
 export function worldHeapMb(w, fallback = 0) {
   if (Number.isInteger(w?.worldHeapMb) && w.worldHeapMb >= 256) return w.worldHeapMb;
   const base = Number.isInteger(fallback) && fallback >= 256 ? fallback : DEFAULT_WORLD_HEAP_MB;
@@ -89,6 +93,9 @@ export class Registry {
   }
   update(slug, patch) { const w = this.get(slug); if (!w) return null; Object.assign(w, patch); this.save(); return w; }
   remove(slug) { this.worlds = this.worlds.filter((w) => w.slug !== slug); this.save(); }
+  /** #2540: the operator's site switches, kept in worlds.json (`site`; absent = on), so they survive a restart and go into the backup. */
+  site() { return { uploads: this.extra.site?.uploads !== false, creation: this.extra.site?.creation !== false }; }
+  setSite(patch) { this.extra = { ...this.extra, site: { ...this.site(), ...patch } }; this.save(); return this.site(); }
   worldDir(slug, entry = this.get(slug)) { return join(this.dataDir, 'worlds', entry ? dataSlugOf(entry) : slug); }
   save() {
     if (this.frozen) return;   // handing over to a newer launcher (keeper.mjs): it owns the file now

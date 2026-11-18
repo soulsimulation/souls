@@ -9,6 +9,12 @@ import type {CarrierPose} from './WorldBroadcast.ts';
 export function isRideCarrierDef(def: {components?: Record<string, unknown>; tags?: readonly string[]} | undefined): boolean {
   return !!def && (!!def.components?.carrier || (def.tags ?? []).includes('carrier'));
 }
+/** #2198: a ride carrier whose thing has its own cars (a big wheel's hanging gondolas, kit role `gondola`): the rider goes
+ *  round in one of them (the wheel turns to carry it, gen-mesh/motion.ts), so no car is drawn for it. */
+export function hasOwnCars(def: {make?: object} | undefined): boolean {
+  const shapes = ((def?.make as {args?: {shapes?: unknown}} | undefined)?.args)?.shapes;
+  return Array.isArray(shapes) && shapes.some(s => (s as {role?: unknown} | null)?.role === 'gondola');
+}
 const ID = /^[a-z0-9][a-z0-9._-]{0,99}$/;
 /** The native carrier id a god ride installs as (mirrors installGodRides): its name when that is a free place-style id,
  *  else `ride-<thing id>`. */

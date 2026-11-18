@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Fresh, fake dev worlds only. Real Chrome/input, both owner boxes at DPR 1/2,
-// and a scripted background CLI listener/ack loop (no model calls).
+// and a scripted background CLI listener/ack loop (no model calls). The Soul side
+// drives eden.mjs and tests `listen` once: one background `listen` exits on the
+// owner's note, then the agent acks it.
 // node tools/test-harness/inbox-walk.mjs <absolute-output-dir> [port=5960]
 import assert from 'node:assert/strict';
 import {mkdirSync, writeFileSync, rmSync} from 'node:fs';
@@ -18,7 +20,6 @@ const port = Number(process.argv[3] ?? 5960);
 if (!Number.isInteger(port) || port < 5960 || port > 5968) throw Error('This lane owns ports 5960–5969 only');
 mkdirSync(out, {recursive: true});
 const {chromium} = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test');
-process.env.EDGE_CLI_FILE = resolve(root, 'tools/world-launcher/soul/eden-agent.mjs');
 process.env.EDGE_SKILL_FILE = resolve(root, 'tools/world-launcher/soul/skill.md');
 const report = {startedAt: new Date().toISOString(), status: 'running', runs: []};
 const running = new Set();
@@ -62,12 +63,16 @@ try {
       mkdirSync(godDir); mkdirSync(soulDir);
       writeFileSync(resolve(godDir, '.eden-god.json'), JSON.stringify({world: base, token: god}), {mode: 0o600});
       writeFileSync(resolve(soulDir, '.eden-agent.json'), JSON.stringify({world: base, token: soulToken, soul: soul.id, mode: 'edge'}), {mode: 0o600});
-      for (const [dir, name, route] of [[godDir, 'eden-god.mjs', '/god/eden-god.mjs'], [soulDir, 'eden-agent.mjs', '/eden-agent.mjs']]) {
+      for (const [dir, name, route] of [[godDir, 'eden-god.mjs', '/god/eden-god.mjs'], [soulDir, 'eden.mjs', '/eden.mjs']]) {
         const download = await fetch(base + route); assert.equal(download.status, 200);
         writeFileSync(resolve(dir, name), await download.text());
       }
       const entrySkill = await (await fetch(base + '/SKILL.md')).text();
-      assert.match(entrySkill, /eden-god\.mjs listen/); assert.match(entrySkill, /eden-agent\.mjs listen/);
+      assert.match(entrySkill, /eden-god\.mjs listen/);
+      // Soul mode is a pointer to the world's current instructions and skill, not a command list.
+      const soulMode = entrySkill.slice(entrySkill.indexOf('## Soul mode'));
+      assert.ok(soulMode.includes(`${base}/instructions.md`) && soulMode.includes(`${base}/skill.md`), 'Soul mode points at /instructions.md and /skill.md');
+      assert.doesNotMatch(soulMode, /node eden/);
       await page.goto(`${base}?dev=1#soul/${soul.id}`, {waitUntil: 'domcontentloaded'});
       await page.locator('[data-agent-message="soul"]').waitFor({state: 'visible', timeout: 90000});
       run.renderer = await page.evaluate(() => {
@@ -110,7 +115,7 @@ try {
       await both('acknowledged', 'acknowledged');
       for (const [kind, dir, cli, ownerPath, previous] of [
         ['god', godDir, resolve(godDir, 'eden-god.mjs'), '/v1/god/inbox', godMessage],
-        ['soul', soulDir, resolve(soulDir, 'eden-agent.mjs'), `/v1/edge/owner/${soul.id}/inbox`, soulMessage],
+        ['soul', soulDir, resolve(soulDir, 'eden.mjs'), `/v1/edge/owner/${soul.id}/inbox`, soulMessage],
       ]) {
         const child = spawn(process.execPath, [resolve(root, cli), 'listen', '--after', previous.id], {cwd: dir, env: process.env, stdio: ['ignore', 'pipe', 'pipe']});
         running.add(child);
@@ -123,8 +128,10 @@ try {
         await send(kind, `Please confirm you are listening, ${kind}.`);
         await Promise.race([finish, new Promise((_, reject) => {const t = setTimeout(() => reject(Error(`${kind} listener exceeded 10 seconds`)), 10000); t.unref();})]);
         running.delete(child); assert.equal(child.exitCode, 0, `${kind} CLI failed: ${stderr.slice(0, 400)}`);
-        const response = JSON.parse(stdout); assert.equal(response.inbox.latest.state, 'delivered');
-        const ack = spawn(process.execPath, [resolve(root, cli), 'ack', response.inbox.latest.id, 'Listening.'], {cwd: dir, env: process.env, stdio: ['ignore', 'pipe', 'pipe']});
+        // eden-god.mjs prints the inbox; eden.mjs prints the wake, its new messages in `messages`.
+        const response = JSON.parse(stdout), note = kind === 'god' ? response.inbox.latest : response.messages[0];
+        if (kind === 'god') assert.equal(note.state, 'delivered'); else assert.equal(note.text, `Please confirm you are listening, ${kind}.`);
+        const ack = spawn(process.execPath, [resolve(root, cli), 'ack', note.id, 'Listening.'], {cwd: dir, env: process.env, stdio: ['ignore', 'pipe', 'pipe']});
         running.add(ack); let ackError = ''; ack.stderr.on('data', d => ackError += d); ack.stdout.resume();
         const [code] = await once(ack, 'exit'); running.delete(ack); assert.equal(code, 0, ackError.slice(0, 400));
         run.listenerMs[kind] = Date.now() - at; assert.ok(run.listenerMs[kind] < 10000);

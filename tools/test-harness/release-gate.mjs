@@ -412,7 +412,8 @@ export function compareRuns(baseline, candidate, manifest, candidateSourceFiles 
       }
       if (t.status === 'skip' || t.status === 'todo') {
         const entry = q.get(key(step, t.id));
-        if (before?.status !== t.status || before.directive !== t.directive || !entry || entry.status !== t.status) unexpectedSkips.push({ step, id: t.id, status: t.status });
+        // a test new since the baseline is expected to skip only when quarantine.json lists it, with its reason
+        if ((before && (before.status !== t.status || before.directive !== t.directive)) || !entry || entry.status !== t.status) unexpectedSkips.push({ step, id: t.id, status: t.status });
         else quarantined.push({ step, id: t.id, reason: entry.reason, owner: entry.owner, status: t.status });
       }
     }
@@ -681,7 +682,11 @@ export function cacheAdd(runDir, { root = ROOT, cacheDir = defaultCacheDir(root)
     const harnessTree = gitAt(root, 'rev-parse', `${meta.harnessRef}:tools/test-harness`);
     const archive = execFileSync('git', ['-C', root, 'archive', '--format=tar.gz', meta.harnessRef, 'tools/test-harness'], { maxBuffer: MAX_BUFFER });
     const manifest = JSON.parse(execFileSync('git', ['-C', root, 'show', `${meta.harnessRef}:tools/test-harness/quarantine.json`], { maxBuffer: MAX_BUFFER }));
-    run = readRun(runDir, { schemaVersion: 1, sourceSha: meta.sourceSha, harnessRef: meta.harnessRef, harnessTree, harnessArchiveSha256: sha256(archive), node: meta.node }, manifest, REQUIRED_STEPS, { root });
+    // A steps-only run (a CI-evidence gate's baseline, #1463) is validated on exactly its steps and stored under the key
+    // naming them, so only a gate that executes the same steps reads it; it is never read as a full run.
+    const only = Array.isArray(meta.only) && meta.only.length ? meta.only : null;
+    if (only && only.some(step => !REQUIRED_STEPS.includes(step))) throw Error(`steps-only run names an unknown step: ${only.filter(step => !REQUIRED_STEPS.includes(step)).join(', ')}`);
+    run = readRun(runDir, { schemaVersion: 1, sourceSha: meta.sourceSha, harnessRef: meta.harnessRef, harnessTree, harnessArchiveSha256: sha256(archive), node: meta.node, ...(only && { only }) }, manifest, only || REQUIRED_STEPS, { root });
     // On its own terms, the run must pass as a gate baseline: every failure, skip and TODO has its exact quarantine,
     // no test file failed to load and no V6 scenario failed (compareRuns of the run with itself, on its own source tree).
     const sourceFiles = new Set(gitAt(root, 'ls-tree', '-r', '--name-only', meta.sourceSha).split('\n'));
@@ -700,7 +705,7 @@ export function cacheAdd(runDir, { root = ROOT, cacheDir = defaultCacheDir(root)
       provenance = { via: 'cache-add', receipt: receiptPath, receiptSha256: sha256(receiptBytes), label };
     }
     if (run.errors.length) return { stored: false, reason: run.errors.join('; ') };
-    return storeCache(cacheDir, run, provenance, root);
+    return storeCache(cacheDir, run, { ...provenance, ...(only && { ciEvidence: true, only }) }, root);
   } catch (e) { return { stored: false, reason: e.message }; }
 }
 
@@ -718,7 +723,6 @@ export const SCOPE_RULES = [
   // Owned music inputs feed the generated web playlist as well as package composition checks.
   ['packages/music/', ['V1', 'V2', 'V3-bundle', 'V3-packages', 'V4']],
   ['packages/', ['V1', 'V3-packages', 'V3-mars-engine', 'V3-walk', 'V5']],
-  ['tools/edge-skill/', ['V3-client-cli']],
   ['tools/client-eval/', ['V3-client-cli']],
   ['tools/world-launcher/', ['V3-launcher-unit', 'V6']],
   ['tools/god-skill/', ['V6']],
@@ -760,7 +764,7 @@ export const CI_COVERED = {
   'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck', defs: ['package.json#typecheck'], tests: false },
   'V2-build-root': { jobs: ['types-web'], command: 'pnpm --filter @souls/web build', defs: [], tests: false },
   'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client', defs: ['package.json#test:client'], tests: true },
-  'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs', defs: [], tests: true },
+  'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs tools/world-launcher/soul/*.test.mjs', defs: [], tests: true },
   'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh', defs: ['tools/test-harness/web-suite.sh', 'tools/test-harness/web-loader.mjs'], tests: true },
   // every server shard (SERVER_SHARDS at the candidate, .github/scripts/server-test-files.mjs) plus the latency job
   'V5-server-full': { jobs: ['server-*', 'latency'], command: "import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';",
@@ -821,11 +825,18 @@ export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id)
     && r.path === '.github/workflows/ci.yml' && (r.event !== 'push' || r.head_branch === 'main'));
   // a push to main runs every job; prefer it, then the newest. A run that went green on a re-run of failed jobs counts
   // (it ran at this sha); its attempt is recorded.
-  const run = ok.sort((a, b) => (a.event === 'push') - (b.event === 'push') || a.id - b.id).at(-1);
+  let run = ok.sort((a, b) => (a.event === 'push') - (b.event === 'push') || a.id - b.id).at(-1);
   if (!run) return none(`no successful push/merge_group ci.yml run at ${sha} (${runs.length} run(s) at this sha)`);
   let jobs;
   try { jobs = api(`repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []; }
   catch (e) { return none(`could not read the jobs of CI run ${run.id}: ${String(e.message).split('\n')[0]}`); }
+  // a push the merge queue covered (.github/scripts/ci-main.mjs) ran no qualify job: its merge_group run is the evidence
+  const queued = ok.filter(r => r.event === 'merge_group').at(-1);
+  if (queued && jobs.some(j => j.name === 'merge-group-covered' && j.conclusion === 'success')) {
+    run = queued;
+    try { jobs = api(`repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []; }
+    catch (e) { return none(`could not read the jobs of CI run ${run.id}: ${String(e.message).split('\n')[0]}`); }
+  }
   const conclusion = Object.fromEntries(jobs.map(j => [j.name, j.conclusion])), jobId = Object.fromEntries(jobs.map(j => [j.name, j.id]));
   const ciYml = ciDefinition('ci.yml', file) || '';
   const shards = Number(/export const SERVER_SHARDS = (\d+)/.exec(file('.github/scripts/server-test-files.mjs') || '')?.[1]);
@@ -944,6 +955,12 @@ export async function main(args = process.argv.slice(2), deps = {}) {
       harness: { ref: harnessRef, tree: harnessTree, suiteTree: suite, archiveSha256: sha256(harnessArchive) }, quarantineSha256: sha256(manifestBytes), renamesSha256: sha256(renamesBytes), node, exclusions: EXPECTED_SKIP, scopeExclusions: manifest.scopeExclusions };
     const identity = { schemaVersion: 1, harnessRef, harnessTree, harnessArchiveSha256: sha256(harnessArchive), node };
     const scopeMode = options['--scope'] || 'full';
+    // #1935: the release owner stamps the Soul client once per release; a release head's gate runs stamp.mjs --check on its files
+    const soulFile = path => { try { return execFileSync('git', ['-C', root, 'show', `${candidateSha}:tools/world-launcher/soul/${path}`], { maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
+    if (scopeMode === 'full' && soulFile('SOURCES.json')) {
+      const off = (await import(pathToFileURL(join(root, 'tools/world-launcher/soul/stamp.mjs')).href)).problems(soulFile);
+      if (off.length) throw Error(`client stamp: ${off.join('; ')} (the release owner runs node tools/world-launcher/soul/stamp.mjs <version>)`);
+    }
     const scope = scopeMode === 'full' ? { resolved: 'full', steps: [...REQUIRED_STEPS] }
       : scopeFor(git('diff', '--name-only', baselineSha, candidateSha).split('\n'));
     // A full gate takes CI's successful run at the candidate as evidence for the steps CI runs identically (#1463)

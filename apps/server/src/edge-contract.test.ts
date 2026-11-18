@@ -121,14 +121,15 @@ test('lasting marks: make a sign while walking (not interrupted), others read an
  const bad=(await f.call(0,'POST','/v1/edge/act',{capability:'make:project',params:{}})).json;assert.equal(bad.code,'capability.params');
 });
 
-test('PM-R057 vocabulary over HTTP: natural names resolve (resolved), unknown gets did_you_mean, object capabilities act via /act',async t=>{
+// #1911: an act is an offered id; the words reading ("go to <name>" resolved, did_you_mean for an unknown id) is retired
+// here: the strict gate refuses words, and an unknown id as it is (#1948). The receipt and refusal code checks stay.
+test('PM-R057 over HTTP: the walk id of a place acts, an unknown id is refused, object capabilities act via /act',async t=>{
  const f=await setup(t),caps=(await f.call(0,'GET','/v1/edge/capabilities')).json.capabilities as any[];
  const place=caps.find(c=>c.verb==='walk'&&c.available&&c.target?.kind==='place'&&/\s/.test(c.label))!;assert.ok(place,'a walk target with a multi-word name');
- const natural=(await f.call(0,'POST','/v1/edge/act',{capability:'go to '+place.label.toLowerCase()})).json;
- assert.equal(natural.accepted,true,JSON.stringify(natural));assert.equal(natural.receipt.capability,place.id);assert.deepEqual([natural.resolved.from,natural.resolved.to],['go to '+place.label.toLowerCase(),place.id]);
+ const natural=(await f.call(0,'POST','/v1/edge/act',{capability:place.id})).json;
+ assert.equal(natural.accepted,true,JSON.stringify(natural));assert.equal(natural.receipt.capability,place.id);
  const unknown=(await f.call(0,'POST','/v1/edge/act',{capability:'walk:the-moon'})).json;
- assert.deepEqual([unknown.accepted,unknown.code],[false,'capability.unknown']);assert.ok(unknown.did_you_mean.length>=1&&unknown.did_you_mean.every((d:any)=>caps.some(c=>c.id===d.id)),JSON.stringify(unknown));
- assert.ok(unknown.did_you_mean.every((d:any)=>d.id.startsWith('walk:')),'same verb first');
+ assert.deepEqual([unknown.accepted,unknown.code],[false,'capability.unknown']);
  f.ledger.comms!.objects.create({id:'talk-1',kind:'presentation',name:'A talk',placeId:place.target.id,params:{title:'Hello',startsAtTick:f.host.engine.world.tick+20*600,capacity:5}});
  const reserve=(await f.call(1,'GET','/v1/edge/capabilities')).json.capabilities.find((c:any)=>c.id==='object:talk-1:reserve');assert.ok(reserve,'listed');
  const r=(await f.call(1,'POST','/v1/edge/act',{capability:'object:talk-1:reserve'})).json;assert.equal(r.accepted,true,JSON.stringify(r));assert.deepEqual([r.receipt.phase,r.receipt.object],['completed','talk-1']);

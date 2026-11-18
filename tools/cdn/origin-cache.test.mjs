@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { originCacheClass, originCacheProblem } from './origin-cache.mjs';
+import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { cdnCacheEligible, cdnRuleExpression, originCacheClass, originCacheProblem } from './origin-cache.mjs';
+import { checkSoulGame } from '../world-launcher/deploy/caddy/check-soul-game.mjs';
+import { EDGE_SNAPSHOT_CACHE } from '../../apps/server/src/edge-snapshot.ts';
 
 const IMM = 'public, max-age=31536000, immutable', DAYSWR = 'public, max-age=86400, stale-while-revalidate=604800';
 const r = (path, cc, cf = 'HIT', status = 200) => ({ path, status, headers: { ...(cc ? { 'cache-control': cc } : {}), ...(cf ? { 'cf-cache-status': cf } : {}) } });
@@ -54,4 +58,85 @@ test('legacy core GLBs may revalidate while uploaded GLBs and other hash objects
   assert.match(originCacheProblem(r(glb, 'public, no-cache, immutable')), /mutable asset view/);
   assert.match(originCacheProblem(r(png, VIEW, 'DYNAMIC')), /immutable/);
   assert.equal(originCacheProblem(r(png, IMM, 'HIT')), null);
+});
+
+// --- E2: the CDN cache rule ------------------------------------------------------------------------------------------
+// One sample path per hashed and stable class, in soul.game's root-launcher form, with the policy the origin sends it.
+const RULE_SAMPLES = [
+  ['/assets/LiveWorld-BN26MIPk.js', IMM],                                    // Vite bundle
+  [`/assets/${SHA}.png`, IMM], [`/w/eden/assets/${SHA}.png`, IMM],           // content-addressed stored objects
+  ['/w/eden/v1/world/part/8cd8bf3068833a807af5426e595f3290', IMM],           // snapshot part
+  [`/w/eden/art/${SHA}.png`, IMM],                                           // hung art
+  ['/w/eden/v1/souls/s_1/profile-photo/0123456789abcdef', IMM],              // profile photo
+  ['/modular/humanoid/kit.json', DAYSWR], ['/mars-assets/draco/draco_decoder.wasm', DAYSWR], ['/world-assets/eden/sky.json', DAYSWR],
+  ['/w/eden/fonts/inter.woff2', DAYSWR],
+];
+test('E2 A1: every hashed and stable class is eligible under the documented rule; HIT/MISS accepted, DYNAMIC/BYPASS refused', () => {
+  const seen = new Set();
+  for (const [path, cc] of RULE_SAMPLES) {
+    const cls = originCacheClass(path); assert.ok(cls === 'hashed' || cls === 'stable', `${path}: ${cls}`); seen.add(cls);
+    assert.equal(cdnCacheEligible(path), true, `${path} is not eligible under the rule`);
+    for (const cf of ['HIT', 'MISS', 'EXPIRED', 'REVALIDATED']) assert.equal(originCacheProblem(r(path, cc, cf)), null, `${path} ${cf}`);
+    for (const cf of ['DYNAMIC', 'BYPASS']) assert.match(originCacheProblem(r(path, cc, cf)), new RegExp(`Cloudflare ${cf}`), `${path} ${cf}`);
+  }
+  assert.deepEqual([...seen].sort(), ['hashed', 'stable']);
+  assert.equal(cdnCacheEligible('/w/eden/v1/world/snapshot?defs=ref&cols=1&v=12.3.4'), true, 'the snapshot (the origin keeps it no-store unless keyed)');
+  // nothing that can answer per user, nor the page and the lists (E3's)
+  for (const p of ['/', '/w/eden/', '/w/eden', '/v1/config', '/w/eden/v1/config', '/v1/site/worlds', '/__sim/healthz', '/__sim/thumbs/eden.webp', '/w/eden/ws', '/w/eden/v1/edge/act',
+    '/w/eden/v1/edge/events', `/w/eden/v1/god/assets/${SHA}`, '/w/eden/v1/god/fonts/x.woff2', '/w/eden/v1/art/media', '/v1/me', `/w/eden/asset-view/${SHA}.glb`]) assert.equal(cdnCacheEligible(p), false, p);
+});
+test('E2 A3: docs/operations/cdn.md gives the rule expression verbatim', () => {
+  const doc = readFileSync(new URL('../../docs/operations/cdn.md', import.meta.url), 'utf8');
+  assert.ok(doc.includes(cdnRuleExpression()), 'cdn.md does not carry cdnRuleExpression(): paste the current one');
+});
+
+const listen = (s) => new Promise((yes) => s.listen(0, '127.0.0.1', () => yes({ url: `http://127.0.0.1:${s.address().port}`, close: () => { s.closeAllConnections(); s.close(); } })));
+/** A stand-in CDN: keeps a GET only on a path `eligible` allows, for the origin's s-maxage or max-age (none, no-store,
+ *  private or 0: not kept, BYPASS); anything else passes through as DYNAMIC. Cloudflare's cf-cache-status words. */
+function standInCdn(origin, eligible) {
+  const kept = new Map();
+  return listen(createServer(async (req, res) => {
+    const send = (st, h, body, cf, extra = {}) => res.writeHead(st, { ...h, 'cf-cache-status': cf, ...extra }).end(body);
+    const hit = kept.get(req.url);
+    if (eligible(req.url) && hit && hit.until > Date.now()) return send(hit.status, hit.headers, hit.body, 'HIT', { age: String(Math.floor((Date.now() - hit.at) / 1000)) });
+    const o = await fetch(origin + req.url, { headers: { accept: req.headers.accept ?? '*/*' } }), body = Buffer.from(await o.arrayBuffer());
+    const cc = o.headers.get('cache-control') ?? '', headers = { 'content-type': o.headers.get('content-type') ?? '', ...(cc ? { 'cache-control': cc } : {}) };
+    if (!eligible(req.url)) return send(o.status, headers, body, 'DYNAMIC');
+    const ttl = Number((/s-maxage=(\d+)/.exec(cc) ?? /max-age=(\d+)/.exec(cc) ?? [0, 0])[1]);
+    if (o.status !== 200 || !cc || /no-store|private/.test(cc) || ttl <= 0) return send(o.status, headers, body, 'BYPASS');
+    kept.set(req.url, { status: o.status, headers, body, at: Date.now(), until: Date.now() + ttl * 1000 });
+    send(o.status, headers, body, 'MISS');
+  }));
+}
+/** The origin as the launcher answers these paths: the page (never cached) with the snapshot key and parts, the bundle,
+ *  a part, a stable file, and the snapshot (cacheable only under the current key, as edge-snapshot.ts does). */
+function standInOrigin({ staleCacheable = false } = {}) {
+  const KEY = '41.2.7', PART = 'ab'.repeat(16);
+  return listen(createServer((req, res) => {
+    const [path, q = ''] = req.url.split('?'), v = new URLSearchParams(q).get('v');
+    const ok = (type, cc, body) => res.writeHead(200, { 'content-type': type, 'cache-control': cc }).end(body);
+    if (path === '/w/eden/') return ok('text/html', 'no-cache', `<!doctype html><head><script>window.__simSnapshotKey="${KEY}";window.__simSnapshotParts=["${PART}","${'cd'.repeat(16)}"]</script><script type="module" crossorigin src="/assets/index-AbCd1234.js"></script></head>`);
+    if (path === '/assets/index-AbCd1234.js') return ok('text/javascript', IMM, 'export {}');
+    if (path === `/w/eden/v1/world/part/${PART}`) return ok('application/json', IMM, '{}');
+    if (path === '/mars-assets/draco/draco_decoder.wasm') return ok('application/wasm', 'public, max-age=86400', 'wasm');
+    if (path === '/w/eden/v1/world/snapshot') return ok('application/json', v === KEY || staleCacheable ? EDGE_SNAPSHOT_CACHE : 'no-store', '{"tick":1}');
+    res.writeHead(404).end();
+  }));
+}
+const cacheCheck = async (eligible, opts) => {
+  const o = await standInOrigin(opts), cdn = await standInCdn(o.url, eligible);
+  try { return await checkSoulGame({ origin: cdn.url, points: ['cache'], waitMs: 3000 }); } finally { cdn.close(); o.close(); }
+};
+test('E2 A2: the check\'s cache section passes through a stand-in CDN configured from the documented rule', async (t) => {
+  const r = await cacheCheck(cdnCacheEligible);
+  t.diagnostic(`check-soul-game --points cache:\n${r.seen.map((x) => `  ${x}`).join('\n')}\n${r.pass ? 'PASS' : 'FAIL'}`);
+  assert.equal(r.pass, true, r.problems.join('\n'));
+  assert.equal(r.seen.length, 5, r.seen.join('\n'));
+});
+test('E2 A2: the same check fails without the rule (the CDN\'s by-extension default) and when a stale key is kept', async () => {
+  const byExtension = (u) => /\.(?:js|css|png|jpg|wasm|woff2?)$/.test(u.split('?')[0]);
+  const d = await cacheCheck(byExtension);
+  assert.deepEqual(d.problems.map((p) => /^cache: (\w+)/.exec(p)?.[1]), ['part', 'snapshot'], d.problems.join('\n'));
+  const s = await cacheCheck(cdnCacheEligible, { staleCacheable: true });
+  assert.equal(s.problems.length, 1, s.problems.join('\n')); assert.match(s.problems[0], /stale key answered HIT/);
 });

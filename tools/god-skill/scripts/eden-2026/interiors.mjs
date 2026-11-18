@@ -113,7 +113,7 @@ export const HOUSES = [['eden-house-3', 0], ['eden-house-4', 1]].flatMap(([h, v]
     l('armchair', 'armchair', [-2.7, -0.4], E, { params: { fabric: v ? C.rose : C.ochre } }),
     l('living-rug', 'rug', [-3.95, -0.4], N, { params: { border: v ? '#6a4a7a' : C.navy, field: C.cream } }),
     l('floor-lamp', 'floor-lamp', [-2.5, -1.25], N), l('living-pendant', 'eden-pendant@1', [-3.95, -0.4], N),
-    v ? l('easel', 'easel', [2.9, -0.7], PI * 0.85) : l('piano', 'piano', [2.9, -0.95], N),
+    v ? l('easel', 'easel', [2.9, -0.7], -0.47) : l('piano', 'piano', [2.9, -0.95], N),   // the easel faces the room (#1871)
     v ? l('plan-chest', 'dresser', [4.6, -1.15], N) : l('music-stool', 'stool', [2.9, 0.15], N),
     l('tall-shelf', 'bookcase', [4.7, 1.2], S, { params: { sx: 0.9, sy: 1 } }), l('plant', 'potted-plant', [-1.6, 1.15], N, { params: { sy: 1.4 } }),
     b('bed', 'bed', [-0.55, 0.35], N, { params: { quilt: v ? C.teal : C.ochre } }), b('wardrobe', 'wardrobe', [0.55, -1.25], N, { params: { wood } }),

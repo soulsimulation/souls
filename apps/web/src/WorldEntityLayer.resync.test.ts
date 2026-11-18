@@ -153,3 +153,18 @@ test('a child of a newly created surface parent keeps ordinary God creation easi
   f.layer.applyEdge([{type:'edge',kind:'world-diff',seq:11,by:'god',diff:{upserts:[parent,child],removes:[],defs:[],tiles:[]}} as never]);
   const d=f.d(child.id)!;assert.equal(d.obj.position.y,d.to.p.y+40);assert.equal(d.obj.scale.x,.2);assert.equal(d.dur,2.5);
 });
+
+// #1809: native completion provenance is persisted on the entity; the envelope alone is not authority.
+for(const def of ['core/chair@2','core/bowl@2'])for(const by of ['engine','god'])test(`ground ${def} creation preserves ${by} provenance through socket and resync`,async t=>{
+ const f=await fixture();t.after(()=>f.layer.dispose());
+ const r=applyBatch(f.model,{ops:[{op:'place',def,name:'crafted-output',p:[8,4],r:.7}]},by,3);assert.equal(r.result.accepted,true,JSON.stringify(r.result));
+ const child=structuredClone(f.model.get('crafted-output')!),expected=f.model.worldPose(child);assert.equal(child.by,by);f.model.delete(child.id);const before=plain(f.model,10);
+ f.layer.applyEdge([{type:'edge',kind:'world-diff',seq:11,by:'engine',diff:{upserts:[child],removes:[],defs:[],tiles:[]}} as never]);
+ const verify=()=>{const d=f.d(child.id)!;if(by==='engine'){assert.deepEqual(d.obj.position.toArray(),[expected.x,0,expected.z]);assert.equal(d.obj.scale.x,1);assert.ok(d.dur<.01);f.frame();assert.deepEqual(d.obj.position.toArray(),[expected.x,0,expected.z]);}else{assert.equal(d.obj.position.y,40);assert.ok(Math.abs(d.obj.scale.x-.2)<1e-12);assert.equal(d.dur,2.5);}};verify();
+ f.model.delete(child.id);(f.inner as unknown as {unload(id:string):void}).unload(child.id);const next=plain(f.model,12);next.entities.push(child as never);await f.inner.applyDelta(diffSnapshots(before,next),new Set(),f.inner.signal);verify();
+});
+test('native ground output keeps existing construction refinement priority',async t=>{
+ const f=await fixture();t.after(()=>f.layer.dispose());const child={id:'native-refinement',name:'native-refinement',def:'core/chair@2',in:{parent:'world'},p:[8,4],by:'engine',born:0,v:1} as Entity;
+ (f.inner as unknown as {sites:{refinement(e:Entity,m:WorldModel):{scale:number;seconds:number}|null}}).sites.refinement=()=>({scale:.4,seconds:.7});
+ f.layer.applyEdge([{type:'edge',kind:'world-diff',seq:11,by:'engine',diff:{upserts:[child],removes:[],defs:[],tiles:[]}} as never]);const d=f.d(child.id)!;assert.equal(d.obj.position.y,0);assert.equal(d.obj.scale.x,.4);assert.equal(d.dur,.7);
+});

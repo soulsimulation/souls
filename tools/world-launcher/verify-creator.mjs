@@ -15,7 +15,7 @@ try {
     clerkIssuer: process.env.CLERK_ISSUER_URL ?? '', clerkPublishableKey: process.env.CLERK_PUBLISHABLE_KEY ?? '',
     clerkAuthorizedParties: (process.env.CLERK_AUTHORIZED_PARTIES ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     accountRegistryPath: process.env.ACCOUNT_REGISTRY_PATH, publicUrl: process.env.PUBLIC_URL,
-    worldId: 'creator-verifier', adminEmails: [], inviteRequired: false }, db);
+    worldId: 'creator-verifier', adminEmails: [], inviteRequired: false, env: process.env }, db);   // #2389: Auth reads its world's env
   await auth.init();
   const account = await auth.accountFromToken(token);
   id = account?.identity.id ?? null;

@@ -78,6 +78,19 @@ test('A1: a refused or unoffered face still speaks, and says so; nothing is retr
   assert.deepEqual(writes(two.seen).slice(1), [['say', 'Hello']]);
 });
 
+// #1981: in the eight-hour run a seat read a refused turn as failed speech. Delivered speech exits 0 and says so; speech the
+// world refused still exits non-zero.
+test('#1981 A1: a refused face exits 0 with a note that the speech went out; refused speech exits non-zero', async t => {
+  const far = await world(t), f = await far.cli('say', 'Hello', '--to', 'Zed');
+  assert.equal(f.code, 0, f.err); assert.equal(f.json.said.id, 'sp_1');
+  assert.equal(f.json.note, 'The speech went out (exit 0); only the turn toward Zed was refused (face.not-offered). Not a failure.');
+  const near = await world(t), n = await near.cli('say', 'Hello', '--to', 'Bo');
+  assert.equal(n.json.note, undefined, 'a face that was accepted needs no note');
+  const shut = await world(t, {sayReply: () => [409, {error: {code: 'say.refused', message: 'You cannot speak here.'}}, {}]});
+  const s = await shut.cli('say', 'Hello', '--to', 'Zed');
+  assert.notEqual(s.code, 0, 'speech that did not go out is a failure'); assert.match(s.err, /say/);
+});
+
 test('A2: a refused gesture is reported once; a bow that would stand a seated Soul waits for --stand-ok', async t => {
   const w = await world(t, {refuse: new Set(['cheer:here'])}), r = await w.cli('say', 'Bravo', '--to', 'Bo', '--gesture', 'cheer');
   assert.equal(r.code, 0); assert.equal(r.json.gestured.accepted, false); assert.equal(r.json.gestured.code, 'gesture.too-far');

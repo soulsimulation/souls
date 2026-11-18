@@ -17,6 +17,7 @@ import { Db } from './db.ts';
 import { optionsFor } from './deck.ts';
 import { initKernel, replayKernel } from './fold.ts';
 import { WorldHost, replayFromGenesis } from './world.ts';
+import { repairReader } from './world-factory.ts';
 import {testPort} from '../test/test-port.ts';
 
 if (!marsAvailable()) test('the shell on the Mars engine (skipped: no Mars checkout on this machine)', { skip: true }, () => {});
@@ -78,7 +79,7 @@ else {
   assert.ok(Number.isInteger(PORT) && PORT >= 1024 && PORT <= 65535,'explicit valid fixture port');
   assert.ok(PORT < 4930 || PORT > 4970,'TEST_MARS_PORT must be outside 4930-4970 (release listeners)');
   const BASE = `http://127.0.0.1:${PORT}`;
-  let proc: ChildProcess;let fixtureReady=false;
+  let proc: ChildProcess;let fixtureReady=false;let fixtureData='';
   const fixtureBuild=`isolated-mars-test-${process.pid}`,connections=new Set<Connection>();
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const client = () => { assert.ok(fixtureReady,'owned fixture must be ready before WS');const c = new Connection(`ws://127.0.0.1:${PORT}/ws`, async () => null, {}, (u) => new WebSocket(u) as any); connections.add(c);c.connect(); return c; };
@@ -89,7 +90,7 @@ else {
   before(async () => {
     const vacancy=createServer();await new Promise<void>((resolve,reject)=>{vacancy.once('error',reject);vacancy.listen(PORT,'127.0.0.1',()=>vacancy.close(error=>error?reject(error):resolve()));});
     let listening=false,startupError:Error|undefined;
-    const fixtureData=mkdtempSync(join(tmpdir(),'souls-mars-'));
+    fixtureData=mkdtempSync(join(tmpdir(),'souls-mars-'));
     proc = spawn(process.execPath, [new URL('./main.ts', import.meta.url).pathname], {
       env: { PATH: process.env.PATH, HOME: process.env.HOME, ...(process.env.MARS_ENGINE_DIR ? { MARS_ENGINE_DIR: process.env.MARS_ENGINE_DIR } : {}), WORLD_KEY:'toy',WORLD_ID:WORLD_ID, BUILD_ID:fixtureBuild, ENGINE: 'mars', MIND_DRIVER: 'central', PORT: String(PORT), HOST: '127.0.0.1', DATA_DIR:fixtureData,ACCOUNT_REGISTRY_PATH:join(fixtureData,'accounts.sqlite'),ACCOUNT_AUTH_REQUIRED:'0',SEED_NATIVES:'1', BRAIN_MODE: 'fake', DEV_AUTH: '1', PUBLIC_URL: BASE, WEB_DIR: '/nonexistent' },
       stdio: ['ignore', 'pipe', 'inherit'],
@@ -148,18 +149,31 @@ else {
     assert.equal((await api(`/v1/souls/${wren.id}/intent`, admin, { intent: { agenda: [{ card: 'ask to be the dj', of: 'Rob' }, { card: 'be the dj', of: 'Rob' }], text: "go to Rob's party and ask him if you can DJ" } })).status, 200);
     assert.equal((await api('/v1/admin', admin, { action: 'clock_rate', rate: 5 })).status, 200);
     const mine = async () => (await (await fetch(`${BASE}/v1/plays?limit=200`)).json() as any).plays.filter((p: any) => [rob.id, wren.id].includes(p.soulId));
-    let plays: any[] = [];
-    for (let i = 0; i < 400; i++) { await sleep(300); plays = await mine(); if (plays.some((p) => p.ok && p.card === 'be the dj')) break; }
+    // Bounded by world ticks, not wall time (#2061): a loaded machine dilates the clock, and a wall-time cap measures the
+    // machine. A world that stops ticking fails as that, after 100 polls without a tick.
+    const worldTick = async () => (await (await fetch(`${BASE}/healthz`)).json() as any).tick as number;
+    const STORY_TICKS = 6000, t0 = await worldTick();
+    let plays: any[] = [], tick = t0, last = t0, still = 0;
+    while (tick - t0 < STORY_TICKS) {
+      await sleep(300); plays = await mine(); if (plays.some((p) => p.ok && p.card === 'be the dj')) break;
+      tick = await worldTick(); still = tick === last ? still + 1 : 0; last = tick; assert.ok(still < 100, `the world stopped ticking at ${tick}`);
+    }
     await api('/v1/admin', admin, { action: 'clock_rate', rate: 1 });
     const trace = plays.map((p: any) => `${p.tick} ${p.soul}:${p.card}→${p.targetName}${p.ok ? '' : ' REFUSED ' + p.reason}`).join('\n');
     const done = plays.filter((p) => p.ok).map((p) => `${p.soul}:${p.card}`);
     let at = -1; for (const step of ['Rob:host a gathering', 'Wren:ask to be the dj', 'Rob:say yes', 'Wren:be the dj']) { const i = done.indexOf(step, at + 1); assert.ok(i > at, `${step} happened in order\n${trace}`); at = i; }
-    // the bodies really were there: both ended up near the fire
     const snap = (await api('/v1/world', admin)).body;
     void snap;
     const c = client();t.after(()=>c.close()); await sleep(6500);
-    const near = (id: string) => { const e = c.replica.entities[id], f = c.replica.entities['fire']; return Math.hypot(e.pose.p[0] - f.pose.p[0], e.pose.p[2] - f.pose.p[2]); };
-    assert.ok(near(rob.entityId) < 6 && near(wren.entityId) < 6, `Rob ${near(rob.entityId).toFixed(1)} m and Wren ${near(wren.entityId).toFixed(1)} m from the fire`);
     assert.equal(c.stats.lastCheck, 'ok'); c.close();
+    // the bodies really were there: both were near the fire when Wren became the DJ. Measured at that tick, replayed from
+    // the world's own log (#2061): after the story Rob's mind may end the party and walk off, so a pose read some wall time
+    // later depends on how many ticks the machine ran in between.
+    const djTick = plays.find((p) => p.ok && p.card === 'be the dj' && p.soulId === wren.id).tick;
+    const log = new Db(join(fixtureData, 'sim.db'));
+    const reader = await repairReader({ engine: 'mars' } as never, factory, {});   // the factory the fixture server reads its log with
+    const atDj = replayFromGenesis(reader, log.world(WORLD_ID)!.seed, log.events(WORLD_ID), djTick).engine.world.entities as any; log.close();
+    const near = (id: string) => Math.hypot(atDj[id].pose.p[0] - atDj['fire'].pose.p[0], atDj[id].pose.p[2] - atDj['fire'].pose.p[2]);
+    assert.ok(near(rob.entityId) < 6 && near(wren.entityId) < 6, `Rob ${near(rob.entityId).toFixed(1)} m and Wren ${near(wren.entityId).toFixed(1)} m from the fire at tick ${djTick}`);
   });
 }

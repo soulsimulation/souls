@@ -6,10 +6,21 @@ import {monitorEventLoopDelay, PerformanceObserver, type IntervalHistogram} from
 import v8 from 'node:v8';
 import {clockOf, LEVELS, S, sharedLoad, type ClockState, type Level} from './shared.ts';
 import {frameBudgetMs} from './admission.ts';
+import {publishTickWindow, sharedApi, type TickWindow} from './api-times.ts';
 
 export type Signals = {service: number; loopP99Ms: number; heapFrac: number; gcFrac: number; oldestMs: number};
 const RANK: Record<Level, number> = {green: 0, amber: 1, red: 2, black: 3};
+/** #2124: what enters amber (its enter conditions, or the step down from red) and what holds it (the amber lower band a
+ *  signal is not yet under, else `dwell`: every signal is under it and the 30 s calm runs). */
+export type AmberEntry = 'service' | 'loop' | 'heap' | 'queue' | 'red';
+export type AmberHold = 'service' | 'loop' | 'heap' | 'dwell';
 export const STEP_DOWN_MS = 30_000, BLACK_SERVICE_MS = 30_000;
+/** A blip (one slow act: a tick gap lowers the 5 s tick service for 5 s and raises the loop p99, the max of two 5 s
+ *  windows, for up to 10 s) is shorter than this, with a margin. Amber's own conditions enter amber from green only once
+ *  they have held this long, and at amber a crossing of its lower band this short pauses the 30 s calm instead of
+ *  restarting it. Red and black, and their calms, are unchanged (#2124: with one Soul, single slow acts held amber
+ *  83-85 % of a run). */
+export const AMBER_BLIP_MS = 12_000;
 
 /** Loop-delay bands are relative to the world's own quiet baseline (LOAD-CONTRACT §1): a large world whose quiet ticks
  *  take 170 ms has a quiet loop p99 near 170 ms, so fixed 200/100 ms amber bands would hold it at amber forever.
@@ -18,15 +29,41 @@ export const BASELINE_ENTER_X = 2, BASELINE_LEAVE_X = 1.2, BASELINE_CAP_MS = 400
 const loopEnter = (abs: number, b: number) => Math.max(abs, BASELINE_ENTER_X * b);
 const loopLeave = (abs: number, b: number) => Math.max(abs, BASELINE_LEAVE_X * b);
 
-/** Enter on any condition; step down one level after 30 s with every signal below the current level's lower band. */
+/** Enter on any condition (amber's after AMBER_BLIP_MS of it); step down one level after 30 s with every signal below the
+ *  current level's lower band (at amber, a shorter crossing pauses the 30 s). */
 export class LevelState {
   level: Level = 'green';
   /** The world's quiet loop-delay p99 (ms), from QuietBaseline or a registry pin; 0 = absolute bands only. */
   baselineMs = 0;
   private calmSince: number | null = null;
+  private amberSince: number | null = null;   // amber's conditions hold at green since
+  private breachSince: number | null = null;  // at amber, a signal over the lower band since (the calm paused)
   private starvedSince: number | null = null;   // tick service < 0.2 since
+  /** #2124: queue age raises amber on a fresh queue only. After amber steps down, the queue amber's own smaller budget left
+   *  behind does not raise it again until it has once been under 2 s: re-entering at once held amber ~94 % of a 24-Soul run. */
+  private queueArmed = true;
+  /** #2124: the signals that caused the last entry into amber (empty until one). */
+  amberEntry: AmberEntry[] = [];
+  /** #2124: the amber enter conditions that hold on this sample (the queue only while armed). */
+  amberEnters(s: Signals): AmberEntry[] {
+    const b = this.baselineMs, out: AmberEntry[] = [];
+    if (s.service < 0.8) out.push('service');
+    if (s.loopP99Ms > loopEnter(200, b)) out.push('loop');
+    if (s.heapFrac > 0.70) out.push('heap');
+    if (this.queueArmed && s.oldestMs > 2000) out.push('queue');
+    return out;
+  }
+  /** #2124: what keeps amber from stepping down on this sample. */
+  amberHolds(s: Signals): AmberHold[] {
+    const b = this.baselineMs, out: AmberHold[] = [];
+    if (s.service < 0.9) out.push('service');
+    if (s.loopP99Ms >= loopLeave(100, b)) out.push('loop');
+    if (s.heapFrac >= 0.60) out.push('heap');
+    return out.length ? out : ['dwell'];
+  }
   enterOf(s: Signals, now: number): Level {
     const b = this.baselineMs;
+    if (s.oldestMs <= 2000) this.queueArmed = true;
     if (s.service < 0.2) this.starvedSince ??= now; else this.starvedSince = null;
     if ((s.heapFrac > 0.92 && s.gcFrac > 0.40) || (this.starvedSince !== null && now - this.starvedSince >= BLACK_SERVICE_MS)) return 'black';
     if (s.service < 0.5 || s.loopP99Ms > loopEnter(1000, b) || s.heapFrac > 0.85) return 'red';
@@ -34,7 +71,7 @@ export class LevelState {
     // 8 ms/frame, so a queue that red itself starves could keep red forever (the eden2 bench, 2026-10-31: red held for
     // whole windows at tick service 1.0 while the launcher shed every read as world.busy). Whether the thread is behind
     // is what service / loop delay / heap say.
-    if (s.service < 0.8 || s.loopP99Ms > loopEnter(200, b) || s.heapFrac > 0.70 || s.oldestMs > 2000) return 'amber';
+    if (this.amberEnters(s).length) return 'amber';
     return 'green';
   }
   below(level: Level, s: Signals): boolean {
@@ -49,14 +86,31 @@ export class LevelState {
   /** Suspension is neither calm time nor continuous starvation. Keep the level, restart its timers. */
   resumed(now: number) {
     if (this.calmSince !== null) this.calmSince = now;
+    if (this.amberSince !== null) this.amberSince = now;
+    if (this.breachSince !== null) this.breachSince = now;
     if (this.starvedSince !== null) this.starvedSince = now;
   }
   update(s: Signals, now: number): Level {
-    const enter = this.enterOf(s, now);
-    if (RANK[enter] > RANK[this.level]) { this.level = enter; this.calmSince = null; return this.level; }
-    if (this.level === 'green' || !this.below(this.level, s)) { this.calmSince = null; return this.level; }
+    let enter = this.enterOf(s, now);
+    if (enter === 'amber' && this.level === 'green') { this.amberSince ??= now; if (now - this.amberSince < AMBER_BLIP_MS) enter = 'green'; } else this.amberSince = null;
+    if (RANK[enter] > RANK[this.level]) { if (enter === 'amber') this.amberEntry = this.amberEnters(s); this.level = enter; this.calmSince = this.breachSince = this.amberSince = null; return this.level; }
+    if (this.level === 'green') return this.level;
+    if (!this.below(this.level, s)) {
+      // at amber a blip pauses the calm; a crossing that lasts AMBER_BLIP_MS (or any at red and black) restarts it
+      if (this.level !== 'amber' || this.calmSince === null) { this.calmSince = null; return this.level; }
+      this.breachSince ??= now;
+      if (now - this.breachSince >= AMBER_BLIP_MS) this.calmSince = this.breachSince = null;
+      return this.level;
+    }
+    if (this.breachSince !== null && this.calmSince !== null) this.calmSince += now - this.breachSince;
+    this.breachSince = null;
     this.calmSince ??= now;
-    if (now - this.calmSince >= STEP_DOWN_MS) { this.level = LEVELS[RANK[this.level] - 1]; this.calmSince = null; }
+    if (now - this.calmSince >= STEP_DOWN_MS) {
+      this.level = LEVELS[RANK[this.level] - 1]; this.calmSince = this.breachSince = null;
+      if (this.level === 'amber') this.amberEntry = ['red'];
+      // #2124: only a queue still past 2 s on the step-down sample is disarmed; a fresh one between bands keeps its hint
+      if (this.level === 'green' && s.oldestMs > 2000) this.queueArmed = false;
+    }
     return this.level;
   }
 }
@@ -90,7 +144,8 @@ export class QuietBaseline {
  *  windows (~50 s, half-life ~33 s), long enough to average over a large world's heavy ticks (one every 10-15 s) and short
  *  enough to follow a world that grows within a minute or two. Until the first quiet window, non-warm windows with tick
  *  service >= 0.95 seed it provisionally (a world that boots straight into load still calibrates); the first quiet window
- *  replaces that seed. A window needs >= 20 ticks of its own (1 s) to count. */
+ *  replaces that seed. Any other window whose ticks averaged less than the value moves it down by alpha (#2559), never
+ *  up. A window needs >= 20 ticks of its own (1 s) to count. */
 export const QUIET_TICK_ALPHA = 0.1, QUIET_TICK_MIN_TICKS = 20;
 export class QuietTick {
   value = 0;
@@ -101,15 +156,27 @@ export class QuietTick {
     if (!Number.isFinite(avgMs) || avgMs < 0) return this.value;
     if (quiet && !this.quietSeen) { this.quietSeen = true; this.value = avgMs; return this.value; }
     if (quiet || (!this.quietSeen && served)) this.value = this.value > 0 ? this.value + QUIET_TICK_ALPHA * (avgMs - this.value) : avgMs;
+    // #2559 (after #2470's round 2): any window whose own ticks averaged less than the learned value shows that value is
+    // stale-high (load only adds to a tick, so the quiet tick is at most this), and moves it down by alpha, served or not,
+    // quiet seen or not. Never up. Learned once from heavy setup ticks (a boot, Souls joining), the quiet tick otherwise
+    // stayed high for good: it left requests the 2 ms floor budget on a mostly idle thread, the acts queued past their
+    // deadline, and with acts queued no window was quiet again to relearn it. Viewers arriving tipped worlds into it.
+    else if (this.value > 0 && avgMs < this.value) this.value += QUIET_TICK_ALPHA * (avgMs - this.value);
     return this.value;
   }
 }
 
-const TICK_MS = 50, MIN_WINDOW_SAMPLES = 100;
+const TICK_MS = 50, MIN_WINDOW_SAMPLES = 100, DROWSY_SAMPLE_MS = 1000;
+/** A clock just started owes no tick until its first frame decides (it ticks, or a still world sleeps), for at most this long. */
+const START_GRACE_MS = 1000;
+/** #1944 A3: the tick window (10 s), and how late past its due time a tick's start counts as late. */
+export const TICK_WINDOW_MS = 10_000, LATE_TICK_MS = 25;
 /** What the monitor reads from the world (WorldHost satisfies it). */
 export type HostLike = {rewinds?: number; engine: {world: {tick: number}}; tickMs: number[]; paused: boolean; pace: number; baseRate: number; readonly running: boolean; readonly clockAvailable: boolean; readonly stepFailing?: string | null;
   /** #1326: the effective rate (lower while dilated), and the host's listeners, where the monitor notes each completed tick. */
-  clockRate?: number; listeners?: {afterTickComplete?(tick: number): void}[]};
+  clockRate?: number; listeners?: {afterTickComplete?(tick: number): void}[];
+  /** #2384: a still world asleep to its horizon owes no tick until it wakes: not stalled, not behind. */
+  readonly sleeping?: boolean};
 /** #1326: a clock owing ticks counts as stalled once its last tick is older than this, or 10 of its expected tick intervals
  *  at the current rate and attention pace when that is longer (a world sleeping at a reduced pace ticks less often). */
 export const STALL_MIN_MS = 2000;
@@ -129,13 +196,16 @@ export type MonitorOpts = {
   baselineMs?: number;
   souls?: () => {awake: number; waiting: number; connected: number};
   onLevel?: (from: Level, to: Level, s: Signals) => void;
-  /** Black for this long → planned restart (main.ts: snapshot, exit 75). */
+  /** Black for this long with no tick completed in it (#2622) → planned restart (world-main.ts: snapshot, exit 75). */
   onBlackTooLong?: () => void; blackLimitMs?: number;
   shared?: Float64Array; now?: () => number; sampleMs?: number;
   /** Loop-delay window (default 5 s; tests shorten it). */
   windowMs?: number;
   /** Drill only (SIM_LOAD_DRILL_LEVEL): hold this level whatever the signals say, to exercise dials and the restart path. */
   drill?: Level;
+  /** #1944 A3: where the tick windows are published (default the process's api-times buffer) and the monotonic clock of
+   *  tick starts (default performance.now). */
+  api?: Float64Array; mono?: () => number;
 };
 
 export class LoadMonitor {
@@ -154,7 +224,7 @@ export class LoadMonitor {
   private histAt = 0;
   private gc: {at: number; ms: number}[] = [];
   private obs: PerformanceObserver | null = null;
-  private ticks: {at: number; tick: number; due: number}[] = [];   // due = ticks owed since the previous sample
+  private ticks: {at: number; tick: number; due: number; asleep?: boolean}[] = [];   // due = ticks owed since the previous sample
   private timer: NodeJS.Timeout | null = null;
   private pendingSample: NodeJS.Immediate | null = null;
   private blackSince: number | null = null;
@@ -162,9 +232,21 @@ export class LoadMonitor {
   private souls = {awake: 0, waiting: 0, connected: 0};
   private a: Float64Array;
   private tickHook: {afterTickComplete(): void} | null = null;
+  /** #2384: the histogram is off because the world sleeps; when the last full sample was taken. */
+  private drowsy = false; private sampledAt = 0;
+  /** A clock seen starting (running after a sample that saw it stopped, or the first sample): when and at which tick. */
+  private starting: {at: number; tick: number} | null = null; private wasRunning = false;
   private seenTick = -1;
+  /** #2124: what held amber on the last sample (the tick window counts the time to the next sample against it). */
+  private holds: AmberHold[] = [];
   private now: () => number;
   private o: MonitorOpts;
+  /** #1944 A3: the open tick window: its start (wall), each tick's own ms, late ticks, the longest gap, ms at each level
+   *  (by RANK) and when that was last counted; the previous tick's start and due time (mono) and whether it was late. */
+  private tw = {from: 0, ms: [] as number[], late: 0, maxGap: 0, levels: [0, 0, 0, 0], amberMs: {service: 0, loop: 0, heap: 0, dwell: 0} as Record<AmberHold, number>,
+    entries: {service: 0, loop: 0, heap: 0, queue: 0, red: 0} as Record<AmberEntry, number>, levelAt: 0, prevStart: 0, prevDue: 0, prevLate: false, interval: 0, prevTick: undefined as number | undefined};
+  /** The last completed tick window (also in live.json and /healthz as `api.ticks`). */
+  tickWindow: TickWindow | null = null;
   constructor(o: MonitorOpts) { this.o = o; this.a = o.shared ?? sharedLoad; this.now = o.now ?? Date.now; this.windowMs = o.windowMs ?? 5000; this.baseline = new QuietBaseline(o.baselineMs); this.state.baselineMs = this.baseline.value; }
 
   /** The dial registry (LOAD-CONTRACT §1). A dial is told the current level at once and on every change. */
@@ -172,13 +254,19 @@ export class LoadMonitor {
   start() {
     if (this.timer) return;
     // #1326: the wall time of each completed tick, at the tick (a sample alone would lag it by up to 250 ms)
-    if (this.o.host.listeners && !this.tickHook) { this.tickHook = {afterTickComplete: () => { this.a[S.tickAt] = this.now(); }}; this.o.host.listeners.push(this.tickHook); }
+    if (this.o.host.listeners && !this.tickHook) { this.tickHook = {afterTickComplete: () => { this.a[S.tickAt] = this.now(); this.tickDone(); }}; this.o.host.listeners.push(this.tickHook); }
     this.hist = monitorEventLoopDelay({resolution: 10}); this.hist.enable(); this.histAt = this.startedAt = this.now(); this.quiet = {depth: 0, reqMs: this.o.requestMs?.() ?? 0, service: 1, tick0: this.o.host.engine.world.tick};
     try { this.obs = new PerformanceObserver(list => { for (const e of list.getEntries()) this.gc.push({at: this.now(), ms: e.duration}); }); this.obs.observe({entryTypes: ['gc']}); } catch { this.obs = null; }
     process.on('SIGCONT', this.resumed);
     // On thaw, overdue timers can run before the SIGCONT callback. Sample after the poll phase so the explicit
     // resume notification can discard suspended wall time before it becomes a false red lasting 30 seconds.
     this.timer = setInterval(() => {
+      // #2384: while the world sleeps to its horizon, the event-loop histogram (a 10 ms timer) is off and a full sample is
+      // taken once a second (under the 2 s stall threshold, so the tick age stays fresh); a wake turns both back at once
+      const asleep = !!this.o.host.sleeping;
+      if (asleep !== this.drowsy) { this.drowsy = asleep; if (asleep) this.hist?.disable(); else { this.hist?.reset(); this.hist?.enable(); this.histAt = this.now(); } }
+      // (the turn and the tick age stay fresh at the full cadence, so a host pause under load is not read as a stall)
+      if (asleep && this.now() - this.sampledAt < DROWSY_SAMPLE_MS) { const n = this.now(); this.a[S.lastTurnAt] = n; if (this.a[S.stallMs] > 0) this.a[S.tickAt] = n; return; }
       if (!this.pendingSample) this.pendingSample = setImmediate(() => { this.pendingSample = null; this.sample(); });
     }, this.o.sampleMs ?? 250); this.timer.unref();
     this.sample();
@@ -192,7 +280,7 @@ export class LoadMonitor {
   private resumed = () => {
     const now = this.now();
     if (this.a[S.tickAt]) this.a[S.tickAt] = now;   // #1326: time spent suspended (SIGSTOP) is not a stall
-    this.ticks = []; this.prevLoopP99 = 0; this.hist?.reset(); this.histAt = now; this.gc = [];
+    this.ticks = []; this.prevLoopP99 = 0; this.hist?.reset(); this.histAt = now; this.gc = []; this.tw.prevStart = 0;
     this.quiet = {depth: 0, reqMs: this.o.requestMs?.() ?? 0, service: 1, tick0: this.o.host.engine.world.tick};
     this.state.resumed(now);
     if (this.blackSince !== null) this.blackSince = now;
@@ -201,23 +289,38 @@ export class LoadMonitor {
   /** One sample: read, decide, publish. Public for tests (which pass signals straight to state.update instead). */
   sample(): Level {
     const now = this.now(), h = this.o.host, a = this.a;
-    a[S.lastTurnAt] = now;
+    a[S.lastTurnAt] = now; this.sampledAt = now;
     a[S.halted] = h.clockAvailable === false || h.stepFailing ? 1 : 0;
     a[S.rewinds] = h.rewinds ?? 0;
     // #1326: a tick this sample sees advance dates from now at the latest: a host without listeners, the first sample, and a
     // faulted tick (the world moves on, but afterTickComplete runs only after a clean one)
     if (h.engine.world.tick !== this.seenTick) { this.seenTick = h.engine.world.tick; a[S.tickAt] = Math.max(a[S.tickAt], now); }
     // a clock that starts owing again (unpaused, restarted, its rate raised from 0) counts its age from now
-    const stallMs = stallMsOf(h); if (stallMs > 0 && !(a[S.stallMs] > 0)) a[S.tickAt] = now;
+    const stallMs = stallMsOf(h); if (stallMs > 0 && (!(a[S.stallMs] > 0) || h.sleeping)) a[S.tickAt] = now;   // #2384: asleep, its clock is accounted for
     a[S.stallMs] = stallMs; a[S.clockRate] = h.clockRate ?? h.baseRate; a[S.baseRate] = h.baseRate;
     // tick service over 5 s: ticks run / ticks owed at the admin rate and the attention pace (dilation counts as missed)
-    const prev = this.ticks.at(-1), owing = h.running && !h.paused && h.clockAvailable;
+    // #2384: a sleeping world owes nothing, nor does one just woken until it lands (its frame runs within 50 ms)
+    // a clock just started owes nothing until its first frame decides, as one just woken owes nothing until it lands: on a busy
+    // host the first frame can owe no tick and a still world sleeps at the second (~100 ms in), unticked; a sample between
+    // read it as 2 ticks missed of 2 owed, service 0 and red for 35 s. Bounded: a clock that has not ticked a second on owes.
+    if (h.running && !this.wasRunning) this.starting = {at: now, tick: this.ticks.at(-1)?.tick ?? h.engine.world.tick};   // (a tick since the last sample: it has decided)
+    this.wasRunning = h.running;
+    if (this.starting && (h.engine.world.tick !== this.starting.tick || h.sleeping || now - this.starting.at >= START_GRACE_MS)) this.starting = null;
+    const prev = this.ticks.at(-1), asleep = !!h.sleeping || (!!prev?.asleep && prev.tick === h.engine.world.tick), owing = h.running && !h.paused && h.clockAvailable && !asleep && !this.starting;
+    this.tickWindowSample(now, owing);
     const due = prev && owing ? (Math.min(1000, now - prev.at) * h.baseRate * h.pace) / TICK_MS : 0;
-    this.ticks.push({at: now, tick: h.engine.world.tick, due});
+    this.ticks.push({at: now, tick: h.engine.world.tick, due, asleep});
+    // the ticks a world owed awake and put into its lag as it went to sleep, unticked, are paid when it lands: not missed
+    if (h.sleeping) for (let i = this.ticks.length - 1; i >= 0 && this.ticks[i].tick === h.engine.world.tick; i--) this.ticks[i].due = 0;
     while (this.ticks.length > 2 && now - this.ticks[1].at > 5000) this.ticks.shift();
     let owed = 0; for (let i = 1; i < this.ticks.length; i++) owed += this.ticks[i].due;
     const ran = this.ticks.at(-1)!.tick - this.ticks[0].tick;
     const service = owed >= 2 ? Math.min(1, ran / owed) : 1;
+    // #2440: the same over the last ~1 s, for admission's spare time: from the newest sample at least 1 s old, so a hold
+    // longer than 1 s (one sample before it, one after) counts its owed ticks instead of reading 1
+    let i1 = this.ticks.length - 1; while (i1 > 0 && now - this.ticks[i1].at < 1000) i1--;
+    let owed1 = 0; for (let i = i1 + 1; i < this.ticks.length; i++) owed1 += this.ticks[i].due;
+    const service1 = owed1 >= 2 ? Math.min(1, (this.ticks.at(-1)!.tick - this.ticks[i1].tick) / owed1) : 1;
     // event-loop delay p99 over the last ~5 s (two rotating windows)
     const q = this.o.queue?.() ?? {depth: 0, oldestMs: 0};
     this.quiet.depth = Math.max(this.quiet.depth, q.depth); this.quiet.service = Math.min(this.quiet.service, service);
@@ -248,12 +351,17 @@ export class LoadMonitor {
     const warm = this.startedAt !== null && now - this.startedAt < 2 * this.windowMs, judged = warm ? {...this.signals, loopP99Ms: 0} : this.signals;
     const from = this.level, to = this.o.drill ? (this.state.level = this.o.drill) : this.state.update(judged, now);
     if (to !== from) this.changed(from, to);
+    this.holds = to === 'amber' ? this.state.amberHolds(judged) : [];
     if (to === 'black') {
       this.blackSince ??= now;
-      if (now - this.blackSince >= (this.o.blackLimitMs ?? 60_000)) { this.blackSince = null; try { this.o.onBlackTooLong?.(); } catch (e) { console.error('[load] planned restart failed', e); } }
+      // #2622: only a world that has stopped making progress restarts: its clock owes ticks and has completed none for the
+      // limit (the stall clock above: paused, halted, asleep or just started owes none). A busy world still ticking stays
+      // up at black, admission refusing softly, until it recovers. The drill exercises the restart path whatever the ticks.
+      const limit = this.o.blackLimitMs ?? 60_000, stuck = !!this.o.drill || (a[S.stallMs] > 0 && now - a[S.tickAt] >= limit);
+      if (now - this.blackSince >= limit && stuck) { this.blackSince = null; try { this.o.onBlackTooLong?.(); } catch (e) { console.error('[load] planned restart failed', e); } }
     } else this.blackSince = null;
     const shed = this.o.shed?.() ?? {reads: 0, acts: 0};
-    a[S.worldTick] = h.engine.world.tick; a[S.service5s] = service; a[S.tickP99Ms] = this.tickStats.p99; a[S.loopP99Ms] = loopP99;
+    a[S.worldTick] = h.engine.world.tick; a[S.service5s] = service; a[S.service1s] = service1; a[S.tickP99Ms] = this.tickStats.p99; a[S.loopP99Ms] = loopP99;
     a[S.heapUsedMb] = hs.used_heap_size / 1048576; a[S.heapLimitMb] = hs.heap_size_limit / 1048576; a[S.gcPct10s] = 100 * gcMs / 10_000;
     a[S.level] = LEVELS.indexOf(to); a[S.queueDepth] = q.depth; a[S.queueOldestMs] = q.oldestMs;
     a[S.awake] = this.souls.awake; a[S.waiting] = this.souls.waiting; a[S.connected] = this.souls.connected;
@@ -275,11 +383,47 @@ export class LoadMonitor {
     }
     this.quiet = {depth: 0, reqMs, service: 1, tick0: tick};
   }
+  /** #1944 A3: one completed tick (the host's afterTickComplete; public for tests). Its start is its end less its own ms.
+   *  A tick is due one interval (50 ms at the clock's rate and pace) after the previous one started, or, while the clock
+   *  catches up on late ticks back to back, one interval after the previous one was due. Late: started > 25 ms past due. */
+  tickDone() {
+    const h = this.o.host, w = this.tw, own = h.tickMs.at(-1) ?? 0, start = (this.o.mono ? this.o.mono() : performance.now()) - own;
+    const rate = (h.clockRate ?? h.baseRate) * h.pace, interval = rate > 0 ? TICK_MS / rate : 0;
+    if (interval !== w.interval) { w.interval = interval; w.prevStart = 0; }   // a new pace or rate: the next tick is due from now
+    if (w.prevStart && interval) {
+      // #2298: a jump's landing completes every tick it covered, so it is due that many intervals on
+      const steps = Math.max(1, h.engine.world.tick - (w.prevTick ?? h.engine.world.tick - 1));
+      const gap = start - w.prevStart, due = (w.prevLate && gap < interval / 2 ? w.prevDue : w.prevStart) + interval * steps;
+      w.prevLate = start - due > LATE_TICK_MS; if (w.prevLate) w.late++;
+      w.prevDue = due; if (gap > w.maxGap) w.maxGap = gap;
+    } else { w.prevLate = false; w.prevDue = start; }
+    w.prevStart = start; w.prevTick = h.engine.world.tick; w.ms.push(own);
+    this.a[S.tickSpentMs] += own;   // #2440: admission's job timing leaves the ticks out
+  }
+  /** #1944 A3: count the time since the last sample at the level it was at; close and publish a full window. */
+  private tickWindowSample(now: number, owing: boolean) {
+    const w = this.tw;
+    if (!owing) w.prevStart = 0;   // a paused or stopped clock owes no ticks: the next one is not late
+    if (!w.from) { w.from = w.levelAt = now; return; }
+    const dt = Math.max(0, now - w.levelAt);
+    w.levels[RANK[this.level]] += dt; w.levelAt = now;
+    if (this.level === 'amber') for (const k of this.holds) w.amberMs[k] += dt;
+    if (now - w.from < TICK_WINDOW_MS) return;
+    const ms = w.ms.sort((x, y) => x - y), q = (p: number) => ms.length ? ms[Math.min(ms.length - 1, Math.floor(p * ms.length))] : 0;
+    const span = w.levels.reduce((x, y) => x + y, 0) || 1, share = (i: number) => w.levels[i] / span;
+    this.tickWindow = {at: now, windowS: (now - w.from) / 1000, ticks: ms.length, tickMs: {p50: q(0.5), p99: q(0.99)}, lateTicks: w.late, longestGapMs: w.maxGap,
+      levels: {green: share(0), amber: share(1), red: share(2), black: share(3)},
+      amberS: {service: w.amberMs.service / 1000, loop: w.amberMs.loop / 1000, heap: w.amberMs.heap / 1000, dwell: w.amberMs.dwell / 1000}, amberEntries: {...w.entries}};
+    publishTickWindow(this.tickWindow, this.o.api ?? sharedApi);
+    w.from = now; w.ms = []; w.late = 0; w.maxGap = 0; w.levels = [0, 0, 0, 0];
+    w.amberMs = {service: 0, loop: 0, heap: 0, dwell: 0}; w.entries = {service: 0, loop: 0, heap: 0, queue: 0, red: 0};
+  }
   /** Mark a main-thread turn without a full sample (after a tick). */
   turn() { this.a[S.lastTurnAt] = this.now(); }
   private changed(from: Level, to: Level) {
-    const s = this.signals;
-    console.log(`[load] ${from}→${to}: service ${s.service.toFixed(2)}, loop p99 ${Math.round(s.loopP99Ms)} ms (quiet ${Math.round(this.state.baselineMs)}), heap ${Math.round(100 * s.heapFrac)}%, gc ${Math.round(100 * s.gcFrac)}%, queue ${(s.oldestMs / 1000).toFixed(1)} s`);
+    const s = this.signals, why = to === 'amber' && !this.o.drill ? this.state.amberEntry : [];
+    for (const k of why) this.tw.entries[k]++;
+    console.log(`[load] ${from}→${to}${why.length ? ` (${why.join(', ')})` : ''}: service ${s.service.toFixed(2)}, loop p99 ${Math.round(s.loopP99Ms)} ms (quiet ${Math.round(this.state.baselineMs)}), heap ${Math.round(100 * s.heapFrac)}%, gc ${Math.round(100 * s.gcFrac)}%, queue ${(s.oldestMs / 1000).toFixed(1)} s`);
     this.o.onLevel?.(from, to, s);
     for (const [name, dial] of this.dials) { try { dial(to); } catch (e) { console.error(`[load] dial ${name} failed`, e); } }
   }

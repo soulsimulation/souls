@@ -4,7 +4,7 @@ import { run, start } from '../../lib/proc.mjs';
 
 // The ordinary shell verbs a human would approve for their own agent in its own folder; a compound command is allowed
 // only when every part is (so echo/mkdir/cp/chmod/head/tail/grep/wc/date/sleep/true/mv/touch/rm-free list matters).
-export const DEFAULT_ALLOWED = ['Bash(node eden.mjs:*)', 'Bash(node eden-agent.mjs:*)', 'Bash(node eden-god.mjs:*)', 'Bash(node --version)', 'Bash(curl:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Bash(mkdir:*)',
+export const DEFAULT_ALLOWED = ['Bash(node eden.mjs:*)', 'Bash(node eden-god.mjs:*)', 'Bash(node --version)', 'Bash(curl:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Bash(mkdir:*)',
   'Bash(pwd:*)', 'Bash(test:*)', 'Bash(cp:*)', 'Bash(mv:*)', 'Bash(touch:*)', 'Bash(chmod:*)', 'Bash(echo:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(grep:*)', 'Bash(wc:*)', 'Bash(date:*)', 'Bash(sleep:*)', 'Bash(true)', 'Bash(cd:*)',
   'Read(./**)', 'Write(./**)', 'Edit(./**)'];
 

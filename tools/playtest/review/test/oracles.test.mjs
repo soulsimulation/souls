@@ -67,3 +67,24 @@ test('vocabulary passes when the world offered a match', () => {
   const acts = [{ turn: 3, cmd: 'node eden.mjs act "pet the duck"', output: { accepted: false, code: 'capability.unknown', did_you_mean: ['feed:ducks'] } }];
   assert.equal(runOracles(ev('r2'), { acts }).find((o) => o.id === 'vocabulary').status, 'pass');
 });
+
+// #1774: the oracles on the new loop (find/look locally, then `act <id>`; no resolve)
+test('vocabulary on the new loop: act.not-an-id with an offered alternative or a lookup that found rows passes; with neither it fails', () => {
+  const v = (acts) => runOracles(ev('r2'), { acts }).find((o) => o.id === 'vocabulary');
+  assert.equal(v([{ turn: 3, cmd: 'node eden.mjs act sit-ground', output: { accepted: false, code: 'act.not-an-id', alternatives: [{ id: 'sit-ground:here' }] } }]).status, 'pass');
+  assert.equal(v([{ turn: 3, cmd: 'node eden.mjs find "duck"', output: { found: [{ id: 'feed:ducks' }] } }, { turn: 3, cmd: 'node eden.mjs act pet:duck', output: { accepted: false, code: 'act.not-an-id' } }]).status, 'pass');
+  assert.equal(v([{ turn: 3, cmd: 'node eden.mjs find "duck"', output: { found: [] } }, { turn: 3, cmd: 'node eden.mjs act pet:duck', output: { accepted: false, code: 'act.not-an-id' } }]).status, 'fail');
+});
+test('duplicate-acts on the new loop: a refused act sent again is a retry; the same id taken twice (with or without --for) is a duplicate; a plan counts', () => {
+  const d = (acts) => runOracles(ev('r1'), { acts }).find((o) => o.id === 'duplicate-acts');
+  assert.equal(d([{ turn: 2, cmd: 'node eden.mjs act sit-ground --wait', output: { accepted: false, code: 'act.not-an-id' } }, { turn: 2, cmd: 'node eden.mjs act sit-ground --wait', output: { accepted: true } }]).status, 'pass');
+  assert.equal(d([{ turn: 2, cmd: 'node eden.mjs act sit-ground:here --for m_1 --wait', output: { accepted: true } }, { turn: 3, cmd: 'node eden.mjs act sit-ground:here', output: { accepted: true } }]).status, 'fail');
+  assert.equal(d([{ turn: 2, cmd: 'node eden.mjs plan \'["walk:mill"]\'', output: { accepted: true } }, { turn: 3, cmd: 'node eden.mjs plan \'["walk:mill"]\'', output: { accepted: true } }]).status, 'fail');
+});
+test('a card request with no chat turn reads the acts of the turns that started in its window (its wake turns)', () => {
+  const e = ev('r2'); e.channel = 'card'; e.chatTurns = [];
+  const turns = run.seats[e.seat].turns;
+  const inWin = turns.filter((t) => Date.parse(t.startedAt) >= Date.parse(e.sentAt) && Date.parse(t.startedAt) <= Date.parse(e.cutoffAt));
+  assert.ok(inWin.length, 'the fixture has a turn in r2\'s window');
+  assert.equal(runOracles(e, { run }).find((o) => o.id === 'vocabulary').status, 'fail', 'its refused act is seen, as on the chat channel');
+});

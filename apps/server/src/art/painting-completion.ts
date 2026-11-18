@@ -3,7 +3,6 @@ import { existsSync, linkSync, mkdirSync, unlinkSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import type { Op, WorldModel } from '@souls/world-compiler';
 import { canvasFace, flatCanvas, paintingEasel, planFinishedPainting, type ArtFailure } from './art.ts';
-import { worldDay } from '../god/poster-boards.ts';
 import { PAINTING_RENDERER, PaintingRejected, rasterizePainting, validatePainting, type Painting } from './painting.ts';
 import { ACT_REACH } from '../god/actuators.ts';
 import { STATION_TOL } from '../../../../mars/viewer/engine/work/paint.ts';
@@ -16,6 +15,8 @@ export type PaintingIntent = { target: string; binding: string; actor: string; o
 export type PaintingPublished = { target: string; media: string; title: string; maker: string; renderer: typeof PAINTING_RENDERER };
 type Result = { accepted: boolean; seq?: number; failures?: unknown[] };
 export type PaintingDeps = { model(): WorldModel; dir: string; basePath: string; worldId: string;
+  /** #2416: this world's day (a fading canvas records the day it was drawn on); absent: day 0. */
+  worldDay?(): number;
   /** Calls complete inside the world edit transaction; notifies receipt observers after model publication. */
   commit(ops: Op[], note: string, complete: () => void, durable: () => void): Result };
 const fail = (code: string, message: string): ArtFailure => ({ ok: false, status: 409, code, message });
@@ -76,7 +77,7 @@ export function createPaintingService(d: PaintingDeps) {
       // #430: a fading canvas records the world day it was drawn on (its age is read from it; nothing ticks).
       const targetDef = model.resolvedDef(model.entities.get(intent.target)!.def);
       const fades = typeof canvasFace(targetDef)?.fadeDays === 'number' && targetDef?.state?.day?.type === 'number';
-      if (fades) state.day = worldDay();
+      if (fades) state.day = d.worldDay?.() ?? 0;
       const published: PaintingPublished = { target: intent.target, media, title: recipe.title, maker: state.maker, renderer: PAINTING_RENDERER };
       // Immutable PNGs remain in the existing art store. One current pointer per
       // easel; every finished painting adds a small retained file. Identity in

@@ -14,8 +14,9 @@ import {EdgeLedger} from './edge/ledger/ledger.ts';
 import {mountEdgeRoutes,edgeSoulResolver} from './edge/routes.ts';
 import {installPuntActivities} from './punt-install.ts';
 import {centroid} from './edge/ledger/places.ts';
+import {rerouteCarrier} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 
-async function world(t:any,opts:{balloon?:boolean;punt?:boolean}){
+async function world(t:any,opts:{balloon?:boolean;punt?:boolean;ambient?:boolean}){
  const f=fixture(':memory:',await retainedCommonsShoreFactory().then(nativeSleepSnapshotFactoryV1),{durableClockV1:true});f.souls.enableLifecycle();f.brain.quiesce();t.after(()=>{f.host.stop();f.db.close();});
  await accept<unknown>(f.host,new LivingWorld(f.host).install(['Owners drive their Souls.']));for(let i=0;i<4;i++)f.host.tickOnce();
  await accept(f.host,f.host.installCommonsProvisionsV1());await accept(f.host,f.host.installRetainedCommonsShoreV1());
@@ -23,14 +24,15 @@ async function world(t:any,opts:{balloon?:boolean;punt?:boolean}){
  const rows:any[]=[];for(const n of ['ana','ben','cy']){await invite(f,n);rows.push(await accept(f.host,f.souls.create('dev:'+n,{name:n,description:'rider'})));}
  const tokens=rows.map((r,i)=>{const tok='sim_STEER_TEST_TOKEN_'+i;f.db.setSoulToken(r.id,hashToken(tok),'synthetic');return tok;});
  if(opts.balloon)await accept<unknown>(f.host,f.host.installCarrierV1({id:'eden-balloon',def:'hot-air-balloon',label:'Red balloon',at:[-20,-9],yaw:Math.PI,route:'commons-hop',waitSeconds:60}));
- const ledger=new EdgeLedger(f.host,f.db,undefined,{ambient:true}),app=new Hono(),bearer=(c:any)=>c.req.header('authorization')?.replace(/^Bearer\s+/i,'');
+ const ledger=new EdgeLedger(f.host,f.db,undefined,{ambient:opts.ambient??true}),app=new Hono(),bearer=(c:any)=>c.req.header('authorization')?.replace(/^Bearer\s+/i,'');
  const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,soul:edgeSoulResolver(f.host,f.souls,bearer),ledger});t.after(()=>comms.close());
  if(opts.balloon)comms.objects.create({id:'ride-eden-balloon',kind:'ride',name:'Red balloon',placeId:'world',params:{carrier:'eden-balloon'}});
  if(opts.punt){const installer=installPuntActivities(f.host,ledger);t.after(()=>installer.close());}
  const pump=async<T>(p:Promise<T>|T)=>{const q=Promise.resolve(p);let done=false;q.then(()=>done=true,()=>done=true);for(let i=0;i<400&&!done;i++){await setImmediate();f.host.drainInputs();}assert.ok(done,'request settled');return q;};
  const call=async(i:number,method:string,path:string,body?:unknown)=>{const res=await pump(app.request(path,{method,headers:{authorization:'Bearer '+tokens[i],'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}) as Promise<Response>);return await res.json() as any;};
  const run=async(n:number,until:()=>boolean)=>{for(let i=0;i<n&&!until();i++){f.host.tickOnce();if(i%20===0){await setImmediate();f.host.drainInputs();}}return until();};
- const W=f.host.engine.world as any,ent=(i:number)=>W.entities[rows[i].entity_id],car=(id:string)=>W.entities[id];
+ // read the host's current world every time: a fault recovery replaces the engine, and a world captured once goes stale
+ const W=()=>f.host.engine.world as any,ent=(i:number)=>W().entities[rows[i].entity_id],car=(id:string)=>W().entities[id];
  const steer=(i:number,ride:string,params:Record<string,unknown>)=>call(i,'POST',`/v1/edge/objects/${ride}/act`,{action:'steer',params});
  return {f,rows,ledger,comms,call,run,ent,car,steer};
 }
@@ -56,8 +58,8 @@ test('steer the balloon to a named place and land there; the other rider is refu
  // honest refusals before anything moves: an unknown place, a bad mix of params
  const unk=await w.steer(0,'ride-eden-balloon',{to:'the moon'});assert.equal(unk.accepted,false);assert.equal(unk.code,'steer.unknown-place',JSON.stringify(unk));
  const mix=await w.steer(0,'ride-eden-balloon',{to:'Presentation deck',stop:true});assert.equal(mix.accepted,false);assert.equal(mix.code,'ride.steer-params');
- // the Soul's own words: "fly the balloon to the presentation deck and land there" is the steer with to + land
- const go=await w.call(0,'POST','/v1/edge/act',{capability:'fly the balloon to the presentation deck and land there'});assert.equal(go.accepted,true,JSON.stringify(go));assert.equal(go.resolved?.to,'object:ride-eden-balloon:steer',JSON.stringify(go.resolved));
+ // "fly the balloon to the presentation deck and land there" is the steer with to + land; #1911: the act sends that id
+ const go=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:steer',params:{to:'presentation deck',land:true}});assert.equal(go.accepted,true,JSON.stringify(go));assert.equal(go.receipt.capability,'object:ride-eden-balloon:steer',JSON.stringify(go));
  assert.ok(await w.run(40,()=>!!b().carrier.steer),'the engine takes the steer');
  // ben is a rider too, but ana is steering
  const other=await w.steer(1,'ride-eden-balloon',{direction:'N',distance:50});assert.equal(other.accepted,false,JSON.stringify(other));assert.equal(other.code,'ride.steered');assert.match(other.reason,/ana/);
@@ -74,13 +76,54 @@ test('steer the balloon to a named place and land there; the other rider is refu
  await replayExact(w);
 });
 
+// #2196 park-away/1: with the rule adopted, a balloon that landed away never moves with nobody aboard. It stays parked where its
+// rider left it, never teleports or respawns, and offers its ride right there; the rider gets back in and flies it home.
+// Ambient life is off here: over the five idle minutes it can leave the third Soul standing by the basket, and the rider's
+// boarding brush with her is set aside by a fault recovery ("choose again"), which is not what this test is about.
+test('park-away/1: the empty balloon stays where it landed and its rider rides it home',{timeout:600000},async t=>{
+ const w=await world(t,{balloon:true,ambient:false}),b=()=>w.car('eden-balloon'),home=[...b().carrier.home];
+ await accept<unknown>(w.f.host,w.f.host.enableCarrierParkAwayV1('test'));
+ await boardAndLift(w);
+ const go=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:steer',params:{to:'presentation deck',land:true}});assert.equal(go.accepted,true,JSON.stringify(go));
+ assert.ok(await w.run(6000,()=>b().carrier.phase==='landed'),'came down: '+b().carrier.phase);
+ assert.ok(await w.run(600,()=>!w.ent(0).human.carrier&&!w.ent(1).human.carrier),'riders stepped out');
+ const parked=[...b().pose.p],yaw=b().pose.yaw;assert.ok(flat(parked,home)>15,'landed away from home');
+ // nobody aboard for five minutes: it never lifts off, never moves, never goes back home
+ let moved=0,lifted=false;
+ await w.run(6000,()=>{moved=Math.max(moved,Math.hypot(b().pose.p[0]-parked[0],b().pose.p[1]-parked[1],b().pose.p[2]-parked[2]));lifted||=b().carrier.phase==='aloft'||b().phase==='carried';return false;});
+ assert.equal(lifted,false,'never lifted off with nobody aboard');assert.equal(moved,0,'stayed exactly where it was left');
+ assert.equal(b().carrier.phase,'parked');assert.equal(b().pose.yaw,yaw);
+ // a god re-route never moves it from where it was left (it re-routes once ridden home)
+ const spec={id:'eden-balloon',def:'hot-air-balloon',label:'Red balloon',at:[home[0]+30,home[2]] as [number,number],yaw:Math.PI,route:'commons-hop',waitSeconds:60};
+ assert.equal(rerouteCarrier(w.f.host.engine.world as any,spec,0)?.code,'carrier.carrier-away');assert.deepEqual(b().pose.p,parked);
+ // its ride is offered where it stands, says where it goes, and the rider who left it rides it home
+ const offer=(await w.call(0,'GET','/v1/edge/capabilities')).capabilities.find((c:any)=>c.id==='object:ride-eden-balloon:join');
+ assert.ok(offer?.available,JSON.stringify(offer));assert.match(offer.label,/flies home to its launch spot/,offer.label);
+ const back=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:join'});assert.equal(back.accepted,true,JSON.stringify(back));
+ assert.ok(await w.run(3000,()=>w.ent(0).human.carrier?.phase==='seated'),'seated at the parked spot');
+ assert.ok(flat(b().pose.p,parked)<1e-9,'boarded where it was parked');
+ const st=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:start'});assert.equal(st.accepted,true,JSON.stringify(st));
+ assert.ok(await w.run(400,()=>b().carrier.phase==='aloft'),'lifted off with its rider');
+ // steered on the way home (a hold here), it still keeps its own route: after the hold it flies home
+ assert.ok(await w.run(400,()=>b().pose.p[1]>5),'climbing');
+ const hold=await w.steer(0,'ride-eden-balloon',{stop:true});assert.equal(hold.accepted,true,JSON.stringify(hold));
+ assert.ok(await w.run(40,()=>b().carrier.steer?.by!==null),'the hold is taken');assert.ok(!String(b().carrier.steer.away.route.id).startsWith('steer'),'kept its own route: '+b().carrier.steer.away.route.id);
+ assert.ok(await w.run(9000,()=>b().carrier.phase==='landed'||b().carrier.phase==='parked'),'came home: '+b().carrier.phase);
+ assert.ok(flat(b().pose.p,home)<.5,`landed at home ${b().pose.p}`);
+ assert.ok(await w.run(600,()=>!w.ent(0).human.carrier),'rider stepped out at home');
+ assert.ok(await w.run(200,()=>b().carrier.phase==='parked'),'parked at home');assert.equal(b().carrier.steer,undefined);
+ assert.ok(!String(b().carrier.route.id).startsWith('steer'),'its own route is back: '+b().carrier.route.id);
+ assert.deepEqual(w.f.host.engine.runtime.violations,[]);assert.equal(w.f.db.paidCost(),0);
+ await replayExact(w);
+});
+
 test('stop holds the balloon in the air, then with nobody steering it rejoins its own route and lands at home; out of bounds is refused',{timeout:600000},async t=>{
  const w=await world(t,{balloon:true}),b=()=>w.car('eden-balloon'),home=[...b().carrier.home];
  await boardAndLift(w);
  // out of bounds: the engine's refusal reaches the Soul as a ride.* code with a readable reason (this fixture has no ground
  // field, so the bound here is the ride's range from home)
  const far=w.ledger.steerCheck(w.rows[0].entity_id,'eden-balloon',{x:home[0]+5000,z:home[2]});assert.equal(far?.code,'ride.out-of-bounds',JSON.stringify(far));assert.match(String(far?.reason),/outside the world/);
- const stop=await w.call(0,'POST','/v1/edge/act',{capability:'hover here'});assert.equal(stop.resolved?.to,'object:ride-eden-balloon:steer',JSON.stringify(stop));assert.equal(stop.accepted,true,JSON.stringify(stop));
+ const stop=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:steer',params:{stop:true}});assert.equal(stop.accepted,true,JSON.stringify(stop));assert.equal(stop.receipt.capability,'object:ride-eden-balloon:steer',JSON.stringify(stop));
  assert.ok(await w.run(60,()=>!!b().carrier.steer),'holding');
  const at=[...b().pose.p];assert.ok(await w.run(1200,()=>false)===false);
  assert.ok(flat(b().pose.p,at)<2&&b().pose.p[1]>3,`hovers where it stopped: ${at} -> ${b().pose.p}`);
@@ -100,10 +143,10 @@ test('row the punt: steering out over open water is fine, a land target off its 
  assert.ok(await w.run(3000,()=>w.ent(0).human.carrier?.phase==='seated'),'seated');
  assert.ok(await w.run(2000,()=>p().carrier.phase==='aloft'),'pushed off: '+p().carrier.phase);
  const ashore=await w.steer(0,'ride-eden-punt',{to:'Presentation deck',land:true});assert.equal(ashore.accepted,false,JSON.stringify(ashore));
- const water=await w.call(0,'POST','/v1/edge/act',{capability:'row to the connected calm water'});assert.equal(water.resolved?.to,'object:ride-eden-punt:steer',JSON.stringify(water));assert.equal(water.accepted,true,JSON.stringify(water));
+ const water=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-punt:steer',params:{to:'connected calm water'}});assert.equal(water.accepted,true,JSON.stringify(water));assert.equal(water.receipt.capability,'object:ride-eden-punt:steer',JSON.stringify(water));
  assert.ok(await w.run(40,()=>!!p().carrier.steer),'steering: '+JSON.stringify(w.ledger.receipt(w.rows[0].id,water.receipt.id))+' phase '+p().carrier.phase+' ground '+!!(w.f.host.engine as any).rt?.services?.spatial?.ground);
  assert.ok(await w.run(1200,()=>false)===false);
- const land=await w.call(0,'POST','/v1/edge/act',{capability:'row back'});assert.equal(land.resolved?.to,'object:ride-eden-punt:steer',JSON.stringify(land));assert.equal(land.accepted,true,JSON.stringify(land));
+ const land=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-punt:steer',params:{land:true}});assert.equal(land.accepted,true,JSON.stringify(land));assert.equal(land.receipt.capability,'object:ride-eden-punt:steer',JSON.stringify(land));
  assert.ok(await w.run(8000,()=>!w.ent(0).human.carrier),'rowed back and stepped out: '+p().carrier.phase+' '+p().pose.p);
  assert.ok(flat(p().pose.p,home)<1.5,`back at its bank: ${p().pose.p} vs ${home}`);
  assert.equal(w.ent(0).human.shore?.depthMetres??0,0,'rower on dry ground');

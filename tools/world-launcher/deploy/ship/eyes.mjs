@@ -12,10 +12,16 @@
 // whose head is not --sha, starts the probe (expecting we-<sha12>, or the live build for a no-switch run), posts
 // release/eyes "ready", waits for release/ship "released", lets the probe watch 60 s more, runs the checks and posts
 // release/eyes pass or fail. Any failure, interrupt or crash posts fail, never pass; the run then fails and does not publish.
+//
+// --gpu hardware (release.yml eyes=gpu-runner, on a souls-timed runner): every check uses Playwright's Chromium with the first
+// hardware GL renderer found (ship/browser.mjs GPU_CANDIDATES; the log prints it) and SwiftShader disabled; none found fails.
+// --checks-only: no run, no handover, no probe and no god folder: the walks, poster and stall against the live build, with
+// their verdict (release.yml eyes_only=true). Nothing is posted.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { chromium as playwrightChromium, pickHardwareGl } from './browser.mjs';
 import { CONTEXT, defaultRepo, description, isRun, isSha, latestFor, listStatuses, postStatus, sameRun, waitFor } from './handover.mjs';
 
 // EYES_DEPLOY_DIR: tests only, a deploy/ folder of stand-in tools (release-probe.mjs, ship/*.mjs, ship/poster-count.py)
@@ -29,9 +35,11 @@ const cli = resolve(flag('cli', join(ROOT, '.local/release-probe')));
 const findMin = Number(flag('find-min', 45)), releaseMin = Number(flag('release-min', 60)), pollMs = Number(flag('poll-s', 15)) * 1000;
 const PAGE = '/w/eden/', SLUGS = ['eden', 'mars-college-2026', 'mars-college-2027'];
 const say = (s) => console.log(`[eyes ${new Date().toISOString().slice(11, 19)}Z] ${s}`);
-if (!isSha(sha)) { console.error('eyes: --sha must be the full 40-hex commit the dispatched run ships'); process.exit(2); }
-if (wantRun != null && !isRun(wantRun)) { console.error('eyes: --run is the Actions run id (digits, optionally .<attempt>)'); process.exit(2); }
-if (!existsSync(join(cli, '.eden-god.json'))) { console.error(`eyes: no release-probe god folder at ${cli} (--cli; docs/release.md "The release-probe world")`); process.exit(2); }
+const checksOnly = argv.includes('--checks-only'), gpu = flag('gpu', null);
+if (gpu !== null && gpu !== 'hardware') { console.error('eyes: --gpu takes hardware'); process.exit(2); }
+if (!checksOnly && !isSha(sha)) { console.error('eyes: --sha must be the full 40-hex commit the dispatched run ships'); process.exit(2); }
+if (!checksOnly && wantRun != null && !isRun(wantRun)) { console.error('eyes: --run is the Actions run id (digits, optionally .<attempt>)'); process.exit(2); }
+if (!checksOnly && !existsSync(join(cli, '.eden-god.json'))) { console.error(`eyes: no release-probe god folder at ${cli} (--cli; docs/release.md "The release-probe world")`); process.exit(2); }
 
 const gh = (args) => new Promise((yes, no) => { const p = spawn('gh', args, { stdio: ['ignore', 'pipe', 'pipe'] }); let o = '', e = ''; p.stdout.on('data', (d) => (o += d)); p.stderr.on('data', (d) => (e += d)); p.on('close', (c) => (c ? no(Error(e.trim().slice(0, 300))) : yes(o))); });
 /** run a tool to a log file; resolves its exit code */
@@ -67,10 +75,13 @@ process.on('uncaughtException', crashed); process.on('unhandledRejection', crash
 
 // 1. the run: the newest release/ship "waiting-for-eyes" on this sha whose run is release.yml, in progress, shipping this
 // sha, at the attempt the status names. An earlier run's or attempt's status is skipped; another sha refuses (exit 2).
-say(`looking for a release run of ${sha.slice(0, 12)}${wantRun ? ` (run ${wantRun})` : ''}; up to ${findMin} min`);
-let mode = null; const skipped = new Set(), findEnd = Date.now() + findMin * 60_000;
-for (;;) {
+let mode = checksOnly ? 'checks-only' : null; const skipped = new Set(), findEnd = Date.now() + findMin * 60_000;
+if (!checksOnly) say(`looking for a release run of ${sha.slice(0, 12)}${wantRun ? ` (run ${wantRun})` : ''}; up to ${findMin} min`);
+while (!checksOnly) {
   let statuses = []; try { statuses = await listStatuses(repo, sha); } catch (e) { say(`status read failed; retrying`); }
+  // a late or queued eyes job for a run whose ship already stopped: leave at once, so the release group frees up
+  const shipNow = wantRun != null ? latestFor(statuses, CONTEXT.ship, wantRun) : null;
+  if (shipNow?.state === 'failure' || shipNow?.state === 'error') { say(`STOPPED: run ${wantRun} already stopped (${shipNow.detail || shipNow.description}); nothing to watch`); process.exit(1); }
   const waiting = statuses.filter((x) => x.context === CONTEXT.ship && x.state === 'pending').map((x) => latestFor([x], CONTEXT.ship, wantRun)).filter((x) => x?.word === 'waiting-for-eyes' && !skipped.has(x.run));
   const cand = waiting[0];
   if (cand && latestFor(statuses, CONTEXT.ship, cand.run)?.word === 'waiting-for-eyes') {
@@ -85,22 +96,32 @@ for (;;) {
   if (Date.now() + pollMs * 2 > findEnd) { say('no release run is waiting for eyes on this sha'); process.exit(1); }
   await new Promise((r) => setTimeout(r, pollMs * 2));
 }
-const label = flag('label', `run-${String(run).replace('.', '-')}`);
+const label = flag('label', checksOnly ? 'checks' : `run-${String(run).replace('.', '-')}`);
 const OUT = resolve(flag('out', join(ROOT, `.local/ship/${label}-eyes`))); PDIR = join(OUT, 'probe');
 if (existsSync(join(OUT, 'eyes-result.json'))) { const was = `${OUT}.${Date.now()}`; renameSync(OUT, was); say(`an earlier eyes run moved to ${was}`); }
 mkdirSync(OUT, { recursive: true });
-say(`run ${run}, mode ${mode}, outputs ${OUT}`);
+say(`${checksOnly ? 'checks only' : `run ${run}`}, mode ${mode}, outputs ${OUT}`);
+
+const env = { SHIP_PLAYWRIGHT_FROM: join(ROOT, 'mars/viewer'), EDEN_GOD_PLAYWRIGHT_FROM: join(ROOT, 'mars/viewer'), EDEN_GOD_NO_NPX: '1',
+  SIM_CHROME_LEASE: join(ROOT, 'tools/god-skill/lib/chrome-lease.mjs'), CHROME_LEASE_SLOTS: process.env.CHROME_LEASE_SLOTS || '3' };
+for (const k of ['SIM_HEAVY_SLOT', 'EDEN_GOD_NO_LEASE', 'PHONE', 'WIN', 'CPU', 'DESK', 'SHIP_GPU']) delete process.env[k];
+// --gpu hardware: a hardware renderer or nothing; every check below launches with it (SHIP_GPU)
+if (gpu) {
+  const g = await pickHardwareGl(playwrightChromium());
+  for (const t of g.tried) say(`gl: ${t.label}: ${t.renderer ?? t.error ?? 'no WebGL'}`);
+  if (!g.label) await abort('no hardware GL renderer (SwiftShader refused)');
+  say(`gl renderer: ${g.vendor} / ${g.renderer} (hardware, ${g.label})`);
+  env.SHIP_GPU = g.label; writeFileSync(join(OUT, 'gl.json'), JSON.stringify({ label: g.label, vendor: g.vendor, renderer: g.renderer }) + '\n');
+}
 
 // 2. the probe, expecting the candidate (or, when nothing switches, the build that stays live)
-let expect = `we-${sha.slice(0, 12)}`;
+let expect = checksOnly ? null : `we-${sha.slice(0, 12)}`;
+if (!checksOnly) {
 if (mode === 'no-switch') {
   const h = await fetch(`${origin}/__sim/healthz`).then((r) => r.json()).catch(() => null);
   if (!/^we-[0-9a-f]{12}$/.test(h?.build ?? '')) await abort('healthz does not name the live build');
   expect = h.build;
 }
-const env = { SHIP_PLAYWRIGHT_FROM: join(ROOT, 'mars/viewer'), EDEN_GOD_PLAYWRIGHT_FROM: join(ROOT, 'mars/viewer'), EDEN_GOD_NO_NPX: '1',
-  SIM_CHROME_LEASE: join(ROOT, 'tools/god-skill/lib/chrome-lease.mjs'), CHROME_LEASE_SLOTS: process.env.CHROME_LEASE_SLOTS || '3' };
-for (const k of ['SIM_HEAVY_SLOT', 'EDEN_GOD_NO_LEASE', 'PHONE', 'WIN', 'CPU', 'DESK']) delete process.env[k];
 const probeArgs = [join(DEPLOY, 'release-probe.mjs'), '--origin', origin, '--pages', PAGE, '--phone-pages', PAGE, '--expect-build', expect, '--out', PDIR,
   '--after-s', '60', '--settle-s', '20', '--arrive-every', '6', '--cli-every', '1', '--cli', cli, '--max-min', String(releaseMin + 20)];
 say(`probe expecting ${expect}`);
@@ -138,9 +159,11 @@ for (;;) {
 }
 if (probeGone) await abort('the probe exited before the release');
 writeFileSync(join(PDIR, 'released'), ''); say('released; the probe watches 60 s more');
+}
 
 // 4. the checks: ship.sh's commands, checks.mjs's bars
 const failed = [], post = [];
+if (!checksOnly) {
 const rc = await probeExit; post.push(`probe ${rc}`);
 // the bar alone (counts, page paths, build ids): what failed, readable without the workstation's files
 let bar = null; try { bar = JSON.parse(readFileSync(join(PDIR, 'report.json'), 'utf8')).bar; writeFileSync(join(OUT, 'probe-bar.json'), JSON.stringify(bar, null, 1) + '\n'); } catch {}
@@ -148,6 +171,7 @@ const missed = !bar ? ['no-report'] : [['errorPages', bar.errorPages], ['notLoad
   ['lost', bar.lost], ['unclean', bar.unclean], ['notResumed', bar.notResumed], ['reloaded', bar.reloaded?.length], ['rolledBack', bar.rolledBack?.length]].filter(([, n]) => n > 0).map(([k, n]) => `${k}=${n}`)
   .concat(bar.reconnectMaxMs > (bar.reconnectBarMs ?? 5000) ? [`reconnectMaxMs=${bar.reconnectMaxMs}`] : []);
 if (rc !== 0) failed.push(`probe(${missed.join(',') || `exit=${rc}`})`);
+}
 const live = async (name, log, cmd, args, more = {}) => { const c = await tool(join(OUT, log), cmd, args, { ...env, ...more }); post.push(`${name} ${c}`); if (c) failed.push(name); say(`${name}: ${c ? `FAILED (exit ${c})` : 'ok'}`); };
 const N = process.execPath, SHIPD = join(DEPLOY, 'ship'), URLS = SLUGS.map((s) => `${origin}/w/${s}/`);
 await live('walk-desktop', 'walk-desktop.log', N, [join(SHIPD, 'walk.mjs'), join(OUT, 'walk-desktop'), ...URLS], { DPRS: '1,2' });
@@ -166,4 +190,4 @@ writeFileSync(join(OUT, 'POSTLIVE.txt'), post.join('\n') + '\n');
 writeFileSync(join(OUT, 'eyes-result.json'), JSON.stringify({ at: new Date().toISOString(), run, sha, mode, expect, status: failed.length ? 'fail' : 'pass', failed }) + '\n');
 for (const f of ['walks-check.txt', 'poster-check.txt', 'stall-check.txt']) if (existsSync(join(OUT, f))) say(`${f}: ${readFileSync(join(OUT, f), 'utf8').trim().split('\n').pop()}`);
 if (failed.length) { await finish('failure', 'fail', failed.join(' ')); say(`FAIL: ${failed.join(' ')} (${OUT}/POSTLIVE.txt)`); process.exit(1); }
-await finish('success', 'pass'); say('PASS: probe, walks, poster and stall'); process.exit(0);
+await finish('success', 'pass'); say(`PASS: ${checksOnly ? '' : 'probe, '}walks, poster and stall`); process.exit(0);

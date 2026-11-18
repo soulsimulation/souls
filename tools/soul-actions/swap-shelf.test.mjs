@@ -80,14 +80,14 @@ test('swap shelf: leave and take by plain words, no door, who left what, nearby 
 
  // no door: nothing to open, and an empty shelf says nothing
  assert.ok(!edge.capabilities(soul).some(c => c.object === shelfId && ['open', 'close'].includes(c.action)), 'a swap shelf has no door to open');
- await refuse('open the swap shelf', 'capability.unknown');
+ await refuse(`object:${shelfId}:open`, 'capability.unknown');
  const emptyNear = await here();
  // Ana leaves the bowl
- results.pickUp = await done('pick up the bowl');
+ results.pickUp = await done(`pick-up:${id('bowl')}`);
  const holdingNear = await here();
  const putCap = edge.capabilities(soul).find(c => c.id === `put-in:${shelfId}`);
  assert.ok(putCap?.available, 'put-in offered at once, no open step ' + JSON.stringify(putCap));
- const put = await done('leave the bowl on the swap shelf', soul, {item: bowl, isize: bowlSize});
+ const put = await done(`put-in:${shelfId}`, soul, {item: bowl, isize: bowlSize});
  assert.match(put.capability, new RegExp(`put-in:${shelfId}$`));
  assert.equal(item('bowl').support.kind, 'resting-on'); assert.equal(item('bowl').support.on, shelfId); assert.match(item('bowl').support.slot, /^in-\d$/);
  assert.equal(ent('bowl').id, bowl); assert.equal(ent('bowl').in.parent, shelfId);
@@ -102,7 +102,7 @@ test('swap shelf: leave and take by plain words, no door, who left what, nearby 
  await join('bea', 'Bea');
  const takeCap = edge.capabilities(souls.Bea).find(c => c.id === `pick-up:${bowl}`);
  assert.equal(takeCap?.available, true); assert.match(takeCap.label, /^Take swap-shelf\/bowl \(left by Ana\) out of swap-shelf /, takeCap?.label);
- const take = await done('take the bowl from the swap shelf', souls.Bea, {item: bowl, isize: bowlSize});
+ const take = await done(`pick-up:${id('bowl')}`, souls.Bea, {item: bowl, isize: bowlSize});
  assert.match(take.capability, new RegExp(`pick-up:${bowl}$`));
  assert.equal(item('bowl').support.kind, 'in-hand'); assert.equal(item('bowl').support.by, souls.Bea.entityId);
  assert.ok(take.lip.min >= 0, 'hand and bowl pass over the front rail: ' + JSON.stringify(take.lip));
@@ -111,30 +111,28 @@ test('swap shelf: leave and take by plain words, no door, who left what, nearby 
  const afterTake = await here(souls.Bea);
  assert.equal(shelfRow(afterTake)?.state?.holds, undefined, 'the shelf is empty again');
  // interrupted before the release: the bowl stays in her hand, the shelf and its record unchanged
- {const before = leftBy(), r = await act('put the bowl in the swap shelf', true, souls.Bea); for (let n = 0; n < 600 && !body(souls.Bea).human?.itemTransferV1?.reachTick; n++) await tick(1); await tick(6);
+ {const before = leftBy(), r = await act(`put-in:${shelfId}`, true, souls.Bea); for (let n = 0; n < 600 && !body(souls.Bea).human?.itemTransferV1?.reachTick; n++) await tick(1); await tick(6);
   await accept(f.host, edge.act(souls.Bea, {capability: 'stand:here'})); await tick(60);
   assert.equal(edge.receipt(souls.Bea.soulId, r.receipt.id).phase, 'replaced'); assert.equal(item('bowl').support.kind, 'in-hand', 'interrupted: still in her hand');
   assert.equal(ent('bowl').in.parent, souls.Bea.entityId); assert.equal(leftBy(), before); results.interrupted = 'bowl stayed in hand; shelf and record unchanged';}
  // Bea leaves it again: the record names her now, and the taken-off entry is gone
- results.beaPut = await done('leave the bowl on the swap shelf', souls.Bea, {item: bowl, isize: bowlSize});
+ results.beaPut = await done(`put-in:${shelfId}`, souls.Bea, {item: bowl, isize: bowlSize});
  assert.equal(leftBy(), `${bowl}=${souls.Bea.soulId}`);
  // refused: the lantern does not fit; then a full shelf
- results.lanternUp = await done('pick up the lantern');
- {const b = await refuse('put the lantern on the swap shelf', 'item.does-not-fit'); assert.match(b.reason, /\(0\.22 × 0\.45 × 0\.22 m\) does not fit in swap-shelf \(up to 0\.30 × 0\.28 × 0\.30 m\)/);}
- results.lanternDown = await done('put the lantern on the table');
+ results.lanternUp = await done(`pick-up:${id('lantern')}`);
+ {const b = await refuse(`put-in:${shelfId}`, 'item.does-not-fit'); assert.match(b.reason, /\(0\.22 × 0\.45 × 0\.22 m\) does not fit in swap-shelf \(up to 0\.30 × 0\.28 × 0\.30 m\)/);}
+ results.lanternDown = await done(`put-on:${id('table')}`);
  assert.equal(item('lantern').support.on, id('table'), '"on the table" is still a surface put');
  ok(god.act({ops: [{op: 'place', def: 'core/cup@2', name: 'cup', in: {parent: 'swap-shelf', slot: 'in-1'}, p: [0, 0]}, {op: 'place', def: 'core/cup@2', name: 'mug', in: {parent: 'swap-shelf', slot: 'in-2'}, p: [0, 0]}].filter(o => !(ent('bowl').in.slot === o.in.slot)).concat(ent('bowl').in.slot === 'in-3' ? [] : [{op: 'place', def: 'core/cup@2', name: 'mug2', in: {parent: 'swap-shelf', slot: 'in-3'}, p: [0, 0]}])})); await tick(20);
  const full = await here(souls.Bea);
  const holds = shelfRow(full)?.state?.holds ?? []; assert.equal(holds.length, 3, JSON.stringify(holds)); assert.ok(holds.includes('bowl (left by Bea)')); assert.ok(holds.filter(h => !/left by/.test(h)).length === 2, 'god-placed things have no leaver');
- results.bookUp = await done('pick up the book');
- await refuse('leave the book on the swap shelf', 'container.full');
+ results.bookUp = await done(`pick-up:${id('book')}`);
+ await refuse(`put-in:${shelfId}`, 'container.full');
  // a book (an item-kind word, as cups and letters are): its take names the shelf, so storage words resolve it, not the kind
  ok(god.act({ops: [{op: 'remove', id: [...god.model.entities.values()].find(e => e.in.parent === shelfId && e.name !== 'bowl').id}]})); await tick(10);
- results.bookPut = await done('leave the book on the swap shelf');
+ results.bookPut = await done(`put-in:${shelfId}`);
  assert.deepEqual(leftBy().split(',').sort(), [`${bowl}=${souls.Bea.soulId}`, `${id('book')}=${souls.Ana.soulId}`].sort(), 'the record: the bowl Bea left and the book Ana left');
- // "from Ana" names a Soul, not the shelf: the leaver in the take label is not container words
- {const prev = soul; soul = souls.Bea; try {const r = await (await app.request('/v1/edge/resolve', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability: 'take the book from Ana'})})).json(); results.fromAna = r.resolve?.capability ?? r.resolve?.code ?? null; assert.notEqual(r.resolve?.capability, `pick-up:${id('book')}`, JSON.stringify(r).slice(0, 300));} finally {soul = prev;}}
- results.bookTake = await done('take the book from the swap shelf', souls.Bea);
+ results.bookTake = await done(`pick-up:${id('book')}`, souls.Bea);
  assert.equal(results.bookTake.capability, `pick-up:${id('book')}`); assert.equal(item('book').support.by, souls.Bea.entityId);
  assert.equal(leftBy(), `${bowl}=${souls.Bea.soulId}`, 'a thing taken off drops out of the record');
 

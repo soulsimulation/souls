@@ -4,7 +4,8 @@
 //        [--public <release-receipt.json>]
 // --public also writes the release receipt (#1402): only what ship.sh checks (shas, build id, statuses, counts,
 // timestamps, sha256 of each raw receipt), with no path, host or name. It must pass tools/proof/publication.mjs, or it is
-// not written. It is the receipt that may travel: the release workflow reads it from a prerelease.
+// not written. It is the receipt that may travel: the release workflow reads it from a prerelease. For a blocked gate
+// it also lists the gate's count blocker lines and the removed and skipped tests (step and id), for accepted exceptions.
 // The CPU gate (release-gate.sh, Modal) excludes V7; the V7 walk (v7-walks.sh, real Chrome on 5870-5879) covers it.
 // They combine only when both judged the SAME candidate commit: the V7 source sha must equal the gate's candidate sha,
 // the V7 checkout must have been clean, the V7 walk must pass and the gate must not be blocked. Anything else is blocked.
@@ -44,15 +45,21 @@ export function combineReceipts(gate, v7) {
 
 const SHA40 = /^[0-9a-f]{40}$/, ISO = /^\d{4}-\d\d-\d\dT[\d:.]+Z$/, len = a => (Array.isArray(a) ? a.length : null);
 const sha = s => (typeof s === 'string' && SHA40.test(s) ? s : null), iso = s => (typeof s === 'string' && ISO.test(s) ? s : null);
+// #2262: the gate's count blocker lines, word for word; any other line is published as 'other' (it may name a path)
+const COUNT_LINE = /^\d+ (new test failure\(s\)|baseline assertions removed|unexpected test skip\(s\)\/TODO\(s\))$/;
+const tests = a => (Array.isArray(a) ? a.map(t => ({ step: String(t?.step), id: String(t?.id) })) : []);
 
 /** The release receipt: the ship's verdict inputs and nothing else. Every value is a sha, a fixed word, a count or a time. */
 export function publicReceipt(gate, gateSha256, v7, v7Sha256, combined = combineReceipts(gate, v7)) {
-  const candidate = sha(combined.candidate);
+  const candidate = sha(combined.candidate), blocked = gate?.status === 'blocked';
   const r = { schema: 'release-receipt/1', at: new Date().toISOString(), candidate, build: candidate ? `we-${candidate.slice(0, 12)}` : null,
     status: ['pass', 'quarantined', 'blocked'].includes(combined.status) ? combined.status : 'blocked', blockers: combined.blockers.length,
     gate: { sha256: gateSha256, status: String(gate?.status ?? '').replace(/[^a-z-]/g, '') || null, scope: gate?.scope?.resolved === 'full' ? 'full' : 'not-full',
       baseline: sha(gate?.refs?.baseline?.sha), startedAt: iso(gate?.startedAt), endedAt: iso(gate?.endedAt),
-      blockers: len(gate?.blockers), newFailures: len(gate?.newFailures), unexpectedSkips: len(gate?.unexpectedSkips), removed: len(gate?.removed), quarantined: len(gate?.quarantined) },
+      blockers: len(gate?.blockers), newFailures: len(gate?.newFailures), unexpectedSkips: len(gate?.unexpectedSkips), removed: len(gate?.removed), quarantined: len(gate?.quarantined),
+      // a blocked gate also carries what the release workflow needs to match accepted exceptions exactly (#2262):
+      // its blocker lines and the removed and skipped tests by step and id, as the gate receipt lists them
+      ...(blocked ? { blockerLines: (gate.blockers ?? []).map(b => (COUNT_LINE.test(b) ? b : 'other')), removedTests: tests(gate.removed), unexpectedSkipTests: tests(gate.unexpectedSkips) } : {}) },
     v7: { sha256: v7Sha256, status: v7?.status === 'pass' ? 'pass' : 'fail', source: sha(v7?.source), dirty: v7?.dirty === false ? false : true, at: iso(v7?.at), checks: len(v7?.checks), failed: len(v7?.failed) } };
   assertPublishable(r);
   return r;

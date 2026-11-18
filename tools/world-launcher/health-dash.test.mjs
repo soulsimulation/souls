@@ -111,6 +111,9 @@ test('#1150: a halted world keeps its last tick numbers, shows its counts by rul
   assert.deepEqual(row(d).tickMs, { avg: 4.2, max: 8.4, n: 400 }); assert.equal(row(d).glitches, null, 'a fake world from before the counts'); assert.equal(row(d).halted, undefined);
   const kid = L.pool.status('halts');
   assert.equal((await fetch(`http://127.0.0.1:${kid.port}/w/halts/halt`)).status, 200);
+  // the page hears the halted world's 503 (its counts) first: once a guard look reads `halted` in live.json it restarts
+  // the world (#1326; the fake world exits at once on SIGTERM), and a page that never asked in between has no counts
+  for (let i = 0; i < 40 && !row(d).glitches; i++) { d = await dash(); if (!row(d).glitches) await new Promise((r) => setTimeout(r, 100)); }
   for (let i = 0; i < 100 && !row(d).halted; i++) { await L.pool.guard(); d = await dash(); if (!row(d).halted) await new Promise((r) => setTimeout(r, 100)); }
   assert.equal(row(d).halted, true);
   assert.deepEqual(row(d).glitches, { total: 2, byRule: { 'collision.human-load': { recovery: 1, halt: 1 } } });

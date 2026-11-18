@@ -35,7 +35,7 @@ test('eden.mjs creates a Soul on an account world: create --for, owner approves,
   const dir = mkdtempSync(join(tmpdir(), 'cli-create-'));
   t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, { recursive: true, force: true }); f.host.stop(); f.db.close(); });
   const world = `http://127.0.0.1:${(server.address() as { port: number }).port}/w/test`;
-  const run = (...args: string[]) => new Promise<Record<string, any>>((resolve, reject) => execFile(process.execPath, [CLI, ...args], { cwd: dir },
+  const run = (...args: string[]) => new Promise<Record<string, any>>((resolve, reject) => execFile(process.execPath, [CLI, ...args], { cwd: dir, env: { ...process.env, HOME: dir } },
     (err, out, errText) => err ? reject(new Error(`${args.join(' ')}: ${errText || out}`)) : resolve(JSON.parse(out))));
   const owner = (path: string) => app.request(path, { method: 'POST', headers: { host: '127.0.0.1', 'content-type': 'application/json', authorization: 'Bearer owner' }, body: '{}' });
 

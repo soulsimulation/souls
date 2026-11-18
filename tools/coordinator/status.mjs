@@ -3,6 +3,9 @@
 // fresh required checks, the Actions queue by workflow, and the PRs labelled needs:rebase.
 //
 //   node tools/coordinator/status.mjs [--repo o/r] [--since 6h|30m|2d|<ISO time>] [--json]
+//   node tools/coordinator/status.mjs --agenda <issue> [--repo o/r] [--json]
+//        instead: each task the agenda issue lists, by lane, with its state, PR and head, who it waits on, and the
+//        hours since it was claimed against its Ceiling line; the last release and the agenda's Needs Gene section
 //
 // Read-only: every call is a `gh api` GET (GH_TOKEN or the gh login). The output holds only what the GitHub API says
 // about the repository: no tokens, host names or local paths.
@@ -120,7 +123,126 @@ export function format(s, now = new Date().toISOString()) {
   return lines.join('\n');
 }
 
-async function repoFromGit() {
+// ── agenda ──────────────────────────────────────────────────────────────────────────────────────────────────────
+// `--agenda <issue>`: the lane table, computed from GitHub. A task is a table row whose first cell starts with `#N`,
+// in the lane named by the `##` heading above it; the agenda's "Lanes and order" table (first cell the lane name, then
+// its issues in order, parenthesised refs ignored) sets each lane's dispatch order. A task's PR is one that closes it
+// (`Closes #N`), else an open PR on a branch `agent/<N>-…`; its claim time is the newest `agent:claimed` label event.
+const refs = s => [...String(s).matchAll(/#(\d+)/g)].map(m => Number(m[1]));
+const cells = line => line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+const laneKey = s => s.replace(/^Lane\s+/i, '').trim();
+
+export function parseAgenda(body) {
+  const tasks = [], order = new Map(), sections = new Map();
+  let lane = '', header = null;
+  for (const line of String(body).split(/\r?\n/)) {
+    const h = /^##\s+(.*)$/.exec(line);
+    if (h) { lane = h[1].trim(); header = null; sections.set(lane, []); continue; }
+    if (lane) sections.get(lane).push(line);
+    if (!line.trim().startsWith('|')) { header = null; continue; }
+    const c = cells(line);
+    if (c.every(x => /^:?-+:?$/.test(x))) continue;
+    if (!/^#\d+/.test(c[0])) {
+      if (!header) header = c.map(x => x.toLowerCase());
+      else if (c.length === 2 && refs(c[1]).length) order.set(laneKey(c[0]), refs(c[1].replace(/\([^)]*\)/g, '')));
+      continue;
+    }
+    const col = re => { const i = header?.findIndex(x => re.test(x)) ?? -1; return i >= 0 ? c[i] ?? '' : ''; };
+    const number = refs(c[0])[0];
+    if (!tasks.some(t => t.number === number)) tasks.push({ number, lane, ceiling: Number.parseFloat(col(/ceiling/)) || null, tier: col(/tier/), depends: col(/depend/), title: col(/title/) });
+  }
+  for (const t of tasks) { const o = order.get(laneKey(t.lane)) ?? []; t.rank = o.includes(t.number) ? o.indexOf(t.number) : o.length + tasks.indexOf(t); }
+  const section = name => (sections.get(name) ?? []).join('\n').trim();
+  return { tasks, needsGene: section('Needs Gene') };
+}
+
+const PR_FIELDS = 'number state isDraft headRefName headRefOid mergedAt labels(first:30){nodes{name}}';
+const TASK_FIELDS = `number title state closedAt body labels(first:30){nodes{name}}
+  timelineItems(itemTypes:[LABELED_EVENT], last:50){nodes{... on LabeledEvent{createdAt label{name}}}}
+  closedByPullRequestsReferences(first:10, includeClosedPrs:true){nodes{${PR_FIELDS}}}`;
+const ghGraphql = async query => { const { stdout } = await exec('gh', ['api', 'graphql', '-f', `query=${query}`], { maxBuffer: 1 << 27 }); return JSON.parse(stdout).data; };
+githubApi.graphql = ghGraphql;
+
+/** One task's row from its issue and PRs: state, PR and head, who it waits on, hours since claimed. */
+export function taskRow(task, issue, openPrs = [], depState = new Map(), now = Date.now()) {
+  const names = o => (o?.labels?.nodes ?? []).map(l => l.name);
+  const linked = issue?.closedByPullRequestsReferences?.nodes ?? [];
+  const byBranch = openPrs.filter(p => p.headRefName?.startsWith(`agent/${task.number}-`));
+  const prs = [...linked, ...byBranch.filter(p => !linked.some(l => l.number === p.number))];
+  const pr = prs.find(p => p.state === 'OPEN') ?? prs.find(p => p.mergedAt) ?? prs.sort((a, b) => b.number - a.number)[0];
+  const labels = names(issue), prLabels = names(pr);
+  const ceiling = Number.parseFloat(/\*\*Ceiling:\*\*\s*(\d+(?:\.\d+)?)/.exec(issue?.body ?? '')?.[1]) || task.ceiling;
+  const tier = prLabels.find(l => /^tier:T\d$/.test(l))?.slice(5) ?? (task.tier || null);
+  const claims = (issue?.timelineItems?.nodes ?? []).filter(e => e.label?.name === 'agent:claimed').map(e => e.createdAt).sort();
+  const claimedAt = claims.at(-1) ?? null;
+  const end = pr?.mergedAt ?? issue?.closedAt ?? null;
+  let hours = claimedAt ? Math.max(0, ((end ? Date.parse(end) : now) - Date.parse(claimedAt)) / 3_600_000) : null;
+  const openDeps = refs(task.depends).filter(n => depState.get(n) === 'OPEN');
+  let state, waits;
+  if (pr?.mergedAt) [state, waits] = ['merged', null];
+  else if (issue?.state === 'CLOSED') [state, waits] = ['closed', null];
+  else if (pr?.state === 'OPEN' && pr.isDraft) [state, waits] = ['draft', 'lane'];
+  else if (pr?.state === 'OPEN') {
+    state = 'review';
+    waits = prLabels.includes(REBASE) ? 'lane (rebase)'
+      : ['T3', 'T4'].includes(tier) && !prLabels.includes(APPROVED_LABEL) ? 'maintainer (T3+ sign-off)'
+        : prLabels.includes(READY) ? 'merge train' : 'coordinator (review)';
+  } else if (labels.includes('agent:claimed')) [state, waits] = ['claimed', 'lane'];
+  else [state, waits] = ['ready', openDeps.length ? `deps ${openDeps.map(n => `#${n}`).join(' ')}` : /after release \d+/i.exec(task.depends)?.[0] ?? 'coordinator (dispatch)'];
+  if (state === 'ready') hours = null; // an unclaimed task's old claim (an earlier agenda) is not running time
+  return { ...task, ceiling, tier, state, waits, pr: pr ? { number: pr.number, state: pr.mergedAt ? 'MERGED' : pr.state, head: pr.headRefOid?.slice(0, 8) ?? null, mergedAt: pr.mergedAt ?? null } : null, claimedAt, hours, openDeps };
+}
+
+export async function collectAgenda({ repo, agenda, api = githubApi, now = Date.now() }) {
+  const [owner, name] = repo.split('/');
+  const issue = await api.get(`repos/${repo}/issues/${agenda}`).then(p => p[0] ?? p);
+  const { tasks, needsGene } = parseAgenda(issue.body);
+  const deps = [...new Set(tasks.flatMap(t => refs(t.depends)))].filter(n => !tasks.some(t => t.number === n));
+  const issues = new Map(), depState = new Map();
+  const all = [...tasks.map(t => ['t', t.number]), ...deps.map(n => ['d', n])];
+  for (let i = 0; i < all.length; i += 20) {
+    const part = all.slice(i, i + 20).map(([k, n]) => k === 't'
+      ? `i${n}: issueOrPullRequest(number:${n}){ ... on Issue { ${TASK_FIELDS} } ... on PullRequest { number state } }`
+      : `i${n}: issueOrPullRequest(number:${n}){ ... on Issue { number state } ... on PullRequest { number state } }`).join('\n');
+    const data = await api.graphql(`{ repository(owner:"${owner}", name:"${name}") { ${part} } }`);
+    for (const [k, v] of Object.entries(data.repository)) if (v) { issues.set(Number(k.slice(1)), v); depState.set(Number(k.slice(1)), v.state); }
+  }
+  const head = await api.graphql(`{ repository(owner:"${owner}", name:"${name}") { latestRelease { tagName publishedAt }
+    pullRequests(states:OPEN, first:100, orderBy:{field:CREATED_AT, direction:DESC}){ nodes { ${PR_FIELDS} } } } }`);
+  const release = head.repository.latestRelease;
+  const since = release?.publishedAt
+    ? (await api.graphql(`{ search(query:"repo:${repo} is:pr is:merged merged:>=${release.publishedAt}", type:ISSUE, first:1){ issueCount } }`)).search.issueCount
+    : null;
+  const rows = tasks.map(t => taskRow(t, issues.get(t.number), head.repository.pullRequests.nodes, depState, now));
+  return { repo, agenda: Number(agenda), at: new Date(now).toISOString(), release: release ? { tag: release.tagName, at: release.publishedAt, mergedSince: since } : null, rows, needsGene };
+}
+
+const fmtH = h => (h == null ? '—' : `${h.toFixed(1)}h`);
+const esc = s => String(s).replace(/\|/g, '\\|');
+
+/** The agenda table as Markdown: per lane, what it is on and what goes next, then the task rows in dispatch order. */
+export function formatAgenda(a) {
+  const out = [`Agenda #${a.agenda} on ${a.repo}, computed from GitHub at ${a.at.slice(0, 16)}Z.`, ''];
+  const r = a.release;
+  const tasksSince = r ? a.rows.filter(x => x.pr?.mergedAt && x.pr.mergedAt >= r.at).map(x => `#${x.number}`) : [];
+  out.push(r ? `**Release:** last ${r.tag} at ${r.at.slice(0, 16)}Z; ${r.mergedSince} PRs merged since, ${tasksSince.length} of them agenda tasks${tasksSince.length ? ` (${tasksSince.join(', ')})` : ''}.` : '**Release:** none published.');
+  const gene = a.rows.filter(x => x.waits?.startsWith('maintainer'));
+  out.push('', '## Needs Gene', '', ...(gene.length ? gene.map(x => `- #${x.number} PR #${x.pr.number}: ${x.tier} sign-off`) : ['- No task PR waits on a maintainer sign-off.']));
+  if (a.needsGene) out.push('', 'From the agenda:', '', a.needsGene);
+  const lanes = [...new Set(a.rows.map(x => x.lane))];
+  for (const lane of lanes) {
+    const rows = a.rows.filter(x => x.lane === lane).sort((x, y) => x.rank - y.rank);
+    const on = rows.filter(x => ['claimed', 'draft', 'review'].includes(x.state));
+    const next = rows.find(x => x.state === 'ready');
+    out.push('', `## ${lane}`, '');
+    out.push(`On: ${on.length ? on.map(x => `#${x.number} (${x.state})`).join(', ') : 'nothing'}. Next: ${next ? `#${next.number}${next.depends && next.depends !== 'none' ? ` (depends on ${esc(next.depends)}${next.openDeps.length ? `; open: ${next.openDeps.map(n => `#${n}`).join(' ')}` : ''})` : ''}` : 'none'}.`, '');
+    out.push('| Task | State | PR @head | Waits on | Claimed / ceiling | Title |', '|---|---|---|---|---|---|');
+    for (const x of rows) out.push(`| #${x.number} | ${x.state} | ${x.pr ? `#${x.pr.number} @${x.pr.head ?? '—'}` : '—'} | ${x.waits ?? '—'} | ${fmtH(x.hours)} / ${x.ceiling ?? '?'}h${x.hours != null && x.ceiling && x.hours > x.ceiling ? ' over' : ''} | ${esc(cut(x.title || '', 70))} |`);
+  }
+  return out.join('\n');
+}
+
+export async function repoFromGit() {
   const { stdout } = await exec('git', ['remote', 'get-url', 'origin']);
   const m = /github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?\s*$/.exec(stdout);
   if (!m) throw Error('no GitHub origin remote; pass --repo owner/name');
@@ -131,6 +253,11 @@ async function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
   const repo = opt('--repo') ?? process.env.GITHUB_REPOSITORY ?? await repoFromGit();
   const required = process.env.MERGE_TRAIN_CHECKS ? process.env.MERGE_TRAIN_CHECKS.split(',').map(s => s.trim()).filter(Boolean) : DEFAULT_CHECKS;
+  if (opt('--agenda')) {
+    const a = await collectAgenda({ repo, agenda: opt('--agenda') });
+    console.log(argv.includes('--json') ? JSON.stringify(a, null, 2) : formatAgenda(a));
+    return 0;
+  }
   const s = await collect({ repo, since: parseSince(opt('--since')), maintainer: opt('--maintainer') ?? process.env.MAINTAINER, required });
   console.log(argv.includes('--json') ? JSON.stringify(s, null, 2) : format(s));
   return 0;

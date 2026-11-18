@@ -28,7 +28,7 @@ import { GROUND_TILE_M, G_OUTSIDE, G_STEEP, G_WALK, type GroundField } from './g
 import { linkApproach, linkEdgeTest, PLAN_MARGIN, snap as snapCell } from './path.ts';
 import type { Spatial } from './service.ts';
 import { boxesOf, type GroundNav } from './tiled.ts';
-import { HUMAN_PROFILE, type Link, type Obstacle, type Surface, type SpatialScene } from './types.ts';
+import { doorSides, HUMAN_PROFILE, type Link, type Obstacle, type Surface, type SpatialScene } from './types.ts';
 
 /** Policy id of the audit's rules (what counts as connected, what a rescue picks): bump when they change. */
 export const NAV_CONNECT_POLICY = 'nav-connect/1';
@@ -62,6 +62,10 @@ export type ConnVerdict = {
   pocket?: number;
   /** Upper floors: the floor (surface id) it stands on, when not connected. */
   floor?: string;
+  /** Connected only through closed hand doors (doors-pass/1): a walk between it and the main area goes through them. */
+  door?: true;
+  /** With `door`: the areas a walk joins without another door share it (a walk between two different ones passes a door). */
+  group?: number;
 };
 
 const ALL = new Int32Array(0), NONE = new Int32Array(0);
@@ -138,6 +142,8 @@ export class NavConnectivity {
   private flatUpper = new WeakMap<LevelGrid, Int32Array>();
   /** Components joined to the main area both ways (node ids: `0:<root>` level 0, `u<cluster>:<level>:<label>` upper). */
   private good = new Set<string>();
+  /** Areas in `good` only through closed hand doors (doors-pass/1), each with its door group (areas joined without a door). */
+  private behind = new Map<string, number>();
   private fwd = new Set<string>();
   private bwd = new Set<string>();
   private graphVer = '';
@@ -188,7 +194,7 @@ export class NavConnectivity {
       work.clusterMemo = new Map(this.clusterMemo); work.linkMemo = new Map(this.linkMemo);
       work.flat = this.flat; work.flatUpper = this.flatUpper; work.ext = this.ext; work.per = this.per;
       work.parent = this.parent.slice(); work.base = new Map(this.base); work.rootSize = new Map(this.rootSize);
-      work.clusters = this.clusters; work.good = this.good; work.fwd = this.fwd; work.bwd = this.bwd;
+      work.clusters = this.clusters; work.good = this.good; work.behind = this.behind; work.fwd = this.fwd; work.bwd = this.bwd;
       work.main = this.main; work.version = this.version; work.graphVer = this.graphVer; work.dirty = this.dirty;
       const carry = this.carried; this.carried = undefined;
       if (carry && ground === carry.ground && ground.per === carry.per) {
@@ -242,7 +248,7 @@ export class NavConnectivity {
     this.tiles = w.tiles; this.ext = w.ext; this.per = w.per; this.flat = w.flat;
     this.parent = w.parent; this.base = w.base; this.rootSize = w.rootSize; this.lru = w.lru; this.mediaMemo = w.mediaMemo;
     this.dirty = w.dirty; this.clusters = w.clusters; this.clusterMemo = w.clusterMemo; this.flatUpper = w.flatUpper;
-    this.good = w.good; this.fwd = w.fwd; this.bwd = w.bwd; this.graphVer = w.graphVer; this.linkMemo = w.linkMemo;
+    this.good = w.good; this.behind = w.behind; this.fwd = w.fwd; this.bwd = w.bwd; this.graphVer = w.graphVer; this.linkMemo = w.linkMemo;
     this.main = w.main; this.version = w.version;
   }
 
@@ -599,11 +605,42 @@ export class NavConnectivity {
       while (q.length) for (const n of adj.get(q.pop()!) ?? []) if (!seen.has(n)) { seen.add(n); q.push(n); }
       return seen;
     };
-    this.good = new Set();
+    this.good = new Set(); this.behind = new Map();
     if (this.main >= 0) {
       const m = `0:${this.main}`;
       this.fwd = reach(fwdAdj, m); this.bwd = reach(bwdAdj, m);
       for (const n of this.fwd) if (this.bwd.has(n)) this.good.add(n);
+      // doors-pass/1 (#2365, #2434): an area closed, unlocked hand doors away from the main area is joined to it (a walk
+      // opens each door, passes and closes it: entry 31), with every area that walks to and from it without another door
+      // (the building's upper floors by its stairs). Any number of doors in series and on any floor (the passage's door
+      // chain, Spatial.doorChain), so joined areas are taken door by door until no door joins another.
+      const nodeAt = (level: number, p: Vec2): string | null => {
+        if (level === 0) { const s = this.snap(p, 0.6); return s ? `0:${s.root}` : null; }
+        const u = this.upperAt(level, p, 0.6), c = u ? snapCell(u.g, p, this.t, 0.6) : -1;
+        return u && c >= 0 ? u.node(c) : null;
+      };
+      const pairs: [string, string][] = [];
+      // in ground-tile order, so a tile's fine labels are made once for all its doors (the LRU holds 8 tiles: in scene
+      // order Eden's ~650 doors re-made a tile per door side, ~45 s of each graph build)
+      const tileKey = (o: Obstacle) => [Math.floor(o.obb.c[1] / GROUND_TILE_M), Math.floor(o.obb.c[0] / GROUND_TILE_M)];
+      const doors = this.scene.obstacles.filter((o) => o.door === 'pass').map((o) => ({ o, k: tileKey(o) }))
+        .sort((x, y) => x.k[0] - y.k[0] || x.k[1] - y.k[1] || (x.o.id < y.o.id ? -1 : x.o.id > y.o.id ? 1 : 0));
+      for (const { o } of doors) {
+        const level = sp.passDoorLevel(o); if (level === null) continue;
+        const [a, b] = doorSides(o), na = nodeAt(level, a), nb = nodeAt(level, b);
+        if (na && nb && na !== nb) pairs.push([na, nb]);
+        yield 'graph';   // a door's sides may make a tile's fine labels: a slice may end here (the build stays unpublished)
+      }
+      for (let more = true, group = 0; more;) {
+        more = false;
+        for (const [na, nb] of pairs) {
+          const n = this.good.has(na) && !this.good.has(nb) ? nb : this.good.has(nb) && !this.good.has(na) ? na : null;
+          if (!n) continue;
+          const f = reach(fwdAdj, n), b = reach(bwdAdj, n);
+          for (const x of f) if (b.has(x) && !this.good.has(x)) { this.good.add(x); this.behind.set(x, group); this.fwd.add(x); this.bwd.add(x); }
+          group++; more = true;
+        }
+      }
     } else { this.fwd = new Set(); this.bwd = new Set(); }
     this.linkMemo = memo;
     this.stats.links = tasks.length / 2; this.stats.edges = edges;
@@ -657,7 +694,7 @@ export class NavConnectivity {
       if (u && c >= 0) { node = u.node(c); floor = u.floor; }
     }
     if (!node) return { id, level, ok: false, code: 'nav.no-standing-room' };
-    if (this.good.has(node)) return { id, level, ok: true, area: node };
+    if (this.good.has(node)) return { id, level, ok: true, area: node, ...(this.behind.has(node) ? { door: true as const, group: this.behind.get(node)! } : {}) };
     const code = this.fwd.has(node) || this.bwd.has(node) ? 'nav.one-way' : 'nav.disconnected';
     return { id, level, ok: false, code, area: node, ...(level === 0 ? { pocket } : { floor }) };
   }

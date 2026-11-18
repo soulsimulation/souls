@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {useDraft, writeDraft} from './input-draft.ts';
 import type {Api} from './useSouls.ts';
 import {windowCode} from './god-ui/join-api.ts';
 import {reportAgentPresence,withLink} from './agent-presence.ts';
@@ -167,15 +168,15 @@ export function useSoulInbox(api: Api, soulId: string) {
   return {inbox, send};
 }
 /** The Connected card's box: the form and the latest receipt. */
-export function SoulMessageBox({inbox, send}: {inbox: AgentInbox | null; send(text: string): Promise<unknown>}) {
-  const [text, setText] = useState(''), [sending, setSending] = useState(false), [error, setError] = useState('');
+export function SoulMessageBox({inbox, send, draftKey}: {inbox: AgentInbox | null; send(text: string): Promise<unknown>; draftKey: string}) {
+  const [text, setText] = useDraft(draftKey), [sending, setSending] = useState(false), [error, setError] = useState('');
   const mounted = useRef(true);
   useEffect(() => {mounted.current = true; return () => {mounted.current = false;};}, []);
   const onSend = async (event: React.FormEvent) => {
     event.preventDefault();
     if (sending || !text.trim()) return;
     setSending(true); setError('');
-    try {await send(text.trim()); if (mounted.current) setText('');}
+    try {await send(text.trim()); writeDraft(draftKey, ''); if (mounted.current) setText('');}
     catch (e) {if (mounted.current) setError(e instanceof Error ? e.message : 'Message could not be sent. Try again.');}
     finally {if (mounted.current) setSending(false);}
   };

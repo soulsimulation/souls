@@ -156,7 +156,7 @@ test('levels: a world with more than 20 floor heights gives each its own level, 
 });
 
 /** Every building/1 type in the catalogue (structures.json + vocab-w3.json: 40 types). */
-const BUILDING_TYPES = [...structures, ...vocabW3].filter((d: any) => d?.make?.gen === 'building/1').map((d: any) => coreRef(String(d.name).replace(/^core-/, '')));
+const BUILDING_TYPES = [...structures, ...vocabW3].filter((d: any) => d?.make?.gen === 'building/1' && (d.version ?? 1) === 1).map((d: any) => coreRef(String(d.name).replace(/^core-/, '')));
 const YAWS = Array.from({ length: 48 }, (_, i) => i * 7.5);
 /**
  * Door sweep: each building placed on flat ground and on two slopes of a knoll (h 12, r 60: ~0.24 at 40 m, ~0.34 at 25 m

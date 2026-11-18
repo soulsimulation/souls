@@ -9,25 +9,43 @@ named beside each one is the authority.
 | Line | At f6c658203 | Read it from | What moves it |
 |---|---|---|---|
 | Server release | 0.119 | newest `v*` tag, top of `CHANGELOG.md` | the release owner names it at publish time |
-| Soul CLI, `eden.mjs` | 2.14.0 | `VERSION` in `tools/world-launcher/soul/eden.mjs`, `controllerCli` in `SOURCES.json` | a new published copy of the CLI |
-| Soul guide, `skill.md` | 2.9.3 | front matter of `tools/world-launcher/soul/skill.md`, `skill` in `SOURCES.json` | a new published copy of the guide |
+| Soul CLI, `eden.mjs` | 2.14.0 | `VERSION` in `tools/world-launcher/soul/eden.mjs`, `controllerCli` in `SOURCES.json` | the release owner, at release ([below](#the-client-version)) |
+| Soul guide, `skill.md` | 2.9.3 | front matter of `tools/world-launcher/soul/skill.md`, `skill` in `SOURCES.json` | stamped with the CLI: one version for both |
 | Schema notes | 2.9.3 | `schemaNotes` in `SOURCES.json` | moves with the guide |
 | Instructions | 2.0.3 | `instructions` in `SOURCES.json` | a new published capture |
 | Managed runtime | 0.1.0 | `runtime` in `SOURCES.json` | a new runtime publication |
-| Legacy CLI, `eden-agent.mjs` | 1.9, build 1.9.21 | `cli` in `SOURCES.json` | retained; worlds serve a `build-cli.mjs` build of `tools/edge-skill/eden-agent.mjs` (manifest in `builds/`) |
+| Legacy CLI, `eden-agent.mjs` | 1.9, build 1.9.21 | `cli` in `SOURCES.json` | retired (#1754): no world serves it; the files stay until a later batch deletes them |
 | Edge wire contract | `eden-edge/1` | `EDGE_CONTRACT` in `apps/server/src/edge/contract.ts` | a breaking wire change; none so far |
 | Edge API contract | `eden-edge/1.1` | `BOOT_API_CONTRACT` in `apps/server/src/edge/boot/routes.ts` | additive changes |
 | Build id | `we-<sha12>` | `build` in `/v1/config` and `/__sim/healthz` | every build, from the commit |
 
 `SOURCES.json` is `tools/world-launcher/soul/SOURCES.json`. `package.json` versions (0.0.1) mean nothing here.
 
-The lines are not tied together. A server release doesn't bump the CLI, and a new CLI doesn't need a server release to
-exist in the tree, though worlds only serve it after one ships. The version numbers carry no meaning beyond order: there
-is no semver promise on any line.
+The lines are not tied together. A server release stamps a new CLI version only when the client changed, and a new CLI
+doesn't need a server release to exist in the tree, though worlds only serve it after one ships. The version numbers
+carry no meaning beyond order: there is no semver promise on any line.
+
+## The client version
+
+The client version (`eden.mjs` and `skill.md`) is assigned at release by the release owner. A pull request that changes
+the client edits `eden.mjs` or `skill.md` and nothing else: no version line, no hash in `SOURCES.json`, no literal in a
+test. Before the release gate, the release owner stamps the release's client with one command:
+
+```sh
+node tools/world-launcher/soul/stamp.mjs <version>
+```
+
+It sets `VERSION` in `eden.mjs`, the skill's two version lines, the `controllerCli` and `skill` versions in `SOURCES.json`
+and the hash of every file `SOURCES.json` lists. It takes digits and dots only, and refuses a version not above the current
+one when the client's bytes changed. The other files `SOURCES.json` lists (`eden-agent.mjs`, `instructions.md`,
+`schema-notes.md`, the runtime) keep their own versions and are frozen: an edit to one fails the launcher tests in PR CI,
+and `stamp.mjs` refuses to re-hash it, until the same pull request moves that file's version and sha256. `stamp.mjs --check` changes nothing and exits non-zero when anything disagrees. A
+release head's full gate runs it on the candidate and blocks on a disagreement; a lane's `--scope auto` gate does not, so
+between releases `main` may hold client changes that are not stamped yet.
 
 ## How a world shows what it serves
 
-- **`/eden.mjs`, `/skill.md`, `/instructions.md`, `/eden-agent.mjs`:** every launcher world serves exact copies of the
+- **`/eden.mjs`, `/skill.md`, `/instructions.md`:** every launcher world serves exact copies of the
   files in `tools/world-launcher/soul/`, never forks, and `SOURCES.json` records each one's version, hash and origin.
 - **`/v1/config`:** the build id, among other public settings. It does not name a CLI version.
 - **`GET /v1/edge/boot`:** `apiContract`, `eden-edge/1.1`. Edge responses carry `contract`, `eden-edge/1`.
@@ -70,11 +88,11 @@ Release as an asset, as 0.111 and 0.113 have; raw receipts and live clips stay p
 
 - **The server doesn't check client versions.** It never refuses a client for being old. The CLI strips `contract` and
   `apiContract` from responses without acting on them.
-- **New behaviour is opt-in per request, so old clients keep working.** The pattern is strict offers (#1093): `strict:
-  true` in an act turns the check on, and `eden.mjs` 2.9.0 and later send it. A request without it keeps the older
-  free-text path, which the 1.9 line, older 2.x installs, the managed runtime, MCP `eden_act` and benches use today.
-- **A server-side switch can undo such a change for a release.** `EDGE_FREE_TEXT_ACT=1` turns the strict check off. Add
-  the same kind of switch to a change that could strand clients, and remove it once callers have moved.
+- **New behaviour is opt-in per request until callers have moved.** Strict offers (#1093) began as `strict: true` in an
+  act, sent by `eden.mjs` 2.9.0 and later. Since #1911 every act is strict: `POST /v1/edge/act` takes an offered id and
+  refuses words and `{verb, target}` intents with the gate's `capability.unknown`, whatever the request says.
+- **A server-side switch can undo such a change for a release.** `EDGE_FREE_TEXT_ACT=1` did this for strict offers until
+  #1911 removed it. Add the same kind of switch to a change that could strand clients, and remove it once callers have moved.
 - **A newer CLI against an older world** is not guarded: a command the world doesn't have fails as that world answers it.
 - **Changes to the contract** are additive within `eden-edge/1`, as `eden-edge/1.1` was. A breaking change would be a new
   contract, and none has been needed.

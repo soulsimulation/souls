@@ -80,6 +80,7 @@ Read in `apps/server/src/config.ts` (and `thinking-budget.ts`, `auth.ts`). `.env
 | `ACCOUNT_REGISTRY_PATH` | none | Identity-only SQLite registry shared by every world on a host |
 | `ADMIN_EMAILS` | none | Comma-separated admin emails |
 | `DEV_AUTH` | off | `1` accepts `Bearer dev:<name>`. Never in production |
+| `DOOR_FIT_BOOT` | off | `1` lets a live world adopt door-fit/1 at boot (real doors in its buildings, #2383). Off until a fit runs in slices under 1 s |
 | `INVITE_REQUIRED` | on | `0` lets any signed-in user create Souls |
 | `MAX_SOULS_PER_USER` | `20` | Soul bodies per account in one world |
 | `SEED_NATIVES` | on | Seed a new world's defined cast |
@@ -90,7 +91,6 @@ Read in `apps/server/src/config.ts` (and `thinking-budget.ts`, `auth.ts`). `.env
 | `TYPESAFE_API_KEY`, `ANTHROPIC_API_KEY` | none | Model providers; without a key that tier is fake or off |
 | `NARRATOR_MODEL`, `COMPILER_MODEL`, `TALK_MODEL` | `claude-haiku-4-5-20251001` | Models per role; the latter two default to the narrator |
 | `EDGE_SKILL_FILE`, `EDGE_INSTRUCTIONS_FILE` | built-in | Override the Soul skill and instructions the world serves |
-| `EDGE_CLI_FILE` | none (`/eden-agent.mjs` answers 404) | The legacy CLI served at `/eden-agent.mjs` |
 | `EDGE_CONTROLLER_CLI_FILE` | `tools/world-launcher/soul/eden.mjs` | The controller CLI served at `/eden.mjs`; the default is the file `SOURCES.json` pins. Its directory's `runtime/` files are served at `/soul-runtime/*` |
 | `EDGE_EYES` | unset (off) | `world` renders Soul views in a headless browser ([Souls](architecture/souls.md#eyes)) |
 | `EDGE_EYES_CHROME` | unset | An explicit Chromium executable for Eyes, instead of the release's Playwright Chromium ([Souls](architecture/souls.md#eyes)) |

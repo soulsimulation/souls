@@ -112,6 +112,19 @@ test('an act given up replays exactly: a restart with no snapshot boots', {timeo
  assert.equal(again.host.engine.programOf(entity), null, 'the stop is in the log, so replay ends the programme too');
 });
 
+// #2085: the pick lands a second or two before the act's programme ends (the hand holds, then comes back). A restart in
+// that window ends the act at boot (#2051): completed, because the pick is kept in the receipt row when it lands.
+test('a restart after the pick and before the act ends: the act ends completed', {timeout: 60000}, async t => {
+ const dir = mkdtempSync(join(tmpdir(), 'harvest-')), path = join(dir, 'world.db'); t.after(() => rmSync(dir, {recursive: true, force: true}));
+ const g = await garden(t, table, [0.6, 0.7], path), r = await g.act(g.ana, 'basket');
+ for (let n = 0; n < 2600 && !g.state('basket').fruit && !ENDED.includes(g.receipt(r).phase); n++) await g.tick(1);
+ assert.equal(g.state('basket').fruit, 3, 'picked'); assert.equal(g.receipt(r).phase, 'started', 'inside the window: picked, the act not ended');
+ g.close();
+ const again = fixture(path, factory, {durableClockV1: true}); t.after(() => { again.host.stop(); again.db.close(); });
+ const after = new EdgeLedger(again.host, again.db, undefined, {ambient: false}).receipt(r.soulId, r.id);
+ assert.equal(after.phase, 'completed', JSON.stringify(after).slice(0, 300));
+});
+
 test('a vessel on the ground behind something is fetched from its open side', {timeout: 60000}, async t => {
  const g = await garden(t, (ax, az) => [{op: 'place', def: 'core/garden-planter@2', name: 'bed', p: [ax + 4.9, az + 3.9], state: {growth: 4, moisture: 1}}, {op: 'place', def: 'core/counter@1', name: 'counter', p: [ax + 2, az]}, {op: 'place', def: 'core/harvest-basket@1', name: 'basket', p: [ax + 2.75, az]}], [9, -6]);
  const [a] = await g.end([await g.act(g.ana, 'basket')]);

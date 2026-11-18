@@ -1,0 +1,38 @@
+{
+ "name": "toy-1",
+ "recipe": "toy",
+ "recordedAt": "2026-11-14",
+ "reader": {
+  "engine": "toy",
+  "worldKey": "toy",
+  "worldEngine": false
+ },
+ "worldId": "corpus-toy",
+ "seed": "corpus-toy",
+ "adopted": [],
+ "pins": [
+  {
+   "tick": 1200,
+   "state": "e281e59b2f322fbd243ef6efecf7209b1abe74cc683d0d5ecdb9963486b70376",
+   "kernel": "264235b21f48735d02ee44706a6efba64a66e69ee81c99aa70bb663e919c8a9b",
+   "note": "decisions"
+  },
+  {
+   "tick": 3000,
+   "state": "c82fedb7ccb26ee47096953cafa5e0587ed0beb3c30b3621ba4803d91c8a83b4",
+   "kernel": "f18e3193d04fcbbb584793b906385041b879122d7566a930ecd5795d86a3f129",
+   "note": "after the retire"
+  }
+ ],
+ "head": {
+  "tick": 2958,
+  "seq": 121,
+  "state": "79589cd525624b7b0dfb91eb2e33414feb4079d7293b494de1ad723e07506998",
+  "kernel": "f18e3193d04fcbbb584793b906385041b879122d7566a930ecd5795d86a3f129",
+  "note": "boot head"
+ },
+ "snapshot": {
+  "tick": 1200,
+  "seq": 56
+ }
+}

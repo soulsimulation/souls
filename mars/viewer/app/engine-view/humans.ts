@@ -81,6 +81,10 @@ type View = {
   rig: Rig;
   /** PERF-EDEN: posed at least once (a new body is never left in its bind pose by the pose-rate throttle). */
   posedOnce?: boolean;
+  /** V11 (#2618): in the view at the last pose-rate decision, at its sampled place or where it is drawn. */
+  shown?: boolean;
+  /** V11: neither posed this frame nor shown: its rig keeps the matrices and bone texture it was last drawn with. */
+  held?: boolean;
   appearance?:HumanActorAppearance;
   appearanceSoulKey?:string;
   prev: Snap;
@@ -341,6 +345,8 @@ const SEATED = new Set(['sit', 'sit-down', 'stand-up']);
 const OVERLAYS = new Set(['eat', 'serve', 'drink', ...ACTIVITY_OVERLAYS]);
 /** Soul Actions 44: the lips from the rig's head bone, in the body frame of a 1.75 m body (scaled by height). */
 const CUP_LIPS = { fwd: 0.1, up: 0.02 } as const;
+/** #2197: where the eating palm stops, from the head bone: in front of the chin, with the food above it at the lips. */
+const EAT_PALM = { fwd: 0.11, up: -0.06, side: 0.02 } as const;
 const RUN_SPEED = 2.3; // m/s: faster than any walk
 const INTERACT = new Set(['browse', 'post-letter', 'give', 'take', 'hand-over']);
 const PELVIS = 0.09; // m from the hip joints down to the sitting surface (thigh/buttock thickness)
@@ -456,20 +462,44 @@ export type HumanViewer = { eye: THREE.Vector3; frustum: THREE.Frustum; nearM: n
 /** Shared by every people update within one live animation frame; omitted for immediate random-access views. */
 export type RigCreationBudget={remaining:number};
 const _bodySphere = new THREE.Sphere(undefined, 1.3);
+/** V11 (#2618): while `v.held`, the rig's world matrices and bone texture are left as last drawn (nothing in it changed:
+ *  it was not posed and is out of the view, so idle life skips it too); a moved parent still updates it. */
+function holdable(v: View) {
+  const h = v.rig.holder, walk = h.updateMatrixWorld, parentAt = new THREE.Matrix4();
+  h.updateMatrixWorld = function (force?: boolean) {
+    const parent = h.parent;
+    if (v.held && parent && parentAt.equals(parent.matrixWorld)) return;
+    walk.call(h, force);
+    if (parent) parentAt.copy(parent.matrixWorld);
+  };
+  h.traverse((o) => {
+    const s = (o as THREE.SkinnedMesh).isSkinnedMesh ? (o as THREE.SkinnedMesh).skeleton : null; if (!s) return;
+    const update = s.update; s.update = function () { if (!v.held) update.call(s); };
+  });
+}
 export class HumanViews {
   readonly group = new THREE.Group();
   /** Render-time pose rate only: a body further from the eye, or outside the view, keeps its last pose for a few frames
    *  (every 2nd frame to `farM`, every 4th beyond, every 8th off screen; the skinned mesh itself is still drawn). Speaking
-   *  bodies and bodies within `nearM` are posed every frame. Nothing here moves a body or owns a movement path. */
+   *  bodies and bodies within `nearM` are posed every frame. Nothing here moves a body or owns a movement path.
+   *  V11 (#2618): a body is in the view if it is at its sampled place or where it is drawn now, so a held pose never
+   *  lingers in view; a body that comes into view is posed on that frame, whatever its rate; and a body neither posed
+   *  this frame nor in the view is held: three's matrix walk and bone upload skip its rig (holdable), so its drawn pose
+   *  and its shadow stay exactly what they were. */
   viewer: HumanViewer | null = null;
   private poseFrame = 0;
-  /** Last render(): bodies posed / skipped by the pose-rate throttle (diagnostics). */
-  readonly poseStats = { posed: 0, skipped: 0 };
-  private poseDue(v: View, id: string): boolean {
-    const w = this.viewer; if (!w || !v.posedOnce || v.speaking) return true;
-    const p = v.cur.p; _bodySphere.center.set(p[0], p[1] + 0.9, p[2]);
+  /** Last render(): bodies posed / skipped by the pose-rate throttle, in the view, come into view, held (diagnostics). */
+  readonly poseStats = { posed: 0, skipped: 0, shown: 0, entered: 0, held: 0 };
+  private poseDue(v: View): boolean {
+    const w = this.viewer; if (!w || !v.posedOnce || v.speaking) { v.shown = true; return true; }
+    const p = v.cur.p, at = v.rig.holder.position; _bodySphere.center.set(p[0], p[1] + 0.9, p[2]);
     const d = _bodySphere.center.distanceTo(w.eye);
-    const every = !w.frustum.intersectsSphere(_bodySphere) ? 8 : d < w.nearM ? 1 : d < w.farM ? 2 : 4;
+    let shown = w.frustum.intersectsSphere(_bodySphere);
+    if (!shown) { _bodySphere.center.set(at.x, at.y + 0.9, at.z); shown = w.frustum.intersectsSphere(_bodySphere); }
+    const entered = shown && !v.shown; v.shown = shown;
+    if (shown) this.poseStats.shown++;
+    if (entered) { this.poseStats.entered++; return true; }
+    const every = !shown ? 8 : d < w.nearM ? 1 : d < w.farM ? 2 : 4;
     return every === 1 || ((this.poseFrame + Math.floor(v.vary * 8)) % every) === 0;
   }
   private stationBeat:DepictionBeat|null=null;
@@ -568,6 +598,7 @@ export class HumanViews {
     const h = hashId(id);
     const v: View = { rig, prev: s, cur: { ...s }, speed: 0, activity, age: 0, base: activity, arms, legs, spine, seat: SEAT_DEFAULT, vary: (h % 1000) / 1000, cross: ((Math.imul(h, 2654435761) >>> 15) & 1) === 1, saved, layered: false, reachRatio: [], ankle: [], footRest: [], footLat: [], surf: { foot: new Map(), hand: new Map() }, dist: 0, libOn: new Set() };
     measure(v);
+    holdable(v);
     this.views.set(id, v);
     if(!bodyModel)this.syncAppearance(v,publicSoulKey);
     return v;
@@ -949,8 +980,12 @@ export class HumanViews {
     PLAY_MOTION.value.set(0, 0, 0, 0); // empty playground seats hang at rest; riders set theirs below
     this.players.length = 0;
     for (const [id, v] of this.views) if (v.activity === 'play-piano' || (v.activity === 'play-music' && v.instrument === 'drums')) this.players.push({ id, p: v.cur.p, kind: v.activity === 'play-piano' ? 'piano' : 'drums' });
-    this.poseFrame++; this.poseStats.posed = this.poseStats.skipped = 0;
-    for (const [id, v] of this.views) { if (this.poseDue(v, id)) { this.pose(v, alpha, reach); v.posedOnce = true; this.poseStats.posed++; } else this.poseStats.skipped++; }
+    this.poseFrame++; const st = this.poseStats; st.posed = st.skipped = st.shown = st.entered = st.held = 0;
+    for (const v of this.views.values()) {
+      const due = this.poseDue(v);
+      if (due) { this.pose(v, alpha, reach); v.posedOnce = true; st.posed++; } else st.skipped++;
+      v.held = !due && !v.shown; if (v.held) st.held++;
+    }
     // the dock shows one bicycle fewer for each one out under a rider (decorative-motion 'dock-bike')
     let out = 0; for (const v of this.views.values()) if (v.bike?.visible) out++; PLAY_MOTION.value.w = out;
   }
@@ -1418,6 +1453,8 @@ export class HumanViews {
           const head=v.spine?.head?.getWorldPosition(V())??V().copy(h.position).addScaledVector(UP,1.525);
           t.copy(head).addScaledVector(_fwd,.125).addScaledVector(UP,.005).addScaledVector(_right,left?.14:.36);
         }
+        // #2197: the eating hand ends just below and in front of this rig's lips, so the food held up in its fingers meets the mouth
+        if(act.mouth&&!left&&v.spine?.head){const head=v.spine.head.getWorldPosition(V());t.lerp(head.addScaledVector(_fwd,EAT_PALM.fwd).addScaledVector(UP,EAT_PALM.up).addScaledVector(_right,EAT_PALM.side),act.mouth);}
         if (t.y < floor) t.y = floor;
         if (wgt <= 0) return;
         targets[i] = t;
@@ -1473,8 +1510,9 @@ export class HumanViews {
       if (!v.prop || v.prop.kind !== wantProp) { if (v.prop) h.remove(v.prop.obj); v.prop = { kind: wantProp, obj: makeProp(wantProp) }; h.add(v.prop.obj); }
       const hand = (side: 'left' | 'right') => { const i = v.arms.findIndex((_, k) => armSide(v, k) === side); return i >= 0 ? palm(v.arms[i], V()) : null; };
       let L = hand('left'), R = hand('right');
-      // a library eat / drink clip lifts one hand to the mouth: the item goes in that hand (the higher one over the clip)
-      if (lib.cur && (v.activity === 'eat' || v.activity === 'drink') && wantProp !== 'plate') {
+      // a library eat / drink clip lifts one hand to the mouth: the item goes in that hand (the higher one over the clip).
+      // Only when that clip owns the arms: seated, the sitting clip plays under the procedural frame, whose right hand rises.
+      if (clipBody && lib.cur && (v.activity === 'eat' || v.activity === 'drink') && wantProp !== 'plate') {
         const d = lib.cur.act.getClip().duration;
         let up = 0;
         for (const k of [0.2, 0.4, 0.6, 0.8]) { const p = clipProbe(v.rig.template, lib.cur.clip, Math.round(d * k * 10) / 10); if (p) up += p.wristL.y - p.wristR.y; }

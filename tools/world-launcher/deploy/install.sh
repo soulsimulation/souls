@@ -6,6 +6,79 @@
 # the existing release's /srv/sim and /srv/sim-data*, Caddy, DNS or the firewall.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# #2233 A5: `bash install.sh capacity <stage> <GB>` sets how much memory a stage's worlds may use, and nothing else. Run only
+# by name (an ordinary release never runs it; release.sh --capacity <GB> calls it once). It rewrites the stage's memory
+# drop-in (MemoryHigh at the figure, MemoryMax 2 GB above) and, in <stage>.conf, --worlds-mem-mb (2 GB below the figure),
+# --max-running (the worlds that fit at a small world's settled memory), a --range of two ports per such world above the
+# stage's --port, and --max-worlds (at least twice --max-running), then prints what it changed. It takes effect at the
+# stage's next restart. SIM_ETC and SIM_UNIT_DIR point it at a scratch copy (no daemon-reload then).
+if [ "${1:-}" = capacity ]; then
+  STAGE="${2:-}"; GB="${3:-}"
+  case "$STAGE" in staging|production) ;; *) echo "usage: $0 capacity <staging|production> <GB>"; exit 2;; esac
+  [[ "$GB" =~ ^[0-9]+$ ]] && [ "$GB" -ge 4 ] || { echo "capacity: <GB> must be a whole number, at least 4 (got '$GB')"; exit 2; }
+  ETC="${SIM_ETC:-/etc/sim-worlds}"; UNITS="${SIM_UNIT_DIR:-/etc/systemd/system}"
+  CONF="$ETC/$STAGE.conf"; DROP="$UNITS/sim-worlds@$STAGE.service.d/10-memory.conf"
+  [ -f "$CONF" ] || { echo "capacity: no $CONF (run install.sh first)"; exit 1; }
+  SMALL_SETTLED_MB=250   # a small world's settled memory (Pss), measured in #2240
+  MEM=$(( (GB - 2) * 1024 )); RUN=$(( MEM / SMALL_SETTLED_MB ))
+  ARGS="$(sed -n 's/^SIM_WORLDS_ARGS=//p' "$CONF")"
+  get_arg() { printf '%s\n' "$ARGS" | sed -nE "s/(^|.* )--$1 ([^ ]+).*/\2/p"; }
+  set_arg() { if [ -n "$(get_arg "$1")" ]; then ARGS="$(printf '%s\n' "$ARGS" | sed -E "s/(^| )--$1 [^ ]+/\1--$1 $2/")"; else ARGS="$ARGS --$1 $2"; fi; }
+  PORT="$(get_arg port)"; [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "capacity: $CONF has no --port"; exit 1; }
+  LO=$(( PORT + 1 )); HI=$(( PORT + 2 * RUN ))
+  # never into another stage's port or ports
+  for other in "$ETC"/*.conf; do
+    [ "$other" = "$CONF" ] && continue
+    oa="$(sed -n 's/^SIM_WORLDS_ARGS=//p' "$other")"; [ -n "$oa" ] || continue
+    op="$(printf '%s\n' "$oa" | sed -nE 's/(^|.* )--port ([0-9]+).*/\2/p')"; orange="$(printf '%s\n' "$oa" | sed -nE 's/(^|.* )--range ([0-9]+-[0-9]+).*/\2/p')"
+    olo="${orange%-*}"; ohi="${orange#*-}"; [ -n "$orange" ] || { olo="$op"; ohi="$op"; }
+    [ -n "$op" ] && [ "$op" -lt "${olo:-$op}" ] && olo="$op"; [ -n "$op" ] && [ "$op" -gt "${ohi:-$op}" ] && ohi="$op"
+    if [ -n "$olo" ] && [ "$HI" -ge "$olo" ] && [ "$PORT" -le "$ohi" ]; then echo "capacity: ports $PORT-$HI would overlap $(basename "$other" .conf)'s $olo-$ohi; nothing changed"; exit 1; fi
+  done
+  OLDWORLDS="$(get_arg max-worlds)"; WORLDS=$(( 2 * RUN )); [ -n "$OLDWORLDS" ] && [ "$OLDWORLDS" -gt "$WORLDS" ] && WORLDS="$OLDWORLDS"
+  BEFORE="$ARGS"; OLDDROP="$(cat "$DROP" 2>/dev/null || echo '(none)')"
+  set_arg worlds-mem-mb "$MEM"; set_arg max-running "$RUN"; set_arg max-worlds "$WORLDS"; set_arg range "$LO-$HI"
+  TMP="$(mktemp)"; sed "s|^SIM_WORLDS_ARGS=.*|SIM_WORLDS_ARGS=$ARGS|" "$CONF" > "$TMP"; cat "$TMP" > "$CONF"; rm -f "$TMP"   # (cat: the file keeps its owner and mode)
+  install -d "$(dirname "$DROP")"; printf '[Service]\nMemoryHigh=%sG\nMemoryMax=%sG\n' "$GB" "$(( GB + 2 ))" > "$DROP"
+  echo "capacity $STAGE: worlds may use $GB GB"
+  echo "  $DROP"; printf '%s\n' "$OLDDROP" | sed 's/^/    was  /'; sed 's/^/    now  /' "$DROP"
+  echo "  $CONF SIM_WORLDS_ARGS"; echo "    was  $BEFORE"; echo "    now  $ARGS"
+  echo "  --worlds-mem-mb $MEM, --max-running $RUN, --max-worlds $WORLDS, --range $LO-$HI ($(( 2 * RUN )) ports: two per world)"
+  [ -n "${SIM_UNIT_DIR:-}" ] || systemctl daemon-reload
+  echo "takes effect at the next restart of sim-worlds@$STAGE (release.sh --capacity restarts it)"
+  exit 0
+fi
+
+# `bash install.sh unload-still <stage> <0|1>`: whether still worlds leave memory (docs/architecture/worlds.md), and nothing
+# else. 1 writes <data>/launcher-settings.json ({"unloadStill":1}, atomic, owner simworlds); 0 removes it (the default, off).
+# The stage's data dir is its conf's --data. Each launcher reads the file once at its start, so a reload (keeper handover)
+# picks it up. It refuses, changing nothing, when the conf sets --unload-still itself (that arg would win over the file) or
+# names another --data than SIM_SETTINGS_DATA, so a release can never silently leave the setting unread. The conf is
+# never touched (ship's drift guard hashes it). Run only by name (release.sh and ship.sh --unload-still call it before the
+# activation). SIM_ETC points it at a scratch conf; SIM_SETTINGS_DATA names the data dir (ship.sh passes its own; tests).
+if [ "${1:-}" = unload-still ]; then
+  STAGE="${2:-}"; V="${3:-}"
+  case "$STAGE" in staging|production) ;; *) echo "usage: $0 unload-still <staging|production> <0|1>"; exit 2;; esac
+  case "$V" in 0|1) ;; *) echo "unload-still: the value must be 0 or 1 (got '$V')"; exit 2;; esac
+  CONF="${SIM_ETC:-/etc/sim-worlds}/$STAGE.conf"; ARGS="$(sed -n 's/^SIM_WORLDS_ARGS=//p' "$CONF" 2>/dev/null || true)"
+  CONFDATA="$(printf '%s\n' "$ARGS" | sed -nE 's/(^|.* )--data ([^ ]+).*/\2/p')"; DATA="${SIM_SETTINGS_DATA:-$CONFDATA}"
+  if printf '%s\n' "$ARGS" | grep -qE '(^| )--unload-still '; then echo "unload-still: $CONF sets --unload-still itself, which would win over the file; nothing changed"; exit 1; fi
+  if [ -n "$CONFDATA" ] && [ -n "${SIM_SETTINGS_DATA:-}" ] && [ "$CONFDATA" != "$SIM_SETTINGS_DATA" ]; then echo "unload-still: $CONF reads --data $CONFDATA, not $SIM_SETTINGS_DATA; nothing changed"; exit 1; fi
+  [ -n "$DATA" ] && [ -d "$DATA" ] || { echo "unload-still: no data dir for $STAGE (no --data in $CONF, no SIM_SETTINGS_DATA); nothing changed"; exit 1; }
+  FILE="$DATA/launcher-settings.json"
+  WAS="$(cat "$FILE" 2>/dev/null || echo '(none: the default, off)')"
+  if [ "$V" = 1 ]; then
+    TMP="$(mktemp "$DATA/.launcher-settings.XXXXXX")"; printf '{"unloadStill":1}\n' > "$TMP"; chmod 640 "$TMP"
+    if id simworlds >/dev/null 2>&1; then chown simworlds:simworlds "$TMP"; fi   # the launcher's user reads it
+    mv -f "$TMP" "$FILE"
+  else rm -f "$FILE"; fi
+  NOW="$(cat "$FILE" 2>/dev/null || echo '(none: the default, off)')"
+  echo "unload-still $STAGE: $FILE"; echo "    was  $WAS"; echo "    now  $NOW"
+  echo "takes effect when the stage's launcher next starts: the next reload (handover) or restart of sim-worlds@$STAGE"
+  exit 0
+fi
+
 UNIT_SRC="${UNIT_SRC:-$HERE/sim-worlds@.service}"
 
 id simworlds >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/simworlds --shell /usr/sbin/nologin simworlds
@@ -17,6 +90,8 @@ install -d -o root -g simworlds -m 750 /etc/sim-worlds
 # eden2 (cpx42): 16 GB RAM, ~10 GB available with eden3 + the existing Sim release running; a new world's
 # server idles at ~250-350 MB RSS. Production: 24 running worlds in a 6 GB cgroup (~250 MB each), 60
 # registered (sleeping worlds cost only disk), and no world boots while the host has under 2.5 GB free.
+# --disk-min-free-mb 4096 (#2538): no new world while the data disk has under 4 GB free (above each world's own 1 GB
+# headroom, under host-health's 20 GB alert, so the alert comes first). Production only: a floor would refuse on dev boxes.
 # Staging: small, for the rehearsal party; stop it when production is live.
 # Heap: --world-heap-mb is only the default (1536 MB); a world's registry entry `worldHeapMb` wins (op.mjs set-heap) and
 # Eden-2026-class worlds get 2048 MB (registry.mjs worldHeapMb; LOAD-CONTRACT §4). The old launcher-wide cap was too small for Eden 2026 (10-31).
@@ -32,7 +107,7 @@ if [ ! -f /etc/sim-worlds/production.conf ]; then
 # /etc/sim-worlds/production-auth.env is a PLACEHOLDER path: Codex or Gene provisions it (CLERK_PUBLISHABLE_KEY,
 # CLERK_ISSUER_URL=https://clerk.eden.art, CLERK_AUTHORIZED_PARTIES=https://sim.eden.art; no secret key). Each world's node
 # loads it by path (--env-file); the launcher only reads the publishable key and issuer. Never copied from /opt/eden3.
-SIM_WORLDS_ARGS=--base /worlds --port 4620 --range 4621-4659 --data /srv/sim-worlds-data/production --public-origin https://sim.eden.art --auth-env /etc/sim-worlds/production-auth.env --max-worlds 60 --max-running 24 --min-free-mb 2500 --world-heap-mb 1536 --create-limit 6 --mars-web /srv/sim-worlds/production/mars-web --eager 4
+SIM_WORLDS_ARGS=--base /worlds --port 4620 --range 4621-4659 --data /srv/sim-worlds-data/production --public-origin https://sim.eden.art --auth-env /etc/sim-worlds/production-auth.env --max-worlds 60 --max-running 24 --min-free-mb 2500 --disk-min-free-mb 4096 --world-heap-mb 1536 --create-limit 6 --mars-web /srv/sim-worlds/production/mars-web --eager 4
 CONF
 fi
 chown root:simworlds /etc/sim-worlds/*.conf && chmod 640 /etc/sim-worlds/*.conf
@@ -49,7 +124,13 @@ mem() { local d=/etc/systemd/system/sim-worlds@$1.service.d; install -d "$d"; [ 
 mem staging 2500M 3G; mem production 8G 9G
 install -m 644 "$HERE/sim-worlds-backup@.service" /etc/systemd/system/sim-worlds-backup@.service
 install -m 644 "$HERE/sim-worlds-backup@.timer" /etc/systemd/system/sim-worlds-backup@.timer
+# the hourly backup (#2542): installed, never enabled here (enabling it is the maintainer's step; docs/operations.md#backups)
+install -m 644 "$HERE/sim-worlds-backup-hourly@.service" /etc/systemd/system/sim-worlds-backup-hourly@.service
+install -m 644 "$HERE/sim-worlds-backup-hourly@.timer" /etc/systemd/system/sim-worlds-backup-hourly@.timer
 install -m 644 "$HERE/sim-worlds-health@.service" /etc/systemd/system/sim-worlds-health@.service
 install -m 644 "$HERE/sim-worlds-health@.timer" /etc/systemd/system/sim-worlds-health@.timer
+# #2541: the telemetry collector and its alerts. Installed, never enabled here (this runs on every release): enabling is
+# the maintainer's step, docs/operations/telemetry.md.
+install -m 644 "$HERE/sim-worlds-telemetry@.service" /etc/systemd/system/sim-worlds-telemetry@.service
 systemctl daemon-reload
-echo "installed: user simworlds, /srv/sim-worlds{,-data}, /etc/sim-worlds/{staging,production}.conf, sim-worlds@.service, sim-worlds-{backup,health}@.{service,timer} (nothing started)"
+echo "installed: user simworlds, /srv/sim-worlds{,-data}, /etc/sim-worlds/{staging,production}.conf, sim-worlds@.service, sim-worlds-{backup,backup-hourly,health}@.{service,timer}, sim-worlds-telemetry@.service (nothing started)"

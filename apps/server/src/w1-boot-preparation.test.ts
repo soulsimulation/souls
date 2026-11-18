@@ -31,6 +31,18 @@ test('ID then exact normalized name then declared alias; low-confidence fuzzy gu
  const unknown=resolveBootPlace('region-beach',pack.index,current);assert.equal(unknown.ok,false);if(!unknown.ok){assert.deepEqual(unknown.resolvedIfName,{input:'beach',placeId:'region-harbour.beach',name:'Beach'});assert.equal(unknown.did_you_mean[0].id,'walk:region-harbour.beach');}
 });
 
+test('#2124 hints:false answers ok and chosen as before and only empties a plain refusal\'s hints',()=>{
+ const pack=buildBootStatic(fieldInput),current=caps(pack),asks=['region-harbour.beach','  BEACH  ','the beach','woods','beech','region-beach','nowhere at all','shared',...Object.keys(fixtures.fieldRefusals)];
+ const a=pack.index.find(p=>p.id==='region-harbour.beach')!,b=pack.index.find(p=>p.id==='eden-north-woods')!,dup=pack.index.map(p=>p===a||p===b?{...p,aliases:[...p.aliases,'shared']}:p);
+ let hinted=0,ambiguous=0;
+ for(const index of [pack.index,dup])for(const kind of ['auto','id','name'] as const)for(const offers of [current,[],current.map(c=>({...c,available:false,blocked:{code:'route.blocked',reason:'blocked'}}))])for(const ask of asks){
+  const full=resolveBootPlace(ask,index,offers,kind),bare=resolveBootPlace(ask,index,offers,kind,false);
+  assert.deepEqual(bare,full.ok||full.ambiguous?full:{...full,did_you_mean:[]},ask);
+  if(!full.ok&&full.ambiguous)ambiguous++;else if(!full.ok&&full.did_you_mean.length)hinted++;
+ }
+ assert.ok(hinted>0&&ambiguous>0,'the cases include refusals with hints and ambiguities');
+});
+
 test('duplicate names/aliases refuse without nearest, availability or array-order tie breaking',()=>{
  const pack=buildBootStatic(fieldInput),current=caps(pack),a=pack.index.find(p=>p.id==='region-harbour.beach')!,b=pack.index.find(p=>p.id==='eden-north-woods')!;
  for(const list of [[{...a,name:'Shared'},{...b,name:'Shared'}],[{...a,aliases:['shared']},{...b,aliases:['shared']}]] as any[]){

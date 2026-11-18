@@ -85,7 +85,9 @@ const STUB = `(() => {
 async function context(browser, sub, { viewport, dpr, mobile, colorScheme } = {}) {
   const ctx = await browser.newContext({ viewport: viewport ?? { width: 1352, height: 780 }, deviceScaleFactor: dpr ?? 1, isMobile: !!mobile, hasTouch: !!mobile, colorScheme: colorScheme ?? 'light' });
   await ctx.exposeFunction('__stubClerkMint', (s) => keys.sign(s));
-  await ctx.addInitScript((sub) => { try { localStorage.setItem('stubClerk.user', sub); } catch { /* storage off */ } }, sub);
+  // signed in as real Clerk leaves it: the stub's session and Clerk's `__client_uat` cookie, which a world page reads to
+  // decide whether to load Clerk at all (#2564)
+  await ctx.addInitScript((sub) => { try { localStorage.setItem('stubClerk.user', sub); document.cookie = '__client_uat=' + Math.floor(Date.now() / 1000) + '; path=/'; } catch { /* storage off */ } }, sub);
   await ctx.addInitScript(STUB);
   await ctx.route(/clerk\.example\.test/, (r) => r.abort());
   return ctx;
@@ -142,7 +144,7 @@ async function windowCode(page) {
 async function waitStatus(page, status, timeout = 60_000) { await page.waitForFunction((s) => document.querySelector('[data-approval]')?.getAttribute('data-approval-status') === s, status, { timeout, polling: 250 }); }
 async function newAgent(base, name) { const folder = mkdtempSync(join(tmpdir(), `soul-${name}-`)); await agent(folder, ['register', base]); return folder; }
 function worldDb() {
-  const found = []; const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); const st = statSync(p); if (st.isDirectory()) walk(p); else if (/\.(db|sqlite)$/.test(f)) found.push(p); } };
+  const found = []; const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); const st = statSync(p); if (st.isDirectory()) walk(p); else if (f === 'sim.db') found.push(p); } };   // the live world DB only: the server's hourly backup-*.db holds the table too (V7, 0.127)
   walk(dataDir);
   for (const p of found) { try { const db = new DatabaseSync(p); db.exec('PRAGMA busy_timeout=5000'); const has = db.prepare("SELECT name FROM sqlite_master WHERE name='account_approvals_v1'").get(); if (has) return db; db.close(); } catch { /* not ours */ } }
   throw new Error('no world DB with account_approvals_v1 under ' + dataDir);

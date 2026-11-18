@@ -71,7 +71,14 @@ parameters, slots and actions.
 2. **Commit.** In one transaction (`god/store.ts`): refuse `revision.stale` if the edit sequence moved, check the
    journal budget, write the row to `world_edits_v1` with its inverse, update `world_entities_v1` / `world_defs_v1`.
 3. **Physics.** The engine bridge (`god/engine-bridge.ts`) turns the changed entities into a logged `world-edit` event,
-   so Souls walk around, sit on and use what was built, and replay reproduces it. Residents in the way are walked out.
+   so Souls walk around, sit on and use what was built, and replay reproduces it. Under legal-edits/1 (adopted at boot where the engine factory is described: not Eden core) an edit with a resident in its way, or one that
+   changes what a resident uses, is refused by name before the commit (its preview runs off the tick thread); before it,
+   residents in the way were walked out. Under legal-edits/2 (#2188, adopted after it) an edit that would leave a Soul on
+   the ground with no walk out, such as the last wall of a ring closed round her at a distance, is refused too
+   (`body.sealed-in`, `god/seal-check.ts`).
+   A solid of a path or area shape (a wall, fence or hedge) is cut into pieces of at most 1 m that follow the terrain where the ground under it
+   is not flat, and a building's flight entered from the side is climbed along the flight
+   ([#2193](https://github.com/soulsimulation/souls/issues/2193), `god/slope-solids.ts`).
 4. **Viewers.** The commit is broadcast as a `world-diff` message to every viewer and on the god's SSE stream.
 
 ### Joints

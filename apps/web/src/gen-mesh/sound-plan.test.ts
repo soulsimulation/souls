@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { componentsSchema, coreLibrary } from '@souls/world-compiler';
-import { ambienceAt, condition, DEFAULT_SETTINGS, distanceTo, emittersOf, exposureAt, impliedSpecs, treeIndex, treesOf, loadSettings, Movement, saveSettings, SETTINGS_KEY, specsOf, variantOf, VARIANTS, KINDS, MASTER_DEFAULT, QueuedNotes } from './sound-plan.ts';
+import { ambienceAt, condition, DEFAULT_SETTINGS, defSpecs, distanceTo, emittersOf, exposureAt, impliedSpecs, treeIndex, treesOf, loadSettings, Movement, saveSettings, SETTINGS_KEY, specsOf, variantOf, VARIANTS, KINDS, MASTER_DEFAULT, QueuedNotes } from './sound-plan.ts';
 
 test('a def may carry one sound or a list; unknown kinds are dropped; the schema accepts both', () => {
   assert.equal(specsOf({ components: { sound: { kind: 'water', radius: 10, volume: 0.5 } } } as never).length, 1);
@@ -98,6 +98,20 @@ test('implied sounds: things sound like what they are; sounding things gain a se
   assert.deepEqual(em.map((e) => `${e.id}:${e.spec.kind}`), ['f#0:water', 'f#1:water', 'f#2:birds']);
 });
 
+test('#1571: a def\'s specs are made once per def object, frozen; the fountain re-voicing copies; a fresh def misses', () => {
+  const fountain = { name: 'core-fountain', form: 'point', tags: ['fountain'], size: { box: [2, 2, 2] }, components: { sound: { kind: 'water', radius: 14, volume: 0.5 } } };
+  const a = defSpecs(fountain as never);
+  assert.equal(defSpecs(fountain as never), a, 'cached per def object');
+  assert.ok(Object.isFrozen(a.own) && Object.isFrozen(a.own[0]) && Object.isFrozen(a.implied[0]));
+  const once = emittersOf(fakeModel([['f', 'fo', [0, 0]], ['g', 'fo', [5, 0]]], { fo: fountain }) as never);
+  const twice = emittersOf(fakeModel([['f', 'fo', [0, 0]], ['g', 'fo', [5, 0]]], { fo: fountain }) as never);
+  assert.deepEqual(twice, once, 'the same emitters scan after scan');
+  assert.equal(once[0].spec.variant, 0, 'the fountain\'s own water is the splashing voicing');
+  assert.equal(a.own[0].variant, undefined, 'the cached spec is not changed');
+  const merged = { ...fountain };   // a merged (extending) def: a fresh object per resolve
+  assert.notEqual(defSpecs(merged as never), a); assert.deepEqual(defSpecs(merged as never), a);
+});
+
 test('a wood rustles as one voice per cluster, louder than a single tree; the distance is to the nearest tree', () => {
   const tree = { name: 'core-tree', form: 'point', tags: ['tree'], size: { box: [4, 8, 4] } };
   const ents: [string, string, [number, number]][] = [['lone', 't', [100, 100]]];
@@ -180,4 +194,17 @@ test('PERF-ARRIVAL: emitters and trees on areas and paths read the ground throug
   assert.deepEqual(treesOf(modelOn(peeked) as never), treesOf(modelOn(sampledOnly) as never));
   assert.ok(baked.cachedTiles > 4, 'sampling bakes a tile for each part of the world it reads');
   assert.equal(peeked.cachedTiles, 0, 'peek bakes none');
+});
+
+// SA-D7 (#2888): a looks table's sound rows are specs with the reach the row states; the names are the page's own set.
+test('a looks-table sound row is a spec with its stated reach, and the table may name only the page\'s own sounds', async () => {
+  const { SOUNDS } = await import('../../../../packages/form-rules/src/looks.ts');
+  assert.deepEqual([...SOUNDS].filter((s) => s !== 'tune'), [...KINDS]);
+  const table = [
+    { do: 'sound', sound: 'tune', mood: 'sad', field: 'playing', at: { true: 700, false: 0 }, reach_mm: 18000 },
+    { do: 'sound', sound: 'bell', mode: 'loop', field: 'ringing', at: { true: 400, false: 0 }, reach_mm: 6000 },
+    { do: 'sound', sound: 'bell', event: 'struck', mode: 'once', level: 800, reach_mm: 40000 },
+  ];
+  const specs = specsOf({ components: {}, make: { kind: 'gen', args: { looks_table: table } } } as never);
+  assert.deepEqual(specs.map((s) => [s.kind, s.radius, s.volume, s.mood ?? s.when]), [['music', 18, 0.7, 'sad'], ['bell', 6, 0.4, 'ringing']]);
 });

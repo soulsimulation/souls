@@ -32,3 +32,25 @@ test('the notebook stand draws its page face with each signed line at its ruling
     assert.ok(texts.some(t => t.s === '  — Ana') && texts.some(t => t.s === '  — Ben'), 'signed');
   } finally { globals.location = previousLocation; globals.document = previousDocument; }
 });
+
+test('#1223: a private notebook is drawn closed, with no lines, even if words reached the page', async () => {
+  const globals = globalThis as unknown as { location?: URL; document?: unknown };
+  const previousLocation = globals.location, previousDocument = globals.document;
+  const texts: string[] = [];
+  globals.location = new URL('http://offline.invalid/w/fixture?shot=1');
+  const context = { font: '', fillStyle: '', strokeStyle: '', lineWidth: 1, textAlign: '', textBaseline: '', fillRect() {}, beginPath() {}, arc() {}, fill() {}, stroke() {}, moveTo() {}, lineTo() {},
+    measureText: (s: string) => ({ width: s.length * 12 }), fillText(s: string) { texts.push(s); } };
+  globals.document = { createElement: () => ({ width: 0, height: 0, getContext: () => context }) };
+  try {
+    await import('./sign.mesh.ts');
+    const model = new WorldModel({ constants: { ground: 'land' }, seed: 'offline-notebook-private' }), def = coreLibrary().get('core-notebook-stand@1')!;
+    const draw = (entity: Record<string, unknown>) => { texts.length = 0; const root = meshFor(def)!.build({ def, entity: { def: def.ref, in: { parent: 'world' }, by: 'god', born: 0, v: 1, ...entity },
+      args: def.make.kind === 'gen' ? def.make.args : {}, params: {}, model, materials: new MaterialLib(), tint: (_key: string | undefined, fallback: string) => fallback } as unknown as MeshCtx)!;
+      return { texts: [...texts], map: (root.getObjectByName('sign-face') as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>).material.map }; };
+    const closed = draw({ id: 'e_nb_private', owner: 'soul:Ana', access: 'private', state: { text: 'My secret — Ana', textBy: 's_a' } });
+    assert.deepEqual(closed.texts, ['Private'], 'a closed cover, no heading or lines');
+    model.entities.set('e_house', { id: 'e_house', def: 'core-cottage@1', in: { parent: 'world' }, by: 'god', born: 0, v: 1, owner: 'soul:Ana', access: 'private' } as never);
+    assert.equal(draw({ id: 'e_nb_inside', in: { parent: 'e_house' }, state: {} }).map, closed.map, 'inside a private house it is the same closed cover');
+    assert.ok(draw({ id: 'e_nb_public', owner: 'soul:Ana', access: 'public', state: { text: 'Hello — Ana', textBy: 's_a' } }).texts.includes('Hello'), 'a public notebook still shows its lines');
+  } finally { globals.location = previousLocation; globals.document = previousDocument; }
+});

@@ -49,11 +49,11 @@ test('LINK migration: a Soul the old beam took is back on the next boot without 
  const next=mk(false);t.after(()=>next.c.close());assert.ok(next.l.faded.has(ana.soulId),'still faded before the body rule runs');
  const rule=next.l.attachPresence({soulPresence:()=>({listening:false,at:null})})!;
  for(let i=0;i<60;i++){now+=50;f.host.tickOnce();f.host.drainInputs();}
- assert.ok(!next.l.faded.has(ana.soulId),'back');assert.deepEqual(rule.view(ana.soulId)?.state,'asleep');
+ assert.ok(!next.l.faded.has(ana.soulId),'back');assert.deepEqual(rule.view(ana.soulId)?.state,'idle','#2295 A7: back in Wander');
  assert.equal((next.c as any).fading.status(ana.soulId).colour,'green');
  assert.ok(next.l.perceivedBodies(rows[1].id,500).some(b=>b.soulId===ana.soulId),'visible to others again');
  const p=(f.host.engine.world as NativeWorld).entities[ana.entityId];t.diagnostic('was '+JSON.stringify(was)+' now '+JSON.stringify(p.pose.p)+' '+(p.human as any).activity);
- assert.deepEqual(p.pose.p,was,'stays where it was (dry, clear ground)');assert.equal(String((p.human as any).activity),'nap','asleep, lying down');
+ assert.deepEqual(p.pose.p,was,'stays where it was (dry, clear ground)');
  assert.deepEqual((next.c as any).fading.restoreGone(),[],'one-time: nothing left to restore');
  f.host.listeners.splice(n);
 });

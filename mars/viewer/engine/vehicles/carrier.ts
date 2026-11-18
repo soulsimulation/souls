@@ -28,6 +28,7 @@ import { G_SWIM, G_WALK } from '../spatial/ground.ts';
 import type { GroundNav } from '../spatial/tiled.ts';
 import type { Spatial } from '../spatial/service.ts';
 import { humanRadius } from '../bodies/humanoid.ts';
+import { floaterBody, isFloater } from '../bodies/body.ts';
 
 export type CarrierSeatDef = { id: string; local: Vec2; yaw: number; exit: Vec2 };
 /** `doorway`: local floor points between the seats and the door, inside first (a basket's door opening): boarding walks
@@ -54,7 +55,7 @@ export type CarrierState = {
   /** together/1: places kept for invited companions (`seats`), how many of them have boarded, until when. Absent otherwise. */
   hold?: { by: string; seats: number; filled: number; untilTick: number };
   /** VEHICLE-STEER (carrier_steer): a rider's destination. `by` null = the ride flying itself home (after a hover ran out, or
-   *  empty after a landing away). `to`: where the route goes (x, cruise y, z); `land`: the ground point it lands at (absent:
+   *  empty after a landing away; park-away/1: parked away, the flight home its next rider takes). `to`: where the route goes (x, cruise y, z); `land`: the ground point it lands at (absent:
    *  it holds at `to` until `hoverUntil`, then flies itself home). `built`: the route from the pose to `to`/`land` is in
    *  `route` (a boarding ride builds it at lift-off). Absent: the ride flies its own route. */
   steer?: CarrierSteer;
@@ -250,7 +251,7 @@ function turnToward(e: Entity, yaw: number, dt: number) { const t = angleDelta(e
 /** Take the boarding step if it is free (or already mine). */
 const takeDoor = (c: CarrierState, actor: string) => { if (c.doorBy && c.doorBy !== actor) return false; c.doorBy = actor; return true; };
 const freeDoor = (c: CarrierState, actor: string) => { if (c.doorBy === actor) c.doorBy = null; };
-type RideExec = { actor: string; carrier: string; slot: string; phase: 'boarding' | 'seated' | 'leaving'; leg: number; stopping: boolean; waited: number; id: string; path: Vec3[]; throughReturn?: boolean };
+type RideExec = { actor: string; carrier: string; slot: string; phase: 'boarding' | 'seated' | 'leaving'; leg: number; stopping: boolean; waited: number; id: string; path: Vec3[]; throughReturn?: boolean; blockedBy?: string; pathWaited?: number };
 /** The doorway's points in world space, inside first. */
 const inside = (e: Entity, d: CarrierDef) => (d.doorway ?? []).map(q => at(e, q, d.floorY));
 /** From where the boarder stands, round the basket (never through it) to the boarding step, through the door, then to its seat. */
@@ -260,6 +261,48 @@ export function boardingPath(e: Entity, from: Vec3, seat: Vec3, d: CarrierDef): 
   const side = l[1] >= 0 ? 1 : -1, out = d.door[0] >= 0 ? 1 : -1, pts: Vec2[] = [];
   if (l[0] * out < Math.abs(d.door[0]) - 0.05) { if (Math.abs(l[1]) < hz) pts.push([l[0], side * hz]); pts.push([d.door[0], side * hz]); }
   return [...pts.map(q => at(e, q)), doorPoint(e)!, ...inside(e, d).reverse(), seat];
+}
+/** board-path/1 (logged runtime policy `carrierBoardPathV1`): a boarder's step never brings it within the human-human
+ *  invariant's separation of another body. Outside the basket it goes round the other way when that way is clear; otherwise it
+ *  waits (`boarding-wait`, the blocker named on the ride and by a `carrier.board-path-blocked` mark). Waits and reroutes are
+ *  bounded by BOARD_TIMEOUT: before the boarding step (or a bank's plank) the seat is then given up with that refusal; past it
+ *  (inside the basket) the boarder steps out as a timed-out boarder always has. */
+function boardPathRule(rt: Runtime): boolean { return rt.services.carrierBoardPathV1 === true; }
+const bodyRadius = (e: Entity) => isFloater(e) ? floaterBody(e.body).radius : humanRadius(e);
+/** board-path/1: the body a straight step from a to b would bring within the separation collision.human-human reads (the two
+ *  radii − 0.08 on the same level, within 1 m of height) and nearer than it stands now; null when the step is clear. */
+function pathBlocker(rt: Runtime, me: Entity, a: Vec3, b: Vec3): string | null {
+  const vx = b[0] - a[0], vz = b[2] - a[2], len2 = vx * vx + vz * vz, ra = bodyRadius(me), lv = me.human?.level;
+  for (const o of Object.values(rt.world.entities)) {
+    if (o.id === me.id || o.kind !== 'human' || !o.human || o.human.level !== lv) continue;
+    const q = o.pose.p; if (Math.abs(q[1] - a[1]) > 1 && Math.abs(q[1] - b[1]) > 1) continue;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((q[0] - a[0]) * vx + (q[2] - a[2]) * vz) / len2)) : 0;
+    const near = hypot(a[0] + vx * t - q[0], a[2] + vz * t - q[2]);
+    if (near < ra + bodyRadius(o) - 0.08 && near < hypot(a[0] - q[0], a[2] - q[2]) - 1e-6) return o.id;
+  }
+  return null;
+}
+/** board-path/1: from where the boarder stands outside the basket, the shortest way round it to the boarding step (either side,
+ *  round the far end if need be) whose every step stays off the basket, clear of static geometry and clear of other bodies; null
+ *  when there is none. The points before the door, in world space. */
+function boardDetour(rt: Runtime, e: Entity, me: Entity, d: CarrierDef): Vec3[] | null {
+  const size = CATALOG[e.def].size, ra = bodyRadius(me), hx = size[0] / 2 + ra - 0.02, hzIn = size[2] / 2 + ra - 0.02;
+  const hz = size[2] / 2 + 0.6, dx = d.door[0], fx = (dx >= 0 ? -1 : 1) * (size[0] / 2 + 0.6), door = doorPoint(e)!, w = (q: Vec2) => at(e, q);
+  const loc = (p: Vec3) => rot2([p[0] - e.pose.p[0], p[2] - e.pose.p[2]], -e.pose.yaw);
+  const offBasket = (a: Vec3, b: Vec3) => { const la = loc(a), lb = loc(b), n = Math.max(1, Math.ceil(hypot(lb[0] - la[0], lb[1] - la[1]) / 0.05));
+    for (let i = 1; i < n; i++) { const x = la[0] + (lb[0] - la[0]) * i / n, z = la[1] + (lb[1] - la[1]) * i / n; if (Math.abs(x) < hx && Math.abs(z) < hzIn) return false; }
+    return true; };
+  let best: Vec3[] | null = null, bestLen = Infinity;
+  for (const s of [1, -1]) for (const via of s === 1 ? [[], [[dx, hz]], [[fx, hz], [dx, hz]], [[fx, -hz], [fx, hz], [dx, hz]]] : [[[dx, -hz]], [[fx, -hz], [dx, -hz]], [[fx, hz], [fx, -hz], [dx, -hz]]]) {
+    const pts = (via as Vec2[]).map(w), legs = [me.pose.p, ...pts, door];
+    let len = 0, ok = true;
+    for (let i = 1; i < legs.length && ok; i++) {
+      len += hypot(legs[i][0] - legs[i - 1][0], legs[i][2] - legs[i - 1][2]);
+      ok = offBasket(legs[i - 1], legs[i]) && !pathBlocker(rt, me, legs[i - 1], legs[i]) && stepClear(rt, me.id, legs[i - 1], legs[i]);
+    }
+    if (ok && len < bestLen - 1e-9) { best = pts; bestLen = len; }
+  }
+  return best;
 }
 /** together/1: places kept for companions who have not boarded yet. */
 const keptSeats = (c: CarrierState) => c.hold ? Math.max(0, c.hold.seats - c.hold.filled) : 0;
@@ -291,7 +334,10 @@ const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
     if (p.holdSeats && p.holdSeats > free - keptSeats(c) - 1) return { ok: false, diagnostic: diag('full', `${e.label ?? e.id} has no room for ${p.holdSeats} more`, [e.id]) };
     const a = rt.world.entities[p.actor];
     const door = doorPoint(e)!;
-    if (hypot(a.pose.p[0] - e.pose.p[0], a.pose.p[2] - e.pose.p[2]) > BOARD_REACH || Math.abs(a.pose.p[1] - (c.bank ? door[1] : c.home[1])) > 0.05 || (c.bank && hypot(a.pose.p[0] - door[0], a.pose.p[2] - door[2]) > 0.35) || (a.human!.level ?? 0) !== 0)
+    // park-away/1: a balloon parked where a rider left it is boarded from the ground round it there, which may lie up to the
+    // landing's own 1 m level tolerance from its floor (the boarding path climbs it, as a step out at step-out/1 comes down it)
+    const awayLevel = !c.bank && parkedAway(rt, e, c) ? 1 + 0.05 : 0;
+    if (hypot(a.pose.p[0] - e.pose.p[0], a.pose.p[2] - e.pose.p[2]) > BOARD_REACH || Math.abs(a.pose.p[1] - (c.bank ? door[1] : awayLevel ? e.pose.p[1] : c.home[1])) > (awayLevel || 0.05) || (c.bank && hypot(a.pose.p[0] - door[0], a.pose.p[2] - door[2]) > 0.35) || (a.human!.level ?? 0) !== 0)
       return { ok: false, diagnostic: diag('not-at-door', `${p.actor} must stand beside ${e.label ?? e.id} first`, [p.actor]) };
     return { ok: true, program: { slot } };
   },
@@ -322,6 +368,29 @@ const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
       const blocker = blockerAt(rt, ex.actor, to);
       if (blocker && hypot(a.pose.p[0] - to[0], a.pose.p[2] - to[2]) > 1e-9)
         return ++ex.waited > BOARD_TIMEOUT ? (leave(), { status: 'running', phase: 'leaving' }) : { status: 'running', phase: 'boarding-wait' };
+      if (boardPathRule(rt)) {
+        // before the boarding step the legs past it (step to doorway to seat) are read too, so a body that would block them
+        // (a seated rider in the way on a punt) is waited for where the seat can still be given up
+        const doorAt = ex.path.length - 2 - (c.bank ? 0 : (d.doorway ?? []).length);
+        let by = pathBlocker(rt, a, a.pose.p, last ? seat.p : to);
+        for (let i = doorAt; !by && ex.leg <= doorAt && i < ex.path.length - 1; i++) by = pathBlocker(rt, a, ex.path[i], i + 1 === ex.path.length - 1 ? seat.p : ex.path[i + 1]);
+        if (by) {
+          // before the boarding step (or a bank's plank) the seat can be given up where the body stands: outside a basket go
+          // round the other way when that is clear, else wait. Past the step the body waits, then steps out as before.
+          // board-path/1 waits and reroutes have their own bound (pathWaited), apart from the door wait.
+          const doorIdx = doorAt, before = ex.leg <= doorIdx;
+          const bound = () => (ex.pathWaited = (ex.pathWaited ?? 0) + 1) > BOARD_TIMEOUT;
+          if (ex.blockedBy !== by) { ex.blockedBy = by; rt.mark('carrier.board-path-blocked', { carrier: e.id, actor: ex.actor, by }); }
+          const round = before && !c.bank ? boardDetour(rt, e, a, d) : null;
+          if (bound()) {
+            if (before) return abandon(diag('board-path-blocked', `${rt.world.entities[by]?.label ?? by} stayed in the way to the boarding step of ${e.label ?? e.id}`, [by, e.id]));
+            leave(); return { status: 'running', phase: 'leaving' };
+          }
+          if (round) { ex.path = [...round, ...ex.path.slice(doorIdx)]; ex.leg = 0; return { status: 'running', phase: 'boarding' }; }
+          return { status: 'running', phase: 'boarding-wait' };
+        }
+        delete ex.blockedBy;
+      }
       if (!last) { const dx = to[0] - a.pose.p[0], dz = to[2] - a.pose.p[2]; if (Math.abs(dx) + Math.abs(dz) > 1e-6) turnToward(a, heading([dx, dz]), dt); if (moveToward(a, to, d.transferSpeed, dt)) ex.leg++; return { status: 'running', phase: 'boarding' }; }
       turnToward(a, seat.yaw, dt);
       if (moveToward(a, seat.p, d.transferSpeed, dt) && Math.abs(angleDelta(a.pose.yaw, seat.yaw)) < 1e-9) {
@@ -434,7 +503,7 @@ const depart: ActionDef<{ actor: string; carrier: string }, null, DepartExec> = 
 // one generic verb for every ride. A seated rider sets a destination (x, z), asks it to land, or to stop (hold here). The
 // world flies/rows it there on a smooth route from where it is (the same Hermite curve, so viewers need nothing new). With
 // nobody steering it keeps its own route: a hold runs out after STEER_HOVER and it rejoins its route; a balloon that landed
-// away flies itself home once its riders are out. Water rides go only where open water reaches in a straight line and let
+// away flies itself home once its riders are out (park-away/1, #2196: it parks there, and its next rider flies it home). Water rides go only where open water reaches in a straight line and let
 // riders off only at their own bank. Deterministic: everything is world state, built from the pose at a tick.
 const STEER_AIR = 4, STEER_WATER = 1.2, STEER_CLIMB = 1.5, STEER_CRUISE = 35, STEER_HOVER = 120 * TPS, STEER_LAND_SEARCH = 30, STEER_RANGE = 1200;
 /** landing/1: a moved landing first climbs back to cruise height (STEER_CRUISE above the ground) before it crosses; a hover looking for
@@ -588,6 +657,17 @@ function startReturn(c: CarrierState, by: string | null = null) {
   c.steer = { by, to: [...c.home] as Vec3, land: [...c.home] as Vec3, built: false, ret: true, away: c.steer!.away, ...(c.steer?.asked ? { asked: c.steer.asked } : {}) };
 }
 
+/** park-away/1 (#2196, logged runtime policy `carrierParkAwayV1`): adopted, an empty ride that landed away parks there. */
+function parkAway(rt: Runtime): boolean { return rt.services.carrierParkAwayV1 === true; }
+/** park-away/1: on the ground away from its home (only this rule leaves a ride parked anywhere but its home). */
+function parkedAway(rt: Runtime, e: Entity, c: CarrierState): boolean { return parkAway(rt) && (c.phase === 'parked' || c.phase === 'boarding') && !same(e.pose.p, c.home); }
+/** park-away/1: parked away from home with its own route back, and a flight home waiting for the next rider (built at lift-off
+ *  from where it stands: up, across, down at home). A rider who steers it before lift-off replaces that flight. */
+function parkHere(c: CarrierState): void {
+  const own = c.steer!.away.route;
+  c.route = own;
+  c.steer = { by: null, to: [...c.home] as Vec3, land: [...c.home] as Vec3, built: false, ret: true, away: { route: own, elapsed: 0, wake: [] } };
+}
 /** A steer is over: the ride gets its own route back (a steer flew a 'steer'/'steer-return' route in its place), so the next
  *  boarding qualifies and the next unsteered trip flies the ride's own route again. */
 function endSteer(c: CarrierState): void {
@@ -648,7 +728,9 @@ const steer: ActionDef<SteerParams, SteerPlan, { carrier: string; id: string; pl
   start(rt, p, prog, id) {
     const e = rt.world.entities[p.carrier], c = state(e)!;
     // where it leaves its own route (or, steered again while flying itself back, that return route), and the steered legs
-    const away = c.steer && !c.steer.ret ? c.steer.away : { route: c.route, elapsed: c.phase === 'aloft' ? c.elapsed : 0, wake: [] as Vec3[] };
+    // park-away/1: steered off a flight back (from a parked spot, or after a hover), it keeps the ride's own route, never the
+    // built return route (which starts where the ride was parked: flown later from home, it would jump there)
+    const away = c.steer && (!c.steer.ret || parkAway(rt)) ? c.steer.away : { route: c.route, elapsed: c.phase === 'aloft' ? c.elapsed : 0, wake: [] as Vec3[] };
     if (!prog.ret) away.wake.push([...e.pose.p] as Vec3);
     c.steer = { by: p.actor, to: prog.to, ...(prog.land ? { land: prog.land } : {}), built: false, ...(prog.ret ? { ret: true as const } : {}), away, ...(prog.landing ? { asked: prog.landing.requested } : {}) };
     delete c.landNote;
@@ -682,7 +764,11 @@ export function stepCarriers(rt: Runtime, table?: EntityTable | null): void {
     const riders = Object.values(c.seats).filter((a): a is string => !!a);
     const tick = rt.tick;
     if (c.phase === 'boarding') {
-      if (!riders.length) { c.phase = 'parked'; c.departAtTick = null; c.phaseTick = tick; delete c.hold; continue; }
+      if (!riders.length) {
+        // park-away/1: everyone got out before lift-off; a steer one of them set goes with them, and the flight home waits again
+        if (parkedAway(rt, e, c) && c.steer) parkHere(c);
+        c.phase = 'parked'; c.departAtTick = null; c.phaseTick = tick; delete c.hold; continue;
+      }
       if (c.hold) {
         // together/1: wait for invited companions (all seated), or until the hold runs out / its host is no longer aboard
         const companionsIn = c.hold.filled >= c.hold.seats && riders.every(a => carried(rt.world.entities[a])?.phase === 'seated');
@@ -712,8 +798,11 @@ export function stepCarriers(rt: Runtime, table?: EntityTable | null): void {
         if (c.bank) { delete h.shore; (rt.services.carrierBankContact as ((rt: Runtime, actor: string) => void) | undefined)?.(rt, actor); }
       }
       if (!Object.values(c.seats).some(Boolean)) {
-        // VEHICLE-STEER: a ride that landed away from home flies itself back empty once its riders are out
-        if (c.steer?.land && !same(c.steer.land, c.home)) { startReturn(c); c.phase = 'aloft'; e.phase = 'carried'; c.elapsed = 0; }
+        // VEHICLE-STEER: a ride that landed away from home flies itself back empty once its riders are out.
+        // park-away/1 (#2196): a ride never moves with nobody aboard. It parks where it landed and offers its seats there; the
+        // next rider flies it home (a flight home straight from here), or steers it anywhere else.
+        if (c.steer?.land && !same(c.steer.land, c.home) && parkAway(rt)) { parkHere(c); c.phase = 'parked'; rt.mark('carrier.parked-away', { carrier: e.id, at: [e.pose.p[0], e.pose.p[2]] }); }
+        else if (c.steer?.land && !same(c.steer.land, c.home)) { startReturn(c); c.phase = 'aloft'; e.phase = 'carried'; c.elapsed = 0; }
         else { endSteer(c); c.phase = 'parked'; }
         c.phaseTick = tick;
       }
@@ -786,6 +875,8 @@ export function rerouteCarrier(world: { entities: Record<string, Entity> }, spec
   if (!e || !c) return diag('unknown-carrier', `no carrier ${spec.id}`);
   if (spec.def !== e.def) return diag('def-mismatch', `${spec.id} is a ${e.def}, not a ${spec.def}`);
   if (c.phase !== 'parked' || Object.values(c.seats).some(Boolean) || c.doorBy || c.hold) return diag('carrier-busy', `${spec.id} has riders or boarders; it re-routes once parked and empty`, [spec.id]);
+  // park-away/1: parked where a rider left it (never at home before the rule), it is not moved to a new home; it re-routes once ridden home
+  if (c.steer?.ret && !same(e.pose.p, c.home)) return diag('carrier-away', `${spec.id} is parked away from its home; it re-routes once ridden back there`, [spec.id]);
   const next = carrierEntity(spec, tick); if ('code' in next) return next;
   const n = state(next)!;
   c.home = n.home; c.yaw = n.yaw; c.route = n.route; c.elapsed = 0; c.departAtTick = null; c.holding = false;
@@ -798,6 +889,7 @@ export function rerouteCarrier(world: { entities: Record<string, Entity> }, spec
  *  flight (e.g. the brisk eden loop); refused (no change) while boarding, aloft or landed, or for a route not ending at home. */
 export function setCarrierRoute(world: { entities: Record<string, Entity> }, id: string, routeId: string): boolean {
   const e = world.entities[id], c = state(e); if (!e || !c || c.phase !== 'parked' || Object.values(c.seats).some(Boolean)) return false;
+  if (c.steer?.ret && !same(e.pose.p, c.home)) return false;   // park-away/1: parked away, its flight home keeps its own route
   const route = routeAt(routeId, c.home); if (!route) return false;
   const a = route.keys[0].p, b = route.keys[route.keys.length - 1].p;
   if (hypot(a[0] - c.home[0], a[1] - c.home[1], a[2] - c.home[2]) > 1e-6 || hypot(b[0] - c.home[0], b[1] - c.home[1], b[2] - c.home[2]) > 1e-6) return false;

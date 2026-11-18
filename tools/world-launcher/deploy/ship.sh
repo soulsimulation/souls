@@ -3,7 +3,7 @@
 # release is live and says what is live, and after it is live it keeps collecting evidence and reports every failure.
 #
 #   tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--no-eyes] [--from <step>] [--out <dir>]
-#                                       [--accept-host-codes <code,...>]
+#                                       [--accept-host-codes <code,...>] [--unload-still <0|1>]
 #     --label    the release, such as 0.123. Backups are pre-r0123-production-*, the outputs <out>
 #     --sha      the commit to ship: must be HEAD, clean and on origin/main
 #     --dry-run  prints every step and its commands; touches nothing remote and writes nothing. Exit 1 if a guard would stop
@@ -18,6 +18,10 @@
 #     --out      outputs (default $SHIP_OUT_ROOT/<label>)
 #     --accept-host-codes  the snapshot passes with hostOk false only when every public hostCode is in this list, such as
 #                halted for a release that fixes a halted world (#1356). Recorded in snapshot.json; any other code refuses
+#     --unload-still  1 writes, 0 removes, the host's <data>/launcher-settings.json (deploy/install.sh unload-still) right
+#                before the activation, so the new launcher the reload starts reads it. The conf is not touched, so the
+#                drift guard stands. --dry-run and --no-switch only say what they would write. A rollback is code only:
+#                the file stays (a build from before 0.130 does not read it)
 #
 # The host and every operator path come from the environment or an untracked deploy.env (docs/release.md has the table).
 # Steps: preflight snapshot stage rehearse backup probe-start activate probe-check healthz walks poster stall cdn-walk
@@ -38,15 +42,16 @@ STEPS="snapshot stage rehearse backup probe-start healthz walks poster stall cdn
 EYES_STEPS="probe-start probe-check walks poster stall"
 
 usage() { sed -n '5,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
-LABEL=""; SHA=""; DRY=0; NOSWITCH=0; NOEYES=0; FROM=""; OUT=""; ACCEPT=""
+LABEL=""; SHA=""; DRY=0; NOSWITCH=0; NOEYES=0; FROM=""; OUT=""; ACCEPT=""; UNLOAD=""
 while [ $# -gt 0 ]; do case "$1" in
-  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --no-switch) NOSWITCH=1;; --no-eyes) NOEYES=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;; --accept-host-codes) ACCEPT="${2:-}"; shift;;
+  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --no-switch) NOSWITCH=1;; --no-eyes) NOEYES=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;; --accept-host-codes) ACCEPT="${2:-}"; shift;; --unload-still) UNLOAD="${2:-}"; shift;;
   *) usage;; esac; shift; done
 [ -n "$LABEL" ] && [ -n "$SHA" ] || usage
 [ "$DRY$NOSWITCH" != 11 ] || { echo "--dry-run and --no-switch: pick one"; exit 2; }
 case "$LABEL" in *[!A-Za-z0-9._-]*) echo "--label: letters, digits, ., - and _ only"; exit 2;; esac
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "--sha: the full 40-character commit"; exit 2; }
 [[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "--accept-host-codes: comma-separated host codes, such as halted"; exit 2; }
+[[ -z "$UNLOAD" || "$UNLOAD" =~ ^[01]$ ]] || { echo "--unload-still: 0 or 1"; exit 2; }
 if [ -n "$FROM" ]; then case " $STEPS " in *" $FROM "*) ;; *) echo "--from: one of $STEPS (activation always runs with a fresh probe, from probe-start)"; exit 2;; esac; fi
 TAG="${LABEL//./}"; BUILD="we-${SHA:0:12}"; OUT="${OUT:-$OUT_ROOT/$LABEL}"; PDIR="$OUT/probe"; REL="$HOST_ROOT/releases/$BUILD"; MANIFEST="$RELEASE_DIR/$BUILD/RELEASE-MANIFEST.json"
 HOST="$(deploy_target 2>/dev/null)" || HOST=""
@@ -90,8 +95,22 @@ preactivate() {
   say "   + SHIP_PREACTIVATE_CMD"; [ "$DRY" = 1 ] || bash -c "$SHIP_PREACTIVATE_CMD" || die "SHIP_PREACTIVATE_CMD refused the activation (the workstation's probe is not watching); nothing changed"
 }
 stop_probe() { [ -n "$PROBE_PID" ] && kill -0 "$PROBE_PID" 2>/dev/null || return 0; say "   stopping the release probe"; touch "$PDIR/stop"; wait "$PROBE_PID" 2>/dev/null; PROBE_PID=""; }
+# --unload-still: what the host's settings file said before this run wrote it (0 or 1; empty until written, or once restored)
+UNLOAD_WAS=""
+settings_cmd() { printf 'SIM_ETC=%q SIM_SETTINGS_DATA=%q bash %q unload-still production %s' "$(dirname "$HOST_CONF")" "$HOST_DATA" "$REL/tools/world-launcher/deploy/install.sh" "$1"; }
+settings_note() {
+  [ -n "$UNLOAD_WAS" ] || return 0
+  say "   settings: $HOST_DATA/launcher-settings.json now says unload-still $UNLOAD (it said $UNLOAD_WAS before this run); the next launcher start obeys it"
+  say "   to revert it, on the host: $(settings_cmd "$UNLOAD_WAS"), or ship the next release with --unload-still $UNLOAD_WAS"
+}
+# nothing was activated (a refused or never-started activation): put the file back as it was, so "nothing changed" holds
+settings_restore() {
+  [ -n "$UNLOAD_WAS" ] || return 0
+  if rsh "$(settings_cmd "$UNLOAD_WAS")" > /dev/null 2>&1; then say "   settings: launcher-settings.json restored to unload-still $UNLOAD_WAS"; UNLOAD_WAS=""
+  else say "   settings: COULD NOT restore launcher-settings.json"; fi
+}
 die() {
-  say ""; say "STOPPED at step $CUR: $*"; say "   live now: $LIVE"; stop_probe
+  say ""; say "STOPPED at step $CUR: $*"; say "   live now: $LIVE"; settings_note; stop_probe
   [ -f "$OUT/ROLLBACK.txt" ] && { say "   rollback, only if you decide to:"; sed 's/^/     /' "$OUT/ROLLBACK.txt"; }
   [ "$DRY" = 1 ] || { printf '%s STOPPED %s\n' "$CUR" "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"; result stopped "$CUR${DETAIL:+ $DETAIL}"; }
   exit 1
@@ -116,6 +135,7 @@ say "ship $BUILD (label $LABEL)$([ "$DRY" = 1 ] && echo ' -- DRY RUN: nothing re
 [ "$NOEYES" = 0 ] || say "   --no-eyes: the probe, walks, poster and stall run on a GPU workstation (ship/eyes.mjs), not here"
 say "   outputs $OUT${FROM:+; resuming at $FROM}"
 [ -z "$ACCEPT" ] || say "   accepting host codes at the snapshot: $ACCEPT (recorded in snapshot.json; any other code refuses)"
+[ -z "$UNLOAD" ] || say "   unload-still $UNLOAD: $([ "$UNLOAD" = 1 ] && echo writes || echo removes) <data>/launcher-settings.json right before the activation$([ "$NOSWITCH" = 1 ] && echo ' (--no-switch: not written)')"
 
 # ---- 1 preflight: every guard, on every run, resumed or not ---------------------------------------------------------
 N=1; CUR=preflight; say ""; say "== [1/$NSTEPS] preflight: guards (local only)"
@@ -129,6 +149,8 @@ git -C "$ROOT" merge-base --is-ancestor "$SHA" origin/main 2>/dev/null || pf "$S
 # --no-switch makes nothing live, so the receipts are reported, never required
 rf() { if [ "$NOSWITCH" = 1 ]; then say "   receipts (not required with --no-switch): $*"; else pf "$*"; fi; }
 if [ -z "$RECEIPTS" ]; then rf "SHIP_RECEIPTS is not set: the folder with release-receipt.json (or receipt.json and ship-receipt.json)"
+# a gate blocked only by blockers the maintainer accepted, for this receipt and cut (docs/release.md#accepted-exceptions)
+elif [ -n "${SHIP_EXCEPTIONS:-}" ]; then node "$VERDICT" accepted "$RECEIPTS" "$SHIP_EXCEPTIONS" "$SHA" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || rf "the receipts are blocked beyond the accepted exceptions"
 elif [ -f "$RECEIPTS/release-receipt.json" ]; then node "$VERDICT" receipt "$RECEIPTS/release-receipt.json" "$SHA" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || rf "the release receipt is not clean for this commit"
 elif ! node "$VERDICT" receipts "$RECEIPTS/receipt.json" "$RECEIPTS/ship-receipt.json" "$SHA" | sed 's/^/   /'; then rf "the gate and ship receipts are not clean for this commit"; fi
 [ "$NOEYES" = 1 ] || { [ -n "$PROBE_CLI" ] && [ -d "$PROBE_CLI" ]; } || pf "SHIP_PROBE_CLI is not the release-probe god folder"
@@ -237,6 +259,7 @@ if step activate "$ACT_WHAT" && [ "$NOSWITCH" = 1 ]; then
     drift
   fi
   preactivate
+  [ -z "$UNLOAD" ] || say "   + (install.sh unload-still production $UNLOAD is not run)"
   say "   + (host-activate.sh is not run)"; released
   [ "$DRY" = 1 ] || printf 'activate skipped-no-switch %s\n' "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"
 elif [ "$STARTED" = 1 ]; then
@@ -248,17 +271,33 @@ elif [ "$STARTED" = 1 ]; then
     A="$(node -p 'const fs=require("fs"),s=JSON.parse(fs.readFileSync(process.argv[1])),u=JSON.parse(fs.readFileSync(process.argv[2]));[s.previousBuild,u.manifestSha256,s.remote.worlds,s.remote.configurationSha256].join(" ")' "$OUT/snapshot.json" "$OUT/upload-receipt.json")"
   else A='<previous> <manifest sha256> <worlds> <config sha256>'; fi
   preactivate
+  # the setting the new launcher reads at its start (the reload below starts it); a data-dir file, outside the conf's hash
+  if [ -n "$UNLOAD" ]; then
+    SF="$(printf '%q' "$HOST_DATA/launcher-settings.json")"; READ_SF="if [ -e $SF ]; then cat $SF; else echo NOFILE; fi"; PREV_UNLOAD=""; WAS_FILE=""
+    if [ "$DRY" = 0 ]; then
+      # fail closed: a file (or a connection) that cannot be read is never taken for "no file"
+      WAS_FILE="$(rsh "$READ_SF")" && [ -n "$WAS_FILE" ] || die "could not read launcher-settings.json on the host; nothing changed"
+      case "$WAS_FILE" in *'"unloadStill":1'*|*'"unloadStill": 1'*|*'"unloadStill":true'*) PREV_UNLOAD=1;; *) PREV_UNLOAD=0;; esac
+    fi
+    # the previous value is kept for the stops below only once the write succeeded (install.sh refuses before it writes)
+    if x rsh "$(settings_cmd "$UNLOAD")"; then [ "$DRY" = 1 ] || UNLOAD_WAS="$PREV_UNLOAD"
+    else
+      NOW_FILE="$(rsh "$READ_SF")" || NOW_FILE="(unreadable)"
+      if [ "$NOW_FILE" != "$WAS_FILE" ]; then UNLOAD_WAS="$PREV_UNLOAD"; settings_restore; fi
+      die "install.sh unload-still failed; nothing was activated"
+    fi
+  fi
   LIVE="the activation started: check healthz; the host rolls back by itself on failure"
   # from here a stop is not "before the release": the host may have switched (release.yml reads this marker)
-  [ "$DRY" = 1 ] || date -u +%FT%TZ > "$OUT/ACTIVATING"
+  [ "$DRY" = 1 ] || { date -u +%FT%TZ > "$OUT/ACTIVATING"; date -u +%s > "$OUT/activating-epoch"; }
   rc=0; x_in "$SHIPD/host-activate.sh" rsh "bash -s -- $(quote "$HOST_ROOT" "$HOST_DATA" "$HOST_CONF" "$HOST_UNIT" "$ORIGIN" "$BUILD") $A" || rc=$?
   # The host's exit is the only account of what happened (ship/host-activate.sh). Never claim a rollback it didn't report.
   DETAIL="exit $rc"; WAS="${A%% *}"
   case "$rc" in
     0) DETAIL="";;
-    80) LIVE="$WAS: nothing changed"; die "a guard on the host refused the activation (exit 80); nothing changed";;
+    80) LIVE="$WAS: nothing changed"; settings_restore; die "a guard on the host refused the activation (exit 80); nothing changed";;
     81) LIVE="$WAS, by the host's rollback: confirm with healthz"; die "the activation or its health check failed (exit 81); the host rolled code back to $WAS";;
-    82) LIVE="$WAS, by the stage link: confirm with healthz"; die "the activation failed (exit 82); the stage link is on $WAS, because activate.sh rolled back or never moved it, so no further rollback ran";;
+    82) LIVE="$WAS, by the stage link: confirm with healthz"; settings_restore; die "the activation failed (exit 82); the stage link is on $WAS, because activate.sh rolled back or never moved it, so no further rollback ran";;
     90) LIVE="UNKNOWN: the rollback failed. Read the stage link and healthz now"; die "ROLLBACK FAILED (exit 90): the activation failed and so did the rollback to $WAS. Act now";;
     91) LIVE="UNKNOWN: the stage link is neither $BUILD nor $WAS. Read it and healthz now"; die "the activation failed and the stage link is unexpected (exit 91); the host made no further change";;
     *) LIVE="UNKNOWN: read the stage link and healthz now"; die "the host's outcome is unknown (exit $rc): the connection may have dropped mid-activation, and the host may have rolled back or be rolling back";;
@@ -288,6 +327,23 @@ if step healthz "public healthz reports this build, every world and hostOk"; the
   if [ "$DRY" = 0 ]; then
     W="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).remote.worlds" "$OUT/snapshot.json")"
     node "$VERDICT" health "$OUT/live-health.json" "$([ "$NOSWITCH" = 1 ] && prev_build || echo "$BUILD")" "$W" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "healthz is wrong$([ "$NOSWITCH" = 1 ] && echo ' (the live build, no switch)' || echo ' after activation')"
+  fi
+  # --unload-still: the launcher the reload started says where its setting came from (0 removes the file: the default).
+  # Missing is a named warning only: recorded in POSTLIVE.txt and annotated, never a failed check (the release still
+  # publishes) and never a rollback. The journal is read from a minute before the activation.
+  if [ -n "$UNLOAD" ] && [ "$NOSWITCH" = 0 ]; then
+    WANT="unload-still $UNLOAD ($([ "$UNLOAD" = 1 ] && echo launcher-settings.json || echo 'the default'))"
+    EPOCH="$(cat "$OUT/activating-epoch" 2>/dev/null || true)"; SINCE="$([[ "$EPOCH" =~ ^[0-9]+$ ]] && echo "@$(( EPOCH - 60 ))" || echo '-1h')"
+    JQ="journalctl -u $(printf '%q' "$HOST_UNIT") --since $(printf '%q' "$SINCE") --no-pager -o cat | grep -F $(printf '%q' "$WANT")"
+    say "   + $(quote rsh "$JQ") > $OUT/unload-still.log"
+    if [ "$DRY" = 0 ]; then
+      if rsh "$JQ" > "$OUT/unload-still.log" 2>&1; then printf 'unload-still-log 0\n' >> "$OUT/POSTLIVE.txt"; say "   the new launcher said: $WANT"
+      else
+        printf 'unload-still-log warning\n' >> "$OUT/POSTLIVE.txt"
+        say "   WARNING unload-still-log: no '$WANT' line from the new launcher in the unit's journal; check it by hand (not a failed check)"
+        echo "::warning::unload-still-log: no '$WANT' line from the new launcher in the unit's journal; check it by hand"
+      fi
+    fi
   fi
   done_step
 fi

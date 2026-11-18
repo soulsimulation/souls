@@ -46,6 +46,14 @@ test('restart: reads what the last chat left, waits out a stopping serve, starts
   assert.deepEqual(calls(), ['serve --status', 'pending', 'serve --stop', 'serve --status', 'serve --status', 'serve']);
 });
 
+test('#1774: a seat that moves into a Souls home keeps its record on there (.souls/.eden-record-on)', async () => {
+  const { s } = restartable({ home: true });
+  writeFileSync(join(s.folder, s.cli.file), FAKE_CLI.replace("rmSync('.eden-agent.json'); console.log('{}');", "rmSync('.eden-agent.json'); (await import('node:fs')).mkdirSync('.souls'); writeFileSync('.souls/config.json', '{}'); console.log('{}');"));
+  await s.restart();
+  assert.equal(readFileSync(join(s.folder, '.souls', '.eden-record-on'), 'utf8'), '');
+  assert.equal(s.info.recordOn, join(s.folder, '.souls', '.eden-record-on'));
+});
+
 test('#1226 briefBytes: the owner setting lands in the Souls home once there is one, keeps the rest, and comes back after a restart', async () => {
   const { s } = restartable({ home: true, briefBytes: 0 });
   assert.equal(s.ownerSettings(), null, 'no home yet: nothing is written');
@@ -72,10 +80,14 @@ test('restart: a step that fails says which, and the seat keeps its chat; a turn
   await s.restart(); assert.equal(done, true); assert.equal(s.info.sessionId, null);
 });
 
-test('createSeat: empty folder plus only the identity seed; refuses a non-empty folder', () => {
+test('createSeat: empty folder plus only the identity seed and the record switch; refuses a non-empty folder', () => {
   const run = mkdtempSync(join(tmpdir(), 'pt-seat-'));
   const s = createSeat({ runDir: run, seat: { id: 'pip', adapter: 'claude-headless', model: 'haiku', soulName: 'Pip' }, worldBase: 'http://h/w/x' });
-  assert.deepEqual(readdirSync(s.folder), ['.eden-agent.json']);
+  // #1774: the client's full session record (#1773) is on before the seat's first command; an empty file, nothing else
+  assert.deepEqual(readdirSync(s.folder).sort(), ['.eden-agent.json', '.eden-record-on']);
+  assert.equal(readFileSync(join(s.folder, '.eden-record-on'), 'utf8'), '');
+  const off = createSeat({ runDir: mkdtempSync(join(tmpdir(), 'pt-seat-')), seat: { id: 'off', record: false }, worldBase: 'http://h/w/x' });
+  assert.deepEqual(readdirSync(off.folder), ['.eden-agent.json'], 'seat.record false leaves it off');
   const seed = JSON.parse(readFileSync(join(s.folder, '.eden-agent.json'), 'utf8'));
   assert.match(seed.identity, /^agent-[0-9a-f]{24}$/); assert.deepEqual(Object.keys(seed), ['identity']);
   const info = JSON.parse(readFileSync(join(run, 'seats/pip/seat.json'), 'utf8'));

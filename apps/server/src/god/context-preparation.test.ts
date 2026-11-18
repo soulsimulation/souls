@@ -76,7 +76,7 @@ test('unchanged offline Eden preserves exact scene hash under cooperative prepar
     const genesis = JSON.parse(readFileSync(new URL('../../../../worlds/templates/eden-2026.json', import.meta.url), 'utf8'));
     const { god, db } = fixture(genesis);
     try {
-        assert.equal(god.model.entities.size, 4935);
+        assert.equal(god.model.entities.size, 5586);   // 4935 + the 219 doors door-fit/1 fitted and the classroom's 2 (#2383) + the 430 door-fit/2 fitted (#2434)
         const before = contextScene(god, new Set());
         const after = await prepareContextScene(god, new Set(), new ContextPreparation(() => {}, new AbortController().signal));
         assert.equal(after.key, before.key);

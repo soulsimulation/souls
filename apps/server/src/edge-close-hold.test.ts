@@ -59,7 +59,9 @@ test('#1295 A2: a look linked to the message mid-walk doesn\'t close it; the wal
   const m = await take('walk to the bench and look at the cottage');
   const walk = await act(WALK, {for: m}); await w.settle(10);
   // an attention act ends as it is accepted, without replacing the walk: before #1295 its end closed the message mid-walk
-  const look = (await accept(w.host, req('/v1/edge/act', token, {verb: 'look', target: 'cottage', for: m}))).data;
+  // #1911: an act is an offered id; the look at the cottage is the id the world offers for it
+  const lookId = (w.edge.intents.dryRun(w.soul, {verb: 'look', target: 'cottage'}).would as {capability: string}).capability;
+  const look = (await accept(w.host, req('/v1/edge/act', token, {capability: lookId, for: m}))).data;
   assert.equal(look.accepted, true, JSON.stringify(look)); assert.equal(look.channel, 'attention');
   assert.equal(phase(look.receipt.id), 'completed'); assert.equal(phase(walk.receipt.id), 'started', 'the look did not replace the walk');
   assert.equal(row(m).result, null, 'not closed mid-walk'); assert.match(row(m).progress ?? '', /still going$/);
@@ -104,17 +106,26 @@ test('#1295 A4 (review): a short act linked to the message that replaces its wal
   assert.equal(row(m).outcome, 'done', 'the replaced walk does not write over it'); assert.doesNotMatch(row(m).result!, /replaced/);
 });
 
-test('#1295 A5: an open-ended sit holds nothing once seated; a timed one runs until it ends', {timeout: 300000}, async t => {
+test('#1295 A5, #2452 A3: a sit closes its message done once seated, timed or not, and goes on; a timed lie runs until it ends', {timeout: 300000}, async t => {
   const {w, take, act, phase, until, row, result} = await world(t);
   const SIT = 'sit:cottage/part-outdoor-bench';
   const m = await take('sit on the bench');
   const sit = await act(SIT, {for: m}); await w.settle(4);
   assert.equal((await result(m, 'done', 'Sitting')).status, 409, 'not seated yet: refused');
-  await until(() => (w.edge as any).holding(w.soul.soulId, sit.receipt.id) === true);
+  await until(() => row(m).result !== null);
+  assert.equal((w.edge as any).holding(w.soul.soulId, sit.receipt.id), true, 'closed once seated');
   assert.equal(phase(sit.receipt.id), 'started', 'the sit goes on');
-  assert.equal((await result(m, 'done', 'Sitting on the bench')).status, 200, 'held: the agent closes it');
+  assert.deepEqual({...row(m)}, {result: 'Sitting now.', outcome: 'done', result_by: 'server', progress: null});
+  assert.equal((await result(m, 'done', 'Sitting on the bench')).status, 200, 'the agent\'s words still replace the line');
+  // a timed sit is done once seated too: its end does not hold the card open, and writes nothing more
+  const s = await take('sit down for a minute');
+  const ground = await act('sit-ground:here', {params: {seconds: 6}, for: s});
+  await until(() => row(s).result !== null);
+  assert.equal(phase(ground.receipt.id), 'started', 'still sitting'); assert.equal(row(s).outcome, 'done'); assert.equal(row(s).result, 'Sitting now.');
+  await until(() => phase(ground.receipt.id) === 'completed'); await w.settle(40);
+  assert.equal(row(s).result, 'Sitting now.', 'the timed end wrote nothing more');
   const n = await take('lie down for a bit');
-  const lie = await act('lie:here', {params: {seconds: 4}, for: n});
+  const lie = await act('lie:here', {params: {seconds: 5}, for: n});
   await until(() => (w.edge as any).holding(w.soul.soulId, lie.receipt.id) === true);
   assert.equal((await result(n, 'done', 'Lying down')).status, 409, 'a timed lie runs until it ends');
   await until(() => phase(lie.receipt.id) === 'completed');

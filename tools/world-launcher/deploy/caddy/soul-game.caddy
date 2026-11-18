@@ -1,0 +1,41 @@
+# soul.game on the PRODUCTION host, behind the CDN (lane E1, #2513). Installed as /etc/caddy/sites/soul-game.caddy,
+# with cdn-trust.snippet imported in the Caddyfile's global options. docs/operations/cdn.md, "The site behind the CDN",
+# has the ordered steps and the rollback. The release never writes Caddy's configuration.
+#
+# @@PRODUCTION_PORT@@ is a placeholder, never a real value in this repository: the production launcher's loopback port,
+# the --port of SIM_WORLDS_ARGS in /etc/sim-worlds/production.conf. The install substitutes it.
+#
+# The launcher and the worlds key every per-address limit on the FIRST X-Forwarded-For entry. For a trusted peer Caddy
+# would append to the X-Forwarded-For it received, and the CDN appends to whatever the visitor sent, so the first entry
+# would be the visitor's own text. Here the header is replaced, never appended: exactly one entry, {client_ip}, which is
+# the CF-Connecting-IP of a peer in cdn-trust.snippet's ranges and the TCP peer for anyone else. It is never empty (an
+# empty X-Forwarded-For from loopback would look like the operator's own direct request to the launcher).
+# GET /__sim/whoami answers the address the launcher keyed a request on; check-soul-game.mjs compares it from outside.
+#
+# When the launcher cannot answer (stopped, restarting, a release), Caddy's own 502/503/504 for a page a browser asked
+# for is replaced by poster.html beside this file, read from the live release: "back in a moment" and a reload after a
+# random 3 to 8 s, so waiting visitors come back spread out. It is sent as 503 with Retry-After and no-store, so neither
+# the CDN nor a crawler keeps it. Only a GET that accepts HTML outside /__sim/, /v1/ and /w/<world>/v1/ gets it: agents,
+# API calls, health checks and WebSockets keep the real status. A status the launcher itself sends is never replaced.
+https://soul.game {
+	reverse_proxy localhost:@@PRODUCTION_PORT@@ {
+		header_up X-Forwarded-For {client_ip}
+	}
+	handle_errors {
+		@poster {
+			expression `{http.error.status_code} in [502, 503, 504]`
+			method GET
+			header Accept *text/html*
+			not path /__sim/* /v1/* /w/*/v1/*
+		}
+		handle @poster {
+			root * /srv/sim-worlds/production/tools/world-launcher/deploy/caddy
+			rewrite * /poster.html
+			header Cache-Control no-store
+			header Retry-After 5
+			file_server {
+				status 503
+			}
+		}
+	}
+}

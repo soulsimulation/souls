@@ -18,6 +18,7 @@ const global = window as unknown as {
         detail: boolean;
     }) => Promise<{
         data?: string;
+        thumb?: string;
         reason?: string;
         photo?: PhotoChoice;
     }>;
@@ -57,7 +58,7 @@ global.contextRender = async ({ snapshot, target, detail }) => {
         if (!layer.active || layer.stats.lastError || Object.keys(snapshot.assetBytes ?? {}).some(assetFailed))
             return { reason: 'scene assets unavailable' };
         const result = await previews.captureContext(target, layer.contextMeshes(), detail, layer.contextGroundAt);
-        return { data: result.url, photo: result.photo, reason: result.reason };
+        return { data: result.url, thumb: result.thumb, photo: result.photo, reason: result.reason };
     }
     finally {
         stopFallbacks();

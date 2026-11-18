@@ -18,6 +18,7 @@ create their own versioned tables (`*_v1`) with `CREATE TABLE IF NOT EXISTS` whe
 | `talks`, `narratives` | rendered speech; narrator plans (central driver) | newest 20,000 talk lines |
 | `take_chunks`, `take_archives` | recorded pose chunks for the viewer; archive manifest | only with `TAKES_PERSIST=1` (off by default) |
 | `glitches_v1` | one row per refusal, recovery and halt: rung, rule, bodies, tick, evidence (`glitch.ts`) | operations data; replay never reads it |
+| `edge_clients_v1` | one row per Soul, client (its `x-soul-client` header when it is a short version string, else `invalid`; `none` without one) and UTC day: first and last request, count (`client-version.ts`) | operations data, written at most once a minute and at shutdown |
 | `render_scene_captures` | content-addressed public render scenes | canonical for the takes that cite them |
 | `intent_*`, `lifecycle_operations_v1`, `clock_frontiers_v1`, … | structured intent, Soul lifecycle and durable clock facts | canonical |
 
@@ -49,9 +50,10 @@ Owner words, private rules, journals and recovery details are carried in private
 
 ## Maintenance and backups
 
-In-process, a minute after boot and then hourly (`apps/server/src/main.ts`): prune call bodies and talk lines, `VACUUM`
-when the file is bloated, write `backup-YYYYMMDDHH.db`, and keep the 6 newest plus the 00:00 UTC file of each recent
-day (about a week). Off-host copies: a launcher host backs up world data with restic. See [disaster recovery](../operations/disaster-recovery.md).
+In-process, a minute after boot and then hourly (`backupNow` in `apps/server/src/world-main.ts`): prune call bodies and
+talk lines, write `backup-YYYYMMDDHH.db`, and keep the 2 newest (the history is the restic snapshots, nightly and
+hourly). The hourly job does not compact the database (a `VACUUM` stalled a serving world's tick thread); a bloated file
+is compacted once at boot, before the world serves (`vacuumIfBloated` in `apps/server/src/db.ts`). Off-host copies: a launcher host backs up world data with restic. See [disaster recovery](../operations/disaster-recovery.md).
 
 With `ARCHIVE_TAKES=1` (requires `TAKES_PERSIST=1`) take segments are uploaded to R2 (`R2_*` settings, prefix
 `R2_PREFIX`, default `sim`) and verified before local pruning.
