@@ -1,6 +1,6 @@
 {
  "format": "souls-effect-cases/1",
- "about": "A note pinned and taken down (from entry 19, #493): Ana pins \"Choir practice Thursday\" (its words by reference); Ben cannot pin over it, and cannot take it down, since only its author does; Ana takes it down and the place is free again.",
+ "about": "A note pinned and taken down (from entry 19, #493): Ana pins \"Choir practice Thursday\" (its words by reference); Ben cannot pin over it, and cannot take it down, since only its author does; Ana takes it down and the place is free again. Another Soul's attempt to take the note back is refused by its need (the actor is not at an end of the link), with the original's words by key.",
  "cases": [
   {
    "name": "pinned_refused_twice_taken_down_by_its_author",
@@ -126,10 +126,12 @@
      "expect": {
       "verdict": "no",
       "reason": "not_linked",
-      "effect": 0,
+      "need": 0,
       "detail": {
-       "link": "author"
-      }
+       "link": "author",
+       "count": 1
+      },
+      "says": "not_your_note"
      }
     },
     {

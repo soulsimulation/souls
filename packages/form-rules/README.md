@@ -46,8 +46,14 @@ names the point of another thing given as a form argument, placed by that node's
 rotation, the fix a `walk_to` its `stand` point, SA-F2; else, an unknown pose, `unknown`), `hand` (`free: true`, `empty: true` (every hand holds nothing, else
 `hand_not_empty` with how many hold something) or `holds: <kind>`), `held_by_actor` (this thing, or a `thing` argument), `moves` (a `thing` argument moves `by` `carry`
 or `push`, read from its kind's `motion.how`: `moves_by`, `motion_unsaid`, `needs_souls`, or `no_free_hand` when
-carrying takes more hands), and `linked`
-/ `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
+carrying takes more hands), `not_in_hand` (no node's hand
+in the state holds this thing, else `in_hand` with the holder and hand; the fix is `put` only when the actor holds it),
+`linked`
+/ `unlinked` (whether the thing has any link of that type; with `end: "actor"`, whether the actor is one of
+its ends, the detail unchanged; whether the actor holds one as a permission is "who may", SA-F7a), `most_per` (the actor is at an end of this link on fewer than the link's `most_per`
+things of this kind among this thing's parent's `children`, the link declared `per: "parent"`; a node with no parent
+counts alone; a refusal is `already_linked` with `detail: {link, most_per, on}`, `on` the things that hold the actor,
+sorted), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
 overflows) and `enough` (every amount they ask is there to give at the source, else `not_enough`, with the source, what
 it can give and the amount asked), and `sum` (two or more `int` fields of this kind added up, `at_least` and/or
@@ -91,7 +97,8 @@ the state and the asker, and the expected verdict; adding one changes no code.
 ```
 
 - A node has a `kind` (resolved from `content/kinds/` and `cases/kinds/`), `fields` (a missing field has its
-  default), `links` (type to the linked ends), `slots` (name to its occupants), and for the actor `hands` (name to
+  default), `links` (type to the linked ends), `slots` (name to its occupants), `children` (its child nodes, entry
+  section 11), and for the actor `hands` (name to
   the held node or `null`; holding is the held thing's parent being the hand) and `effector_mm`, the effector's
   position in the frame of the act's thing (turning poses into that frame is geometry the engine supplies).
 - An argument naming a slot is the slot's name on the act's thing, or `{"node", "slot"}` for another node's.
@@ -108,7 +115,7 @@ layers of Engine v2's contract T6:
 
 - `changes`, generic changes any viewer can apply without the kinds: `set` (`node`, `field`, its number `n`, `to`,
   and for an amount the signed `by`), `link` / `unlink` (`node`, `link`, `n`, `end`), `reparent` (`node`, `to`),
-  `create` (`node`, `kind`, `to`) and `remove` (`node`, with everything it holds). A place `to` is a slot
+  `create` (`node`, `kind`, `to`, and `fields`, by name, when the entry sets the made thing's fields) and `remove` (`node`, with everything it holds). A place `to` is a slot
   `{node, slot}`, a hand `{node, hand}`, or loose in a node `{node}`.
 - `events`, one per effect the entry declares, in order: its name, the node, and the indexes of its changes. The name
   is `namespace:name`: the declaring kind's namespace before the plain name its entry writes (`poured` in an
@@ -132,8 +139,10 @@ to zero, or between two fields of this one thing (`into_field`, both ends `"this
 zero the same way; `reparent` moves the actor, the thing or a `thing` argument into a slot, the actor's first free hand or
 `here`, loose in the actor's place (holding is a parent);
 `create` makes a thing in a slot, the actor's first free hand or `here`, loose in the place the actor is in (where
-on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.<n>`; `link` / `unlink` join the
-actor to the thing. Effects are worked out in order on a copy, so a later one sees an earlier one; one that cannot be
+on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.<n>` and the fields its `set` names (a value, or the
+choice a value argument made; refused as `bad_input` if the made kind has no such field or value); `link` / `unlink` join the
+actor to the thing, and `unlink` with `from: "all"` frees every end of the link on this thing, one `unlink` change
+each, sorted (none when it has none). Effects are worked out in order on a copy, so a later one sees an earlier one; one that cannot be
 done refuses the whole form with `{verdict: "no", reason, effect, detail}`.
 
 A stock's take (an entry's `stock` section names the form, [#2851](https://github.com/soulsimulation/souls/issues/2851))

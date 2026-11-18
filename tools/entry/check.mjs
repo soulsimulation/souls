@@ -228,6 +228,29 @@ export function checkText(text) {
   return {entry, findings};
 }
 
+/** A `create` that sets the made thing's fields: each is a field of the made kind, and each value (or each choice of a
+ *  value argument) a value of it. A text, list, schedule or timed field is set its own way, never at the bench. */
+export function madeFields(entry, loaded) {
+  const out = [];
+  for (const [fn, f] of Object.entries(entry.forms ?? {})) (f.effects ?? []).forEach((e, i) => {
+    if (e.change !== 'create' || !Array.isArray(e.set)) return;
+    const made = loaded.get(e.kind);
+    if (!made) return;
+    e.set.forEach((x, j) => {
+      const path = `forms.${fn}.effects.${i}.set.${j}`, def = made.state?.[x.field];
+      const add = reason => out.push({rule: 'refs', form: fn, field: x.field, path, reason, fix: `set a bool, enum or int field of ${e.kind} to one of its values`});
+      if (!def) return add(`"${x.field}" is not a state field of ${e.kind}`);
+      if (!['bool', 'enum', 'int'].includes(def.type)) return add(`"${x.field}" of ${e.kind} is ${def.type}; a bench sets a bool, enum or int field`);
+      const values = isObj(x.to) ? f.takes?.[x.to.arg]?.of ?? [] : [x.to];
+      for (const v of values) {
+        const ok = def.type === 'bool' ? typeof v === 'boolean' : def.type === 'enum' ? def.values?.includes(v) : Number.isSafeInteger(v) && (def.min === undefined || v >= def.min) && (def.max === undefined || v <= def.max);
+        if (!ok) add(`${JSON.stringify(v)} is not a value of "${x.field}" of ${e.kind}`);
+      }
+    });
+  });
+  return out;
+}
+
 /** Check files. Kinds an entry refers to are looked for among `all`, so one family can refer to another. */
 export function checkFiles(files, all = files) {
   const rows = files.map(file => ({file, ...checkText(readFileSync(file, 'utf8'))}));
@@ -239,6 +262,7 @@ export function checkFiles(files, all = files) {
   for (const r of rows) {
     if (!r.entry || r.findings.length) continue;
     for (const k of F.kindRefs(r.entry)) if (!loaded.has(k)) r.findings.push({rule: 'refs', form: null, field: 'kind', path: 'forms', reason: `refers to ${k}, which is not loaded`, fix: `add ${k} under content/kinds, or name a kind that exists`});
+    r.findings.push(...madeFields(r.entry, loaded));
   }
   try { F.hashKinds([...loaded.values()].filter(e => F.kindRefs(e).every(k => loaded.has(k)))); } catch (e) {
     const names = new Set(e.message.match(/[a-z][a-z0-9-]*:[a-z][a-z0-9_]*/g) ?? []);

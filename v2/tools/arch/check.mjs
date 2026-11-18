@@ -55,6 +55,8 @@ export const ALLOWED = {
   skills: ['replica'],
   // W8 (#2729): the object store's SigV4 signature (ring) and HTTP (ureq); sim's tick loop in a test (dev only).
   directoryd: ['replica', 'ring', 'ureq', 'sim'],
+  // O1 (#2730): the launcher reads a world's pin from its directory record.
+  supervisor: ['replica', 'directoryd'],
 };
 
 const rsFiles = dir => readdirSync(dir, { recursive: true }).filter(f => /\.rs$/.test(f)).map(f => join(dir, f));
