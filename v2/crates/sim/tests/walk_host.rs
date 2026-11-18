@@ -204,6 +204,8 @@ impl Walk {
                     }),
                 crossing: self.controller.carrying(b.id),
                 staying: false,
+                // The walk through the host asks no standing spot (N9).
+                spot: None,
             })
             .collect();
         self.town.get_mut().turns(&marks, at).unwrap();

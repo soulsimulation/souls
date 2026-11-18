@@ -16,6 +16,10 @@
 //!   the marks of the last are read into each such link's facts (who waits at which end and how far from it, who is
 //!   inside and how far along, whether each end has room to step out into), and its owning node writes who may
 //!   enter. Without turns ([`Town::turns`] `None`) every link is free, as N7 walked them.
+//! - **Standing spots** (N9, `crate::spots`). The marks of the last tick that ask a spot are read into the tables of
+//!   their targets' nodes. A place is never in a doorway or on a stair: none within `spots::CLEAR` of a link's end on
+//!   the target's node, or within half the link's width and half that of its line (placed on the open ground by its
+//!   building's frame).
 
 use super::{Leg, Mark, Pass, World, node_of};
 use crate::controller::{Controller, Track};
@@ -26,11 +30,12 @@ use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map};
+use crate::spots::{Ask, CLEAR, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Refusal};
 use replica::encode::Value;
-use replica::host::{Answer, Ask, F_GRANTED, F_TURNS, Near, Seen};
+use replica::host::{Answer, Ask as HostAsk, F_GRANTED, F_TURNS, Near, Seen};
 use replica::ids::Id;
-use replica::pose::{ControllerInput, Mode, Vec3};
+use replica::pose::{ControllerInput, Frame, Mode, Quat, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
@@ -65,6 +70,8 @@ pub struct Town {
     pub doors: Doors,
     /// The turn states of the narrow links, written by their owners; `None` walks every link free.
     pub turns: Option<Turns>,
+    /// The standing spots' tables, by owning node (N9).
+    pub spots: Spots,
     crossings: BTreeMap<Id, Crossing>,
 }
 
@@ -131,6 +138,7 @@ impl Town {
             buildings,
             doors,
             turns: Some(Turns::new()),
+            spots: Spots::new(),
             crossings: BTreeMap::new(),
         })
     }
@@ -171,7 +179,119 @@ fn dist2(a: Vec3, b: Vec3) -> i128 {
     d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)
 }
 
+/// Whether `p` (µm, the frame of `node`) lies in a doorway or on a stair: within [`CLEAR`] of the end on `node` of a
+/// link, or within half the link's width and half [`CLEAR`] of its line.
+fn in_passage(buildings: &[Building], ground: Id, node: Id, p: Vec3) -> bool {
+    buildings.iter().any(|b| {
+        b.links.iter().any(|l| {
+            let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
+            let mut on = false;
+            for e in ends {
+                on = true;
+                if to_segment(p, e.a, e.b) < CLEAR {
+                    return true;
+                }
+            }
+            on && l.line.windows(2).any(|s| {
+                let (a, c) = if node == ground {
+                    (
+                        b.place.point(s[0]).unwrap_or(s[0]),
+                        b.place.point(s[1]).unwrap_or(s[1]),
+                    )
+                } else {
+                    (s[0], s[1])
+                };
+                to_segment(p, a, c) < l.width / 2 + CLEAR / 2
+            })
+        })
+    })
+}
+
+/// The town as the spot tables read it (N9): N5's map for walkable ground and routes, N6's surfaces for a straight
+/// walk, N4's links for doorways and stairs.
+struct Grounds<'a> {
+    tree: &'a Tree,
+    map: &'a mut Map,
+    surfaces: &'a BTreeMap<Id, Surface>,
+    buildings: &'a [Building],
+    ground: Id,
+}
+
+impl Ground for Grounds<'_> {
+    fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        let s = self.map.spot(node, p)?;
+        let w = self.map.world(s.piece, s.at);
+        let um = |v: [i64; 3]| Vec3::new(v[0] * 1000, v[1] * 1000, v[2] * 1000);
+        Some((um(s.at), um(w)))
+    }
+
+    fn passage(&self, node: Id, p: Vec3) -> bool {
+        in_passage(self.buildings, self.ground, node, p)
+    }
+
+    fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
+        // A straight walk on the surface (N6's walk, as the next corner is found), else N5's route.
+        if an == bn
+            && let Some(s) = self.surfaces.get(&an)
+            && let Ok(mut body) = s.place(
+                an,
+                Frame {
+                    node: an,
+                    slot: None,
+                },
+                a,
+                Quat::IDENTITY,
+            )
+            && s.step(&mut body, walk([b.x - a.x, b.z - a.z]), 1_000_000, 0)
+                .is_ok()
+            && [body.pose.position.x, body.pose.position.z] == [b.x, b.z]
+        {
+            return Some(flat(a, b));
+        }
+        let from = self.map.spot_near(an, a, AT_EDGE)?;
+        let to = self.map.spot_near(bn, b, AT_EDGE)?;
+        let r = self.map.route(self.tree, from, to, HANDS).ok()?;
+        Some(r.length as i64 * 1000)
+    }
+}
+
 impl World for Town {
+    fn spots(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
+        let asks: Vec<Ask> = marks
+            .iter()
+            .filter_map(|m| {
+                m.spot.map(|(target, order)| Ask {
+                    who: m.who,
+                    order,
+                    node: m.node,
+                    from: m.at,
+                    target,
+                })
+            })
+            .collect();
+        let Town {
+            spots,
+            map,
+            tree,
+            buildings,
+            ground,
+            surfaces,
+            ..
+        } = self;
+        let mut g = Grounds {
+            tree,
+            map,
+            surfaces,
+            buildings,
+            ground: *ground,
+        };
+        spots.write(&mut g, &asks, at)
+    }
+
+    fn spot(&self, who: Id, target: &Target) -> Option<Result<Vec3, &'static str>> {
+        self.spots.of(who, target)
+    }
+
     fn turns(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
         let Town {
             turns,
@@ -453,18 +573,18 @@ impl Town {
 
     /// The geometry answers and reads the walk skill asks of the world (T9b #3120), for `body`, with every body as
     /// the controller holds it at the tick's start.
-    pub fn answer(&mut self, bodies: &Controller, body: Id, q: &Ask) -> Option<Answer> {
+    pub fn answer(&mut self, bodies: &Controller, body: Id, q: &HostAsk) -> Option<Answer> {
         let me = bodies.body(body)?;
         match q {
-            Ask::Distance { .. } => None,
-            Ask::Toward { to, .. } => self.corner_of(me, *to).ok().map(|[x, z]| {
+            HostAsk::Distance { .. } => None,
+            HostAsk::Toward { to, .. } => self.corner_of(me, *to).ok().map(|[x, z]| {
                 Answer::Point(Vec3::new(
                     x,
                     if [x, z] == [to.x, to.z] { to.y } else { 0 },
                     z,
                 ))
             }),
-            Ask::Near { radius } => {
+            HostAsk::Near { radius } => {
                 let (node, p) = crate::index::place_of(me);
                 Some(Answer::Near(
                     bodies
