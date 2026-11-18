@@ -1,6 +1,6 @@
 {
  "format": "souls-form-cases/1",
- "about": "eden:oil_lantern (from #1700). One oil charge (0 or 1). Taken with a hand free. Lit only with a charge; put out, the charge is spent ('put-out empties it'), so a lantern that is out and empty is refilled at an oil supply, which the rules do not name as a fix from here.",
+ "about": "eden:oil_lantern (from #1700). One oil charge (0 or 1). Taken with a hand free. Lit only with a charge; put out, the charge is spent ('put-out empties it'), so a lantern that is out and empty is refilled at an oil supply, which the rules do not name as a fix from here. The wick rule (from #1700): light and put out need the lantern in nobody's hand ('Place the lantern on a surface before working its wick.').",
  "cases": [
   {
    "name": "take_every_need_met",
@@ -355,6 +355,149 @@
     "fix": {
      "step": "put"
     }
+   }
+  },
+  {
+   "name": "light_while_held",
+   "act": {
+    "this": "l1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:oil_lantern",
+      "fields": {
+       "oil": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "l1",
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "in_hand",
+    "need": 3,
+    "detail": {
+     "node": "b1",
+     "hand": "left"
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "place_first"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "light_held_by_another",
+   "act": {
+    "this": "l1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:oil_lantern",
+      "fields": {
+       "oil": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": "l1"
+      }
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "in_hand",
+    "need": 3,
+    "detail": {
+     "node": "b2",
+     "hand": "right"
+    },
+    "fix": null,
+    "says": "place_first"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "put_out_while_held",
+   "act": {
+    "this": "l1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:oil_lantern",
+      "fields": {
+       "oil": 1,
+       "lit": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": "l1"
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "in_hand",
+    "need": 2,
+    "detail": {
+     "node": "b1",
+     "hand": "right"
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "place_first"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
    }
   }
  ]
