@@ -1,9 +1,10 @@
 # Application checks on isolated runners, scoped to what a change touches. Pushes to main and manual runs are full scope
 # (every qualify job and the local smoke): the merge train lands T0-T2 PRs without re-testing them only while main's
 # latest full-scope run is green (.github/scripts/merge-train.mjs, mainCiState).
-# The job matrix is the release gate's CPU contract split for GitHub runners; `scope` picks jobs with the same path
-# map as `tools/test-harness/release-gate.mjs --scope auto` (.github/scripts/ci-scope.mjs). Branch protection requires
-# the single `ci-ok` check. The full Modal gate still qualifies releases (release.yml); CI is the per-PR check.
+# The job matrix is the release gate's CPU contract split for GitHub runners; `scope` picks the jobs a pull request or
+# merge group's diff can reach (.github/scripts/ci-scope.mjs and ci-reach.mjs, docs/testing.md#ci-scope), and a leg that
+# runs a list of test files runs only the affected ones, as a `selected` leg. Branch protection requires the single
+# `ci-ok` check. The full Modal gate still qualifies releases (release.yml); CI is the per-PR check.
 # CI window (docs/testing.md#ci-window): a pull request run does its heavy jobs (qualify, smoke) only for a ready PR
 # labelled merge:ready or ci:run; otherwise it runs scope and repo, and ci-ok fails as "full CI deferred" when heavy jobs
 # were selected. Adding either label starts a fresh pull_request run with the window open: the merge queue reads required
@@ -112,6 +113,7 @@ jobs:
           tools/assets/manifest.test.mjs
           tools/assets/mars-web.test.mjs
           .github/scripts/ci-scope.test.mjs
+          .github/scripts/ci-reach.test.mjs
           .github/scripts/ci-main.test.mjs
           .github/scripts/gate-renames.test.mjs
           .github/scripts/server-test-files.test.mjs
@@ -173,6 +175,7 @@ jobs:
         env:
           CHECK_KIND: ${{ matrix.kind }}
           SERVER_SHARD: ${{ matrix.shard }}
+          SELECTED_COMMANDS: ${{ toJSON(matrix.commands) }}
           GOD_SKILL: ${{ matrix.godSkill || false }}
         shell: bash
         run: |
@@ -240,8 +243,7 @@ jobs:
               node --test --test-concurrency=4 tools/soul-runtime/*.test.mjs tools/soul-trace/*.test.mjs
               # the entry format and its gates (check, look, prove); picked by tools/entry, content and packages/form-rules
               node --test --test-concurrency=4 tools/entry/*.test.mjs
-              # form-rules' own tests and the launcher test that reads content/kinds: a change confined to the low-risk
-              # paths (ci-scope.mjs LOW_RISK) runs this job and no packages or launcher job
+              # form-rules' own tests and the launcher test that reads content/kinds
               node --test --test-concurrency=4 packages/form-rules/src/*.test.ts tools/world-launcher/soul/card-search.test.mjs
               ;;
             server)
@@ -262,6 +264,11 @@ jobs:
               god=0
               if [ "$GOD_SKILL" = true ]; then node --test --test-concurrency=1 tools/god-skill/*.test.mjs tools/god-skill/lib/*.test.mjs tools/god-skill/scripts/*.test.mjs tools/god-skill/e2e/*.test.mjs || god=$?; fi
               exit $(( server || god ))
+              ;;
+            selected)
+              # a leg narrowed to the test files the diff can affect (ci-scope.mjs jobsFor): every listed command runs,
+              # any failure fails the job. Its name is not the full leg's, so it never counts as that leg's evidence.
+              node .github/scripts/ci-scope.mjs exec
               ;;
             *) echo "unknown check kind: $CHECK_KIND"; exit 1 ;;
           esac

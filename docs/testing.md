@@ -26,7 +26,8 @@ pnpm test                                    # everything (slow; prefer the focu
 
 In CI, every god-skill unit test (each `*.test.mjs` under `tools/god-skill/`, its `lib/`, `scripts/` and `e2e/`, the
 replay corpus among them; none needs a browser or a live server) runs on the `server-0` job (`godSkill` and
-`GOD_SKILL_TESTS` in `.github/scripts/ci-scope.mjs`), which any `apps/server/` or `tools/god-skill/` change selects.
+`GOD_SKILL_TESTS` in `.github/scripts/ci-scope.mjs`). A change that reaches only some of them runs those only (see
+[CI scope](#ci-scope)).
 
 The Pip authoring example's renderer test is manual, not part of CI: it needs pulled media and loads renderer code
 with parameter properties, so run `node --experimental-transform-types --test tools/body-authoring/robot/robot.test.mjs`
@@ -140,16 +141,16 @@ therefore **windowed**:
 - **Every PR push** runs the cheap jobs, `scope` and `repo` (the tooling tests), and the separate `security` (gitleaks,
   path-guard, scrub-guard), `proof` and `changelog` workflows.
 - **Heavy jobs** (the `qualify` matrix and the browser `smoke`) run only inside the window: the PR is not a draft
-  and carries `merge:ready` or `ci:run`. Outside the window, a run whose paths selected heavy jobs is **deferred**.
+  and carries `merge:ready` or `ci:run`. Outside the window, a run that selected heavy jobs is **deferred**.
   The heavy jobs are skipped and `ci-ok` fails with "Full CI deferred". A deferred `ci-ok` is a real failure, so
-  skipped heavy jobs never count toward merging, and branch protection still requires a green `ci-ok`. Docs or
-  tools-only PRs select no heavy jobs and are never deferred.
+  skipped heavy jobs never count toward merging, and branch protection still requires a green `ci-ok`. A PR whose
+  diff reaches no test selects no heavy jobs and is never deferred.
 - **The `heavy: true` legs run once, in the merge queue.** A `pull_request` run never runs the `qualify` legs that
   `ci-scope.mjs` marks `heavy: true` (`packages`, `launcher`, the server shards, `soul-actions`), even inside the window.
-  Every change reaches main through a merge-group run, which selects them by the same path map and must pass them, so
+  Every change reaches main through a merge-group run, which selects them by the same reach and must pass them, so
   running them on the PR as well only doubled the load. On the PR, `ci-ok` passes when every job that ran passed: the
-  light legs the paths pick (`types-web`, `web`, `client-cli`, `native`, `latency`, `docs-reference`, `soul-tools`), the
-  smoke, `scope` and `repo`. A PR whose paths pick only heavy legs has nothing of its own to run and is never deferred.
+  light legs the reach picks (`types-web`, `web`, `client-cli`, `native`, `latency`, `docs-reference`, `soul-tools`), the
+  smoke, `scope` and `repo`. A PR whose reach picks only heavy legs has nothing of its own to run and is never deferred.
   The step summary lists the legs left to the queue. The decision is `heavyInQueue` in `.github/scripts/ci-scope.mjs`.
 - **To request full CI**, add `ci:run` (or `merge:ready`) to a ready PR. `ci.yml` takes the `labeled` event, so that starts
   a fresh `pull_request` run with the window open. The merge queue reads required checks from that event: a green dispatch
@@ -159,22 +160,48 @@ therefore **windowed**:
 - **Any other label starts the same run** (#2018). The merge queue reads only the newest `ci` run at a head, so a run
   without `ci-ok` would hide the real one. Like a window label's run, it queues behind the PR's running CI, cancels
   nothing, and does no heavy work when the head's newest run passed, so its `ci-ok` repeats that result.
-- **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
+- **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's reach-scoped CI on its branch, on the branch's
   own `ci.yml`. It runs the heavy legs, and reads only earlier requested runs as green at the head. It tells you the
   result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
-  which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
+  which the merge train reads (see CI on main below). A merge-group run is reach-scoped over everything in the group since `main`, and
   `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
 
-**Low-risk paths.** When every file a PR or a merge group changes sits under `tools/entry/`, `content/kinds/`,
-`content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
-`AGENTS.md` and `CLAUDE.md`, CI skips the server shards, `latency`, the smoke, `packages` (the walk) and `types-web` (the
-bundle). It runs `repo`, `soul-tools` (the entry tests, the form-rules tests and the one launcher test that reads
-`content/kinds`) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
-keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
-and the usual path map decides; a changelog fragment beside any other file still selects every job. The list is
-`LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after a low-risk merge group runs in full, since the
-group did not run every `qualify` job.
+## CI scope
+
+Pull request and merge-group runs pick their jobs by what the diff can reach, so a change runs the tests it can affect
+and no others. `.github/scripts/ci-reach.mjs` maps the tree a run checks out: every code file's imports (static,
+re-exports, `require` and `import()` of a literal; a workspace package name stands for the whole package), every path
+its text names (a literal with a folder or an extension, the literal arguments of `join()`, `resolve()` and `URL()` put
+together, path-like words in scripts and data), and each unit's data (any code file reads the data files of its own
+package or top folder). A change affects a test when it reaches it through those edges: as changed code it imports or
+runs, or as data or a folder it reads. The header of `ci-reach.mjs` states the rules.
+
+Each job in `ci-scope.mjs` (`JOBS`) declares what it runs and reads (`reach`: test globs, command scripts, folders it
+builds, and the media manifest when it pulls media). A job runs when the diff reaches one of them. The legs that run a
+list of test files (the server shards with their god-skill and body-authoring tests, `soul-actions`, `soul-tools`) run
+only the affected files, as a `selected` leg with its own name (`server (selected 1/2)`, `soul-actions (selected)`);
+the server's files are packed into legs no longer than a full shard. When the affected server files are most of the
+inventory (75 % of its measured time or more), the full shards run instead. A selected leg never carries a full leg's
+name, so it never counts as that leg: a merge group that ran one leaves the push to main to run everything (see CI on
+main), and the release gate's CI evidence ignores it.
+
+Certainty comes first. A diff with any file the map cannot place runs every job and the smoke: a file outside
+`apps/`, `packages/`, `tools/`, `content/`, `mars/`, `e2e/`, `worlds/`, `docs/`, `changes/`, `scripts/` and `.claude/`
+(root Markdown aside), a `package.json`, the lockfile or workspace file, a `tsconfig` or build config, a dotfile, a
+test-harness baseline, or an unknown extension. So does an empty or unreadable diff. Pushes to main, manual runs and
+the release gate always run everything. The step summary shows, for each job, one chain from the diff to it.
+
+Run the same selection before opening a PR:
+
+```sh
+node .github/scripts/ci-scope.mjs local --base origin/main         # print the commands CI would run for this tree
+node .github/scripts/ci-scope.mjs local --base origin/main --run   # and run them
+```
+
+`local` diffs the working tree (commits, staged and unstaged edits, untracked files) against its merge base with
+`--base`, and prints media first, then each selected leg's commands as `ci.yml` runs them, then the smoke. It does not
+apply the CI window or leave heavy legs to the queue: it lists everything the merge queue will run.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
 `merge:ready` once a head's `ci-ok` is green, and remove `ci:run` from PRs that leave the window. A PR labelled
@@ -186,19 +213,19 @@ is behind main can still leave with `needs:rebase`. The decision is `windowFor` 
 **CI on main.** The merge queue fast-forwards `main` to the commit its merge-group run tested, so the push carries
 the same sha. When a successful merge-group `ci` run at that sha passed every `qualify` job, the push run does no heavy
 work: it runs `scope`, `repo` and the marker job `merge-group-covered`, and `ci-ok` passes on those. Any other push to
-main (a direct push, a revert, a merge group whose paths selected only some jobs) runs everything. The marker counts as
+main (a direct push, a revert, a merge group whose reach selected only some jobs) runs everything. The marker counts as
 full scope for the merge train's `fullScope`, and the release gate's CI evidence then reads the merge-group run's jobs.
 The decision is `queueCovered` in `.github/scripts/ci-main.mjs`.
 
 **Soul Action tests.** `tools/soul-actions/*.test.mjs` runs as the CI job `soul-actions`, about 76 s measured on a
-loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
-`packages/engine-*`) and by every full-scope run, including each push to main, and a failure blocks through `ci-ok`. It
-is not a gate step, so the gate's suite tree and cached baseline don't change.
+loaded laptop. It runs the files a diff reaches (see CI scope) and every file in each full-scope run, including each push
+to main, and a failure blocks through `ci-ok`. It is not a gate step, so the gate's suite tree and cached baseline don't
+change.
 
 **Soul runtime and trace tests.** `tools/soul-runtime/*.test.mjs` and `tools/soul-trace/*.test.mjs` run as the CI job
-`soul-tools`, about 17 s measured on a loaded laptop. It is picked by its own paths (`tools/soul-runtime`,
-`tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
-`ci-ok`. Like `soul-actions`, it is not a gate step.
+`soul-tools`, about 17 s measured on a loaded laptop, with the entry tests, the form-rules tests and the launcher test
+that reads `content/kinds`. It runs the files a diff reaches and every file in each full-scope run, and a failure blocks
+through `ci-ok`. Like `soul-actions`, it is not a gate step.
 
 **Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
 whose hosted median is over about 8 minutes: `packages`, `launcher`, `soul-actions`) run on the runners named by the
