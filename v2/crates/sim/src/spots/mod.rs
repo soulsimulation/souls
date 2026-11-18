@@ -288,17 +288,22 @@ impl Spots {
                 Some(_) => None,
             })
             .collect();
+        // A missing table is refused, and the other releases and the grants go on (#3275); the first is returned.
+        let mut refused = None;
         for (who, why) in gone {
             let (t, i) = self.held.remove(&who).expect("held");
-            let p = self
+            let Some(p) = self
                 .owners
                 .get_mut(&t.node)
                 .and_then(|o| o.get_mut(&t.at))
                 .map(|tb| &mut tb.places[i])
-                .ok_or_else(|| Refusal {
+            else {
+                refused.get_or_insert(Refusal {
                     name: "spot-table-missing",
                     detail: show(t.node),
-                })?;
+                });
+                continue;
+            };
             p.holder = None;
             self.record.push(Entry::Release {
                 at,
@@ -349,6 +354,6 @@ impl Spots {
                 }
             }
         }
-        Ok(())
+        refused.map_or(Ok(()), Err)
     }
 }

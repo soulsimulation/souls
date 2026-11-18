@@ -40,6 +40,7 @@ use replica::world_model::Audience;
 
 use crate::log::crc32c;
 
+pub mod fork;
 #[cfg(test)]
 mod tests;
 

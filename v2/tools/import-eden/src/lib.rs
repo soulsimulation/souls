@@ -87,6 +87,8 @@ pub struct Import {
     pub notes: Vec<String>,
     /// Today's def ref to its form: point, path or area.
     pub forms: BTreeMap<String, String>,
+    /// Every entry the import committed, in order: what a stream of the world starts from (V5, #2714).
+    pub effects: Vec<Effect>,
 }
 
 type R<T> = Result<T, String>;
@@ -741,7 +743,6 @@ pub fn load(text: &str) -> R<Import> {
         .map_err(|e| e.to_string())?,
     )
     .map_err(|e| format!("{}: {}", e.name, e.detail))?;
-    drop(effects);
     tree.commit(&header, &part, &rules)
         .map_err(|e| format!("commit refused: {}: {}", e.name, e.detail))?;
 
@@ -767,6 +768,7 @@ pub fn load(text: &str) -> R<Import> {
         by_ref,
         notes: b.notes,
         forms,
+        effects,
     })
 }
 
