@@ -66,6 +66,10 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
+A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
+thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
+chain with a wake entry of its own; the world never waits for a time or a condition.
+
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15, section 12), `motion` and `loose`
 (SA-F10), `hatch` (SA-F9).
 
@@ -254,6 +258,58 @@ draws; a text, list or schedule field changes no part, so it is not drawn.
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
 
+## An activity (proposed: `roles`)
+
+A group activity (a lecture, a supper, later a handshake, a dance or a bout) is a node Souls enter (SA-G1a,
+[#2872](https://github.com/soulsimulation/souls/issues/2872); Engine v2 B5, [#2724](https://github.com/soulsimulation/souls/issues/2724)).
+Its kind is an ordinary entry plus a `roles` section, which the validator does not take yet: it is proposed on
+[#2842](https://github.com/soulsimulation/souls/issues/2842), and until then the examples are test kinds
+(`packages/form-rules/cases/kinds/test/lecture_activity.json`, `supper.json`).
+
+```json
+"roles": {
+  "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
+  "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } }
+}
+```
+
+- A **role** is one of the kind's link types; membership is that link to the body, and the link's `most` is how many
+  the role takes. `need` is `required` (the activity cannot start without it), `replaceable` (required, and another
+  may take it while it runs) or `optional`. Starting, leaving and ending are SA-G1b's and Engine v2 B5's.
+- **places** say where a member of the role may be, in a fixed order. `in: "this"`: the activity's own `slots`, in
+  the order listed, so a body becomes the activity's child. `in: "here"`: the slots of things in the same place as
+  the activity whose origin is within `within_mm` of the activity's, nearest first, then by node id, then in the
+  thing's slot order. Only a slot that admits a body counts, and, if `posture` is given, only one with that posture.
+  The first slot with room is the place. If no slot has room, the answer is `no_free_place`, naming the role.
+- **Entering is a form** of the kind. It links the role to the actor and moves the actor into a slot argument
+  (`reparent`), and the role's places fill that argument. Who may enter a role is that form's `who`.
+- The world moves no body. Each Soul walks and sits by its own steps; the form's effects only link and set the parent.
+  Anything that needs another Soul's yes is an offer with an expiry (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)).
+## A move
+
+A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
+(SA-D4, [#2856](https://github.com/soulsimulation/souls/issues/2856); feeds Engine v2 B2, [#2681](https://github.com/soulsimulation/souls/issues/2681),
+and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
+classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
+`effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
+`start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
+includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
+point and then to a second one. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
+`held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
+contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
+the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free. `strike` and `pump` (SA-D5b, [#2859](https://github.com/soulsimulation/souls/issues/2859)) are the same shape with the effector at the tool's head (a hammer's face, a pump's nozzle): a window `strike_us` per blow or `pump_us` per stroke, `count` of them in the record, claiming the hand only.
+
+```sh
+node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
+node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/entry/cases/moves.json
+```
+
+`tools/entry/pose.mjs` gives the hand's position in whole millimetres at any time from a move, a record
+(`start_us`, `from_mm`, `contact_mm`, and `to_mm` for a slide) and a time. It has no imports and uses whole-number
+arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
+rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
+move the thing's frame into the world's: the caller passes world positions.
+
 ## The looks table
 
 `looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
@@ -268,6 +324,16 @@ is a role of the model (the closed list of roles of the shape language), not the
 only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
 function that turns a table, a state and the time since it changed into each part's placement, in whole numbers; its
 cases are `packages/form-rules/cases/looks/`. Collision shapes never follow looks.
+
+A `sound` row says what is heard (SA-D7). `sound` is one of the page's own synthesised set (`sound-plan.ts`: water, bell, hum,
+chime, kettle and the rest) or `tune`; there are no audio files. `mode` is `loop` (default) or `once`. `reach_mm`, how far it
+carries, is required on every sound row. It is driven by a `field` (`at` or `range` + `to` give the loudness in permille, 0 is
+silent, so the sound stops when the field says so) or by a named `event` (with `level`, permille; played once from the record).
+A `tune` row names a tune by id (`tune`) or a mood tag (`mood`, which picks one from `content/tunes/tunes.json` by hashing the
+thing's id). A thing that carries sound to another place names the `link`. The function answers with what is heard
+(`sounds` on the part, or on `@self` when the row has no part): which sound, loud how, reaching how far, and the microseconds
+since the state began. A tune is notes, `[midi, start step, steps long]` over steps of `step_us`, repeating; which notes sound in
+a window of world time is `tuneNotes`, a pure function of time, so every viewer, live or in replay, is at the same point of it.
 
 ```json
 "table": [

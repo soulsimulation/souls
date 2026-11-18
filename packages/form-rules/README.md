@@ -3,13 +3,16 @@
 What a form needs, decided from plain data (Soul Actions SA-F2, [#2843](https://github.com/soulsimulation/souls/issues/2843)),
 what it does, as generic changes plus named events (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)),
 the value of a field that changes with time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)),
-and who may do a form, as a test on links (SA-F7a, [#2848](https://github.com/soulsimulation/souls/issues/2848)).
+who may do a form, as a test on links (SA-F7a, [#2848](https://github.com/soulsimulation/souls/issues/2848)),
+how a thing reacts, by rules on its kind (SA-F15, [#2853](https://github.com/soulsimulation/souls/issues/2853)),
+and where a Soul entering a role of an activity is placed (SA-G1a, [#2872](https://github.com/soulsimulation/souls/issues/2872)).
 `decide(input)` answers whether a form of a kind written in the [entry format](../../docs/soul-actions/entry-format.md)
 can be done now. Nothing in today's server or client calls it yet; Engine v2's shared rules (R2,
 [#2685](https://github.com/soulsimulation/souls/issues/2685)) write it again and run the same cases.
 
 ```sh
-node --test packages/form-rules/src/*.test.ts        # every case in cases/, cases/effects/, cases/timed/ and cases/who/, plus the library's own checks
+node --test packages/form-rules/src/*.test.ts        # every case in cases/, cases/effects/, cases/timed/, cases/who/, cases/react/ and cases/activity/, plus the library's own checks
+node packages/form-rules/bin/check-reactions.mjs     # the check gate's rule check over every kind (exit 1 on a refusal)
 node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed values and crossings in Node and in a browser build
 ```
 
@@ -176,6 +179,62 @@ A file in `cases/who/` is `{"format": "souls-who-cases/1", "about": ..., "cases"
 case. Its three examples, a private workbench, a chess move and a lecture speech, use the test kinds in
 `cases/kinds/test/`.
 
+## Things react
+
+A kind may carry `reactions`: named rules, each `{"when": <trigger>, "do": [<effect>, ...]}`, that answer what
+happens to a thing, or to a thing linked to it, with no Soul acting. The trigger and the effects come from two closed
+lists in [`src/reactions.json`](src/reactions.json), the one file shared with Engine v2 E18
+([#2788](https://github.com/soulsimulation/souls/issues/2788)), which runs them.
+
+- **Triggers** (`when.on`): `changed` (a `field` of this thing), `linked_changed` (a `field` of a thing at the other
+  end of a `link`), `support_changed` (a `field` of the thing it rests on, or it comes to rest on a thing where that
+  field differs), `rested` and `left` (something comes to rest on it or leaves), `body_entered` and `body_left` (a
+  body enters or leaves the place it is in), `due` (a `timer` one of its forms set comes due) and `world` (the world
+  announces a change of `light` or `weather`, Engine v2 E6). A trigger that carries a new value may filter on it
+  with `is` or `not`.
+- **Effects** (`do[].change`): `set` a field to a constant or to the trigger's new value (`{"trigger": "value"}`),
+  `add` a whole amount to an int field (held within its `min` and `max`), or set the `rate` (`per_s`) of a timed field,
+  which settles its value at `now_us` first. Each acts on this thing, or with `"target": {"link": <type>}` on every
+  thing at the far end of that link, and may name its `event`.
+- A rule never chooses, never draws, never moves a body and acts on no offer or activity. Only `set`, never "flip":
+  setting a field to its own value is no change, and starts nothing.
+
+`react({kinds, state, cause, receipt})` takes the state before a cause, which is a generic `set` or `reparent`
+change or `{"due": <timer>, "node"}`, and returns what the rules do, in the shape `effects` returns (`actor:
+"world"`), plus `fired`, the `[node, rule]` pairs started; `apply` applies it. A body is a node whose kind's owner is
+`family`; `state.world` names the world's own node. It answers one cause: a chain of rules, its depth and a fan-out
+spread over ticks are E18's.
+
+`checkReactions(kinds)` is the check gate's: it refuses a rule outside the lists, one that names a body, an offer or
+a draw (`acts_on_body`, `acts_on_offer`, `draws`), and any set of rules that could feed itself. It builds the graph
+whose nodes are (kind, field), with an edge from what a rule watches to what it writes, across a link type to every
+kind that declares it, and refuses each cycle with its fields and rules, as the kind loaded last among them. The
+graph is drawn wide (every kind with the field may be a support), so it can refuse a safe set but never accepts a
+loop.
+
+A file in `cases/react/` is `{"format": "souls-react-cases/1", "about": ..., "cases": [...]}`: a state, a `cause`, a
+`receipt`, what `react` should return (`expect`, compared like a rule case's) and the nodes `after` the cause and the
+changes are applied. A file in `cases/react/check/` (`souls-react-check-cases/1`) is a list of kinds, loaded in that
+order, and every error expected. The `reactions` section is not in the entry format yet; the five examples (a wall
+switch and its lamps, a street lamp, a kettle on a stove, a shop, a chiming door) use test kinds in
+`cases/kinds/test/`.
+
+## An activity
+
+An activity kind carries a `roles` section (proposed for the format on
+[#2842](https://github.com/soulsimulation/souls/issues/2842); the format page's "An activity" section says what it
+holds). `place(input)` takes a rule case's input whose act is an entering form of the activity: the form that links a
+role to the actor and puts the actor into a slot argument. It returns `{verdict: "yes", role, place, args}`, with the
+first free place by the role's rule filled into the argument, or `{verdict: "no", reason: "no_free_place", role,
+detail: {places}}`, where `places` is how many places it looked at. A node's `at_mm` is its origin in the frame of the
+place it is loose in. `enter(input)` asks who may (SA-F7a), then the place, then the form's needs and effects
+(SA-F2b), and returns the effects with `role` and `place`. `apply` applies them.
+
+A file in `cases/activity/` is `{"format": "souls-activity-cases/1", "about": ..., "cases": [...]}`. Each case has a
+state, the `activity` node, and the Souls who `enter` in order: each with its `actor`, `form`, `receipt` and what
+`enter` should return (`expect`). The test checks that every body is where the rules placed it and that no place is
+given twice. Then it compares the nodes `after`. The examples are a lecture in three rooms and a supper whose host
+must be its owner. Both are test kinds, because `roles` is not in the entry format yet.
 ## Looks
 
 `looks(input)` in `src/looks.ts` (SA-D1a, [#2885](https://github.com/soulsimulation/souls/issues/2885)) turns a kind's
@@ -186,3 +245,34 @@ Its cases are `cases/looks/` (kinds in `cases/looks/kinds/`); `node --test packa
 them and `node packages/form-rules/bin/looks-browser-check.mjs` checks Node against a browser build. Today's page
 calls it for a def whose `make.args.looks_table` carries a table (`apps/web/src/gen-mesh/vocab-look.ts`); the wiring is
 thrown away when Engine v2 draws things (V17, V8), the table and the function carry over.
+
+A row may follow a timed field (below; SA-D1b, [#2886](https://github.com/soulsimulation/souls/issues/2886)): the
+state holds its three stored numbers and `looks({..., now_us, fields})` reads it with `valueAt` at the viewer's world
+time, so a level rises on screen with nothing sent after the record (a viewer behind the set time draws it as set).
+The page sets its world clock with `setLooksClock` (`vocab-look.ts`) and places such parts again each frame.
+
+## A timed value
+
+A field of type `timed` changes by itself with time (a kettle heats, a candle burns down) and is stored as three whole
+numbers, `{value, per_s, set_us}`: its value when it was set, its rate per second in the field's unit, and the world
+time it was set, in microseconds. Nothing is written between events; Engine v2's F5
+([#2770](https://github.com/soulsimulation/souls/issues/2770)) settles and rewrites the three on any change and runs
+the same cases.
+
+- `valueAt(def, stored, now_us)`: the value plus `per_s x (now_us - set_us) / 1,000,000`, truncated toward zero (whole
+  units accrued, so rising and falling behave alike), held within the field's `min` and `max`. The rounding of a
+  falling value is F5's ([#2770](https://github.com/soulsimulation/souls/issues/2770)) to settle: a floor instead of
+  truncating the change would read one unit lower for a falling value mid-step (a candle 1 mm shorter after 1 us).
+- `crossing(def, stored, {at_least | at_most: level}, from_us)`: the first whole microsecond at or after `from_us` at
+  which that value meets the level, so the crossing is rounded up and a need on the field turns from no to yes at
+  exactly that time; `null` when it never does (the rate is zero or points away, or a bound stops it short).
+- World time is a signed 64-bit count that never stops. Every number (the three, `now_us`, `from_us`, a level, `min`,
+  `max`) may be a safe integer or a big integer, as T0's encoding reads a whole number beyond 2^53; everything is
+  worked in big integers, and a result is a number when it is a safe integer, else a big integer. Only a number or
+  result outside the signed 64-bit range is refused, as `{bad: "beyond_i64"}`; a time before `set_us` is refused as
+  `{bad: "time_before_set"}`. A Rust build needs 128-bit intermediates (rate x elapsed time exceeds 64 bits).
+  Case files are read with whole numbers beyond 2^53 as big integers (`parse` in `src/load.ts`).
+
+A file in `cases/timed/` is `{"format": "souls-timed-cases/1", "about": ..., "cases": [...]}`. A case names a kind
+and a field, a stored value, `values` as `[now_us, value]` and `crossings` as a level, `from_us` and the expected
+time (or `null`). The `timed` type is not in the entry format yet; its cases use `cases/kinds/test/timed_kettle.json`.
