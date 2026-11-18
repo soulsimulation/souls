@@ -51,9 +51,14 @@
 //! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check before a tick, so a run fed
 //! the same inputs at the same ticks writes the same log: how K12's replay is checked on the real loop.
 //!
-//! Not here (K18's known limits): a route search and a move's checks still run on the clock thread (`sim::host`'s
-//! runner plans a walk's route when its spot is granted; B3 checks a seat at commit); a seated body is logged only
-//! while it stands, so a restart stands it where it last stood; one zone a process.
+//! **Off the clock** (K18b, #3175). The clock runs no rule check, no route search and no reach check: the checkers
+//! run the rules (I3), and the bodies' planner thread (`sim::planner`) writes the spot tables, plans a walk's legs,
+//! finds each walker's line and measures each reach, from the bodies as a tick left them, for the next tick. A
+//! lockstep tick waits for the planner's answers as it waits for every check; a free-running one waits at most a
+//! tick's length, and a late batch is read at a later tick.
+//!
+//! Not here (K18's known limits): a seated body is logged only while it stands, so a restart stands it where it last
+//! stood; one zone a process.
 // worldd's real clock (`Real`): the one place the process reads time.
 #![allow(clippy::disallowed_methods)]
 
@@ -137,6 +142,8 @@ pub struct Ran {
     /// Faults the auditor named so far, and units ended by a panic.
     pub faults: u64,
     pub panicked: u64,
+    /// Route searches the bodies' planner ran, off the clock (K18b).
+    pub searched: u64,
 }
 
 pub struct Config {
@@ -825,6 +832,7 @@ impl Clock {
             state: self.state(),
             faults: self.faults,
             panicked,
+            searched: self.bodies.as_ref().map_or(0, Bodies::searched),
         }
     }
 }
@@ -939,6 +947,7 @@ pub fn start<S: Storage + 'static>(
     })?;
     let mut cfg = cfg;
     let make = cfg.bodies.take();
+    let tick = cfg.tick;
     let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
     if 1_000_000 % tick_us != 0 {
         return Err(Refusal {
@@ -1050,6 +1059,10 @@ pub fn start<S: Storage + 'static>(
                 match make(&placed) {
                     Ok(mut b) => {
                         b.begin(ticker.due().unwrap_or(0));
+                        // A free-running tick waits at most its own length for the planner (K18b).
+                        if !lockstep {
+                            b.wait = Some(tick);
+                        }
                         c.bodies = Some(b);
                     }
                     Err(e) => eprintln!("worldd: the bodies did not start, moves are refused: {e}"),

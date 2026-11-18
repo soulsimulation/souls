@@ -154,6 +154,23 @@ impl Town {
         self.buildings.iter().find(|b| b.link(link).is_some())
     }
 
+    /// A copy of this town for a planner (K18b, #3175): built again from a frozen copy of the tree, with its own map
+    /// and spot tables, and a door writer of its own (the planner never opens a door).
+    pub fn copy(&self) -> Result<Town, String> {
+        let d = &self.doors;
+        Town::new(
+            self.tree.frozen(),
+            self.ground,
+            Doors::new(d.header.clone(), d.rules.clone(), d.next),
+        )
+    }
+
+    /// The line from where `body` stands to `to` (on the node it stands on), x and z µm, after the body's own point:
+    /// one route search, the planner's.
+    pub fn line(&mut self, body: &Body, to: Vec3) -> Result<Vec<[i64; 2]>, Refusal> {
+        line(&mut self.map, &self.tree, body, to)
+    }
+
     /// The town as the host's questions read it in a tick: the map behind a cell (a route is cached as it is
     /// found), the rest shared.
     pub fn view(&mut self) -> View<'_> {
@@ -404,9 +421,36 @@ impl World for Town {
     }
 }
 
+/// The line from where `body` stands to `to` (on the node it stands on), x and z µm: its points after the body's own,
+/// the first not where the body stands (the funnel may repeat a point), never empty. One N5 route search: the
+/// planner's (K18b, #3175), not the clock's.
+fn line(map: &mut Map, tree: &Tree, body: &Body, to: Vec3) -> Result<Vec<[i64; 2]>, Refusal> {
+    let node = node_of(body);
+    let (Some(from), Some(goal)) = (
+        map.spot_near(node, body.pose.position, AT_EDGE),
+        // A link's near end lies on its piece's edge, within the grid's rounding.
+        map.spot_near(node, to, AT_EDGE),
+    ) else {
+        return Err(refusal("off-ground", show(node)));
+    };
+    let r = map.route(tree, from, goal, HANDS)?;
+    let mut out: Vec<[i64; 2]> = r
+        .first_line
+        .iter()
+        .skip(1)
+        .skip_while(|&&c| c == [from.at[0], from.at[2]])
+        .map(|c| [c[0] * 1000, c[1] * 1000])
+        .collect();
+    if out.is_empty() {
+        out.push([goal.at[0] * 1000, goal.at[2] * 1000]);
+    }
+    Ok(out)
+}
+
 impl View<'_> {
-    /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm).
-    fn clear(&self, body: &Body, to: [i64; 2]) -> Result<bool, Refusal> {
+    /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm): the
+    /// controller's dry run, no route search, so the clock may ask it.
+    pub fn clear(&self, body: &Body, to: [i64; 2]) -> Result<bool, Refusal> {
         let node = node_of(body);
         let s = self
             .surfaces
@@ -424,25 +468,8 @@ impl View<'_> {
         if self.clear(body, [to.x, to.z])? {
             return Ok([to.x, to.z]);
         }
-        let node = node_of(body);
-        let mut map = self.map.borrow_mut();
-        let (Some(from), Some(goal)) = (
-            map.spot_near(node, body.pose.position, AT_EDGE),
-            // A link's near end lies on its piece's edge, within the grid's rounding.
-            map.spot_near(node, to, AT_EDGE),
-        ) else {
-            return Err(refusal("off-ground", show(node)));
-        };
-        let r = map.route(self.tree, from, goal, HANDS)?;
-        // The first point of the line that is not where the body stands (the funnel may repeat a point).
-        let c = r
-            .first_line
-            .iter()
-            .skip(1)
-            .find(|&&c| c != [from.at[0], from.at[2]])
-            .copied()
-            .unwrap_or([goal.at[0], goal.at[2]]);
-        Ok([c[0] * 1000, c[1] * 1000])
+        let line = line(&mut self.map.borrow_mut(), self.tree, body, to)?;
+        Ok(line[0])
     }
 
     /// A link taken in turns as the walk reads it ([`Town::read_link`]).

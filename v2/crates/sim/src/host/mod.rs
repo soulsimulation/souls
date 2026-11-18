@@ -27,10 +27,14 @@
 //!   marks are read for the turns, the skills step, their inputs and crossings are handed on, their entries set their
 //!   bodies' fields, and the controller steps. It answers the walk's questions: the next corner (the town), the bodies
 //!   near (a grid of the bodies as of the tick's start, in cells of [`CELL`]), and reads of bodies and links.
+//! - **With a planner** ([`Runner::tick_planned`], K18b #3175): the runner runs no route search. The spot tables, a
+//!   granted walk's legs and each walker's line are the planner's (`crate::planner`), answered from the last tick's
+//!   [`Wants`]; the clock asks only whether a straight walk is clear (the controller's dry run). A walk gets its place
+//!   and legs a tick after it asks, and stands a tick at the start of a leg whose straight way is not clear.
 //!
 //! Not here: handing intents back after a restart (K13b #3119), entries to the log, timers (K9).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 use replica::bodies::Family;
@@ -509,6 +513,60 @@ fn route_value(count: u64, legs: &[Leg]) -> Value {
     Value::Array(vec![Value::Uint(count), Value::Array(legs)])
 }
 
+/// What a tick asks the world's planner (K18b, #3175), read as of the tick's start, for the planner to answer
+/// before the next tick: the route searches the clock does not run.
+#[derive(Clone, Debug, Default)]
+pub struct Wants {
+    /// The tick's end, world time: the spot tables are written for it.
+    pub at: Micros,
+    /// Every body's mark, for the spot tables (N9).
+    pub marks: Vec<Mark>,
+    /// The walks waiting for their place: the body as it stood, its target and its order.
+    pub places: Vec<(Moved, Target, Id)>,
+    /// The walkers whose straight way to a leg's end was not clear: the body as it stood and the leg's end.
+    pub lines: Vec<(Moved, Vec3)>,
+    /// Reach questions (B2, B3) for the world's own use: a body, its point, a seat, and the seat's two points.
+    pub reach: Vec<(Id, Vec3, Id, [Vec3; 2])>,
+}
+
+/// A walk's place and legs, or a refusal's name.
+pub type Placed = Result<(Vec3, Vec<Leg>), &'static str>;
+
+/// The lines a tick's walkers asked for: the body as it stood and the leg's end.
+type Asked = RefCell<Vec<(Moved, Vec3)>>;
+
+/// The planner's answers to a tick's [`Wants`], used by the next tick ([`Runner::tick_planned`]).
+#[derive(Clone, Debug, Default)]
+pub struct Planned {
+    /// Each walk given an answer: its order, then its place and legs, or a refusal's name.
+    pub places: BTreeMap<Id, (Id, Placed)>,
+    /// Each walker's line: the leg's end asked for, where it stood, and the line's points after that (x and z, µm).
+    pub lines: BTreeMap<Id, (Vec3, Vec3, Vec<[i64; 2]>)>,
+    /// Straight distances, µm, from a body's point to a seat's seat and stand points, by body and seat.
+    pub reach: BTreeMap<(Id, Id), [i64; 2]>,
+    /// Route searches run for these answers (legs and lines).
+    pub searched: u64,
+}
+
+impl Planned {
+    /// Takes `later`'s answers over these.
+    pub fn merge(&mut self, later: Planned) {
+        self.places.extend(later.places);
+        self.lines.extend(later.lines);
+        self.reach.extend(later.reach);
+        self.searched += later.searched;
+    }
+}
+
+/// Where a walker aims next from a line the planner found a tick ago: the first of its points that is not where the
+/// body stands now, or the body's own point (it stands this tick) when there is none.
+fn aim(line: &[[i64; 2]], at: Vec3) -> [i64; 2] {
+    line.iter()
+        .find(|&&c| c != [at.x, at.z])
+        .copied()
+        .unwrap_or([at.x, at.z])
+}
+
 /// The world a tick's skills ask: the town's answers and the runner's bodies.
 struct Here<'a> {
     town: View<'a>,
@@ -516,6 +574,27 @@ struct Here<'a> {
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
     grid: &'a BTreeMap<(Id, i64, i64), Vec<Near>>,
     settled: BTreeSet<Id>,
+    /// With a planner (K18b): its lines of the last tick, and the lines asked for in this one. Without, the town
+    /// searches the route itself.
+    planned: Option<(&'a Planned, Asked)>,
+}
+
+impl Here<'_> {
+    /// Where `me` aims next on its way to `to`, x and z µm.
+    fn toward(&self, me: &Moved, to: Vec3) -> Result<[i64; 2], Refusal> {
+        let Some((planned, asked)) = &self.planned else {
+            return self.town.corner(me, to);
+        };
+        if self.town.clear(me, [to.x, to.z])? {
+            return Ok([to.x, to.z]);
+        }
+        asked.borrow_mut().push((*me, to));
+        Ok(match planned.lines.get(&me.id) {
+            Some((t, _, line)) if *t == to => aim(line, me.pose.position),
+            // No line yet for this leg: the body stands this tick, and the planner answers for the next.
+            _ => [me.pose.position.x, me.pose.position.z],
+        })
+    }
 }
 
 impl Geometry for Here<'_> {
@@ -523,7 +602,7 @@ impl Geometry for Here<'_> {
         let me = self.controller.body(body)?;
         match q {
             Ask::Distance { .. } => None,
-            Ask::Toward { to, .. } => self.town.corner(me, *to).ok().map(|[x, z]| {
+            Ask::Toward { to, .. } => self.toward(me, *to).ok().map(|[x, z]| {
                 Answer::Point(Vec3::new(
                     x,
                     if [x, z] == [to.x, to.z] { to.y } else { 0 },
@@ -746,6 +825,34 @@ impl Runner {
     /// the tick's start, inputs and crossings handed on, the skills' entries set on their bodies, and the controller
     /// stepped. The first refusal is returned once the tick is done; the others went on.
     pub fn tick(&mut self, town: &mut Town) -> Result<(), Refusal> {
+        self.run(town, None).1
+    }
+
+    /// One tick over `town` with a planner (K18b, #3175): as [`Runner::tick`], but the clock runs no route search.
+    /// The spot tables, a granted walk's legs and each walker's line come from `planned`, the planner's answers to
+    /// the last tick's [`Wants`]; this tick's wants are returned, for the planner to answer before the next. A walk
+    /// gets its place and legs a tick after it asks, and stands a tick at the start of each leg whose straight way
+    /// is not clear, while its line is found.
+    pub fn tick_planned(
+        &mut self,
+        town: &mut Town,
+        planned: &Planned,
+    ) -> (Wants, Result<(), Refusal>) {
+        self.run(town, Some(planned))
+    }
+
+    fn run(&mut self, town: &mut Town, planned: Option<&Planned>) -> (Wants, Result<(), Refusal>) {
+        let mut wants = Wants::default();
+        let r = self.run_in(town, planned, &mut wants);
+        (wants, r)
+    }
+
+    fn run_in(
+        &mut self,
+        town: &mut Town,
+        planned: Option<&Planned>,
+        wants: &mut Wants,
+    ) -> Result<(), Refusal> {
         let at = self.now + self.tick;
         let marks: Vec<Mark> = self
             .controller
@@ -771,18 +878,32 @@ impl Runner {
             })
             .collect();
         town.turns(&marks, at)?;
-        town.spots(&marks, at)?;
+        if planned.is_none() {
+            town.spots(&marks, at)?;
+        }
         // A walk sent to a point gets its route once its place is granted; a refusal ends it by name.
-        let waiting: Vec<(Id, Target)> = self
+        let waiting: Vec<(Id, Target, Id)> = self
             .asks
             .iter()
             .filter(|(who, _)| self.running(**who) && !self.granted.contains_key(who))
-            .map(|(who, (t, _))| (*who, *t))
+            .map(|(who, (t, o))| (*who, *t, *o))
             .collect();
-        for (who, target) in waiting {
+        for (who, target, order) in waiting {
             let Some(body) = self.controller.body(who).copied() else {
                 continue;
             };
+            if let Some(planned) = planned {
+                // The planner's answer to the last tick's ask, for this order; else asked again.
+                match planned.places.get(&who) {
+                    Some((o, Ok((p, legs)))) if *o == order => {
+                        self.granted.insert(who, *p);
+                        self.route(who, legs);
+                    }
+                    Some((o, Err(name))) if *o == order => self.end(who, named(name)),
+                    _ => wants.places.push((body, target, order)),
+                }
+                continue;
+            }
             match town.spot(who, &target) {
                 Some(Ok(p)) => match town.plan(&body, target.node, p) {
                     Ok(legs) => {
@@ -811,8 +932,9 @@ impl Runner {
                 fields: &self.fields,
                 grid: &self.grid,
                 settled,
+                planned: planned.map(|p| (p, RefCell::new(Vec::new()))),
             };
-            step_in_units(
+            let staged = step_in_units(
                 tree,
                 &here,
                 self.now,
@@ -820,8 +942,16 @@ impl Runner {
                 &mut self.minter,
                 &mut self.runs,
                 &mut self.units,
-            )
+            );
+            if let Some((_, asked)) = here.planned {
+                wants.lines = asked.into_inner();
+            }
+            staged
         };
+        if planned.is_some() {
+            wants.at = at;
+            wants.marks = marks;
+        }
         let mut refused = hand_on(&staged, &mut self.controller);
         refused.extend(carry(&staged, &mut self.controller, town, at));
         // The tick's end: each skill's own entries set its body's fields.
