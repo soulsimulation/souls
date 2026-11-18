@@ -394,6 +394,8 @@
       ]
     }
   },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:pruning_shrub",
     "table": [

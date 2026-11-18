@@ -9,6 +9,8 @@
     "mouth": { "role": "contact", "at_mm": [0, 160, 190] }
   },
   "geometry": { "bounds_mm": [220, 320, 420] },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:garden_rabbit",
     "table": [
