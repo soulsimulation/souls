@@ -603,6 +603,15 @@ impl Tree {
         });
     }
 
+    /// Replaces a live node's fields outright, outside any part (a refusal's node state, I6 `Replica::apply_states`).
+    pub(crate) fn put_fields(&mut self, id: Id, fields: BTreeMap<u64, Value>) -> bool {
+        let Some(&slot) = self.by_id.get(&id) else {
+            return false;
+        };
+        self.nodes[slot as usize].fields = fields;
+        true
+    }
+
     fn set_field(&mut self, slot: u32, field: u64, to: Value) {
         let old = self.nodes[slot as usize].fields.insert(field, to);
         self.log(move |t| {

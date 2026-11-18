@@ -10,13 +10,19 @@
 //!   never a scan.
 //! - **A batch** is parts, each a little-endian `u32` byte length and then the part's stored bytes. JavaScript passes
 //!   one in as bytes and gets a small answer back ([`Applied`]); the state stays inside WASM memory.
+//! - **A refusal's node states** (I6, #2691) apply through [`Replica::apply_states`], in version order with the
+//!   stream: a state replaces a node only when the copy's is older, and the stream's older entries never undo it
+//!   (the node is held at the state until the stream reaches its version). States are cut to the actor's audience
+//!   on the server ([`Replica::node_state`]).
 
+use crate::effects::read_id;
 use crate::effects::{Body, Change, Effect, Header, Part, Refusal, TransferRec};
 use crate::encode::{Name, Value, encode};
-use crate::hash::{Chain, state_hash, step_hash};
-use crate::ids::Id;
+use crate::hash::{Chain, audience, node_value, state_hash, step_hash};
+use crate::ids::{Hash, Id, Purpose};
 use crate::tree::Tree;
-use std::collections::{BTreeSet, HashMap};
+use crate::world_model::Audience;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 type R<T> = Result<T, Refusal>;
 
@@ -36,6 +42,63 @@ pub struct Replica {
     pub(crate) changed_at: HashMap<Id, u64>,
     /// The same, ordered by version and then id, so that what changed since a version is a range.
     pub(crate) by_version: BTreeSet<(u64, Id)>,
+    /// Nodes a refusal set ahead of the stream (I6): each node's stamp and fields, kept until the stream reaches it.
+    held: HashMap<Id, (u64, BTreeMap<u64, Value>)>,
+}
+
+/// One node's state as a refusal carries it (I6, #2691): `[id, stamp, state]`, the state as the node's hash covers
+/// it (`hash.rs`), its links cut to the actor's audience.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeState {
+    pub id: Id,
+    /// The version the node last changed at.
+    pub stamp: u64,
+    pub state: Value,
+}
+
+impl NodeState {
+    pub fn to_value(&self) -> Value {
+        Value::Array(vec![
+            self.id.to_value(),
+            Value::Uint(self.stamp),
+            self.state.clone(),
+        ])
+    }
+
+    pub fn read(v: &Value) -> R<NodeState> {
+        let Value::Array(a) = v else {
+            return refuse("not-a-record", "a node state is [id, stamp, state]");
+        };
+        match a.as_slice() {
+            [id, Value::Uint(stamp), state @ Value::Map(_)] => Ok(NodeState {
+                id: read_id(id)?,
+                stamp: *stamp,
+                state: state.clone(),
+            }),
+            _ => refuse("not-a-record", "a node state is [id, stamp, state]"),
+        }
+    }
+
+    /// The hash of the state, as [`crate::hash::node_hash`] gives it for a copy holding exactly this node.
+    pub fn hash(&self) -> Option<Hash> {
+        let Value::Map(m) = &self.state else {
+            return None;
+        };
+        let purpose = if m.get(&5) == Some(&audience(Audience::Everyone)) {
+            Purpose::StatePublic
+        } else {
+            Purpose::StatePrivate
+        };
+        Some(Hash::of(purpose, &encode(&self.state).ok()?))
+    }
+}
+
+/// What applying a refusal's states did: the nodes it repaired, and those it could not, left for a fetch (R5): a
+/// node not in the copy, or one that differs other than in its fields.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Repaired {
+    pub applied: Vec<Id>,
+    pub fetch: Vec<Id>,
 }
 
 /// What applying a batch did: the parts applied, the version the copy stands at, the chain of hashes over its steps
@@ -94,6 +157,7 @@ impl Replica {
             version: 0,
             changed_at: HashMap::new(),
             by_version: BTreeSet::new(),
+            held: HashMap::new(),
         })
     }
 
@@ -118,6 +182,7 @@ impl Replica {
             version: self.version,
             changed_at: self.changed_at.clone(),
             by_version: self.by_version.clone(),
+            held: self.held.clone(),
         }
     }
 
@@ -150,7 +215,91 @@ impl Replica {
         }
         all.sort();
         all.dedup();
+        if !self.held.is_empty() {
+            self.keep_held(&all);
+        }
         Ok(all)
+    }
+
+    /// After a part: a held node the stream has reached is let go; one the part touched below its stamp gets the
+    /// refusal's state back, so the stream's older entries never rewind it.
+    fn keep_held(&mut self, touched: &[Id]) {
+        let version = self.version;
+        self.held.retain(|_, (stamp, _)| *stamp > version);
+        for id in touched {
+            if let Some((stamp, fields)) = self.held.get(id) {
+                self.tree.put_fields(*id, fields.clone());
+                self.mark(*id, *stamp);
+            }
+        }
+    }
+
+    fn mark(&mut self, id: Id, stamp: u64) {
+        if let Some(old) = self.changed_at.insert(id, stamp) {
+            self.by_version.remove(&(old, id));
+        }
+        self.by_version.insert((stamp, id));
+    }
+
+    /// A node's state for a refusal (I6): as its hash covers it, with only the links whose audience `sees` allows;
+    /// none for a node not here or of an audience `sees` refuses.
+    pub fn node_state(&self, id: Id, sees: &dyn Fn(Audience) -> bool) -> Option<NodeState> {
+        let n = self.tree.node(self.tree.handle(id)?)?;
+        if !sees(n.audience()) {
+            return None;
+        }
+        let Value::Map(mut m) = node_value(&self.tree, id)? else {
+            return None;
+        };
+        let links = self.tree.links_at(id);
+        if let Some(Value::Array(all)) = m.get_mut(&9) {
+            let kept = all
+                .iter()
+                .zip(links)
+                .filter(|(_, e)| sees(e.audience))
+                .map(|(v, _)| v.clone())
+                .collect();
+            *all = kept;
+        }
+        Some(NodeState {
+            id,
+            stamp: self.changed_at.get(&id).copied().unwrap_or(0),
+            state: Value::Map(m),
+        })
+    }
+
+    /// Applies a refusal's node states (I6) in version order with the stream: a state replaces the copy's node only
+    /// when the copy's is older (a lower stamp), so a refusal never rewinds a node; until the stream reaches the
+    /// state's version the node is held at it. Only fields are repaired: a node not here, or differing in anything
+    /// but its fields, is left for a fetch (R5).
+    pub fn apply_states(&mut self, states: &[NodeState]) -> Repaired {
+        let mut out = Repaired::default();
+        for s in states {
+            if self.changed_at.get(&s.id).copied().unwrap_or(0) >= s.stamp {
+                continue;
+            }
+            let (Some(Value::Map(mut mine)), Value::Map(theirs)) =
+                (node_value(&self.tree, s.id), &s.state)
+            else {
+                out.fetch.push(s.id);
+                continue;
+            };
+            let mut theirs = theirs.clone();
+            let (Some(_), Some(Value::Map(fields))) = (mine.remove(&6), theirs.remove(&6)) else {
+                out.fetch.push(s.id);
+                continue;
+            };
+            if mine != theirs || !self.tree.put_fields(s.id, fields.clone()) {
+                out.fetch.push(s.id);
+                continue;
+            }
+            self.mark(s.id, s.stamp);
+            if s.stamp > self.version {
+                self.held.insert(s.id, (s.stamp, fields));
+            }
+            out.applied.push(s.id);
+        }
+        out
     }
 
     /// Applies a batch (see the module's notes). With `hash_steps`, the answer carries a chain (`hash.rs`) of each

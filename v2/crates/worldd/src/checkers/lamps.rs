@@ -144,6 +144,11 @@ impl World {
 
     /// One part of world effects with these changes, each its own effect, at the live version.
     pub fn part(&self, changes: Vec<(Id, Change)>) -> Part {
+        self.part_of(Audience::Everyone, changes)
+    }
+
+    /// [`World::part`], its effects of `audience`.
+    pub fn part_of(&self, audience: Audience, changes: Vec<(Id, Change)>) -> Part {
         let start = self.replica.version();
         let effects: Vec<Cbor> = changes
             .into_iter()
@@ -155,7 +160,7 @@ impl World {
                         at: 0,
                         cause: Cause::World,
                         actor: Actor::World,
-                        audience: Audience::Everyone,
+                        audience,
                         node,
                     },
                     body: Body::Changes(vec![ChangeRec {
@@ -199,18 +204,53 @@ impl World {
 
     /// A change to a lamp's level, as another act would make it: the lamp's stamp moves on.
     pub fn dim(&mut self, lamp: Id, level: u64) -> Part {
-        let part = self.part(vec![(
-            lamp,
-            Change::Set {
-                node: lamp,
-                field: 3,
-                to: Cbor::Uint(level),
-                by: None,
-            },
-        )]);
+        self.set(lamp, 3, level, Audience::Everyone)
+    }
+
+    /// A field set on a node of `audience`, by an entry of that audience.
+    pub fn set(&mut self, node: Id, field: u64, to: u64, audience: Audience) -> Part {
+        let part = self.part_of(
+            audience,
+            vec![(
+                node,
+                Change::Set {
+                    node,
+                    field,
+                    to: Cbor::Uint(to),
+                    by: None,
+                },
+            )],
+        );
         self.replica
             .apply(&part)
-            .unwrap_or_else(|e| panic!("a dim applies: {e}"));
+            .unwrap_or_else(|e| panic!("a set applies: {e}"));
         part
+    }
+
+    /// An unlit lamp of `audience` under `parent`, created by an entry of that audience (I6's audience test).
+    pub fn lamp_of(&mut self, parent: Id, audience: Audience) -> Id {
+        let id = self.id();
+        let Change::Create {
+            node,
+            kind,
+            pose,
+            fields,
+            ..
+        } = self.create(id, "r2:lamp", parent, 0, &[(1, 0), (2, 1), (3, 0)])
+        else {
+            unreachable!("create makes a create")
+        };
+        let create = Change::Create {
+            node,
+            kind,
+            pose,
+            audience,
+            fields,
+        };
+        let part = self.part_of(audience, vec![(parent, create)]);
+        self.replica
+            .apply(&part)
+            .unwrap_or_else(|e| panic!("a lamp of an audience applies: {e}"));
+        id
     }
 }
