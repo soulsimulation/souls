@@ -26,10 +26,12 @@ from the CPU gate.
 
 ## CI evidence
 
-Every PR and the merge queue run CI on the exact commits, and each push to `main` runs every `ci.yml` job. A full gate
-(#1463) takes the successful `ci.yml` run whose head is exactly the candidate (event `push` to `main`, preferred, or
-`merge_group`; a push the queue already covered, which ran `merge-group-covered` instead of the qualify jobs, defers
-to its merge-group run, [CI on main](../testing.md#ci-window)) as evidence for the steps CI runs with the same command,
+Every PR, the merge queue and each push to `main` run CI's light legs on the exact commits, and the daily scheduled
+run (06:23 UTC) and manual runs on `main` run every `ci.yml` job. A full gate (#1463) takes the fullest successful
+`ci.yml` run whose head is exactly the candidate (`CI_EVENTS` order: `schedule` or `workflow_dispatch` on `main`, then
+`push` to `main`, then `merge_group`; the last two run no `heavy: true` leg, so their evidence covers fewer steps; an
+older push the queue covered, which ran `merge-group-covered` instead of the qualify jobs, defers to its merge-group
+run, [CI on main](../testing.md#ci-window)) as evidence for the steps CI runs with the same command,
 and runs only the rest on Modal. A step counts
 as covered only when all of these hold (`CI_COVERED` and `ciEvidence` in `release-gate.mjs`):
 

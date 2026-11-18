@@ -36,7 +36,8 @@ jobs:
   proof-ok:
     # An edit to a closed PR (a link fixed long after the merge) has nothing left to prove.
     if: github.event_name == 'merge_group' || (github.event.pull_request.draft == false && (github.event.action != 'edited' || github.event.pull_request.state == 'open'))
-    runs-on: ubuntu-latest
+    # Only a merge_group run (which checks nothing) may go to CI_LIGHT_RUNNER: the pull_request path comments with gh.
+    runs-on: ${{ github.event_name == 'merge_group' && vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read
