@@ -1,5 +1,5 @@
 {
-  "about": "What a world costs (Engine v2 O11, #2721): the one unit-price file. Every price has its date and its source; a price with no date is a bug (cost.test.mjs). The machine's own price and size are the owner's to replace with the real machine's (v2/docs/machines.md); until then they are the goal's priced machine.",
+  "about": "What a world costs (Engine v2 O11, #2721): the one unit-price file. Every price has its date and its source; a price with no date is a bug (cost.test.mjs). The machine's size is the production machine's, from the owner's machine facts; its price is an example the owner replaces with the invoice.",
   "eur_usd": {
     "value": 1.0968,
     "date": "2026-11-18",
@@ -8,10 +8,10 @@
   "machine": {
     "eur_month": 79,
     "cores": 8,
-    "memory_gb": 64,
-    "disk_gb": 1024,
+    "memory_gb": 30.6,
+    "disk_gb": 245,
     "date": "2026-11-18",
-    "source": "v2/docs/machines.md, 'The goal, priced': dedicated server, 8 cores, 64 GB, from https://www.hetzner.com/dedicated-rootserver/matrix-ax/ (the low end of EUR 79 to 99); disk_gb is assumed until the owner's machine-facts.sh line gives it"
+    "source": "Example price; the owner replaces it with the invoice: EUR 79 a month, the low end of the dedicated-server row in v2/docs/machines.md, 'The goal, priced'. Size: the production machine's facts line of 18 Nov 2026 (v2/tools/ops/machine-facts.sh): 8 cores, 30.6 GB memory, 245 GB SSD"
   },
   "split": {
     "processor": 0.5,
@@ -33,6 +33,6 @@
   "bytes_served": {
     "eur_per_tb": 1,
     "date": "2026-11-18",
-    "source": "https://docs.hetzner.com/robot/general/pricing/price-list-for-additional-products (traffic past the 10 Gbit add-on's 20 TB)"
+    "source": "v2/docs/machines.md, 'The goal, priced': the 10 Gbit link add-on's row (traffic past its 20 TB)"
   }
 }

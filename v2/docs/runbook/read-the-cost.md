@@ -17,8 +17,9 @@ bytes served. Code and the one unit-price file: `v2/tools/ops/cost/`.
 - **A part with no meter reads "not metered"**, never $0.00. Stored bytes and uploads read so until V3 (history to the
   object store) meters them. A world's total then ends "+ not metered".
 
-Set the machine's real price and size in `prices.json` (`machine`; its cores, memory and disk from
-`v2/tools/ops/machine-facts.sh`) before reading the figures as a bill.
+The machine's size in `prices.json` (`machine`) is the production machine's, from its `v2/tools/ops/machine-facts.sh`
+line of 18 Nov 2026. Its price is an example: replace it with the invoice, with its date, before reading the figures
+as a bill.
 
 ## Run the meter
 

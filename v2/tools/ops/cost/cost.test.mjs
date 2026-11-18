@@ -28,8 +28,8 @@ test('A2: a scripted hour with known use, uploads and bytes gives the hand-worke
   // By hand, prices of 18 Nov 2026: the machine's day is 79 EUR x 1.0968 / 30.4375 days = $2.846725.
   const want = {
     processor: (2.846725 * 0.5) / (8 * 86_400) * 1800, // its half of the day over 8 cores' seconds, x 1,800 core-s: $0.0037067
-    memory: (2.846725 * 0.4) / (64 * 24) * 1, // x 1 GiB-hour: $0.0007413
-    local_disk: (2.846725 * 0.1) / (1024 * 24) * 2, // x 2 GB-hours: $0.0000232
+    memory: (2.846725 * 0.4) / (30.6 * 24) * 1, // x 1 GiB-hour: $0.0015505
+    local_disk: (2.846725 * 0.1) / (245 * 24) * 2, // x 2 GB-hours: $0.0000968
     stored_bytes: (0.015 / (30.4375 * 24)) * 5, // $0.015 a GB-month, x 5 GB-hours: $0.0001027
     uploads: 360 * 4.5e-6, // 360 uploads at $4.50 a million: $0.00162
     bytes_served: 36e9 * (1.0968 / 1e12), // 36 GB at 1 EUR a TB: $0.0394848
@@ -37,7 +37,7 @@ test('A2: a scripted hour with known use, uploads and bytes gives the hand-worke
   for (const part of PARTS) assert.ok(Math.abs(rows.w[part] - want[part]) < 1e-6, `${part}: ${rows.w[part]} vs ${want[part]}`);
   const total = PARTS.reduce((a, part) => a + rows.w[part], 0);
   assert.equal(money(total), '$0.05');
-  assert.ok(Math.abs(total - 0.0456786) < 1e-5, `total ${total}`);
+  assert.ok(Math.abs(total - 0.0465615) < 1e-5, `total ${total}`);
 });
 
 test('A3: all worlds plus "unused" equal the machine\'s price for the day within 1 %', () => {
