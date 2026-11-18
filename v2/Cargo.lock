@@ -809,6 +809,15 @@ name = "stall-test"
 version = "0.0.0"
 
 [[package]]
+name = "stream-check"
+version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
+ "worldd",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
