@@ -182,6 +182,13 @@ therefore **windowed**:
 - **Any other label starts the same run** (#2018). The merge queue reads only the newest `ci` run at a head, so a run
   without `ci-ok` would hide the real one. Like a window label's run, it queues behind the PR's running CI, cancels
   nothing, and does no heavy work when the head's newest run passed, so its `ci-ok` repeats that result.
+- **A label on a green head costs about a minute.** When the head's newest `ci` run passed, a label run (a window
+  label's included) runs only `scope` and `ci-ok`: no `qualify` leg, no smoke and no `repo`, since the tree is the
+  one that passed. A push, a head whose newest run failed or is still going, a closed window and every merge-group
+  run do their jobs as usual. `scope` reads the earlier runs with `GH_TOKEN` over the REST API (`ci-scope.mjs green`),
+  not the `gh` CLI, which the light runners don't have. The `proof` and `changelog` workflows still re-run on every
+  label in about a minute, because their answer depends on labels (`no-changelog`, `approved:maintainer`, `tier:Tn`,
+  `proof:waived`); `security` doesn't run on labels.
 - **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
   own `ci.yml`. It runs the heavy legs, and reads only earlier requested runs as green at the head. It tells you the
   result, but it doesn't count for the queue.
