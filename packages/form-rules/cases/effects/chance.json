@@ -1,0 +1,710 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "SA-F13: a draw effect. The world's drawn number is passed in as data (`draw`, one per draw effect), so every case is fixed. Without it the answer is unknown, with the whole table. The test kinds are in ../kinds/test/: the entry format has no draw yet.",
+  "cases": [
+    {
+      "name": "dart_bull_when_practised",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1",
+              "a1"
+            ]
+          },
+          "d1": {
+            "kind": "test:dartboard",
+            "fields": {
+              "practice": 3
+            }
+          },
+          "a1": {
+            "kind": "test:dart"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "a1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "throw",
+            "args": {}
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "d1",
+                "field": "score",
+                "n": 1,
+                "to": 50
+              }
+            ],
+            "events": [
+              {
+                "event": "test:hit_bull",
+                "node": "d1",
+                "changes": [
+                  0
+                ],
+                "outcome": "bull"
+              }
+            ],
+            "timers": []
+          },
+          "draw": [
+            11
+          ]
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "test:dartboard",
+          "fields": {
+            "practice": 3,
+            "score": 50
+          }
+        }
+      }
+    },
+    {
+      "name": "dart_miss_at_the_bottom_of_the_table",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1",
+              "a1"
+            ]
+          },
+          "d1": {
+            "kind": "test:dartboard"
+          },
+          "a1": {
+            "kind": "test:dart"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "a1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "throw",
+            "args": {}
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "d1",
+                "field": "score",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "test:missed",
+                "node": "d1",
+                "changes": [
+                  0
+                ],
+                "outcome": "miss"
+              }
+            ],
+            "timers": []
+          },
+          "draw": [
+            0
+          ]
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "test:dartboard",
+          "fields": {
+            "score": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "dart_single_at_a_row_boundary",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1",
+              "a1"
+            ]
+          },
+          "d1": {
+            "kind": "test:dartboard"
+          },
+          "a1": {
+            "kind": "test:dart"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "a1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "throw",
+            "args": {}
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "d1",
+                "field": "score",
+                "n": 1,
+                "to": 20
+              }
+            ],
+            "events": [
+              {
+                "event": "test:hit_single",
+                "node": "d1",
+                "changes": [
+                  0
+                ],
+                "outcome": "single"
+              }
+            ],
+            "timers": []
+          },
+          "draw": [
+            6
+          ]
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "test:dartboard",
+          "fields": {
+            "score": 20
+          }
+        }
+      }
+    },
+    {
+      "name": "dart_last_number_is_the_bull_with_default_practice",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1",
+              "a1"
+            ]
+          },
+          "d1": {
+            "kind": "test:dartboard"
+          },
+          "a1": {
+            "kind": "test:dart"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "a1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "throw",
+            "args": {}
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "d1",
+                "field": "score",
+                "n": 1,
+                "to": 50
+              }
+            ],
+            "events": [
+              {
+                "event": "test:hit_bull",
+                "node": "d1",
+                "changes": [
+                  0
+                ],
+                "outcome": "bull"
+              }
+            ],
+            "timers": []
+          },
+          "draw": [
+            9
+          ]
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "test:dartboard",
+          "fields": {
+            "score": 50
+          }
+        }
+      }
+    },
+    {
+      "name": "dart_without_a_draw_is_unknown_with_the_whole_table",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1",
+              "a1"
+            ]
+          },
+          "d1": {
+            "kind": "test:dartboard"
+          },
+          "a1": {
+            "kind": "test:dart"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "a1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "throw",
+            "args": {}
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "unknown",
+            "reason": "draw",
+            "effect": 0,
+            "total": 10,
+            "could_be": [
+              {
+                "outcome": "miss",
+                "weight": 6,
+                "event": "test:missed"
+              },
+              {
+                "outcome": "single",
+                "weight": 3,
+                "event": "test:hit_single"
+              },
+              {
+                "outcome": "bull",
+                "weight": 1,
+                "event": "test:hit_bull"
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "test:dartboard"
+        }
+      }
+    },
+    {
+      "name": "dart_unknown_shows_the_weight_from_practice",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1",
+              "a1"
+            ]
+          },
+          "d1": {
+            "kind": "test:dartboard",
+            "fields": {
+              "practice": 5
+            }
+          },
+          "a1": {
+            "kind": "test:dart"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "a1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "throw",
+            "args": {}
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "unknown",
+            "reason": "draw",
+            "effect": 0,
+            "total": 14,
+            "could_be": [
+              {
+                "outcome": "miss",
+                "weight": 6,
+                "event": "test:missed"
+              },
+              {
+                "outcome": "single",
+                "weight": 3,
+                "event": "test:hit_single"
+              },
+              {
+                "outcome": "bull",
+                "weight": 5,
+                "event": "test:hit_bull"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "dart_draw_at_the_total_is_refused",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1",
+              "a1"
+            ]
+          },
+          "d1": {
+            "kind": "test:dartboard"
+          },
+          "a1": {
+            "kind": "test:dart"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "a1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "throw",
+            "args": {}
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "no",
+            "reason": "bad_input",
+            "effect": 0,
+            "detail": {
+              "what": "draw_out_of_range",
+              "draw": 10,
+              "total": 10
+            }
+          },
+          "draw": [
+            10
+          ]
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "test:dartboard"
+        }
+      }
+    },
+    {
+      "name": "dart_zero_practice_leaves_a_smaller_table",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1",
+              "a1"
+            ]
+          },
+          "d1": {
+            "kind": "test:dartboard",
+            "fields": {
+              "practice": 0
+            }
+          },
+          "a1": {
+            "kind": "test:dart"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "a1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "throw",
+            "args": {}
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "no",
+            "reason": "bad_input",
+            "effect": 0,
+            "detail": {
+              "what": "draw_out_of_range",
+              "draw": 9,
+              "total": 9
+            }
+          },
+          "draw": [
+            9
+          ]
+        }
+      ]
+    },
+    {
+      "name": "dice_roll_each_face_by_its_draw",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1"
+            ]
+          },
+          "x1": {
+            "kind": "test:die"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "x1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "x1",
+            "form": "roll",
+            "args": {}
+          },
+          "receipt": "r1",
+          "draw": [
+            0
+          ],
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "face",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "test:rolled_one",
+                "node": "x1",
+                "changes": [
+                  0
+                ],
+                "outcome": "one"
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "roll",
+            "args": {}
+          },
+          "receipt": "r2",
+          "draw": [
+            5
+          ],
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "face",
+                "n": 1,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "test:rolled_six",
+                "node": "x1",
+                "changes": [
+                  0
+                ],
+                "outcome": "six"
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "roll",
+            "args": {}
+          },
+          "receipt": "r3",
+          "draw": [
+            2
+          ],
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "face",
+                "n": 1,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "test:rolled_three",
+                "node": "x1",
+                "changes": [
+                  0
+                ],
+                "outcome": "three"
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "x1",
+            "form": "roll",
+            "args": {}
+          },
+          "receipt": "r4",
+          "expect": {
+            "verdict": "unknown",
+            "reason": "draw",
+            "effect": 0,
+            "total": 6,
+            "could_be": [
+              {
+                "outcome": "one",
+                "weight": 1,
+                "event": "test:rolled_one"
+              },
+              {
+                "outcome": "two",
+                "weight": 1,
+                "event": "test:rolled_two"
+              },
+              {
+                "outcome": "three",
+                "weight": 1,
+                "event": "test:rolled_three"
+              },
+              {
+                "outcome": "four",
+                "weight": 1,
+                "event": "test:rolled_four"
+              },
+              {
+                "outcome": "five",
+                "weight": 1,
+                "event": "test:rolled_five"
+              },
+              {
+                "outcome": "six",
+                "weight": 1,
+                "event": "test:rolled_six"
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "x1": {
+          "kind": "test:die",
+          "fields": {
+            "face": 3
+          }
+        }
+      }
+    }
+  ]
+}
