@@ -83,8 +83,10 @@ jobs:
       # - /tmp/clr-debug-pipe-*, /tmp/dotnet-diagnostic-*: the runner service's .NET diagnostic pipes, one per job worker;
       # - /tmp/cerr-*: the temp dirs of tools/world-launcher/client-errors.test.mjs, from unit-test jobs on this account
       #   (a timed job runs no unit tests);
+      # - /tmp/node-compile-cache: Node's compile cache, which pnpm turns on, from other jobs on this account (a timed
+      #   job's own processes have TMPDIR in the per-run directory); a v2-bench run, which runs no pnpm, saw it grow;
       # - another account's entries: never read, so never listed.
-      STRAY_EXCLUDE: /tmp/clr-debug-pipe-*,/tmp/dotnet-diagnostic-*,/tmp/cerr-*
+      STRAY_EXCLUDE: /tmp/clr-debug-pipe-*,/tmp/dotnet-diagnostic-*,/tmp/cerr-*,/tmp/node-compile-cache
     steps:
       # Before anything can print them: the runner's paths, host name and user name never reach the public log.
       - name: Mask host-identifying values
@@ -178,7 +180,8 @@ jobs:
           if ! printf '%s' "$channel" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then echo "::error::no pinned channel in v2/rust-toolchain.toml"; exit 1; fi
           export RUSTUP_HOME="$PER_RUN/rustup" CARGO_HOME="$PER_RUN/cargo"
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$PER_RUN/rustup-init.sh"
-          sh "$PER_RUN/rustup-init.sh" -y --quiet --no-modify-path --profile minimal --default-toolchain "$channel"
+          # stdout only says where CARGO_HOME is, wrapped past the log mask: dropped
+          sh "$PER_RUN/rustup-init.sh" -y --quiet --no-modify-path --profile minimal --default-toolchain "$channel" > /dev/null
           { echo "RUSTUP_HOME=$RUSTUP_HOME"; echo "CARGO_HOME=$CARGO_HOME"; echo "RUSTUP_TOOLCHAIN=$channel"; } >> "$GITHUB_ENV"
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
           "$CARGO_HOME/bin/cargo" --version
