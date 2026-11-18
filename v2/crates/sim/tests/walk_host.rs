@@ -347,3 +347,46 @@ fn a_reparent_of_its_own_body_is_refused() {
     assert_eq!(*said.borrow(), Some(Err("reparent-outside-controller")));
     assert!(staged.emits.is_empty());
 }
+
+/// #3168: a new walk never takes the route the world gave a walk before it (`F_ROUTE` goes when a run starts), and a
+/// crossing asked far from the link's near end is refused, the body unmoved, instead of carried there in a straight
+/// line.
+#[test]
+fn a_new_walk_drops_the_old_route_and_a_crossing_is_not_asked_from_afar() {
+    use sim::host::Links;
+    use sim::walk::World;
+    let (t, nodes) = town();
+    let (ground, f0) = (nodes["ground"], nodes["building/floor-0"]);
+    let mut w = Walk::new(t);
+    let me = id(1);
+    let (west, east) = (
+        Vec3::new(-40_000_000, 0, 30_000_000),
+        Vec3::new(-30_000_000, 0, 30_000_000),
+    );
+    w.add(me, ground, west, ground, west);
+    w.run(10);
+    // The world gave that walk a route into the building: through a doorway from the open ground.
+    let body = *w.runner.controller.body(me).unwrap();
+    let inside = w.town.plan(&body, f0, Vec3::new(0, 0, -3_000_000)).unwrap();
+    let link = inside
+        .iter()
+        .find_map(|l| l.link)
+        .expect("a doorway on the way in");
+    w.runner.route(me, &inside);
+    // A new walk east on the open ground: the old route goes, and it walks its own legs.
+    common::walk(&mut w.runner, &mut w.town, body, SPEED, ground, east).unwrap();
+    assert!(
+        !w.runner.fields[&me].contains_key(&replica::host::F_ROUTE),
+        "the old route is gone"
+    );
+    w.run(400);
+    let b = *w.runner.controller.body(me).unwrap();
+    assert_eq!(w.ended()[&me].1, "Done");
+    assert!(
+        common::dist(b.pose.position, east) < 500_000,
+        "it walked east"
+    );
+    // A crossing of the doorway asked from 10 m east of the walk's start: refused, and nothing carries the body.
+    let r = w.town.track(&b, link, SPEED, w.runner.now + TICK);
+    assert_eq!(r.map(|_| ()).unwrap_err().name, "link-not-here");
+}

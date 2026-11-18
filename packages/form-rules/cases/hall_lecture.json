@@ -1,0 +1,76 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:hall_lecture, a lecture as an activity (SA-V5, #2877): a speaker at its own lectern, listeners in the seats near it (a bench stands in for any seat). A case where every need of each form is met, and one per need unmet. Its countdown left_us runs from 3600 s at -1 s per s, set at world time 0.",
+  "cases": [
+    {
+      "name": "take_the_lectern_every_need_met",
+      "act": { "this": "h1", "form": "take_the_lectern", "args": { "place": { "node": "h1", "slot": "lectern" } } },
+      "state": { "actor": "b1", "nodes": { "h1": { "kind": "eden:hall_lecture" }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["h1/slot/lectern", 0]] }
+    },
+    {
+      "name": "take_the_lectern_someone_stands_there",
+      "act": { "this": "h1", "form": "take_the_lectern", "args": { "place": { "node": "h1", "slot": "lectern" } } },
+      "state": { "actor": "b1", "nodes": { "h1": { "kind": "eden:hall_lecture", "slots": { "lectern": ["b2"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "detail": { "node": "h1", "slot": "lectern" }, "fix": null }
+    },
+    {
+      "name": "attend_every_need_met",
+      "act": { "this": "h1", "form": "attend", "args": { "seat": { "node": "k1", "slot": "left" } } },
+      "state": { "actor": "b1", "nodes": { "h1": { "kind": "eden:hall_lecture" }, "k1": { "kind": "eden:bench" }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["k1/slot/left", 0]] }
+    },
+    {
+      "name": "attend_seat_taken_fixed_by_the_other",
+      "act": { "this": "h1", "form": "attend", "args": { "seat": { "node": "k1", "slot": "left" } } },
+      "state": { "actor": "b1", "nodes": { "h1": { "kind": "eden:hall_lecture" }, "k1": { "kind": "eden:bench", "slots": { "left": ["b3"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "detail": { "node": "k1", "slot": "left" }, "fix": { "form": "attend", "args": { "seat": { "node": "k1", "slot": "right" } } } }
+    },
+    {
+      "name": "step_down_every_need_met",
+      "act": { "this": "h1", "form": "step_down" },
+      "state": { "actor": "b1", "nodes": { "h1": { "kind": "eden:hall_lecture", "links": { "speaker": ["b1"] }, "slots": { "lectern": ["b1"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [] }
+    },
+    {
+      "name": "leave_every_need_met",
+      "act": { "this": "h1", "form": "leave" },
+      "state": { "actor": "b2", "nodes": { "h1": { "kind": "eden:hall_lecture", "links": { "listener": ["b2"] } }, "b2": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [] }
+    },
+    {
+      "name": "lapse_at_its_time_with_nobody_in_it",
+      "act": { "this": "h1", "form": "lapse" },
+      "state": { "actor": "b1", "now_us": 3600000000, "nodes": { "h1": { "kind": "eden:hall_lecture" }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["h1/field/2", 0], ["h1/link/1", 0], ["h1/link/2", 0]] }
+    },
+    {
+      "name": "lapse_one_microsecond_early",
+      "act": { "this": "h1", "form": "lapse" },
+      "state": { "actor": "b1", "now_us": 3599999999, "nodes": { "h1": { "kind": "eden:hall_lecture" }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "left_us", "found": 1, "wanted": { "at_most": 0 } }, "fix": null }
+    },
+    {
+      "name": "lapse_refused_while_a_speaker_is_in_it",
+      "act": { "this": "h1", "form": "lapse" },
+      "state": { "actor": "b1", "now_us": 3600000000, "nodes": { "h1": { "kind": "eden:hall_lecture", "links": { "speaker": ["b2"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "already_linked", "need": 1, "detail": { "link": "speaker", "count": 1 }, "fix": null }
+    },
+    {
+      "name": "lapse_refused_while_a_listener_is_in_it",
+      "act": { "this": "h1", "form": "lapse" },
+      "state": { "actor": "b1", "now_us": 3600000000, "nodes": { "h1": { "kind": "eden:hall_lecture", "links": { "listener": ["b3"] } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "already_linked", "need": 2, "detail": { "link": "listener", "count": 1 }, "fix": null }
+    }
+  ]
+}
