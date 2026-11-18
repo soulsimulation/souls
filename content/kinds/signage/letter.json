@@ -1,0 +1,104 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:letter",
+  "owner": "thing",
+  "state": {
+    "words": {
+      "n": 1,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      220,
+      10,
+      110
+    ]
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:letter",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            3,
+            0
+          ],
+          "size": [
+            220,
+            6,
+            110
+          ],
+          "round": 0,
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            7,
+            -20
+          ],
+          "size": [
+            210,
+            2,
+            60
+          ],
+          "round": 0,
+          "tint": "flap",
+          "pitch": -4000
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            7,
+            30
+          ],
+          "size": [
+            30,
+            2,
+            34
+          ],
+          "round": 0,
+          "tint": "stamp"
+        }
+      ],
+      "palette": {
+        "paper": "#efe6cf",
+        "flap": "#e2d6b8",
+        "stamp": "#c23a2b"
+      },
+      "tags": [
+        "object",
+        "post"
+      ]
+    }
+  },
+  "text": {
+    "card": "A letter in its envelope, its words kept by reference; it fits a pocket.",
+    "post": "post",
+    "envelope": "envelope",
+    "note": "note"
+  },
+  "card": {
+    "text": "card",
+    "category": "post",
+    "synonyms": [
+      "envelope",
+      "note"
+    ]
+  }
+}

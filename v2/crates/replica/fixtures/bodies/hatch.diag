@@ -1,0 +1,10 @@
+# The code hatch's shape (Engine v2 T9, #2663, v2/docs/bodies.md rule 9; SA-F9, #3000): one pure function named by
+# the hash of its module, its reads declared, a step limit and what it answers. This one is SA-F9's chess move: it
+# reads the board's squares (field 1) and the move's argument, and answers a verdict. The module hash is a stand-in.
+{
+  1: h'12209c2a07010e03d592fe978bc91c969c98b5c92fa06958135e7d9b59b0d7a6e0a5',   # the module, by its SHA-256
+  2: [{1: 1, 2: 1}, {1: 2, 2: "souls:move"}],                                    # reads: field 1, argument move
+  3: 20000,                                                                      # at most 20,000 steps
+  4: {1: 1},                                                                     # answers a verdict
+  5: "souls:chess-move"                                                          # why: its text key
+}

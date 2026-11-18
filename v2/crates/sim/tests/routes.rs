@@ -4,6 +4,9 @@
 //! needs N1's exported facts file (`node v2/tools/import-eden/export/export.ts` from the repository root) and runs
 //! with `cargo test -p sim --release --test routes -- --ignored --nocapture`.
 
+// Times its own runs: the wall-clock rule (K7) binds the engine, not this test.
+#![allow(clippy::disallowed_methods)]
+
 use import_eden::Import;
 use replica::ids::Id;
 use replica::pose::Vec3;
