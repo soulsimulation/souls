@@ -1,1 +1,1 @@
-{"format":"souls-ask/1","n":297,"group":"open-ended","words":"make this place cosy","obvious":2,"things":{"lamp":"eden:floor_lamp","candle":"eden:candle"},"chain":[{"this":"lamp","form":"dim"},{"this":"candle","form":"light"}]}
+{"format":"souls-ask/1","n":297,"group":"open-ended","words":"make this place cosy","obvious":2,"things":{"lamp":"eden:floor_lamp","candle":"eden:candle"},"given":{"lamp":{"level":3}},"chain":[{"this":"lamp","form":"dim"},{"this":"candle","form":"light"}]}

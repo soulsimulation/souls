@@ -41,8 +41,59 @@ export function census(tpl) {
     usableShare: r.placed ? Math.round((r.usable / r.placed) * 10000) / 10000 : 0 };
 }
 
+/** Placed things per def ref in a parsed template. */
+export function placedByDef(tpl) {
+  const n = {};
+  for (const b of tpl.batches ?? []) for (const o of b.ops ?? []) if (o.op === 'place') n[o.def] = (n[o.def] ?? 0) + 1;
+  return n;
+}
+
+/**
+ * Checks a world's entry map (content/worlds/<world>/map.json) against its template and counts it: every placed def has
+ * one row naming an entry or waiting, with the template's own count. Shares are in tenths of a percent (integers).
+ */
+export function mapCensus(map, tpl) {
+  const placed = placedByDef(tpl), problems = [], seen = new Set();
+  const r = { placed: 0, kinds: Object.keys(placed).length, rows: 0, own: 0, base: 0, waiting: 0, kindsOwn: 0, kindsBase: 0, kindsWaiting: 0 };
+  for (const row of map.rows ?? []) {
+    r.rows++;
+    if (seen.has(row.def)) problems.push(`${row.def}: two rows`);
+    seen.add(row.def);
+    if (placed[row.def] === undefined) { problems.push(`${row.def}: not placed in the template`); continue; }
+    if (row.placed !== placed[row.def]) problems.push(`${row.def}: row says ${row.placed}, template places ${placed[row.def]}`);
+    const n = placed[row.def];
+    if (row.entry && (row.forms === 'own' || row.forms === 'base') && !row.waiting) { r[row.forms] += n; r[row.forms === 'own' ? 'kindsOwn' : 'kindsBase']++; }
+    else if (row.waiting && !row.entry) { r.waiting += n; r.kindsWaiting++; }
+    else problems.push(`${row.def}: names neither one entry with forms own or base, nor waiting`);
+  }
+  for (const d of Object.keys(placed)) if (!seen.has(d)) problems.push(`${d}: no row (${placed[d]} placed)`);
+  for (const n of Object.values(placed)) r.placed += n;
+  const tenths = (x) => (r.placed ? Math.round((x * 1000) / r.placed) : 0);
+  const waiting = (map.rows ?? []).filter((x) => x.waiting && !x.entry).sort((a, b) => b.placed - a.placed)
+    .map((x) => ({ def: x.def, placed: x.placed, task: x.waiting }));
+  return { ...r, ownTenths: tenths(r.own), entryTenths: tenths(r.own + r.base), waitingList: waiting, problems };
+}
+
+const pct = (t) => `${Math.trunc(t / 10)}.${t % 10}%`;
+
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('census.mjs')) {
   const args = process.argv.slice(2), json = args.includes('--json');
+  const mi = args.indexOf('--map');
+  if (mi >= 0) {
+    // node tools/worlds/census.mjs --map content/worlds/eden/map.json [--json]
+    const map = JSON.parse(readFileSync(args[mi + 1], 'utf8'));
+    const c = mapCensus(map, JSON.parse(readFileSync(new URL(map.template, root), 'utf8')));
+    if (json) console.log(JSON.stringify(c, null, 2));
+    else {
+      console.log(`${map.world}: ${c.placed} placed in ${c.kinds} kinds, ${c.rows} rows`);
+      console.log(`  entry with forms of its own: ${c.own} placed (${c.kindsOwn} kinds) = ${pct(c.ownTenths)}`);
+      console.log(`  entry with a card and the base forms only: ${c.base} placed (${c.kindsBase} kinds)`);
+      console.log(`  mapped to an entry: ${c.own + c.base} = ${pct(c.entryTenths)}; waiting: ${c.waiting} placed (${c.kindsWaiting} kinds)`);
+      for (const w of c.waitingList) console.log(`  waiting ${String(w.placed).padStart(4)} ${w.def} (${w.task})`);
+      for (const p of c.problems) console.log(`  PROBLEM ${p}`);
+    }
+    process.exit(c.problems.length ? 1 : 0);
+  }
   const names = args.filter((a) => !a.startsWith('--'));
   if (!names.length) { console.error('usage: node tools/worlds/census.mjs [--json] <template>...'); process.exit(2); }
   const out = {};
