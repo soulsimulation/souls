@@ -56,13 +56,17 @@ async fn upgrade(
         .and_then(|hex| from_hex(hex).ok())
         .and_then(|bytes| decode(&bytes).ok())
         .map(|d| d.value);
+    let header_seen = headers
+        .get("souls-seen")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|n| n.parse().ok());
     ws.read_buffer_size(READ_BUFFER)
         .write_buffer_size(0)
         .max_write_buffer_size(64 * 1024)
         .max_message_size(MESSAGE_MOST)
         .max_frame_size(MESSAGE_MOST)
         .on_upgrade(move |socket| async move {
-            serve(gw, socket, header_token, header_cursor).await;
+            serve(gw, socket, header_token, (header_cursor, header_seen)).await;
         })
 }
 
@@ -101,26 +105,30 @@ async fn send(socket: &mut WebSocket, frame: Vec<u8>) -> bool {
     socket.send(Message::Binary(frame.into())).await.is_ok()
 }
 
-/// The sign-in message: `{1: token, 2: cursor}`.
-fn read_sign_in(bytes: &[u8]) -> (Option<Token>, Option<Value>) {
-    let Ok(d) = decode(bytes) else {
-        return (None, None);
-    };
-    let Value::Map(m) = d.value else {
-        return (None, None);
+/// Where a client resumes from: its cursor, and how many frames at the cursor's version it applied.
+type ResumeFrom = (Option<Value>, Option<usize>);
+
+/// The sign-in message: `{1: token, 2: cursor, 3: seen}`.
+fn read_sign_in(bytes: &[u8]) -> (Option<Token>, ResumeFrom) {
+    let Ok(Value::Map(m)) = decode(bytes).map(|d| d.value) else {
+        return (None, (None, None));
     };
     let token = match m.get(&1) {
         Some(Value::Text(t)) => Token::parse(t.as_str()),
         _ => None,
     };
-    (token, m.get(&2).cloned())
+    let seen = match m.get(&3) {
+        Some(Value::Uint(n)) => usize::try_from(*n).ok(),
+        _ => None,
+    };
+    (token, (m.get(&2).cloned(), seen))
 }
 
 async fn serve(
     gw: Arc<Gateway>,
     mut socket: WebSocket,
     header_token: Option<Option<Token>>,
-    header_cursor: Option<Value>,
+    header_from: ResumeFrom,
 ) {
     // 1. The first frame each way (T10 rule 12): the client's, then the gateway's for its world.
     let Ok(Some(first)) = tokio::time::timeout(SIGN_IN_WITHIN, next_binary(&mut socket)).await
@@ -137,8 +145,8 @@ async fn serve(
     }
 
     // 2. Sign-in, after the first frame, never in it.
-    let (token, cursor) = match header_token {
-        Some(t) => (t, header_cursor),
+    let (token, (cursor, seen)) = match header_token {
+        Some(t) => (t, header_from),
         None => match tokio::time::timeout(SIGN_IN_WITHIN, next_binary(&mut socket)).await {
             Ok(Some(bytes)) => read_sign_in(&bytes),
             _ => return,
@@ -158,7 +166,7 @@ async fn serve(
     let Grant::Actor(actor) = grant;
 
     // 3. The outcome, and the kept frames after the cursor.
-    let mut attached = gw.attach(grant, cursor.as_ref());
+    let mut attached = gw.attach(grant, cursor.as_ref(), seen.unwrap_or(1));
     let mut ok = send(&mut socket, control(attached.outcome)).await;
     for frame in std::mem::take(&mut attached.replay) {
         ok = ok && send(&mut socket, times::finish(frame)).await;

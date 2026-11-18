@@ -10,8 +10,10 @@
 //!
 //! Frames after the first, as CBOR in T0's profile (`v2/docs/encoding.md`):
 //!
-//! - client → gateway, sign-in (unless the `authorization: Bearer <token>` header gave it): `{1: token, 2: cursor}`,
-//!   2 left out for a fresh stream. Then every frame is an intent (T10 rule 2).
+//! - client → gateway, sign-in (unless the `authorization: Bearer <token>` header gave it): `{1: token, 2: cursor,
+//!   3: seen}`, 2 left out for a fresh stream; `seen` (default 1) is how many frames the client applied at its
+//!   cursor's version, since a refusal does not move the version (the `souls-cursor` and `souls-seen` headers give
+//!   the same by header). Then every frame is an intent (T10 rule 2).
 //! - gateway → client, the sign-in's outcome: `{4: name}`, one of `token.refused` (and the socket closes),
 //!   `stream.started`, `stream.resumed` or `stream.cannot-resume` (the client starts again; the stream continues).
 //! - gateway → client, a frame of the stream: `{1: version, 2: answer}` as the world sent it; the version is the
@@ -88,9 +90,9 @@ impl Gateway {
         })
     }
 
-    /// Signs a socket in for `grant`. A socket already signed in for it is let go (its queue closes, so its task
-    /// ends): the last device wins.
-    pub fn attach(&self, grant: Grant, cursor: Option<&Value>) -> Attached {
+    /// Signs a socket in for `grant`, resuming after the first `seen` frames at `cursor`. A socket already signed in
+    /// for it is let go (its queue closes, so its task ends): the last device wins.
+    pub fn attach(&self, grant: Grant, cursor: Option<&Value>, seen: usize) -> Attached {
         let (tx, rx) = mpsc::channel(OUTBOUND);
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         hub.next_session += 1;
@@ -99,7 +101,7 @@ impl Gateway {
         held.session = Some((session, tx));
         let (outcome, replay) = match cursor {
             None => (resume::STARTED, Vec::new()),
-            Some(v) => match Cursor::from_value(v).map(|c| held.kept.resume(&c)) {
+            Some(v) => match Cursor::from_value(v).map(|c| held.kept.resume(&c, seen)) {
                 Some(Resume::Resumed(frames)) => (resume::RESUMED, frames),
                 _ => (resume::CANNOT_RESUME, Vec::new()),
             },
