@@ -465,21 +465,14 @@ impl Town {
                 ))
             }),
             Ask::Near { radius } => {
-                let (node, p) = (node_of(me), me.pose.position);
-                let r = i128::from(*radius);
+                let (node, p) = crate::index::place_of(me);
                 Some(Answer::Near(
                     bodies
-                        .bodies()
-                        .filter(|b| {
-                            b.id != body
-                                && bodies.carrying(b.id).is_none()
-                                && node_of(b) == node
-                                && {
-                                    let q = b.pose.position;
-                                    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-                                    d(p.x, q.x) + d(p.z, q.z) < r * r
-                                }
-                        })
+                        .near()
+                        .bodies_within(node, p, *radius)
+                        .into_iter()
+                        .filter(|&(id, _)| id != body)
+                        .filter_map(|(id, _)| bodies.body(id))
                         .map(|b| Near {
                             id: b.id,
                             position: b.pose.position,
