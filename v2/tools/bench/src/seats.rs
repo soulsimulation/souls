@@ -243,8 +243,12 @@ impl Hall {
 }
 
 /// Mean ns a tick over [`TIMED`] ticks.
+/// The same number of ticks is run first, untimed, so neither arm is timed cold.
 fn timed(h: &mut Hall) -> f64 {
     let geo = h.geo();
+    for _ in 0..TIMED {
+        h.step(&geo);
+    }
     let t = Instant::now();
     for _ in 0..TIMED {
         assert_eq!(h.step(&geo), 0, "nothing fires in a timed tick");
