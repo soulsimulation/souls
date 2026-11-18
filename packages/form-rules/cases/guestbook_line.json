@@ -1,0 +1,197 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:guestbook_line (from #1029, core-guestbook@1). A visitors' book keeps sixteen lines (eden:guestbook's children); a visitor signs a free line with her name (the signer link) and a few words by reference. There is no unsign: a line stays. Signing needs the line free and within reach.",
+ "cases": [
+  {
+   "name": "sign_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {
+     "words": "w_garden"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sign_already_taken",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {
+     "words": "w_garden"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 0,
+    "detail": {
+     "link": "signer",
+     "count": 1
+    }
+   }
+  },
+  {
+   "name": "sign_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {
+     "words": "w_garden"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       1500
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "fix": {
+     "step": "walk_to",
+     "point": "line"
+    }
+   }
+  }
+ ]
+}

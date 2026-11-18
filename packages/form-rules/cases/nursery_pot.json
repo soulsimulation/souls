@@ -1,0 +1,277 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:nursery_pot (from #1843). A portable pot with its own supplies: one portion of soil and water, used together (supplies, 1 to 0). It receives one cutting from a donor (shoots 0 to 1, moved by the donor's take_cutting), then anyone with a free hand plants it here: the cutting is planted for good and the pot's soil and water are used. Refused, as the original refused: no free hand, no cutting yet ('Receive a donor cutting in this same pot before planting.'), already planted ('This same cutting is already planted; there is no free reset.') and no supplies left ('Planting requires the pot's supplied soil and water portions.'). Nothing in the pot's own forms gives it a cutting, soil or water, so those name no fix.",
+  "cases": [
+    {
+      "name": "take_every_need_met",
+      "act": {
+        "this": "np1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "np1": {
+            "kind": "eden:nursery_pot"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_no_free_hand",
+      "act": {
+        "this": "np1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "np1": {
+            "kind": "eden:nursery_pot"
+          },
+          "x1": {
+            "kind": "eden:kindling_bundle"
+          },
+          "x2": {
+            "kind": "eden:kindling_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "plant_cutting_every_need_met",
+      "act": {
+        "this": "np1",
+        "form": "plant_cutting"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "np1": {
+            "kind": "eden:nursery_pot",
+            "fields": {
+              "shoots": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "plant_cutting_hands_full",
+      "act": {
+        "this": "np1",
+        "form": "plant_cutting"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "np1": {
+            "kind": "eden:nursery_pot",
+            "fields": {
+              "shoots": 1
+            }
+          },
+          "x1": {
+            "kind": "eden:kindling_bundle"
+          },
+          "x2": {
+            "kind": "eden:kindling_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "plant_cutting_no_cutting_yet",
+      "act": {
+        "this": "np1",
+        "form": "plant_cutting"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "np1": {
+            "kind": "eden:nursery_pot"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "shoots",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "plant_cutting_already_planted",
+      "act": {
+        "this": "np1",
+        "form": "plant_cutting"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "np1": {
+            "kind": "eden:nursery_pot",
+            "fields": {
+              "shoots": 1,
+              "planted": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {
+          "field": "planted",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "plant_cutting_no_soil_and_water",
+      "act": {
+        "this": "np1",
+        "form": "plant_cutting"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "np1": {
+            "kind": "eden:nursery_pot",
+            "fields": {
+              "shoots": 1,
+              "supplies": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3,
+        "detail": {
+          "field": "supplies",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null
+      }
+    }
+  ]
+}

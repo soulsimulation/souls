@@ -1,0 +1,217 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:flagpole",
+  "owner": "thing",
+  "state": {
+    "raised": {
+      "n": 1,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "foot": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        450
+      ],
+      "yaw_mdeg": 180000
+    },
+    "cleat": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1200,
+        70
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1520,
+      8240,
+      600
+    ]
+  },
+  "forms": {
+    "lower": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "raised",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "foot"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "cleat"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "raised",
+          "to": false,
+          "event": "lowered"
+        }
+      ]
+    },
+    "raise": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "raised",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "foot"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "cleat"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "raised",
+          "to": true,
+          "event": "raised"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:flagpole",
+    "table": [
+      {
+        "part": "blade",
+        "field": "raised",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "true": 0,
+          "false": -6300
+        },
+        "over_us": 8000000
+      }
+    ],
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            100,
+            0
+          ],
+          "r": 300,
+          "h": 200,
+          "segments": 8,
+          "tint": "base"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            4100,
+            0
+          ],
+          "r": 60,
+          "h": 8000,
+          "segments": 6,
+          "r2": 40,
+          "tint": "pole"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            8150,
+            0
+          ],
+          "r": 90,
+          "segments": 5,
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            620,
+            7500,
+            0
+          ],
+          "size": [
+            1200,
+            750,
+            20
+          ],
+          "round": 0,
+          "tint": "flag",
+          "role": "blade"
+        }
+      ],
+      "round": 30,
+      "palette": {
+        "base": "#a39b8c",
+        "pole": "#f2efe6",
+        "gold": "#c79a3a",
+        "flag": "#2f5d8b"
+      },
+      "tags": [
+        "civic",
+        "flagpole",
+        "pole",
+        "pennant",
+        "plaza"
+      ]
+    }
+  },
+  "text": {
+    "card": "A tall white flagpole flying a pennant: lower the flag or raise it.",
+    "civic": "civic",
+    "pennant": "pennant",
+    "mast": "mast"
+  },
+  "card": {
+    "text": "card",
+    "category": "civic",
+    "synonyms": [
+      "pennant",
+      "mast"
+    ]
+  }
+}

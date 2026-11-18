@@ -55,7 +55,7 @@ pub const STOREY: i64 = 3_000;
 pub const FLOORS: i64 = 2;
 pub const ROOMS_PER_FLOOR: i64 = 4;
 pub const STAIR_WIDTH: i64 = 1_000;
-pub const STAIR_RUN: i64 = 4_200;
+pub const STAIR_RUN: i64 = 3_600; // its foot 0.36 m clear of the end wall: a body stands in front of it (N4, #2652)
 pub const STAIR_TOP_TO_DOOR: i64 = 1_500;
 pub const LADDER_WIDTH: i64 = 500;
 pub const CORRIDOR_WIDTH: i64 = 900;
@@ -444,7 +444,7 @@ fn building() -> Built {
     ];
     let sw = STAIR_WIDTH / 2;
     let footprint = rect(-hx, -hz, hx, hz).poly();
-    let (lx, lz0) = (ix - 500, iz - 600); // the ladder, against the east room's outer wall
+    let (lx, lz0) = (ix - 500, iz - 1_000); // the ladder in the east room, its top 0.4 m inside the roof's edge
     Built {
         id: "building",
         def: "testworld-building@1",
@@ -484,7 +484,7 @@ fn building() -> Built {
                 "ladder",
                 1,
                 2,
-                vec![[lx, lz0], [lx, iz]],
+                vec![[lx, lz0], [lx, lz0 + 600]],
                 LADDER_WIDTH,
                 STOREY,
                 2 * STOREY,
