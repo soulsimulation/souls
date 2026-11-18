@@ -98,7 +98,7 @@ fn world() -> World {
 #[test]
 fn every_move_runs_from_data_phase_by_phase() {
     let all = moves();
-    assert_eq!(all.len(), 3, "three moves in the fixtures");
+    assert_eq!(all.len(), 5, "five moves in the fixtures");
     for mv in &all {
         let mut w = world();
         let geo = Fixed(mv.reach);
