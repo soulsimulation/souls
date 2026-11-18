@@ -1,0 +1,683 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "Eden's places, batch 2 (SA-X35, #2925): each walk form done changes no state (the walk is the engine's); the windmill stopped at its brake, refused a second stop, and started again.",
+ "cases": [
+  {
+   "name": "roundhouse_go_to_room_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:roundhouse"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "go_to_room",
+      "args": {
+       "room": "living"
+      }
+     },
+     "receipt": "rc_roundhouse_go_to_room",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:roundhouse"
+    }
+   }
+  },
+  {
+   "name": "chapel_go_to_room_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:chapel"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "go_to_room",
+      "args": {
+       "room": "vestry"
+      }
+     },
+     "receipt": "rc_chapel_go_to_room",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:chapel"
+    }
+   }
+  },
+  {
+   "name": "chapel_enter_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:chapel"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "enter"
+     },
+     "receipt": "rc_chapel_enter",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:chapel"
+    }
+   }
+  },
+  {
+   "name": "church_go_to_room_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:church"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "go_to_room",
+      "args": {
+       "room": "nave"
+      }
+     },
+     "receipt": "rc_church_go_to_room",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:church"
+    }
+   }
+  },
+  {
+   "name": "church_enter_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:church"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "enter"
+     },
+     "receipt": "rc_church_enter",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:church"
+    }
+   }
+  },
+  {
+   "name": "lighthouse_go_to_room_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:lighthouse"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "go_to_room",
+      "args": {
+       "room": "room_2"
+      }
+     },
+     "receipt": "rc_lighthouse_go_to_room",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:lighthouse"
+    }
+   }
+  },
+  {
+   "name": "lighthouse_climb_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:lighthouse"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "climb"
+     },
+     "receipt": "rc_lighthouse_climb",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:lighthouse"
+    }
+   }
+  },
+  {
+   "name": "windmill_go_to_room_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:windmill"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "go_to_room",
+      "args": {
+       "room": "mill"
+      }
+     },
+     "receipt": "rc_windmill_go_to_room",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:windmill"
+    }
+   }
+  },
+  {
+   "name": "stair_flight_go_up_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:stair_flight"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "go_up"
+     },
+     "receipt": "rc_stair_flight_go_up",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:stair_flight"
+    }
+   }
+  },
+  {
+   "name": "stair_flight_go_down_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:stair_flight"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "go_down"
+     },
+     "receipt": "rc_stair_flight_go_down",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:stair_flight"
+    }
+   }
+  },
+  {
+   "name": "bridge_cross_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:bridge"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "cross"
+     },
+     "receipt": "rc_bridge_cross",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:bridge"
+    }
+   }
+  },
+  {
+   "name": "pond_walk_around_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:pond"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "walk_around"
+     },
+     "receipt": "rc_pond_walk_around",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:pond"
+    }
+   }
+  },
+  {
+   "name": "channel_walk_along_walks_and_changes_nothing",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "t1": {
+      "kind": "eden:channel"
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "walk_along"
+     },
+     "receipt": "rc_channel_walk_along",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:channel"
+    }
+   }
+  },
+  {
+   "name": "windmill_stopped_then_started",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "here": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       700,
+       1000,
+       3400
+      ]
+     },
+     "t1": {
+      "kind": "eden:windmill",
+      "fields": {
+       "on": true
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "switch_off"
+     },
+     "receipt": "rw1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "on",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_off",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "switch_off"
+     },
+     "receipt": "rw2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "switch_on"
+     },
+     "receipt": "rw3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "on",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_on",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:windmill",
+     "fields": {
+      "on": 1
+     }
+    }
+   }
+  }
+ ]
+}
