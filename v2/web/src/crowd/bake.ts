@@ -4,10 +4,11 @@
 //   draws in one call whatever its materials; levels 1 and 2 are clustered (`lod.ts`);
 // - one texture of bone matrices, every clip baked once at BAKE_FPS: a row per frame, three texels per bone (the top
 //   three rows of `bone world × bone inverse`), so the vertex shader skins a body from its clip and phase alone.
-// Nothing here runs per body or per frame.
+// Nothing here runs per body or per frame. A body kind someone authored (B13, #2744) brings its own simple model, made
+// at admission by `v2/tools/import-body`; it is drawn as level 2 in place of the clustered one.
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { cluster, type LodMesh } from './lod.ts';
+import { cluster, decodeMesh, type LodMesh } from './lod.ts';
 
 export const BAKE_FPS = 30;
 /** Grid cells of levels 1 and 2, metres. */
@@ -30,16 +31,24 @@ export type BakedModel = {
 const loader = new GLTFLoader();
 const clipFiles = new Map<string, Promise<THREE.AnimationClip[]>>();
 
-/** Loads a body's mesh file and its clips file (shared clips files load once) and bakes `clips`. */
-export async function loadModel(name: string, meshUrl: string, clipsUrl: string, clips: string[]): Promise<BakedModel> {
+/** Loads a body's mesh file and its clips file (shared clips files load once) and bakes `clips`; with `simpleUrl` (a
+ *  kind's simple model, `crowd-mesh/1`) that is its level 2. */
+export async function loadModel(name: string, meshUrl: string, clipsUrl: string, clips: string[], simpleUrl?: string): Promise<BakedModel> {
   let anims = clipFiles.get(clipsUrl);
   if (!anims) clipFiles.set(clipsUrl, (anims = loader.loadAsync(clipsUrl).then((g) => g.animations)));
-  const [mesh, all] = await Promise.all([loader.loadAsync(meshUrl), anims]);
-  return bakeModel(name, mesh, all, clips);
+  const simple = simpleUrl ? fetch(simpleUrl).then(async (r) => {
+    if (!r.ok) throw new Error(`${simpleUrl}: ${r.status}`);
+    return decodeMesh(new Uint8Array(await r.arrayBuffer()));
+  }) : undefined;
+  const [mesh, all, low] = await Promise.all([loader.loadAsync(meshUrl), anims, simple]);
+  return bakeModel(name, mesh, all, clips, low);
 }
 
+/** A body file's bytes, parsed (the importer reads bodies with the crowd's own loader). */
+export const parseModel = (bytes: ArrayBuffer): Promise<GLTF> => loader.parseAsync(bytes, '');
+
 /** The merged body in bind pose, in the model's space, with bone indices into the first skeleton's bones. */
-function merge(gltf: GLTF): { mesh: LodMesh; skeleton: THREE.Skeleton; materials: number } {
+export function merge(gltf: GLTF): { mesh: LodMesh; skeleton: THREE.Skeleton; materials: number } {
   const parts: THREE.SkinnedMesh[] = [];
   gltf.scene.updateMatrixWorld(true);
   gltf.scene.traverse((o) => void ((o as THREE.SkinnedMesh).isSkinnedMesh && parts.push(o as THREE.SkinnedMesh)));
@@ -88,7 +97,7 @@ function geometry(m: LodMesh): THREE.BufferGeometry {
 
 /** Keeps a clip in place: the skeleton root's position track holds its first x and z. (Only the root: UAL's foot IK
  *  bones are the root's children and move in x and z with every step.) */
-function inPlace(clip: THREE.AnimationClip, skeleton: THREE.Skeleton): THREE.AnimationClip {
+export function inPlace(clip: THREE.AnimationClip, skeleton: THREE.Skeleton): THREE.AnimationClip {
   const c = clip.clone();
   const root = skeleton.bones.find((b) => !(b.parent as THREE.Bone | null)?.isBone);
   for (const t of c.tracks) {
@@ -102,7 +111,7 @@ function inPlace(clip: THREE.AnimationClip, skeleton: THREE.Skeleton): THREE.Ani
   return c;
 }
 
-export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationClip[], clipNames: string[]): BakedModel {
+export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationClip[], clipNames: string[], simple?: LodMesh): BakedModel {
   const { mesh, skeleton, materials } = merge(gltf);
   const bones = skeleton.bones.length;
   const mixer = new THREE.AnimationMixer(gltf.scene);
@@ -137,7 +146,7 @@ export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationC
   const bake = new THREE.DataTexture(data, bones * 3, rows.length, THREE.RGBAFormat, THREE.FloatType);
   bake.minFilter = bake.magFilter = THREE.NearestFilter;
   bake.needsUpdate = true;
-  const levels = [mesh, ...LOD_CELLS.map((c) => cluster(mesh, c))];
+  const levels = [mesh, ...LOD_CELLS.map((c, i) => (i === 1 && simple ? simple : cluster(mesh, c)))];
   let lo = Infinity, hi = -Infinity;
   for (let i = 1; i < mesh.position.length; i += 3) (lo = Math.min(lo, mesh.position[i])), (hi = Math.max(hi, mesh.position[i]));
   return {
