@@ -269,7 +269,8 @@ impl Ladder {
     }
 
     /// One tick: the runner's tick (the walk-outs under way are carried in it), then the walk-outs ended, then each
-    /// walker's clock and rungs.
+    /// walker's clock and rungs. A refusal in the runner's tick (one body's) is returned once the rungs are climbed:
+    /// it never stops the ladder for the others.
     pub fn step(&mut self, runner: &mut Runner, town: &mut Town) -> Result<(), Refusal> {
         // A refusal is one body's (the runner went on for the others): the rungs go on too, and it is returned last.
         let ticked = runner.tick(town);
