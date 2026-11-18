@@ -1,0 +1,122 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:banner",
+  "owner": "thing",
+  "state": {
+    "words": {
+      "n": 1,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      4160,
+      3330,
+      160
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:banner",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            -2000,
+            1600,
+            0
+          ],
+          "r": 50,
+          "h": 3200,
+          "segments": 6,
+          "tint": "pole"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            2000,
+            1600,
+            0
+          ],
+          "r": 50,
+          "h": 3200,
+          "segments": 6,
+          "tint": "pole"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -2000,
+            3250,
+            0
+          ],
+          "r": 80,
+          "segments": 4,
+          "tint": "gold"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            2000,
+            3250,
+            0
+          ],
+          "r": 80,
+          "segments": 4,
+          "tint": "gold"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2700,
+            0
+          ],
+          "size": [
+            3900,
+            700,
+            20
+          ],
+          "round": 0,
+          "tint": "cloth"
+        }
+      ],
+      "round": 12,
+      "palette": {
+        "pole": "#8a6a4a",
+        "gold": "#c79a3a",
+        "cloth": "#b0573a"
+      },
+      "tags": [
+        "signage",
+        "sign-text",
+        "banner",
+        "market",
+        "festival",
+        "fabric"
+      ]
+    }
+  },
+  "text": {
+    "card": "A cloth banner on two poles above the street, showing its words.",
+    "signs": "signs",
+    "streamer": "streamer"
+  },
+  "card": {
+    "text": "card",
+    "category": "signs",
+    "synonyms": [
+      "streamer"
+    ]
+  }
+}
