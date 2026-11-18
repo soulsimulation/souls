@@ -1,5 +1,5 @@
 //! The world process (Engine v2, #2635): so far its clock and watchdog (K7, #2647), what it tells its service
-//! manager (O1, #2730), the gateway's socket (I4, #2687) and the fork request (K6, #2670).
+//! manager (O1, #2730), and the fork request (K6, #2670).
 
 mod fork;
 mod gateway_link;
@@ -8,8 +8,8 @@ mod watchdog;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("gateway-link") => std::process::exit(gateway_link::run(&args)),
         Some("fork") => std::process::exit(fork::run(&args)),
+        Some("gateway-link") => std::process::exit(gateway_link::run(&args)),
         _ => std::process::exit(watchdog::run(&args)),
     }
 }

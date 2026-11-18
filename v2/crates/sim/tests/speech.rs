@@ -367,3 +367,68 @@ fn a3_one_body_walks_holds_something_and_speaks_at_once() {
         vec![id(0xcc, 3)]
     );
 }
+
+#[test]
+fn a_body_in_a_slot_speaks_its_lines_in_turn_and_its_voice_is_found() {
+    // B3 meets B11: a body handed into a slot is not stepped each tick, yet its voice must still end each utterance
+    // and start the next, and `saying` must find it there.
+    let surfaces = BTreeMap::from([(floor(), hall())]);
+    let ground = &surfaces[&floor()];
+    let mut c = Controller::new();
+    let body = id(0xb0, 2);
+    let on_floor = Frame {
+        node: floor(),
+        slot: None,
+    };
+    let b = ground
+        .place(body, on_floor, Vec3::ZERO, Quat::IDENTITY)
+        .expect("placed");
+    c.add(humanoid(), b).expect("added");
+    let held = c
+        .claim(body, &shape("souls:seated", Want::All(Class::Locomotion)))
+        .expect("the legs");
+    let in_slot = Frame {
+        node: id(0xd0, 1),
+        slot: Some(1),
+    };
+    c.slot_in(body, held, in_slot, 0).expect("into the slot");
+    let voice = c
+        .claim(body, &shape("souls:talk", Want::One(Class::Voice)))
+        .expect("talk");
+    let line = |n| Line {
+        words: id(0xcc, n),
+        length: length_of(WORDS),
+        replace: false,
+    };
+    c.say(body, voice, line(1)).expect("speaks");
+    c.say(body, voice, line(2)).expect("waits behind");
+
+    let mut at = 0;
+    let mut said = Vec::new();
+    let mut found = Vec::new();
+    for _ in 0..40 {
+        let out = c.step(&surfaces, DT, at);
+        assert!(out.refused.is_empty(), "{:?}", out.refused);
+        said.extend(out.said.into_iter().map(|(_, l, _)| (at, show(l.words))));
+        found.push(c.saying(body).map(|(l, _)| l.words));
+        at += DT;
+    }
+    println!("in a slot: said {said:?} (start µs, words)");
+    assert_eq!(
+        said,
+        vec![
+            (0, show(id(0xcc, 1))),
+            (length_of(WORDS) / DT * DT + DT, show(id(0xcc, 2)))
+        ],
+        "both lines, the second after the first ends"
+    );
+    assert_eq!(
+        found[0],
+        Some(id(0xcc, 1)),
+        "saying() finds a body in a slot"
+    );
+    assert!(
+        found.contains(&Some(id(0xcc, 2))),
+        "the second line is carried too"
+    );
+}

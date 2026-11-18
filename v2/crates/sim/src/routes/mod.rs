@@ -9,8 +9,9 @@
 //!   open ground one of each square it crosses. A doorway to the open ground is such a link, one end on the
 //!   building's floor and the other on the ground's squares.
 //! - **Coarse.** A search (A*, the heuristic the straight distance in the ground's frame) over portals: within a
-//!   piece, from each portal to each other; across a link, from one end to the other. The distance between two
-//!   portals of one piece is its line inside the piece (below), computed on first use and cached with the piece.
+//!   piece, from each portal to each other; across a link, from one end to the other, never straight back across
+//!   the link just crossed. The distance between two portals of one piece is its line inside the piece (below),
+//!   computed on first use and cached with the piece.
 //! - **Fine.** Inside one piece, a search over its triangles and string pulling (the funnel), done as a walker
 //!   enters it. A route carries the first piece's line; the rest is cut as the body goes. String pulling treats the
 //!   body as a point, which is right here: the patch is the ground already shrunk by the body's radius.
@@ -1055,7 +1056,10 @@ impl Map {
                 }
             }
             let (l, side) = (self.portals[u as usize].link, self.portals[u as usize].side);
-            if l != NONE {
+            // Never straight back across the link just crossed: that lands on another portal of the end the body
+            // went in by, a doorway used as a bridge between two squares' pieces of the open ground, which no walk
+            // follows (#3187). Ground there is reached across the pieces.
+            if l != NONE && self.seen[u as usize].3 != LINK | l {
                 if let Some(why) = self.refuse(tree, l, has) {
                     let far = self.links[l as usize].ends[1 - side as usize]
                         .iter()
