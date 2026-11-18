@@ -28,7 +28,8 @@
 //   a hand that was free now holds the cup); at the end the adapter checks that the thing is where the rules put it.
 // - Not here: no reservation (two Souls may both set off; the second fails at the end). A timer (a due list), create,
 //   remove, a put into a named slot and other placement words are new engine only or later tasks; a link has no field
-//   in today's def. Interruption and restart are today's: the receipt fails and nothing is applied.
+//   in today's def. Interruption and restart are today's: the receipt fails and nothing is applied. A thing removed
+//   before its form ends fails the receipt (`form.thing_removed`), where today's programme alone would report it completed.
 // - Pour and sip (SA-F4d, #2931): the moves `pour` and `consume` of a held thing are today's two verbs, reached by
 //   parameters for any held thing, not by code for cans and cups. A pour toward an argument is mars:watering_can_v1
 //   (stage pour, the right hand: today's pour is right-handed) from the entry's stand point by the target, the grip
@@ -193,6 +194,8 @@ export function createFormsAdapter(h: FormsHost) {
   }
   const M = () => h.model, all = () => h.engine.world.entities, world = () => h.engine.world as never;
   const thing = (id: string) => { const e = M().entities.get(id), def = e && M().resolvedDef(e.def), entry = entryOf(def); return e && def && entry ? { e, def, entry } : null; };
+  /** Things with a form under way, by how many: a thing removed before its form ends fails that receipt, never completes it. */
+  const underWay = new Map<string, number>();
   const nameOf = (id: string) => { const e = M().entities.get(id); return e?.name ? M().pathOf(id) : 'it'; };
   /** SA-F4b: the rules' answer for a form that changes a parent. `latest`, by body: its last plan (menus plan too);
    *  `planned`, by body|capability: the plan its act started with (`begun`), checked and dropped at the end. */
@@ -371,6 +374,7 @@ export function createFormsAdapter(h: FormsHost) {
       walk(stand, hand);
       steps.push(LET_GO, { verb: 'mars:hand_actuator_v1', params: { target: id, at: hand.map(r3) } });
     }
+    underWay.set(id, (underWay.get(id) ?? 0) + 1);
     // a change of parent is made by today's motion: keep the rules' answer as it was now; the plan made when the act starts
     // (wrapAct, just before `begun`) is the one checked at the end, never a later menu's
     if ((now.changes as Change[]).some((c) => c.change === 'reparent')) latest.set(soul.entityId, { capability: `object:${id}:${action}`, answer: now });
@@ -380,9 +384,12 @@ export function createFormsAdapter(h: FormsHost) {
    *  anything that is not an entry thing's form, and for a programme that did not finish (today's failure stands). */
   function outcome(capability: string, bodyId: string, finished: boolean): 'done' | Refusal | null {
     const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability); if (!m) return null;
-    const [, id, action] = m, t = thing(id), f = t && formOf(t.entry, action);
+    const [, id, action] = m, t = thing(id), f = t && formOf(t.entry, action), n = underWay.get(id) ?? 0;
+    if (n) { if (n > 1) underWay.set(id, n - 1); else underWay.delete(id); }
+    const key = `${bodyId}|${capability}`, before = planned.get(key); planned.delete(key);
+    if (!t && n && !M().entities.get(id)) return finished ? { code: 'form.thing_removed', reason: 'The thing was removed before this was done; nothing changed.' } : null;
     if (!t || !f) return null;
-    const form = f.form, key = `${bodyId}|${capability}`, before = planned.get(key); planned.delete(key);
+    const form = f.form;
     if (!finished) return null;
     const body = all()[bodyId]; if (!body?.pose?.p) return { code: 'body.unavailable', reason: 'Your body is unavailable; nothing changed.' };
     if ((form.effects ?? []).some((e) => e.change === 'reparent')) {
