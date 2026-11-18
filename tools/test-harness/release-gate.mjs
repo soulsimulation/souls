@@ -775,7 +775,10 @@ export const CI_COVERED = {
 /** Definitions every covered step depends on: the workflow (without its comments and the `repo` and `smoke` jobs, which
  * run no contract step) and the job picker. */
 export const CI_COMMON_DEFINITIONS = ['ci.yml', '.github/scripts/ci-scope.mjs'];
-export const CI_EVENTS = ['push', 'merge_group'];
+/** The ci.yml events whose runs at the candidate count, fullest first: the daily scheduled run and a manual run on main
+ * check every job (ci-scope.mjs FULL_EVENTS); a push to main and a merge group run only the light legs their paths pick
+ * (lightOnly), so they cover fewer steps. Every one but merge_group must be on main. */
+export const CI_EVENTS = ['schedule', 'workflow_dispatch', 'push', 'merge_group'];
 /** One CI definition's comparable text at a commit (`file` reads a path there; null when absent). */
 export function ciDefinition(name, file) {
   if (name === 'ci.yml') {
@@ -824,11 +827,12 @@ export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id)
   try { runs = api(`repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`).workflow_runs || []; }
   catch (e) { return none(`could not read CI runs: ${String(e.message).split('\n')[0]}`); }
   const ok = runs.filter(r => r.head_sha === sha && CI_EVENTS.includes(r.event) && r.status === 'completed' && r.conclusion === 'success'
-    && r.path === '.github/workflows/ci.yml' && (r.event !== 'push' || r.head_branch === 'main'));
-  // a push to main runs every job; prefer it, then the newest. A run that went green on a re-run of failed jobs counts
-  // (it ran at this sha); its attempt is recorded.
-  let run = ok.sort((a, b) => (a.event === 'push') - (b.event === 'push') || a.id - b.id).at(-1);
-  if (!run) return none(`no successful push/merge_group ci.yml run at ${sha} (${runs.length} run(s) at this sha)`);
+    && r.path === '.github/workflows/ci.yml' && (r.event === 'merge_group' || r.head_branch === 'main'));
+  // the fullest run first (CI_EVENTS order: a daily or manual run checks every job), then the newest. A run that went
+  // green on a re-run of failed jobs counts (it ran at this sha); its attempt is recorded.
+  const rank = r => CI_EVENTS.length - CI_EVENTS.indexOf(r.event);
+  let run = ok.sort((a, b) => rank(a) - rank(b) || a.id - b.id).at(-1);
+  if (!run) return none(`no successful ${CI_EVENTS.join('/')} ci.yml run at ${sha} (${runs.length} run(s) at this sha)`);
   let jobs;
   try { jobs = api(`repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`).jobs || []; }
   catch (e) { return none(`could not read the jobs of CI run ${run.id}: ${String(e.message).split('\n')[0]}`); }

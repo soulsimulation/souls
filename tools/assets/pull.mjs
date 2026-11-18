@@ -10,8 +10,8 @@
 //
 // Order per file: already in place with the right bytes → skip; else the shared content-addressed cache
 // (<cache>/<sha[:2]>/<sha>, one copy for every checkout on the machine); else --from <tree> (another checkout that has
-// the file); else GET <url>. Every byte that lands is checked against sha256 + size of the decoded file. Exit 1 lists
-// every path that is missing or wrong.
+// the file); else GET <url> (stalls time out, transient failures are retried). Every byte that lands is checked against
+// sha256 + size of the decoded file. Exit 1 lists every path that is missing or wrong, with the reason.
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
 import { copyFile, lstat, mkdir, readFile, readlink, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
@@ -98,27 +98,47 @@ async function inPlace(f, dest, state) {
   } catch { return false; }
 }
 
-/** Stream a URL, hashing the decoded body. With `to`, the bytes are written there (deleted again on any mismatch). */
-export async function fetchVerified(url, f, to, { fetcher = fetch, tries = 3 } = {}) {
+const netError = e => Error(`network: ${e.cause?.code || e.cause?.message || e.code || e.message}`);
+
+/**
+ * Stream a URL, hashing the decoded body. With `to`, the bytes are written there (deleted again on any mismatch).
+ * A request that sends nothing for `stallMs` (no headers, or no body bytes) is aborted: a stalled connection fails
+ * in seconds, not minutes. Network errors, timeouts, 408, 429 and 5xx are retried `tries` times in all with jittered
+ * exponential backoff (`onRetry(attempt, error)` hears each one); a 404, 403 or wrong bytes fail at once.
+ */
+export async function fetchVerified(url, f, to, { fetcher = fetch, tries = 5, stallMs = 20_000, backoffMs = 500, onRetry } = {}) {
   let last;
   for (let attempt = 1; attempt <= tries; attempt++) {
+    const ac = new AbortController(); let timer, bytes = 0;
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), stallMs); };
     try {
-      const res = await fetcher(url, { headers: { 'accept-encoding': 'br, gzip' }, redirect: 'follow', signal: AbortSignal.timeout(300_000) });
-      if (res.status === 404 || res.status === 403) { await res.body?.cancel(); throw Object.assign(Error(`HTTP ${res.status} (not published?)`), { final: true }); }
-      if (!res.ok || !res.body) { await res.body?.cancel(); throw Error(`HTTP ${res.status}`); }
-      const h = createHash('sha256'); let bytes = 0;
-      const tap = async function* (source) { for await (const chunk of source) { h.update(chunk); bytes += chunk.length; if (to) yield chunk; } };
-      if (to) await pipeline(Readable.fromWeb(res.body), tap, createWriteStream(to));
-      else for await (const _ of tap(Readable.fromWeb(res.body))) ;
+      arm();
+      let res;
+      try { res = await fetcher(url, { headers: { 'accept-encoding': 'br, gzip' }, redirect: 'follow', signal: ac.signal }); }
+      catch (e) { throw ac.signal.aborted ? Error(`timeout: no response in ${stallMs / 1000} s`) : netError(e); }
+      if (!res.ok || !res.body) {
+        await res.body?.cancel().catch(() => {});
+        const retry = res.ok || res.status === 408 || res.status === 429 || res.status >= 500;
+        throw Object.assign(Error(`HTTP ${res.status}${res.status === 404 || res.status === 403 ? ' (not published?)' : ''}`), { final: !retry });
+      }
+      const h = createHash('sha256');
+      const tap = async function* (source) { for await (const chunk of source) { arm(); h.update(chunk); bytes += chunk.length; if (to) yield chunk; } };
+      try {
+        if (to) await pipeline(Readable.fromWeb(res.body), tap, createWriteStream(to));
+        else for await (const _ of tap(Readable.fromWeb(res.body))) ;
+      } catch (e) { throw ac.signal.aborted ? Error(`timeout: stalled, no data for ${stallMs / 1000} s after ${bytes} of ${f.bytes} bytes`) : netError(e); }
+      clearTimeout(timer);
       const sha256 = h.digest('hex');
-      if (sha256 !== f.sha256 || bytes !== f.bytes) throw Object.assign(Error(`got ${bytes} bytes sha256 ${sha256.slice(0, 12)}…, want ${f.bytes} bytes ${f.sha256.slice(0, 12)}…`), { final: true });
+      if (sha256 !== f.sha256 || bytes !== f.bytes) throw Object.assign(Error(`hash mismatch: got ${bytes} bytes sha256 ${sha256.slice(0, 12)}…, want ${f.bytes} bytes ${f.sha256.slice(0, 12)}…`), { final: true });
       return { bytes };
     } catch (e) {
-      last = e; if (to) await rm(to, { force: true });
+      clearTimeout(timer); last = e; if (to) await rm(to, { force: true });
       if (e.final || attempt === tries) break;
-      await new Promise(r => setTimeout(r, 500 * 2 ** attempt));
+      onRetry?.(attempt, e);
+      await new Promise(r => setTimeout(r, backoffMs * 2 ** (attempt - 1) * (0.5 + Math.random())));
     }
   }
+  if (!last.final && tries > 1) last.message += ` (after ${tries} tries)`;
   throw last;
 }
 
@@ -154,7 +174,11 @@ async function pool(items, n, fn) {
 }
 
 export async function run(options) {
-  const opts = { manifest: MANIFEST, dest: ROOT, cache: defaultCache(), concurrency: 8, sets: SETS, only: [], ...options };
+  const opts = { manifest: MANIFEST, dest: ROOT, cache: defaultCache(), concurrency: 8, sets: SETS, only: [], log: m => console.error(m), ...options };
+  // Network failures and retries are printed as they happen, even with --quiet: a job killed by an outer timeout
+  // still shows which paths were failing and why. A local --check lists what is missing at the end instead.
+  const network = !opts.check || opts.remote;
+  const onRetry = f => (attempt, e) => opts.log(`assets: retrying ${f.path} (try ${attempt + 1} of ${opts.tries ?? 5}): ${e.message}`);
   const manifest = await loadManifest(opts.manifest);
   const files = select(manifest.files, opts);
   const state = await openState(opts.cache, opts.dest);
@@ -162,15 +186,19 @@ export async function run(options) {
   const tally = k => { counts[k] = (counts[k] || 0) + 1; };
   let done = 0, bytes = 0;
   const progress = () => { if (!opts.quiet && process.stderr.isTTY) process.stderr.write(`\r  ${done}/${files.length} files, ${(bytes / 1e6).toFixed(1)} MB`); };
-  await pool(files, opts.concurrency, async f => {
+  await pool(files, Math.min(opts.concurrency, MAX_CONCURRENCY), async f => {
+    const fopts = { ...opts, onRetry: onRetry(f) };
     try {
       if (opts.check && opts.remote) {
         if (f.symlink !== undefined) tally('symlink');
-        else { await fetchVerified(f.url, f, null, opts); tally('on cdn'); bytes += f.bytes; }
+        else { await fetchVerified(f.url, f, null, fopts); tally('on cdn'); bytes += f.bytes; }
       } else if (await inPlace(f, opts.dest, state)) tally('ok');
       else if (opts.check) { failed.push({ path: f.path, error: (await exists(join(opts.dest, f.path))) ? 'wrong bytes' : 'missing' }); }
-      else { tally(await place(f, opts, state)); bytes += f.bytes || 0; }
-    } catch (e) { failed.push({ path: f.path, url: f.url, error: e.message }); }
+      else { tally(await place(f, fopts, state)); bytes += f.bytes || 0; }
+    } catch (e) {
+      failed.push({ path: f.path, url: f.url, error: e.message });
+      if (network) opts.log(`assets: FAILED ${f.path}: ${e.message}${f.url ? ` (${f.url})` : ''}`);
+    }
     done++; progress();
   });
   if (!opts.quiet && process.stderr.isTTY) process.stderr.write('\n');
@@ -228,9 +256,10 @@ async function main() {
   const r = await run(o);
   const summary = Object.entries(r.counts).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing';
   if (!r.failed.length) { if (!o.quiet) console.error(`assets: ${r.files} files: ${summary}`); return; }
-  const shown = o.check && !o.remote ? 10 : 40;
-  for (const f of r.failed.slice(0, shown)) console.error(`  ${f.path}: ${f.error}`);
-  if (r.failed.length > shown) console.error(`  … and ${r.failed.length - shown} more`);
+  if (o.check && !o.remote) {
+    for (const f of r.failed.slice(0, 10)) console.error(`  ${f.path}: ${f.error}`);
+    if (r.failed.length > 10) console.error(`  … and ${r.failed.length - 10} more`);
+  }
   const verb = o.check ? (o.remote ? 'not on the CDN' : 'not in place') : 'failed';
   console.error(`assets: ${r.failed.length} of ${r.files} files ${verb} (${summary})${o.check && !o.remote ? '. Run: pnpm assets:pull' : ''}`);
   process.exitCode = 1;

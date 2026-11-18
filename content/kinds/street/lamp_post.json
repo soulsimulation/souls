@@ -1,0 +1,27 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lamp_post",
+  "owner": "thing",
+  "state": {
+    "on": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
+  },
+  "geometry": { "bounds_mm": [400, 4330, 400] },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:lamp_post",
+    "table": [
+      { "part": "light", "field": "on", "do": "glow", "at": { "true": 1000, "false": 0 } },
+      { "part": "light", "field": "on", "do": "tint", "at": { "true": "#ffe2a8", "false": "#5d5f58" } }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"cyl","at":[0,150,0],"r":160,"h":300,"segments":8,"r2":120,"tint":"iron"},{"kind":"cyl","at":[0,1900,0],"r":55,"h":3400,"segments":6,"r2":40,"tint":"iron"},{"kind":"torus","at":[0,3620,0],"r":90,"r2":20,"segments":8,"tint":"iron","pitch":90000},{"kind":"cyl","at":[0,3720,0],"r":130,"h":60,"segments":6,"tint":"iron"},{"kind":"cyl","at":[0,3920,0],"r":110,"h":340,"segments":6,"r2":150,"tint":"glow","glow":800,"role":"light"},{"kind":"cone","at":[0,4170,0],"r":200,"h":180,"segments":6,"tint":"iron"},{"kind":"sphere","at":[0,4290,0],"r":35,"segments":4,"tint":"iron"}],"palette":{"iron":"#2f3633","glow":"#ffe2a8"},"tags":["prop","street","light","lamp","object"]}
+  },
+  "text": {
+    "card": "A cast-iron street lamp with a glass lantern; lean on it or wait by it.",
+    "light": "light",
+    "street_lamp": "street lamp",
+    "street_light": "street light",
+    "lantern": "lantern"
+  },
+  "card": { "text": "card", "category": "light", "synonyms": ["street_lamp", "street_light", "lantern"] }
+}
