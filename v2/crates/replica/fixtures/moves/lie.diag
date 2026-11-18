@@ -9,5 +9,5 @@
       {1: "souls:settle", 2: 600000}],
   7: {1: 1},                                # the body itself
   8: 600000,
-  9: "souls:seat"
+  9: "souls:slot"
 }

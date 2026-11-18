@@ -31,10 +31,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
-pub mod lamps;
-pub mod seats;
+pub mod places;
 #[cfg(test)]
 mod tests;
+pub mod toggles;
 
 /// The rules' data: the kinds by plain name (`souls-entry/1` entries) and each move's reach.
 pub struct Rules {

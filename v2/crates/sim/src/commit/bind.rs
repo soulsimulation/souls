@@ -6,14 +6,14 @@
 //! - A named slot that is taken gives way to the next candidate.
 //! - A selector whose few were all taken since its check (and whose checker saw some free) goes back for one re-check
 //!   on a newer copy, as I3's stale read set does; still taken after it, the act is refused `stale`.
-//! - A selector whose checker saw no free slot ends the list `seat.none-free`, a named end: the agent is told there
+//! - A selector whose checker saw no free slot ends the list `place.none-free`, a named end: the agent is told there
 //!   is no seat, not refused into a second turn.
-//! - A list of named slots only, all taken, is refused `seat-taken`, as B3 names it.
+//! - A list of named slots only, all taken, is refused `place-taken`, as B3 names it.
 
 use replica::ids::Id;
 
 /// The end of a list exhausted with no slot free.
-pub const NONE_FREE: &str = "seat.none-free";
+pub const NONE_FREE: &str = "place.none-free";
 
 /// One candidate as the clock thread takes it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,7 +31,7 @@ pub enum Bound {
     Slot { rank: usize, thing: Id },
     /// Check the selectors again on a copy at this version or newer.
     Recheck { version: u64 },
-    /// The list ended by this name: [`NONE_FREE`], `seat-taken` or `stale`.
+    /// The list ended by this name: [`NONE_FREE`], `place-taken` or `stale`.
     Ended(&'static str),
 }
 
@@ -64,7 +64,7 @@ pub fn bind(
         (true, _, false) => Bound::Recheck { version },
         (_, true, _) => Bound::Ended(NONE_FREE),
         (true, false, true) => Bound::Ended("stale"),
-        (false, false, _) => Bound::Ended("seat-taken"),
+        (false, false, _) => Bound::Ended("place-taken"),
     }
 }
 
@@ -94,7 +94,10 @@ mod tests {
                 thing: id(3)
             }
         );
-        assert_eq!(bind(&list[..1], free, 7, false), Bound::Ended("seat-taken"));
+        assert_eq!(
+            bind(&list[..1], free, 7, false),
+            Bound::Ended("place-taken")
+        );
     }
 
     #[test]

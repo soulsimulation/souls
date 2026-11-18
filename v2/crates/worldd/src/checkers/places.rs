@@ -3,7 +3,7 @@
 //! [`FEW`] by the selector's own rule; the clock thread then binds them in rank order (`sim::commit::bind`), one
 //! lookup each. The scan of a room's slots happens here, never on the clock thread ([`off_clock`]).
 //!
-//! The copy is [`SeatsSeen`]: the seats as built (their thing, room, kind and point) and the set held at a version.
+//! The copy is [`PlacesSeen`]: the seats as built (their thing, room, kind and point) and the set held at a version.
 //! The holds are B3's table (`sim::slots`), not yet in the tree, so the clock publishes that set as it publishes K8's
 //! frozen copy.
 //!
@@ -26,7 +26,7 @@ use sim::commit::off_clock;
 
 /// One seat as built: its thing, the room (node) it is in, its kind and its slot's point in the room's frame, µm.
 #[derive(Clone, Debug)]
-pub struct SeatRow {
+pub struct PlaceRow {
     pub thing: Id,
     pub room: Id,
     pub kind: Name,
@@ -35,9 +35,9 @@ pub struct SeatRow {
 
 /// A checker's copy of the seats: as built, and the things whose seat was held at `version`.
 #[derive(Clone, Debug)]
-pub struct SeatsSeen {
+pub struct PlacesSeen {
     pub version: u64,
-    pub seats: Arc<Vec<SeatRow>>,
+    pub places: Arc<Vec<PlaceRow>>,
     pub held: Arc<HashSet<Id>>,
 }
 
@@ -49,7 +49,7 @@ pub enum Wanted {
 }
 
 /// Resolves `wanted` for a body at `body` (the room's frame) on `seen`, in rank order.
-pub fn resolve(seen: &SeatsSeen, body: Vec3, wanted: &[Wanted]) -> Vec<Slot> {
+pub fn resolve(seen: &PlacesSeen, body: Vec3, wanted: &[Wanted]) -> Vec<Slot> {
     wanted
         .iter()
         .map(|w| match w {
@@ -57,7 +57,7 @@ pub fn resolve(seen: &SeatsSeen, body: Vec3, wanted: &[Wanted]) -> Vec<Slot> {
             Wanted::Select(s) => {
                 off_clock();
                 let Selector::FreeSlot { kind, node, rule } = s;
-                let free = seen.seats.iter().filter(|r| {
+                let free = seen.places.iter().filter(|r| {
                     r.room == *node && r.kind == *kind && !seen.held.contains(&r.thing)
                 });
                 let count = free.clone().count();
@@ -105,13 +105,13 @@ mod tests {
     #[test]
     fn a_selector_resolves_to_the_nearest_free_of_its_kind_in_its_room_and_binds_in_order() {
         let chair = Name::new("eden:chair").unwrap();
-        let row = |n: u64, room: u64, kind: &Name, x: i64| SeatRow {
+        let row = |n: u64, room: u64, kind: &Name, x: i64| PlaceRow {
             thing: id(n),
             room: id(room),
             kind: kind.clone(),
             point: Vec3::new(x, 0, 0),
         };
-        let seats = vec![
+        let places = vec![
             row(10, 1, &chair, 1),
             row(11, 1, &chair, 2),
             row(12, 2, &chair, 0),
@@ -119,9 +119,9 @@ mod tests {
             row(14, 1, &chair, 3),
             row(15, 1, &chair, 4),
         ];
-        let seen = SeatsSeen {
+        let seen = PlacesSeen {
             version: 1,
-            seats: Arc::new(seats),
+            places: Arc::new(places),
             held: Arc::new(HashSet::from([id(10)])),
         };
         let any = Wanted::Select(Selector::FreeSlot {
@@ -150,7 +150,7 @@ mod tests {
                 thing: id(14)
             }
         );
-        let full = SeatsSeen {
+        let full = PlacesSeen {
             held: Arc::new(HashSet::from([id(10), id(11), id(14), id(15)])),
             ..seen
         };
