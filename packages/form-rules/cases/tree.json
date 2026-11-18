@@ -1,0 +1,19 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:tree: a Soul goes to the shade under it; the form has no needs, its one step a walk to the shade area.",
+  "cases": [
+    {
+      "name": "tree_go_to_shade",
+      "act": { "this": "t1", "form": "go_to_shade" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tree" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    }
+  ]
+}
