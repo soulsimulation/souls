@@ -14,6 +14,9 @@
 #                        keeping merge:ready, while MIXED_CAP (4, merge-train.mjs) such PRs are queued or set to
 #                        auto-merge; low-risk PRs enqueue up to the queue's own limit. Every queue exit (unlabeled,
 #                        dequeued, merged) starts the train, which then enqueues a waiting PR
+#   inline-serial        a PR touching tools/world-launcher/soul/eden.mjs or an input inline.mjs builds it from
+#                        (INLINE_FILES, merge-train.mjs) waits the same way while another such PR is queued or set to
+#                        auto-merge: the second would land a stale eden.mjs and fail its merge group
 #
 # Without the rule, everything below applies as written.
 #
@@ -139,7 +142,7 @@ jobs:
 
   # The queue's way back to the author (queue mode, see the header). Runs main's script; no PR code. A dequeue is read
   # after a short wait, so a PR that merged or that the queue re-entered is left alone. A PR leaving the queue makes
-  # room for one the mixed cap held, so the job then starts the train.
+  # room for one the mixed cap or inline-serial held, so the job then starts the train.
   queue-exit:
     if: github.event_name == 'workflow_dispatch' && inputs.exit != ''
     runs-on: ubuntu-latest

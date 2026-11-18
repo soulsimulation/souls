@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, MIXED_CAP, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
+import { INLINE_FILES, touchesInline, awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, MIXED_CAP, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
 import { JOBS } from './ci-scope.mjs';
 
 const M = 'owner';
@@ -442,6 +442,42 @@ test('queue: mixed cap: a PR whose file list cannot be read counts as not low-ri
   // A candidate whose own files cannot be read waits too: not picked, not ejected.
   const own = queueTrain({ prs: { 20: {} }, filesFor: { 20: 'unreadable' } }).run();
   assert.deepEqual([own.pr, own.skipped], ['', [{ pr: 20, why: 'files-unreadable' }]]);
+});
+
+test('queue: inline-serial: the eden.mjs inputs come from inline.mjs, and an unreadable file list counts as one', () => {
+  for (const f of ['tools/world-launcher/soul/eden.mjs', 'tools/world-launcher/soul/inline.mjs', 'tools/world-launcher/soul/home.mjs', 'packages/form-rules/src/rules.ts']) assert.ok(INLINE_FILES.includes(f), f);
+  assert.equal(touchesInline(['docs/a.md', 'packages/form-rules/src/rules.ts']), true);
+  assert.equal(touchesInline(['tools/world-launcher/soul/README.md', 'docs/a.md']), false);
+  assert.equal(touchesInline(null), true);
+});
+
+test('queue: inline-serial: with one eden.mjs PR queued, a second waits and a low-risk PR is still enqueued', () => {
+  const eden = ['tools/world-launcher/soul/eden.mjs', 'tools/world-launcher/soul/home.mjs'], low = ['docs/a.md', 'changes/a.md'];
+  const t = queueTrain({ prs: { 20: {}, 21: {}, 22: {} }, state: { 20: { autoMergeRequest: { enabledAt: 'x' } } }, files: eden, filesFor: { 22: low } });
+  const r = t.run();
+  assert.deepEqual([r.pr, r.mode], [22, 'queue']);
+  assert.deepEqual(r.skipped.at(-1), { pr: 21, tier: r.skipped.at(-1).tier, why: 'inline-serial', inline_queued: [20] });
+  assert.deepEqual([t.reads.held, t.reads.comments], [[], []], 'held back: not taken out of anything, not ejected, no comment');
+  // A module edit without the regenerated file waits the same way.
+  const rules = queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: { isInMergeQueue: true } }, files: eden, filesFor: { 21: ['packages/form-rules/src/rules.ts'] } }).run();
+  assert.deepEqual([rules.pr, rules.skipped.at(-1).why], ['', 'inline-serial']);
+});
+
+test('queue: inline-serial: with no eden.mjs PR queued, an eden.mjs PR is enqueued', () => {
+  const eden = ['tools/world-launcher/soul/eden.mjs'];
+  const r = queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: { isInMergeQueue: true } }, files: eden, filesFor: { 20: ['docs/a.md'] } }).run();
+  assert.deepEqual([r.pr, r.mode], [21, 'queue']);
+  // Once the first has left the queue, the held one goes on the next run.
+  assert.deepEqual(queueTrain({ prs: { 21: {} }, files: eden }).run().pr, 21);
+});
+
+test('queue: inline-serial: a queued PR whose file list cannot be read counts as touching eden.mjs', () => {
+  const t = queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: { isInMergeQueue: true } }, files: ['tools/world-launcher/soul/eden.mjs'], filesFor: { 20: 'unreadable' } });
+  const r = t.run();
+  assert.equal(r.pr, '');
+  assert.deepEqual(r.skipped.map(s => [s.pr, s.why]), [[20, 'files-unreadable'], [21, 'inline-serial']]);
+  // A low-risk PR that touches no eden.mjs input is not held by it.
+  assert.equal(queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: { isInMergeQueue: true } }, filesFor: { 20: 'unreadable' } }).run().pr, 21);
 });
 
 test('queue: a PR with auto-merge on and a failed required check is reported, once, not skipped silently', () => {

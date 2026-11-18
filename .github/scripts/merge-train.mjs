@@ -8,7 +8,9 @@
 //        During a release freeze (--freeze, the RELEASE_FREEZE repo variable, default $RELEASE_FREEZE) it picks nothing:
 //        pr is empty, frozen names the pinned sha, PRs already enqueued are taken back out of the queue (they keep
 //        merge:ready), and the reason goes to the run's summary. In queue mode a PR with any file outside ci-scope.mjs's
-//        LOW_RISK waits (skipped as mixed-cap, label kept) while MIXED_CAP such PRs are queued or set to auto-merge
+//        LOW_RISK waits (skipped as mixed-cap, label kept) while MIXED_CAP such PRs are queued or set to auto-merge, and a
+//        PR touching eden.mjs or an input of inline.mjs waits (skipped as inline-serial) while another such PR is
+//        queued or set to auto-merge
 //   node .github/scripts/merge-train.mjs wait  --repo o/r --sha <sha> [--checks a,b] [--timeout-min 60] [--output f]
 //        polls check runs and commit statuses on <sha> until every required check concluded: result=pass|fail|timeout
 //   node .github/scripts/merge-train.mjs merge --repo o/r --pr <n> --sha <sha> [--queue true]
@@ -23,12 +25,13 @@
 // Every GitHub call goes through `gh api` (GH_TOKEN), except the enqueue: `gh pr merge` picks the right mutation.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPolicy, tierFor } from '../../tools/proof/tier.mjs';
 import { APPROVED_LABEL, maintainerApproved } from '../../tools/proof/gate.mjs';
 import { JOBS, lowRisk } from './ci-scope.mjs';
 import { coveredByQueue } from './ci-main.mjs';
+import { MODULES as INLINE_MODULES } from '../../tools/world-launcher/soul/inline.mjs';
 
 // The maintainer gate itself is tools/proof/gate.mjs, enforced by the required `proof-ok` check; the train uses the same
 // rule only to leave unapproved T3-T4 PRs queued instead of waiting on a check that will fail.
@@ -96,6 +99,19 @@ export const dropped = s => !s.merged && !s.isInMergeQueue && (s.labels?.nodes ?
  * own limit. A PR whose file list cannot be read counts as not low-risk.
  */
 export const MIXED_CAP = 4;
+
+/**
+ * tools/world-launcher/soul/eden.mjs is committed output of inline.mjs, built from the modules it lists (MODULES). Two
+ * PRs that each regenerate it cannot both be current once one merges: the second fails its eden.mjs staleness test in
+ * the merge group and takes the group down. So a PR touching eden.mjs, inline.mjs or one of its modules waits, keeping
+ * merge:ready, while another such PR is queued or set to auto-merge; the queue exit of that one starts the train again.
+ */
+const REPO_ROOT = new URL('../../', import.meta.url).pathname;
+const INLINE_DIR = new URL('../../tools/world-launcher/soul/', import.meta.url).pathname.slice(REPO_ROOT.length);
+export const INLINE_FILES = [...new Set(['eden.mjs', 'inline.mjs', ...INLINE_MODULES.map(([f]) => f)]
+  .map(f => posix.normalize(INLINE_DIR + f)))];
+/** A file list that cannot be read (null) counts as touching eden.mjs. */
+export const touchesInline = files => !Array.isArray(files) || files.some(f => INLINE_FILES.includes(f));
 
 /** `gh pr merge` enqueues a PR whose checks are green and otherwise enables auto-merge, which enqueues it once they are. */
 export const enqueueArgs = ({ repo, pr, sha }) => ['pr', 'merge', String(pr), '--repo', repo, '--auto', '--squash', '--match-head-commit', sha];
@@ -298,7 +314,7 @@ export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh,
     return filesRead.get(n);
   };
   const stateOf = n => { if (!states.has(n)) states.set(n, api.queueState(repo, n)); return states.get(n); };
-  let mixedQueued; // counted when the first mixed PR is about to enqueue
+  let mixedQueued, inlineQueued; // counted when the first mixed (or inline) PR is about to enqueue
   for (const [i, n] of candidates.entries()) {
     const pr = api.gh(`repos/${repo}/pulls/${n}`);
     const labels = (pr.labels ?? []).map(l => l.name);
@@ -326,6 +342,10 @@ export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh,
         if (failed.length) reportStuck({ repo, pr: n, sha: pr.head.sha, failed, notifyIssue, api });
         skipped.push({ pr: n, tier, why: 'queued', ...(failed.length ? { failed } : {}) });
         continue;
+      }
+      if (touchesInline(files)) {
+        inlineQueued ??= candidates.filter(m => m !== n && queued(stateOf(m)) && touchesInline(filesOf(m)));
+        if (inlineQueued.length) { skipped.push({ pr: n, tier, why: 'inline-serial', inline_queued: inlineQueued }); continue; }
       }
       if (!lowRisk(files)) {
         mixedQueued ??= candidates.filter(m => m !== n && queued(stateOf(m)) && !lowRisk(filesOf(m))).length;
