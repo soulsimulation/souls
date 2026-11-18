@@ -52,7 +52,9 @@ green at its head, and the queue re-tests the combination with what is ahead of 
 `proof-ok` is a required check, so T3–T4 still wait for approval. Removing `merge:ready` takes a PR out; a PR the
 queue drops loses the label with a comment giving the reason. A PR with any file outside the low-risk paths (`LOW_RISK`
 in `.github/scripts/ci-scope.mjs`) waits, keeping its label, while four such PRs are queued or set to auto-merge;
-low-risk PRs enqueue up to the queue's own limit, and every queue exit starts the train again. The non-strict and strict landing below apply only
+low-risk PRs enqueue up to the queue's own limit, and every queue exit starts the train again. PRs that regenerate
+`tools/world-launcher/soul/eden.mjs` (or change an input `inline.mjs` builds it from) enter one at a time: the next
+waits, keeping the label, skipped as `inline-serial`, until the one ahead leaves the queue. The non-strict and strict landing below apply only
 when the ruleset does not require the queue.
 
 - **Non-strict**: a T0–T2 PR that touches no strict path, whose required checks are green on its current head, which
