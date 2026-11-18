@@ -1,0 +1,134 @@
+{
+  "format": "souls-activity-steps/1",
+  "about": "test:give, a give between two Souls. The offer g1 is a proposal for one Soul (its invited link, b2) that b1 made (its proposer link), naming the thing it offers (its offered link, book1); its countdown left_us says when it lapses. b1 offers by entering the giver's place in its own act; b2 accepts by entering the taker's place in its own act, in time. Only then does the book pass from b1's hand to b2's, in the same batch: both sides or neither. Unaccepted, the offer lapses at the stated microsecond: b1 is released (event test:released) with the book still in its hand, and the outcome is named (test:offer_lapsed). Nothing is done to a Soul that did not join.",
+  "cases": [
+    {
+      "name": "a_book_offered_and_accepted_ends_in_the_others_hand",
+      "activity": "g1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["g1", "b1", "b2"] },
+          "g1": { "kind": "test:give", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 30000000, "per_s": -1000000, "set_us": 5000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"], "offered": ["book1"] } },
+          "b1": { "hands": { "left": null, "right": "book1" } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "book1": { "kind": "test:book" }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 6000000, "expect": { "verdict": "yes", "role": "giver", "place": { "node": "g1", "slot": "giver" } } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a1", "now_us": 9000000, "expect": { "verdict": "yes", "role": "taker", "place": { "node": "g1", "slot": "taker" } } },
+        { "do": "leave", "actor": "b1", "form": "let_go", "receipt": "x1", "expect": { "verdict": "yes", "role": "giver", "ended": 1 } }
+      ],
+      "after": {
+        "b1": { "hands": { "left": null, "right": null } },
+        "b2": { "hands": { "left": "book1", "right": null } },
+        "book1": { "kind": "test:book" }
+      },
+      "gone": ["g1"]
+    },
+    {
+      "name": "a_book_offered_and_not_accepted_in_time_stays_and_the_asker_is_told",
+      "activity": "g1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["g1", "b1", "b2"] },
+          "g1": { "kind": "test:give", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 30000000, "per_s": -1000000, "set_us": 5000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"], "offered": ["book1"] } },
+          "b1": { "hands": { "left": null, "right": "book1" } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "book1": { "kind": "test:book" }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 6000000, "expect": { "verdict": "yes", "role": "giver" } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "stage": "offered", "ends_us": 35000000 }, "unseen": [] } },
+        { "do": "world", "actor": "w", "form": "lapse", "receipt": "w0", "now_us": 34999999, "expect": { "verdict": "no" } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a1", "now_us": 35000000, "expect": { "verdict": "no", "need": 2 } },
+        { "do": "world", "actor": "w", "form": "lapse", "receipt": "w1", "now_us": 35000000, "expect": { "verdict": "yes", "released": 1 } }
+      ],
+      "after": {
+        "r1": { "loose": ["b2", "b1"] },
+        "b1": { "hands": { "left": null, "right": "book1" } },
+        "b2": { "hands": { "left": null, "right": null } },
+        "book1": { "kind": "test:book" }
+      },
+      "gone": ["g1"]
+    },
+    {
+      "name": "the_taker_has_no_free_hand_so_nothing_changes",
+      "activity": "g1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["g1", "b1", "b2"] },
+          "g1": { "kind": "test:give", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 30000000, "per_s": -1000000, "set_us": 5000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"], "offered": ["book1"] } },
+          "b1": { "hands": { "left": null, "right": "book1" } },
+          "b2": { "hands": { "left": "cup1", "right": "cup2" } },
+          "book1": { "kind": "test:book" },
+          "cup1": { "kind": "test:book" },
+          "cup2": { "kind": "test:book" }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 6000000, "expect": { "verdict": "yes", "role": "giver" } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a1", "now_us": 9000000, "expect": { "verdict": "no", "reason": "no_free_hand", "effect": 2 } }
+      ],
+      "after": {
+        "r1": { "loose": ["g1", "b2"] },
+        "g1": { "kind": "test:give", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 30000000, "per_s": -1000000, "set_us": 5000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"], "offered": ["book1"], "giver": ["b1"] }, "slots": { "giver": ["b1"] } },
+        "b1": { "hands": { "left": null, "right": "book1" } },
+        "b2": { "hands": { "left": "cup1", "right": "cup2" } }
+      }
+    },
+    {
+      "name": "the_giver_no_longer_holds_it_so_nothing_changes",
+      "activity": "g1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["g1", "b1", "b2", "book1"] },
+          "g1": { "kind": "test:give", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 30000000, "per_s": -1000000, "set_us": 5000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"], "offered": ["book1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "book1": { "kind": "test:book" }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 6000000, "expect": { "verdict": "yes", "role": "giver" } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a1", "now_us": 9000000, "expect": { "verdict": "no", "reason": "not_held", "detail": { "thing": "book1", "by": "b1" } } }
+      ],
+      "after": {
+        "r1": { "loose": ["g1", "b2", "book1"] },
+        "b2": { "hands": { "left": null, "right": null } }
+      }
+    },
+    {
+      "name": "only_the_invited_may_accept_and_only_the_proposer_may_offer",
+      "activity": "g1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["g1", "b1", "b2", "b3"] },
+          "g1": { "kind": "test:give", "at_mm": [0, 0, 0], "fields": { "left_us": { "value": 30000000, "per_s": -1000000, "set_us": 5000000 } }, "links": { "invited": ["b2"], "proposer": ["b1"], "offered": ["book1"] } },
+          "b1": { "hands": { "left": null, "right": "book1" } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } },
+          "book1": { "kind": "test:book" }
+        }
+      },
+      "steps": [
+        { "do": "offer", "actor": "b3", "form": "offer", "receipt": "o0", "now_us": 6000000, "expect": { "verdict": "no", "reason": "not_permitted", "detail": { "link": "proposer", "ends": ["b1"] } } },
+        { "do": "accept", "actor": "b2", "form": "accept", "receipt": "a0", "now_us": 6000000, "expect": { "verdict": "no", "need": 0 } },
+        { "do": "offer", "actor": "b1", "form": "offer", "receipt": "o1", "now_us": 6000000, "expect": { "verdict": "yes", "role": "giver" } },
+        { "do": "accept", "actor": "b3", "form": "accept", "receipt": "a1", "now_us": 9000000, "expect": { "verdict": "no", "reason": "not_permitted", "detail": { "link": "invited", "ends": ["b2"] } } },
+        { "do": "world", "actor": "w", "form": "lapse", "receipt": "w1", "now_us": 35000000, "expect": { "verdict": "yes", "released": 1 } }
+      ],
+      "after": {
+        "b1": { "hands": { "left": null, "right": "book1" } },
+        "b3": { "hands": { "left": null, "right": null } }
+      },
+      "gone": ["g1"]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+[package]
+name = "log-crash"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Engine v2 K4 (#2668): the log's process-kill run and its sync table, on a real disk."
+
+[dependencies]
+sim = { path = "../../crates/sim" }

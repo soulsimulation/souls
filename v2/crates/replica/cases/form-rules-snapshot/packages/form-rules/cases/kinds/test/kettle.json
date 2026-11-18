@@ -1,0 +1,41 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:kettle",
+  "owner": "thing",
+  "state": {
+    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 0, "max": 1700, "audience": {"rule": "everyone"} }
+  },
+  "points": {
+    "handle": { "role": "grip", "at_mm": [0, 220, 0] },
+    "spout": { "role": "outlet", "at_mm": [150, 150, 0] }
+  },
+  "geometry": { "bounds_mm": [310, 300, 240] },
+  "forms": {
+    "fill": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "from": { "type": "thing", "select": { "of": "things", "kind": "test:tap", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [{ "need": "held_by_actor" }, { "need": "room" }],
+      "steps": [{ "step": "move", "move": "hold_under", "toward": { "arg": "from" } }],
+      "effects": [{ "change": "transfer", "field": "water_g", "from": { "arg": "from" }, "into": "this", "amount": "room", "event": "filled" }]
+    },
+    "pour": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "into": { "type": "thing", "select": { "of": "things", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "held_by_actor" },
+        { "need": "state", "field": "water_g", "at_least": 1 },
+        { "need": "room" }
+      ],
+      "steps": [{ "step": "move", "move": "pour", "at": "spout", "toward": { "arg": "into" } }],
+      "effects": [{ "change": "transfer", "field": "water_g", "from": "this", "into": { "arg": "into" }, "amount": 250, "event": "poured" }]
+    }
+  },
+  "text": { "card": "A test kettle that holds an amount of water, for the effects' cases: fill it at a tap, pour a cupful." },
+  "card": { "text": "card" }
+}

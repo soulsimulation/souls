@@ -1,0 +1,61 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:kindling_block (from #1621). The block holds one log (stock, a count, 0 or 1). Anyone with a free hand prepares it: walks to its stand, works twenty seconds, the log is used and one eden:kindling_bundle is made on the block's out surface. Refused, as the original refused: no log left ('This block has no raw wood stock left to prepare'), the out surface taken ('Take the item off the output surface before preparing kindling') and no free hand ('Put down what you are holding before preparing kindling'). Nothing restocks the block, so an empty block names no fix; the bundle on the surface is taken by its own form, which the rules do not look for.",
+  "cases": [
+    {
+      "name": "prepare_every_need_met",
+      "act": { "this": "k1", "form": "prepare" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "eden:kindling_block" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "prepare_no_log_left",
+      "act": { "this": "k1", "form": "prepare" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "eden:kindling_block", "fields": { "stock": 0 } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "stock", "found": 0, "wanted": { "at_least": 1 } }, "fix": null }
+    },
+    {
+      "name": "prepare_out_surface_taken",
+      "act": { "this": "k1", "form": "prepare" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "eden:kindling_block", "slots": { "out": ["kb1"] } },
+          "kb1": { "kind": "eden:kindling_bundle" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 1, "detail": { "node": "k1", "slot": "out" }, "fix": null }
+    },
+    {
+      "name": "prepare_hands_full",
+      "act": { "this": "k1", "form": "prepare" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "eden:kindling_block" },
+          "kb1": { "kind": "eden:kindling_bundle" },
+          "kb2": { "kind": "eden:kindling_bundle" },
+          "b1": { "hands": { "left": "kb1", "right": "kb2" } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 2, "detail": {}, "fix": { "step": "put" } }
+    }
+  ]
+}

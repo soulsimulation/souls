@@ -1,0 +1,203 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:marshmallow_fire",
+  "owner": "thing",
+  "state": {
+    "lit": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "heat": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 100,
+      "min": 0,
+      "max": 100,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 1500]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [900, 600, 900]
+  },
+  "forms": {
+    "light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "heat",
+          "at_least": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lit",
+          "to": true,
+          "event": "lit"
+        }
+      ]
+    },
+    "put_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 1000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lit",
+          "to": false,
+          "event": "put_out"
+        }
+      ]
+    },
+    "toast": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "skewer": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "holds": "eden:marshmallow_skewer"
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "state",
+          "of": {
+            "arg": "skewer"
+          },
+          "field": "heat",
+          "at_most": 0,
+          "says": "turn_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "heat",
+          "from": "this",
+          "into": {
+            "arg": "skewer"
+          },
+          "amount": 1,
+          "event": "toasted"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:marshmallow_fire",
+    "table": [
+      {
+        "part": "flame",
+        "field": "lit",
+        "do": "flame",
+        "at": {
+          "true": 1000,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-330,60,0],"size":[160,120,160],"tint":"stone","round":40},{"kind":"box","at":[330,60,0],"size":[160,120,160],"tint":"stone","round":40},{"kind":"box","at":[0,60,-330],"size":[160,120,160],"tint":"stone","round":40},{"kind":"box","at":[0,60,330],"size":[160,120,160],"tint":"stone","round":40},{"kind":"box","at":[-230,60,-230],"size":[160,120,160],"tint":"stone","round":40},{"kind":"box","at":[230,60,-230],"size":[160,120,160],"tint":"stone","round":40},{"kind":"box","at":[-230,60,230],"size":[160,120,160],"tint":"stone","round":40},{"kind":"box","at":[230,60,230],"size":[160,120,160],"tint":"stone","round":40},{"kind":"box","at":[0,60,0],"size":[500,80,90],"tint":"log","round":30},{"kind":"box","at":[0,100,0],"size":[90,80,500],"tint":"log","round":30},{"kind":"cone","at":[0,300,0],"r":200,"h":400,"segments":8,"tint":"flame","role":"flame","pivot":[0,120,0]}],"palette":{"stone":"#7d7a72","log":"#6b4a2f","flame":"#ffa43a"},"tags":["camping","fire","campfire","object"]}
+  },
+  "text": {
+    "card": "A campfire: light it and toast a held marshmallow skewer, one side at a time.",
+    "camp": "camp",
+    "campfire": "campfire",
+    "fire": "fire",
+    "howto_toast": "Light the fire, hold a marshmallow skewer and toast the side facing the fire; turn it and toast the other side; then eat it.",
+    "turn_first": "This exposed side is already golden; turn the skewer to expose the other side."
+  },
+  "card": {
+    "text": "card",
+    "category": "camp",
+    "synonyms": [
+      "campfire",
+      "fire"
+    ]
+  },
+  "howtos": {
+    "toast": {
+      "text": "howto_toast",
+      "steps": [
+        {
+          "form": "light"
+        },
+        {
+          "form": "toast"
+        },
+        {
+          "form": "toast"
+        }
+      ]
+    }
+  }
+}

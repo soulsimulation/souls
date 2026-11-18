@@ -12,7 +12,10 @@ dir=${1:?usage: install-gitleaks.sh <dir>}
 bin="$dir/gitleaks" tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" module=github.com/zricethezav/gitleaks/v8
 
 from_release() {
-  curl -sSfL --retry 8 --retry-delay 15 --retry-all-errors --max-time 120 -o "$dir/$tarball" \
+  # A self-hosted runner's older curl (before 7.71) has no --retry-all-errors (#2144); there --retry covers 5xx and timeouts.
+  local retry_all=
+  curl --help all 2>/dev/null | grep -- --retry-all-errors >/dev/null && retry_all=--retry-all-errors
+  curl -sSfL --retry 8 --retry-delay 15 $retry_all --max-time 120 -o "$dir/$tarball" \
     "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$tarball" &&
     echo "$GITLEAKS_SHA256  $dir/$tarball" | sha256sum -c - &&
     tar -xzf "$dir/$tarball" -C "$dir" gitleaks

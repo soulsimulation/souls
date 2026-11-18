@@ -299,7 +299,7 @@ impl MoveRecord {
 /// back on rising, in the slot's frame (x and z). Decoded from `{1: slot, 2: height mm, 3: [x, z] mm}`; fixture
 /// `v2/crates/replica/fixtures/seats/`. A seat holds one body.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Seat {
+pub struct Place {
     pub slot: u64,
     /// µm above the floor, never below it.
     pub height: i64,
@@ -307,19 +307,19 @@ pub struct Seat {
     pub stand: [i64; 2],
 }
 
-impl Seat {
-    /// Reads a seat, refusing anything else as `not-a-seat` (unknown fields included).
-    pub fn from_value(v: &Value) -> R<Seat> {
+impl Place {
+    /// Reads a seat, refusing anything else as `not-a-place` (unknown fields included).
+    pub fn from_value(v: &Value) -> R<Place> {
         let um = |v: &Value| match v {
             Value::Uint(n) => i64::try_from(*n).ok()?.checked_mul(1000),
             Value::Nint(n) => (-1 - i64::try_from(*n).ok()?).checked_mul(1000),
             _ => None,
         };
         let Value::Map(m) = v else {
-            return refuse("not-a-seat", "a seat is a map");
+            return refuse("not-a-place", "a place is a map");
         };
         if let Some(k) = m.keys().find(|k| **k == 0 || **k > 3) {
-            return refuse("not-a-seat", format!("field {k}"));
+            return refuse("not-a-place", format!("field {k}"));
         }
         let stand = match m.get(&3) {
             Some(Value::Array(a)) if a.len() == 2 => (um(&a[0]), um(&a[1])),
@@ -327,14 +327,14 @@ impl Seat {
         };
         match (m.get(&1), m.get(&2).and_then(um), stand) {
             (Some(Value::Uint(slot)), Some(height), (Some(x), Some(z))) if height >= 0 => {
-                Ok(Seat {
+                Ok(Place {
                     slot: *slot,
                     height,
                     stand: [x, z],
                 })
             }
             _ => refuse(
-                "not-a-seat",
+                "not-a-place",
                 "{1: slot, 2: height mm (not below the floor), 3: [x, z] mm}",
             ),
         }
