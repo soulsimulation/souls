@@ -28,7 +28,7 @@
     {"pr": 3072, "branch": "agent/2925-eden-buildings", "task": "SA-X35"}
   ],
   "rows": [
-    {"def": "core/door@2", "placed": 651, "waiting": "none", "note": "no entry yet and no Eden content task names it; Engine v2 N4 (#2652) crosses doors as links"},
+    {"def": "core/door@2", "placed": 651, "entry": "eden:door", "forms": "own", "pr": 3065, "state": {"open": {"from": "open"}, "locked": {"from": "locked"}}},
     {"def": "core/floor-lamp@1", "placed": 467, "entry": "eden:floor_lamp", "forms": "own", "pr": 3034, "state": {"level": {"from": "on", "values": [[false, 0], [true, 3]]}}},
     {"def": "core/rug@1", "placed": 360, "waiting": "SA-X28", "issue": 2918},
     {"def": "core/chair@1", "placed": 285, "entry": "eden:chair", "forms": "own", "pr": 3039, "state": {"tucked": "default"}},
