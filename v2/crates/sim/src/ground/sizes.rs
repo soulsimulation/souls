@@ -5,8 +5,10 @@
 //!   `size-would-not-fit`; one on a piece with no way out for that class as `size-no-way-out`. Either way the body's
 //!   [`Build`] is left as it was.
 //! - **A way out** is N10's: a doorway that still passes the new class's centre, the end of a stair, ramp or ladder of
-//!   the floor that the class can use, or, on the open ground, the square's edge. A stair or ramp narrower than the
-//!   body with its clearance ([`too_narrow`]) is no way out, as it is no route (`crate::routes`).
+//!   the floor that the class can use, or, on the open ground, the square's edge. A stair, ramp or doorway narrower
+//!   than the body with its clearance ([`too_narrow`]) is no way out, as it is no route (`crate::routes`), and nor is a
+//!   doorway between two rooms whose far side has no ground for the class. A doorway to the open ground is taken to
+//!   lead out: the open ground is not cut here.
 //!
 //! Integers only: µm and mm.
 
@@ -55,12 +57,24 @@ pub fn change_size(
             .and_then(|n| n.parent())
             .ok_or_else(|| fail("a floor with no thing".into()))?;
         let b = Building::read_sized(tree, thing, None, r).map_err(fail)?;
-        let patch = match b.floors.get(&node) {
+        let mut patch = match b.floors.get(&node) {
             Some((_, p)) => p.clone(),
             None => {
                 cut_floor(&Scene::of(tree, node).map_err(fail)?, r, Turn::NONE).map_err(fail)?
             }
         };
+        // A doorway inside the building that this class cannot cross (its far side has no ground for it, or it is
+        // too narrow) is no way out, though its own width still passes the centre.
+        let dead: Vec<Id> = b
+            .links
+            .iter()
+            .filter(|l| l.kind == Kind::Doorway && !l.nodes.contains(&ground))
+            .filter(|l| l.blocked.is_some() || too_narrow(l.width, r))
+            .map(|l| l.id)
+            .collect();
+        for m in patch.meets.iter_mut().filter(|m| dead.contains(&m.link)) {
+            m.width_left = 0;
+        }
         let ends: Vec<Vec3> = b
             .links
             .iter()

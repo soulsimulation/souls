@@ -145,7 +145,8 @@ fn a2_a_body_wider_than_the_only_door_is_refused_naming_it_and_both_widths() {
 }
 
 /// A3: a change to the large class is refused, the old body kept, where the body would not fit (in the 0.9 m
-/// corridor) and where it would have no way out (on the roof, whose ladder lands on no ground for it). The same
+/// corridor) and where it would have no way out (on the roof, whose ladder lands on no ground for it, and in the room
+/// beyond the corridor, whose one door opens onto the corridor). The same
 /// body may become small in both places, and large on the open square.
 #[test]
 fn a3_a_change_to_a_larger_size_that_does_not_fit_or_has_no_exit_is_refused() {
@@ -163,16 +164,23 @@ fn a3_a_change_to_a_larger_size_that_does_not_fit_or_has_no_exit_is_refused() {
     assert_eq!(Size::for_radius(501).unwrap_err().name, "body-too-large");
     let corridor = piece_near(&map, floor1, [-59_841, -146]).at;
     let on_roof = piece_near(&map, roof, [-60_000, 0]).at;
+    let beyond = piece_near(&map, floor1, [-55_331, 53]).at;
     for (place, node, at, name) in [
         ("the corridor", floor1, corridor, "size-would-not-fit"),
         ("the roof", roof, on_roof, "size-no-way-out"),
+        (
+            "the room beyond the corridor",
+            floor1,
+            beyond,
+            "size-no-way-out",
+        ),
     ] {
         let mut body = family("walker", "standard", 1_750, 0);
         let before = body;
         let no =
             change_size(&im.tree, ground, node, who, um(at), &mut body, Size::Large).unwrap_err();
         println!(
-            "A3 standard to large on {place}: {}: {}",
+            "A3 standard to large, {place}: {}: {}",
             no.name, no.detail
         );
         assert_eq!(no.name, name);
@@ -193,7 +201,7 @@ fn a3_a_change_to_a_larger_size_that_does_not_fit_or_has_no_exit_is_refused() {
         Size::Large,
     )
     .expect("the open square");
-    println!("A3 standard to large on the open square: made");
+    println!("A3 standard to large, the open square: made");
     assert_eq!(body.size, Size::Large);
 }
 
