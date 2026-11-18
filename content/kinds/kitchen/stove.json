@@ -1,0 +1,161 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:stove",
+  "owner": "thing",
+  "state": {
+    "lit": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "knob": {
+      "role": "contact",
+      "at_mm": [
+        300,
+        830,
+        310
+      ]
+    },
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ]
+    }
+  },
+  "slots": {
+    "hob": {
+      "admits": "thing",
+      "most": 2,
+      "at_mm": [
+        0,
+        900,
+        50
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      810,
+      2150,
+      637
+    ]
+  },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "knob"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "knob"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lit",
+          "to": true,
+          "event": "hotplates_on"
+        }
+      ]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lit",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "knob"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "knob"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lit",
+          "to": false,
+          "event": "hotplates_off"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:stove",
+    "table": [
+      {
+        "part": "light",
+        "field": "lit",
+        "do": "tint",
+        "at": {
+          "true": "#c8401c",
+          "false": "#1d1f22"
+        }
+      },
+      {
+        "part": "light",
+        "field": "lit",
+        "do": "glow",
+        "at": {
+          "true": 1000,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"extrude","at":[0,15,0],"polygon":[[-385,-285],[385,-285],[385,285],[-385,285]],"h":810,"tint":"iron"},{"kind":"extrude","at":[0,855,0],"polygon":[[-405,-305],[405,-305],[405,305],[-405,305]],"h":10,"tint":"top"},{"kind":"cyl","at":[-200,890,50],"r":130,"h":25,"segments":10,"tint":"plate","role":"light","glow":300},{"kind":"cyl","at":[200,890,50],"r":130,"h":25,"segments":10,"tint":"plate","role":"light","glow":300},{"kind":"box","at":[0,400,302],"size":[560,420,10],"round":0,"tint":"door"},{"kind":"cyl","at":[0,630,320],"r":12,"h":400,"segments":5,"tint":"brass","roll":90000},{"kind":"cyl","at":[280,1500,-220],"r":70,"h":1300,"segments":6,"tint":"iron"},{"kind":"cyl","at":[300,830,312],"r":25,"h":20,"segments":8,"tint":"brass","pitch":90000,"role":"knob"}],"palette":{"iron":"#2f3236","top":"#3c4046","plate":"#1d1f22","door":"#45494f","brass":"#b8913f"},"tags":["kitchen","stove","object"]}
+  },
+  "text": {
+    "card": "A cast-iron stove with two hotplates: switch them on or off; set pots on top.",
+    "cooker": "cooker",
+    "range": "range",
+    "hob": "hob",
+    "oven": "oven",
+    "kitchen": "kitchen"
+  },
+  "card": {
+    "text": "card",
+    "category": "kitchen",
+    "synonyms": [
+      "cooker",
+      "range",
+      "hob",
+      "oven"
+    ]
+  }
+}

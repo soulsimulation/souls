@@ -1,0 +1,55 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:climbing_frame",
+  "owner": "thing",
+  "links": { "climber": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } } },
+  "points": { "by_top": { "role": "stand", "at_mm": [0, 0, 2000] } },
+  "slots": { "top": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 1600, 0], "stand": "by_top" } },
+  "geometry": { "bounds_mm": [3280, 3280, 3280], "front": "none" },
+  "forms": {
+    "climb": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "place" } },
+        { "step": "wait", "us": 5000000 },
+        { "step": "sit", "slot": { "arg": "place" } }
+      ],
+      "effects": [
+        { "change": "link", "link": "climber", "from": "actor", "event": "climbed_up" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "sat_down" }
+      ]
+    },
+    "climb_down": {
+      "who": { "link": "climber" },
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "climber", "from": "actor", "event": "climbed_down" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_up" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:climbing_frame",
+    "shape": {"shapes":[{"kind":"torus","at":[0,0,0],"r":1600,"r2":40,"segments":12,"tint":"bar2","yaw":0,"arc":180000},{"kind":"torus","at":[0,0,0],"r":1600,"r2":40,"segments":12,"tint":"bar","yaw":30000,"arc":180000},{"kind":"torus","at":[0,0,0],"r":1600,"r2":40,"segments":12,"tint":"bar2","yaw":60000,"arc":180000},{"kind":"torus","at":[0,0,0],"r":1600,"r2":40,"segments":12,"tint":"bar","yaw":90000,"arc":180000},{"kind":"torus","at":[0,0,0],"r":1600,"r2":40,"segments":12,"tint":"bar2","yaw":120000,"arc":180000},{"kind":"torus","at":[0,0,0],"r":1600,"r2":40,"segments":12,"tint":"bar","yaw":150000,"arc":180000},{"kind":"torus","at":[0,800,0],"r":1380,"r2":40,"segments":14,"tint":"bar","pitch":90000},{"kind":"torus","at":[0,1350,0],"r":750,"r2":40,"segments":10,"tint":"bar2","pitch":90000}],"palette":{"bar":"#d9534f","bar2":"#f1c84b"},"tags":["play","climbing","playground","structure"],"round":20}
+  },
+  "text": {
+    "card": "A steel climbing dome: climb to the top and sit, then climb down.",
+    "playground": "playground",
+    "climbing_dome": "climbing dome",
+    "jungle_gym": "jungle gym",
+    "play": "play"
+  },
+  "card": { "text": "card", "category": "playground", "synonyms": ["climbing_dome", "jungle_gym", "play"] }
+}

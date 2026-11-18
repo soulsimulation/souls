@@ -7,6 +7,7 @@
 pub mod apply;
 pub mod audience;
 pub mod bodies;
+pub mod directory;
 pub mod durability;
 pub mod effects;
 pub mod encode;
@@ -18,6 +19,7 @@ pub mod kinds;
 pub mod pose;
 pub mod query;
 pub mod read;
+pub mod rules;
 pub mod stream;
 pub mod time;
 pub mod tree;

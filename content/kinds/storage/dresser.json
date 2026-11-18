@@ -1,0 +1,310 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:dresser",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "shut",
+        "top",
+        "middle",
+        "bottom"
+      ],
+      "default": "shut",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "garments": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 12,
+      "default": 9
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        702
+      ],
+      "yaw_mdeg": 180000
+    },
+    "top": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        660,
+        270
+      ]
+    },
+    "middle": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        430,
+        270
+      ]
+    },
+    "bottom": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        200,
+        270
+      ]
+    }
+  },
+  "slots": {
+    "on_top": {
+      "admits": "thing",
+      "most": 6,
+      "at_mm": [
+        0,
+        785,
+        0
+      ],
+      "fits_mm": [
+        600,
+        600,
+        450
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      970,
+      785,
+      505
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "drawer": {
+          "type": "part"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": "shut"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": {
+            "arg": "drawer"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": {
+            "arg": "drawer"
+          },
+          "event": "opened"
+        },
+        {
+          "change": "link",
+          "link": "opener",
+          "from": "actor",
+          "event": "looked_inside"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "not": "shut"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "middle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": "shut",
+          "event": "shut"
+        },
+        {
+          "change": "unlink",
+          "link": "opener",
+          "from": "actor",
+          "event": "stopped_looking"
+        }
+      ]
+    },
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "not": "shut"
+        },
+        {
+          "need": "state",
+          "field": "garments",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "stand"
+        }
+      ],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "eden:garment",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "links": {
+    "opener": { "n": 1, "from": "soul", "most": 1, "audience": { "rule": "everyone" } }
+  },
+  "closed": {
+    "audience": {
+      "rule": "linked",
+      "link": "opener"
+    },
+    "fields": [
+      "garments"
+    ]
+  },
+  "stock": {
+    "garments": {
+      "kind": "eden:garment",
+      "count": "garments",
+      "take": "take"
+    }
+  },
+  "motion": {
+    "how": "pushed_by_one"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:dresser",
+    "table": [
+      {
+        "part": "drawer",
+        "field": "open",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "shut": 0,
+          "top": 300,
+          "middle": 0,
+          "bottom": 0
+        },
+        "over_us": 400000
+      },
+      {
+        "part": "flip",
+        "field": "open",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "shut": 0,
+          "top": 0,
+          "middle": 300,
+          "bottom": 0
+        },
+        "over_us": 400000
+      },
+      {
+        "part": "blind",
+        "field": "open",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "shut": 0,
+          "top": 0,
+          "middle": 0,
+          "bottom": 300
+        },
+        "over_us": 400000
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"box","at":[0,420,0],"size":[970,730,450],"round":0,"tint":"wood"},{"kind":"box","at":[0,200,242],"size":[900,200,10],"round":0,"tint":"front","role":"blind"},{"kind":"box","at":[0,430,242],"size":[900,200,10],"round":0,"tint":"front","role":"flip"},{"kind":"box","at":[0,660,242],"size":[900,200,10],"round":0,"tint":"front","role":"drawer"},{"kind":"sphere","at":[0,200,260],"r":20,"segments":4,"tint":"brass","role":"blind"},{"kind":"sphere","at":[0,430,260],"r":20,"segments":4,"tint":"brass","role":"flip"},{"kind":"sphere","at":[0,660,260],"r":20,"segments":4,"tint":"brass","role":"drawer"},{"kind":"cyl","at":[-400,25,-150],"r":30,"h":50,"segments":6,"r2":24,"tint":"wood"},{"kind":"cyl","at":[400,25,-150],"r":30,"h":50,"segments":6,"r2":24,"tint":"wood"},{"kind":"cyl","at":[-400,25,150],"r":30,"h":50,"segments":6,"r2":24,"tint":"wood"},{"kind":"cyl","at":[400,25,150],"r":30,"h":50,"segments":6,"r2":24,"tint":"wood"}],"palette":{"wood":"#9a6b43","front":"#c49a63","brass":"#b8913f"},"tags":["furniture","storage","dresser","surface"]}
+  },
+  "text": {
+    "card": "A chest of three drawers: open one, take a garment; things stand on its top.",
+    "storage": "storage",
+    "drawers": "drawers",
+    "bureau": "bureau",
+    "howto_dress": "Open a drawer (top, middle or bottom), take a garment with a hand free, then close it."
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "drawers",
+      "bureau"
+    ]
+  },
+  "howtos": {
+    "dress": {
+      "text": "howto_dress",
+      "steps": [
+        {
+          "form": "open"
+        },
+        {
+          "form": "take"
+        },
+        {
+          "form": "close"
+        }
+      ]
+    }
+  }
+}

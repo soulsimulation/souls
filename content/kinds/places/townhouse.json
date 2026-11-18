@@ -1,0 +1,274 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:townhouse",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      6000,
+      10400,
+      10000
+    ]
+  },
+  "areas": {
+    "hall": {
+      "at_mm": [
+        -1415,
+        100,
+        0
+      ],
+      "radius_mm": 1365
+    },
+    "parlour": {
+      "at_mm": [
+        1425,
+        100,
+        2420
+      ],
+      "radius_mm": 1355
+    },
+    "kitchen": {
+      "at_mm": [
+        1425,
+        100,
+        -2420
+      ],
+      "radius_mm": 1355
+    },
+    "landing": {
+      "at_mm": [
+        -1415,
+        2900,
+        0
+      ],
+      "radius_mm": 1365
+    },
+    "bedroom": {
+      "at_mm": [
+        1425,
+        2900,
+        2420
+      ],
+      "radius_mm": 1355
+    },
+    "bath": {
+      "at_mm": [
+        1425,
+        2900,
+        -2420
+      ],
+      "radius_mm": 1355
+    },
+    "landing_2": {
+      "at_mm": [
+        -1415,
+        5700,
+        0
+      ],
+      "radius_mm": 1365
+    },
+    "bedroom_2": {
+      "at_mm": [
+        1425,
+        5700,
+        2420
+      ],
+      "radius_mm": 1355
+    },
+    "bedroom_3": {
+      "at_mm": [
+        1425,
+        5700,
+        -2420
+      ],
+      "radius_mm": 1355
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:townhouse",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            4200,
+            0
+          ],
+          "size": [
+            6000,
+            8400,
+            10000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            9709,
+            2550
+          ],
+          "size": [
+            6300,
+            2617,
+            5200
+          ],
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            9709,
+            -2550
+          ],
+          "size": [
+            6300,
+            2617,
+            5200
+          ],
+          "yaw": 180000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -1415,
+            1150,
+            5020
+          ],
+          "size": [
+            1200,
+            2100,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            1425,
+            1550,
+            5015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -1415,
+            4350,
+            5015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            1425,
+            4350,
+            5015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -1415,
+            7150,
+            5015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            1425,
+            7150,
+            5015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#e9d9c4",
+        "trim": "#3f4a46",
+        "roof": "#5e5a57",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "townhouse"
+      ]
+    }
+  },
+  "text": {
+    "card": "A narrow townhouse: hall, parlour and kitchen, with bedrooms upstairs.",
+    "building": "building",
+    "terrace_house": "terrace house",
+    "house": "house"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "terrace_house",
+      "house"
+    ]
+  }
+}
