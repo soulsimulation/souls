@@ -11,7 +11,7 @@
 //! - **A batch** is parts, each a little-endian `u32` byte length and then the part's stored bytes. JavaScript passes
 //!   one in as bytes and gets a small answer back ([`Applied`]); the state stays inside WASM memory.
 
-use crate::effects::{Body, Change, Effect, Header, Part, Refusal, TransferRec};
+use crate::effects::{Body, Change, Effect, Flight, Header, Part, Refusal, TransferRec};
 use crate::encode::{Name, Value, encode};
 use crate::hash::{Chain, state_hash, step_hash};
 use crate::ids::Id;
@@ -129,22 +129,54 @@ impl Replica {
 
     /// Applies a part whole or not at all, then marks each node its entries changed with the version after that entry.
     pub fn apply(&mut self, part: &Part) -> R<()> {
-        self.apply_touched(part, &[]).map(drop)
+        self.apply_touched(part, &[], &[]).map(drop)
     }
 
     /// Applies a part of a view that declares the sequences it skipped ([`Tree::apply_gaps`]): a gap it did not
     /// declare is still `sequence-gap`. The version stands after the part's last entry.
     pub fn apply_gaps(&mut self, part: &Part, gaps: &[(u64, u64)]) -> R<()> {
-        self.apply_touched(part, gaps).map(drop)
+        self.apply_touched(part, gaps, &[]).map(drop)
+    }
+
+    /// [`Replica::apply_gaps`], with the subtrees the view carried in, each landed by the arrive of its sequence
+    /// ([`Tree::apply_view`]).
+    pub fn apply_view(
+        &mut self,
+        part: &Part,
+        gaps: &[(u64, u64)],
+        carried: &[(u64, Flight)],
+    ) -> R<()> {
+        self.apply_touched(part, gaps, carried).map(drop)
     }
 
     /// [`Replica::apply`], giving back the nodes the part changed, in id order.
-    fn apply_touched(&mut self, part: &Part, gaps: &[(u64, u64)]) -> R<Vec<Id>> {
-        let touched: Vec<Vec<Id>> = part.effects.iter().map(|e| self.touched(e)).collect();
-        if gaps.is_empty() {
+    fn apply_touched(
+        &mut self,
+        part: &Part,
+        gaps: &[(u64, u64)],
+        carried: &[(u64, Flight)],
+    ) -> R<Vec<Id>> {
+        let mut touched: Vec<Vec<Id>> = part.effects.iter().map(|e| self.touched(e)).collect();
+        // A carried subtree: what it takes out where it was, and what it lands, with the ends of its links.
+        for (seq, f) in carried {
+            let at = part
+                .effects
+                .iter()
+                .position(|e| e.envelope.sequence == *seq);
+            if let Some(t) = at.and_then(|i| touched.get_mut(i)) {
+                t.extend(self.subtree_and_ends(f.root));
+                t.extend(self.node_parent(f.root));
+                t.extend(f.nodes.keys());
+                t.extend(f.links.values().flat_map(|l| l.ends));
+                t.push(f.pose.frame.node);
+                t.sort();
+                t.dedup();
+            }
+        }
+        if gaps.is_empty() && carried.is_empty() {
             self.tree.apply(&self.header, part)?;
         } else {
-            self.tree.apply_gaps(&self.header, part, gaps)?;
+            self.tree.apply_view(&self.header, part, gaps, carried)?;
         }
         let mut all = Vec::new();
         for (e, ids) in part.effects.iter().zip(touched) {
@@ -181,7 +213,7 @@ impl Replica {
             }
             let (bytes, tail) = tail.split_at(len);
             rest = tail;
-            let touched = match Part::read(bytes).and_then(|p| self.apply_touched(&p, &[])) {
+            let touched = match Part::read(bytes).and_then(|p| self.apply_touched(&p, &[], &[])) {
                 Ok(t) => t,
                 Err(r) => {
                     refused = Some(r.name);
