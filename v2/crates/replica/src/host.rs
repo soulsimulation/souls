@@ -69,6 +69,15 @@ pub const F_WAITING: u64 = 41;
 pub const F_TURNS: u64 = 42;
 /// A field the world shows on a link taken in turns: the body its owner lets in now, if any (T9b A3).
 pub const F_GRANTED: u64 = 43;
+/// A field the world sets on a walker's body for N10's shoulder turn: 1 while no other body pushes it (T9c).
+pub const F_SHOULDER: u64 = 44;
+/// A field the world sets on a walker's body when it routes it again (N10, T9c): `[count, [leg, ...]]`, each leg
+/// `[x, y, z]` or `[x, y, z, link]` (µm, then the link crossed at its end); a higher count than the walk last took
+/// is a new route, walked from its first leg.
+pub const F_ROUTE: u64 = 45;
+/// A field the world sets on a walker's body while it walks it out to legal ground (N10's last rung, T9c): 1. The
+/// walk stands meanwhile, and its mark is cleared.
+pub const F_HELD: u64 = 46;
 
 /// How a skill's step ended (rule 7).
 #[derive(Clone, Debug, PartialEq, Eq)]

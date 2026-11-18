@@ -1,5 +1,6 @@
-//! The walk skill's [`World`] over the engine as it stands: N5's map for routes and lines, N6's mover for steps, N4's
-//! links and door writer for crossings, all read from K2's tree.
+//! The world's side of walking over the engine as it stands: N5's map for routes and lines, N6's surfaces, N4's links
+//! and door writer for crossings, all read from K2's tree. It answers the walk skill's questions ([`View`]) and gives
+//! the controller its tracks ([`Links`]); it never moves a body.
 //!
 //! - **Legs.** The route (N5, a body with hands) from where the body stands to the goal; each link it crosses is a
 //!   leg's end, at the link's near end on the node the body stands on (N4, read with the open ground: a doorway
@@ -7,7 +8,8 @@
 //! - **The next corner.** The leg's end when a straight walk on the body's surface reaches it (N6's walk, on a copy of
 //!   the body), else the second point of the first line of the route from where it stands to the leg's end.
 //! - **A crossing.** At the near end: a shut door is asked to open and the opening written at the end of that tick
-//!   (N4's writer, the order as the cause and the walker as the Soul), and the body stands. Then it follows the
+//!   (N4's writer, the world as the cause and the walker as the Soul), and the body stands. Then the controller
+//!   carries it along the
 //!   link's line at its speed, never a longer step than speed times the tick, and stands on the far floor's surface
 //!   at the line's end. The line is followed in the frame of the node the body stands on: a body coming in from the
 //!   open ground follows it placed on the ground by the building's frame, and stands at the far end on the floor; a
@@ -15,9 +17,11 @@
 //! - **Turns** (N8). A link under 1.2 m wide is taken in turns (`crate::links::turns`): at the start of each tick
 //!   the marks of the last are read into each such link's facts (who waits at which end and how far from it, who is
 //!   inside and how far along, whether each end has room to step out into), and its owning node writes who may
-//!   enter. Without turns ([`Town::turns`] `None`) every link is free, as N7 walked them.
+//!   enter. Who is inside is every body the controller carries across the link, from the end it went in by and the
+//!   point it began at (recorded when the world gives its track). Without turns ([`Town::turns`] `None`) every link
+//!   is free, as N7 walked them.
 
-use super::{Leg, Mark, Pass, World, node_of};
+use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::scene::FLOOR;
 use crate::ground::{HUMAN_RADIUS, OpenGround, Scene};
@@ -28,13 +32,14 @@ use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map};
 use replica::effects::{Actor, Cause, Refusal};
 use replica::encode::Value;
-use replica::host::{Answer, Ask, F_GRANTED, F_TURNS, Near, Seen};
+use replica::host::{F_GRANTED, F_TURNS, Seen};
 use replica::ids::Id;
 use replica::pose::{ControllerInput, Mode, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
@@ -46,10 +51,8 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 /// How far a leg's end may lie off the ground and still be aimed at, mm: a link's end on its piece's edge.
 const AT_EDGE: i64 = 20;
 
-/// A crossing under way: the controller's track (none while a shut door is opened), the end it came in by, and where
-/// the body stood when it began.
+/// A crossing the controller carries: the end it went in by, and where the body stood when it began.
 struct Crossing {
-    track: Option<Track>,
     from: u8,
     start: Vec3,
 }
@@ -135,12 +138,6 @@ impl Town {
         })
     }
 
-    fn surface(&self, node: Id) -> Result<&Surface, Refusal> {
-        self.surfaces
-            .get(&node)
-            .ok_or_else(|| refusal("no-surface", show(node)))
-    }
-
     fn link(&self, id: Id) -> Option<&crate::links::Link> {
         self.building(id).and_then(|b| b.link(id))
     }
@@ -149,14 +146,26 @@ impl Town {
         self.buildings.iter().find(|b| b.link(link).is_some())
     }
 
-    /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm).
-    fn clear(&self, body: &Body, to: [i64; 2]) -> Result<bool, Refusal> {
-        let s = self.surface(node_of(body))?;
-        let p = body.pose.position;
-        // In one second, at the velocity that is the whole way: the controller's dry run, moving nothing.
-        let b = Controller::probe(s, body, walk([to[0] - p.x, to[1] - p.z]), 1_000_000, 0)?;
-        Ok([b.pose.position.x, b.pose.position.z] == to)
+    /// The town as the host's questions read it in a tick: the map behind a cell (a route is cached as it is
+    /// found), the rest shared.
+    pub fn view(&mut self) -> View<'_> {
+        View {
+            tree: &self.tree,
+            map: RefCell::new(&mut self.map),
+            surfaces: &self.surfaces,
+            buildings: &self.buildings,
+            turns: self.turns.as_ref(),
+        }
     }
+}
+
+/// The town as the walk skill's questions read it ([`Town::view`]).
+pub struct View<'a> {
+    pub tree: &'a Tree,
+    map: RefCell<&'a mut Map>,
+    surfaces: &'a BTreeMap<Id, Surface>,
+    buildings: &'a [Building],
+    turns: Option<&'a Turns>,
 }
 
 fn walk(v: [i64; 2]) -> ControllerInput {
@@ -179,11 +188,18 @@ impl World for Town {
             crossings,
             ..
         } = self;
+        // A crossing ends when the controller no longer carries the body.
+        let carried: BTreeSet<Id> = marks
+            .iter()
+            .filter(|m| m.crossing.is_some())
+            .map(|m| m.who)
+            .collect();
+        crossings.retain(|who, _| carried.contains(who));
         let Some(turns) = turns.as_mut() else {
             return Ok(());
         };
         // The links waited for, crossed, or with a state already.
-        let mut ids: std::collections::BTreeSet<Id> = marks
+        let mut ids: BTreeSet<Id> = marks
             .iter()
             .flat_map(|m| [m.waiting.map(|w| w.0), m.crossing])
             .flatten()
@@ -229,19 +245,6 @@ impl World for Town {
         Ok(())
     }
 
-    fn pass(&self, link: Id, who: Id) -> Pass {
-        let (Some(turns), Some(l)) = (self.turns.as_ref(), self.link(link)) else {
-            return Pass::Free;
-        };
-        if !narrow(l) {
-            Pass::Free
-        } else if turns.granted(l, who) {
-            Pass::Granted
-        } else {
-            Pass::Wait
-        }
-    }
-
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
         let here = node_of(body);
         let from = self
@@ -279,77 +282,38 @@ impl World for Town {
         });
         Ok(legs)
     }
-
-    fn corner(&mut self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
-        self.corner_of(body, to)
-    }
-    fn step(
-        &mut self,
-        body: &mut Body,
-        velocity: [i64; 2],
-        dt: Micros,
-        at: Micros,
-    ) -> Result<(), Refusal> {
-        // N7's crowd keeps its own bodies until T9c retires it: it steps them by the controller's dry run.
-        let s = self.surface(node_of(body))?;
-        *body = Controller::probe(s, body, walk(velocity), dt, at)?;
-        Ok(())
-    }
-
-    fn cross(
-        &mut self,
-        body: &mut Body,
-        link: Id,
-        order: Id,
-        speed: i64,
-        dt: Micros,
-        at: Micros,
-    ) -> Result<bool, Refusal> {
-        if self
-            .crossings
-            .get(&body.id)
-            .is_none_or(|c| c.track.is_none())
-        {
-            let (from, track) = self.track_of(body, link, Cause::Intent(order), speed, at)?;
-            let start = body.pose.position;
-            let stand = track.is_none();
-            self.crossings
-                .entry(body.id)
-                .and_modify(|c| c.track = track.clone())
-                .or_insert(Crossing { track, from, start });
-            if stand {
-                // Stand, open: the opening is written at the end of this tick and read the next.
-                body.linear = Vec3::ZERO;
-                return Ok(false);
-            }
-        }
-        // Along the line, at most speed times the tick: the controller's carry.
-        let c = self.crossings.get_mut(&body.id).expect("a crossing");
-        let t = c.track.as_mut().expect("a track");
-        if !t.advance(body, &self.surfaces, dt)? {
-            return Ok(false);
-        }
-        self.crossings.remove(&body.id);
-        Ok(true)
-    }
 }
 
-impl Town {
+impl View<'_> {
+    /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm).
+    fn clear(&self, body: &Body, to: [i64; 2]) -> Result<bool, Refusal> {
+        let node = node_of(body);
+        let s = self
+            .surfaces
+            .get(&node)
+            .ok_or_else(|| refusal("no-surface", show(node)))?;
+        let p = body.pose.position;
+        // In one second, at the velocity that is the whole way: the controller's dry run, moving nothing.
+        let b = Controller::probe(s, body, walk([to[0] - p.x, to[1] - p.z]), 1_000_000, 0)?;
+        Ok([b.pose.position.x, b.pose.position.z] == to)
+    }
+
     /// Where `body` aims next on its way to `to` (on the node it stands on), x and z µm: `to` when a straight walk
     /// reaches it, else the next corner of the line there.
-    pub fn corner_of(&mut self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
+    pub fn corner(&self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
         if self.clear(body, [to.x, to.z])? {
             return Ok([to.x, to.z]);
         }
         let node = node_of(body);
+        let mut map = self.map.borrow_mut();
         let (Some(from), Some(goal)) = (
-            self.map.spot_near(node, body.pose.position, AT_EDGE),
+            map.spot_near(node, body.pose.position, AT_EDGE),
             // A link's near end lies on its piece's edge, within the grid's rounding.
-            self.map.spot_near(node, to, AT_EDGE),
+            map.spot_near(node, to, AT_EDGE),
         ) else {
             return Err(refusal("off-ground", show(node)));
         };
-        let r = self.map.route(&self.tree, from, goal, HANDS)?;
+        let r = map.route(self.tree, from, goal, HANDS)?;
         // The first point of the line that is not where the body stands (the funnel may repeat a point).
         let c = r
             .first_line
@@ -361,6 +325,13 @@ impl Town {
         Ok([c[0] * 1000, c[1] * 1000])
     }
 
+    /// A link taken in turns as the walk reads it ([`Town::read_link`]).
+    pub fn read_link(&self, link: Id) -> Option<Seen> {
+        link_seen(self.turns, self.buildings, self.tree, link)
+    }
+}
+
+impl Town {
     /// The track across `link` for `body` from where it stands, at `speed`, and the end it goes in by. A shut door
     /// in the link is asked open and the opening written at once (`cause`, the body as the acting Soul), and there is
     /// no track yet: the body stands this tick and asks again the next (T1).
@@ -442,7 +413,7 @@ impl Town {
         Ok((
             near as u8,
             Some(Track {
-                link,
+                link: Some(link),
                 line,
                 speed,
                 to,
@@ -451,65 +422,29 @@ impl Town {
         ))
     }
 
-    /// The geometry answers and reads the walk skill asks of the world (T9b #3120), for `body`, with every body as
-    /// the controller holds it at the tick's start.
-    pub fn answer(&mut self, bodies: &Controller, body: Id, q: &Ask) -> Option<Answer> {
-        let me = bodies.body(body)?;
-        match q {
-            Ask::Distance { .. } => None,
-            Ask::Toward { to, .. } => self.corner_of(me, *to).ok().map(|[x, z]| {
-                Answer::Point(Vec3::new(
-                    x,
-                    if [x, z] == [to.x, to.z] { to.y } else { 0 },
-                    z,
-                ))
-            }),
-            Ask::Near { radius } => {
-                let (node, p) = (node_of(me), me.pose.position);
-                let r = i128::from(*radius);
-                Some(Answer::Near(
-                    bodies
-                        .bodies()
-                        .filter(|b| {
-                            b.id != body
-                                && bodies.carrying(b.id).is_none()
-                                && node_of(b) == node
-                                && {
-                                    let q = b.pose.position;
-                                    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-                                    d(p.x, q.x) + d(p.z, q.z) < r * r
-                                }
-                        })
-                        .map(|b| Near {
-                            id: b.id,
-                            position: b.pose.position,
-                            velocity: b.linear,
-                        })
-                        .collect(),
-                ))
-            }
-        }
-    }
-
     /// A link taken in turns as the walk skill reads it (T9b A3): [`F_TURNS`], and [`F_GRANTED`] the walker its
     /// owner lets in now. Any other link, or none, reads as free (`None`).
     pub fn read_link(&self, link: Id) -> Option<Seen> {
-        let (turns, l) = (self.turns.as_ref()?, self.link(link)?);
-        if !narrow(l) {
-            return None;
-        }
-        let mut fields = BTreeMap::from([(F_TURNS, Value::Uint(1))]);
-        if let Some(who) = turns.state(l).and_then(|s| s.granted) {
-            fields.insert(F_GRANTED, who.to_value());
-        }
-        Some(Seen {
-            id: link,
-            kind: self.tree.link(link)?.0.clone(),
-            parent: None,
-            position: Vec3::ZERO,
-            fields,
-        })
+        link_seen(self.turns.as_ref(), &self.buildings, &self.tree, link)
     }
+}
+
+fn link_seen(turns: Option<&Turns>, buildings: &[Building], tree: &Tree, link: Id) -> Option<Seen> {
+    let l = buildings.iter().find_map(|b| b.link(link))?;
+    if !narrow(l) {
+        return None;
+    }
+    let mut fields = BTreeMap::from([(F_TURNS, Value::Uint(1))]);
+    if let Some(who) = turns?.state(l).and_then(|s| s.granted) {
+        fields.insert(F_GRANTED, who.to_value());
+    }
+    Some(Seen {
+        id: link,
+        kind: tree.link(link)?.0.clone(),
+        parent: None,
+        position: Vec3::ZERO,
+        fields,
+    })
 }
 
 impl Links for Town {
@@ -521,6 +456,11 @@ impl Links for Town {
         at: Micros,
     ) -> Result<Option<Track>, Refusal> {
         // The world opens a shut door for the walker: its own rule, the walker as the acting Soul.
-        Ok(self.track_of(body, link, Cause::World, speed, at)?.1)
+        let (from, track) = self.track_of(body, link, Cause::World, speed, at)?;
+        if track.is_some() {
+            let start = body.pose.position;
+            self.crossings.insert(body.id, Crossing { from, start });
+        }
+        Ok(track)
     }
 }

@@ -15,6 +15,9 @@
 //! - **Along an edge.** The mover cuts a step at the ground's edge and does not slide. A step that left the body where
 //!   it was is tried next tick turned by 45 and then 70 degrees, either way (N7 tried them in the same tick on a copy;
 //!   through the host the skill sees each result a tick later, T1).
+//! - **N10's ladder** (T9c #3127) reaches the walk by fields the world sets on its body: [`F_SHOULDER`] (no body
+//!   pushes it), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
+//!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended.
 //!
 //! Integers only: µm, µm a second, µs.
 
@@ -22,7 +25,8 @@ use replica::bodies::{Class, SkillShape, Want};
 use replica::effects::{Change, read_id};
 use replica::encode::{Name, Value};
 use replica::host::{
-    Answer, Ask, F_CROSSING, F_GRANTED, F_TURNS, F_WAITING, Host, Near, Progress, Skill,
+    Answer, Ask, F_CROSSING, F_GRANTED, F_HELD, F_ROUTE, F_SHOULDER, F_TURNS, F_WAITING, Host,
+    Near, Progress, Skill,
 };
 use replica::ids::Id;
 use replica::pose::{ControllerInput, Mode, Vec3};
@@ -72,8 +76,8 @@ pub struct Route {
     pub tick: Micros,
     /// The leg walked now.
     pub leg: usize,
-    /// No body pushes it (N10's shoulder turn).
-    pub shoulder: bool,
+    /// The count of the last route the world gave it ([`F_ROUTE`]); 0 for the legs it started with.
+    route: u64,
     crossing: Option<Crossing>,
     /// The mark last set on the body.
     waiting: Option<(Id, i64)>,
@@ -88,7 +92,7 @@ impl Route {
             speed,
             tick,
             leg: 0,
-            shoulder: false,
+            route: 0,
             crossing: None,
             waiting: None,
             last: None,
@@ -118,6 +122,32 @@ fn read_int(v: &Value) -> Option<i64> {
         Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
         _ => None,
     }
+}
+
+/// A route the world gave the body ([`F_ROUTE`]): its count and legs.
+fn route_of(me: &replica::host::Seen) -> Option<(u64, Vec<Leg>)> {
+    let Value::Array(a) = me.fields.get(&F_ROUTE)? else {
+        return None;
+    };
+    let [Value::Uint(n), Value::Array(legs)] = a.as_slice() else {
+        return None;
+    };
+    let mut out = Vec::new();
+    for l in legs {
+        let Value::Array(l) = l else { return None };
+        let (to, link) = l.split_at_checked(3)?;
+        let [x, y, z] = to else { return None };
+        let link = match link {
+            [] => None,
+            [k] => Some(read_id(k).ok()?),
+            _ => return None,
+        };
+        out.push(Leg {
+            to: Vec3::new(read_int(x)?, read_int(y)?, read_int(z)?),
+            link,
+        });
+    }
+    Some((*n, out))
 }
 
 /// A body's waiting mark, `[link, distance]`, or none.
@@ -230,6 +260,19 @@ impl Skill for Route {
         let Some(me) = host.read(body) else {
             return Progress::Failed(name("souls:body-gone"));
         };
+        // A new route from the world (N10's reroute): walked from its first leg.
+        if let Some((n, legs)) = route_of(&me)
+            && n > self.route
+        {
+            (self.route, self.legs, self.leg) = (n, legs, 0);
+            (self.crossing, self.last) = (None, None);
+        }
+        // Held while the world walks it out: it stands, unmarked.
+        if me.fields.contains_key(&F_HELD) {
+            self.mark(host, body, None);
+            return Progress::Going;
+        }
+        let shoulder = me.fields.contains_key(&F_SHOULDER);
         let Some(leg) = self.legs.get(self.leg).copied() else {
             return Progress::Done;
         };
@@ -311,7 +354,7 @@ impl Skill for Route {
         };
         // Those waiting at a narrow place make way: they push only others waiting.
         let mut pushers: Vec<(Near, i64)> = Vec::new();
-        if !self.shoulder {
+        if !shoulder {
             for n in &near {
                 if wait || mark_of(host, n.id).is_none() {
                     pushers.push((*n, dist(n)));
