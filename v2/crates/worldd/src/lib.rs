@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod answers;
+pub mod bodies;
 pub mod checkers;
 pub mod measures;
 pub mod view_out;

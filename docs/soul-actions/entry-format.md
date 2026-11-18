@@ -233,7 +233,12 @@ Delivering to viewers is the new engine's view tier. Point and slot names share 
 feeds Engine v2 K3, E2, E3 and B3). Every place is whole millimetres in the thing's own frame: the origin at the centre
 of its footprint on the ground, x to its right, y up, z to its front. `bounds_mm` is [width, height, depth], so x runs
 from -width/2 to width/2, y from 0 to height, z from -depth/2 to depth/2. A point is a name, a `role` (`grip`, `contact`
-for a button or switch, `outlet` for a spout, `stand` for where a body stands), a position and an optional `yaw_mdeg`.
+for a button or switch, `outlet` for a spout, `stand` for where a body stands, `joint` for a connector), a position and
+an optional `yaw_mdeg`. A `joint` point is where a part joins another (Engine v2 B17,
+[#3338](https://github.com/soulsimulation/souls/issues/3338)): it names its `connector` kind and the kind it `mates`
+with (a rack beam's `beam_end` mates with an upright's `beam_seat`); no other point names either. The joint itself is a
+link (section 4), never a parent: a beam seated between two uprights is a child of its bay
+(`content/kinds/construction/`).
 A point or slot more than 100 mm outside the bounds is refused (a handle may stand proud of the box); a `stand` point
 may lie up to 2000 mm outside, within a body's reach of the thing. A kind with any point (other than a stand) or slot
 declares its bounds.

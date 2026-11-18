@@ -48,10 +48,10 @@ export function start(home, soul, pkg = DEFAULT_PKG) {
 }
 
 /** Sends `req` to the Soul's daemon, starting it first if none answers. */
-export async function call(home, soul, req, { pkg = DEFAULT_PKG, within = 5000 } = {}) {
+export async function call(home, soul, req, { pkg = DEFAULT_PKG, within = 5000, ms = 5000 } = {}) {
   const rt = runtimeOf(home, soul);
   try {
-    return await request(rt.socket, req);
+    return await request(rt.socket, req, ms);
   } catch (e) {
     if (!['ENOENT', 'ECONNREFUSED'].includes(e.code)) throw e;
   }
@@ -59,7 +59,7 @@ export async function call(home, soul, req, { pkg = DEFAULT_PKG, within = 5000 }
   const until = Date.now() + within;
   for (;;) {
     try {
-      return { ...(await request(rt.socket, req)), started: true };
+      return { ...(await request(rt.socket, req, ms)), started: true };
     } catch (e) {
       if (!['ENOENT', 'ECONNREFUSED'].includes(e.code) || Date.now() > until) throw e;
       await new Promise((r) => setTimeout(r, 25));
