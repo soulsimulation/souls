@@ -295,13 +295,15 @@ impl Ladder {
                 self.reroute(runner, town, who);
             }
         }
+        // Who runs, taken once (each walker below changes only its own run, after it is read).
+        let running = runner.running_bodies();
         // Still bodies, as they stand now: no order (arrived, or ended by name), not staying, not walking out.
         let still: Vec<(Id, Id, Vec3)> = runner
             .controller
             .bodies()
             .filter(|b| {
                 !runner.staying.contains(&b.id)
-                    && !runner.running(b.id)
+                    && !running.contains(&b.id)
                     && !self.outs.contains(&b.id)
             })
             .map(|b| (b.id, node_of(b), b.pose.position))
@@ -319,7 +321,7 @@ impl Ladder {
                 w.leg += 1;
             }
             w.carried = carried;
-            if !runner.running(who)
+            if !running.contains(&who)
                 || self.outs.contains(&who)
                 || runner.staying.contains(&who)
                 || carried

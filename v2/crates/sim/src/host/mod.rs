@@ -463,6 +463,8 @@ struct Here<'a> {
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
     grid: &'a BTreeMap<(Id, i64, i64), Vec<Near>>,
     settled: BTreeSet<Id>,
+    /// A body's kind, named once a tick, not at each read (#3213).
+    kind: Name,
 }
 
 impl Geometry for Here<'_> {
@@ -488,11 +490,11 @@ impl Geometry for Here<'_> {
     }
 
     fn read(&self, node: Id) -> Option<Seen> {
-        let Some(b) = self.controller.body(node) else {
+        let Some((b, carrying)) = self.controller.seen(node) else {
             return self.town.read_link(node);
         };
         let mut fields = self.fields.get(&node).cloned().unwrap_or_default();
-        if let Some(l) = self.controller.carrying(node) {
+        if let Some(l) = carrying {
             fields.insert(F_CROSSING, l.to_value());
         }
         if self.settled.contains(&node) {
@@ -500,7 +502,7 @@ impl Geometry for Here<'_> {
         }
         Some(Seen {
             id: node,
-            kind: body_kind(),
+            kind: self.kind.clone(),
             parent: Some(node_of(b)),
             position: b.pose.position,
             fields,
@@ -521,9 +523,10 @@ fn near(
     let r = i128::from(radius);
     let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
     let mut out = Vec::new();
+    // A row of cells is one range of the grid's keys (node, i, then j): one search a row, not one a cell (#3213).
     for di in -k..=k {
-        for dj in -k..=k {
-            for n in grid.get(&(node, i + di, j + dj)).into_iter().flatten() {
+        for (_, cell) in grid.range((node, i + di, j - k)..=(node, i + di, j + k)) {
+            for n in cell {
                 if n.id != body && d(at.x, n.position.x) + d(at.z, n.position.z) < r * r {
                     out.push(*n);
                 }
@@ -634,6 +637,11 @@ impl Runner {
         self.runs.iter().any(|r| r.body == body)
     }
 
+    /// The bodies a skill runs on: [`Runner::running`] for many bodies at once, without a scan of the runs each.
+    pub fn running_bodies(&self) -> BTreeSet<Id> {
+        self.runs.iter().map(|r| r.body).collect()
+    }
+
     /// The world ends `body`'s run by `name` (N10's last rung): its driver ends, and its walk's marks go.
     pub fn end(&mut self, body: Id, name: Name) {
         let Some(k) = self.runs.iter().position(|r| r.body == body) else {
@@ -679,7 +687,11 @@ impl Runner {
     }
 
     fn index(&mut self) {
-        self.grid.clear();
+        // The cells are emptied and kept, not dropped, and the ones left empty go after: no cell is allocated again
+        // each tick (#3213).
+        for cell in self.grid.values_mut() {
+            cell.clear();
+        }
         for b in self.controller.bodies() {
             if self.controller.carrying(b.id).is_some() {
                 continue;
@@ -694,6 +706,7 @@ impl Runner {
                     velocity: b.linear,
                 });
         }
+        self.grid.retain(|_, cell| !cell.is_empty());
     }
 
     /// One tick over `town`: the marks read for the turns, every skill stepped against the bodies as they stood at
@@ -728,10 +741,11 @@ impl Runner {
         town.turns(&marks, at)?;
         town.spots(&marks, at)?;
         // A walk sent to a point gets its route once its place is granted; a refusal ends it by name.
+        let running = self.running_bodies();
         let waiting: Vec<(Id, Target)> = self
             .asks
             .iter()
-            .filter(|(who, _)| self.running(**who) && !self.granted.contains_key(who))
+            .filter(|(who, _)| running.contains(*who) && !self.granted.contains_key(who))
             .map(|(who, (t, _))| (*who, *t))
             .collect();
         for (who, target) in waiting {
@@ -766,6 +780,7 @@ impl Runner {
                 fields: &self.fields,
                 grid: &self.grid,
                 settled,
+                kind: body_kind(),
             };
             step(
                 tree,

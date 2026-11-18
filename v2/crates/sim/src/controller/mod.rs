@@ -404,6 +404,13 @@ impl Controller {
         Ok(())
     }
 
+    /// `body` as the mover last left it, and the link it is being carried across, if any: [`Controller::body`] and
+    /// [`Controller::carrying`] in one lookup.
+    pub fn seen(&self, body: Id) -> Option<(&Moved, Option<Id>)> {
+        let s = self.bodies.get(&body)?;
+        Some((&s.moved, s.track.as_ref().and_then(|t| t.link)))
+    }
+
     /// The link `body` is being carried across, if any.
     pub fn carrying(&self, body: Id) -> Option<Id> {
         self.bodies.get(&body)?.track.as_ref().and_then(|t| t.link)

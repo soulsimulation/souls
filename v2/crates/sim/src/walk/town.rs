@@ -119,6 +119,30 @@ pub struct Town {
     /// Each walker's line of corners (#3167), kept from the search that found it.
     lines: BTreeMap<Id, Line>,
     crossings: BTreeMap<Id, Crossing>,
+    /// Where each link is in `buildings` (building, link), the first that holds it: read every tick by each walker
+    /// with a link ahead, so not searched for (#3213).
+    link_at: BTreeMap<Id, (usize, usize)>,
+}
+
+/// Where each link is in `buildings`: the first building, and its first link, with that id.
+fn link_index(buildings: &[Building]) -> BTreeMap<Id, (usize, usize)> {
+    let mut at = BTreeMap::new();
+    for (i, b) in buildings.iter().enumerate() {
+        for (j, l) in b.links.iter().enumerate() {
+            at.entry(l.id).or_insert((i, j));
+        }
+    }
+    at
+}
+
+/// Link `id` in `buildings`, by the index [`link_index`] made of them.
+fn find_link<'b>(
+    link_at: &BTreeMap<Id, (usize, usize)>,
+    buildings: &'b [Building],
+    id: Id,
+) -> Option<&'b crate::links::Link> {
+    let &(i, j) = link_at.get(&id)?;
+    buildings.get(i)?.links.get(j).filter(|l| l.id == id)
 }
 
 impl Town {
@@ -176,12 +200,14 @@ impl Town {
             doors: &gdoors,
         };
         buildings.push(Building::of_ground(&tree, open, &known)?);
+        let link_at = link_index(&buildings);
         Ok(Town {
             tree,
             ground,
             map,
             surfaces,
             buildings,
+            link_at,
             doors,
             turns: Some(Turns::new()),
             spots: Spots::new(),
@@ -193,7 +219,7 @@ impl Town {
     }
 
     fn link(&self, id: Id) -> Option<&crate::links::Link> {
-        self.building(id).and_then(|b| b.link(id))
+        find_link(&self.link_at, &self.buildings, id)
     }
 
     fn building(&self, link: Id) -> Option<&Building> {
@@ -208,6 +234,7 @@ impl Town {
             map: RefCell::new(&mut self.map),
             surfaces: &self.surfaces,
             buildings: &self.buildings,
+            link_at: &self.link_at,
             turns: self.turns.as_ref(),
             meter: self.meter,
             spent: &self.spent,
@@ -223,6 +250,7 @@ pub struct View<'a> {
     map: RefCell<&'a mut Map>,
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
+    link_at: &'a BTreeMap<Id, (usize, usize)>,
     turns: Option<&'a Turns>,
     meter: Option<fn() -> u64>,
     spent: &'a Cell<Spent>,
@@ -431,6 +459,7 @@ impl World for Town {
             turns,
             buildings,
             crossings,
+            link_at,
             ..
         } = self;
         // A crossing ends when the controller no longer carries the body.
@@ -451,7 +480,7 @@ impl World for Town {
             .collect();
         ids.extend(turns.owners.values().flat_map(|m| m.keys().copied()));
         for id in ids {
-            let Some(l) = buildings.iter().find_map(|b| b.link(id)) else {
+            let Some(l) = find_link(link_at, buildings, id) else {
                 continue;
             };
             if !narrow(l) {
@@ -685,7 +714,7 @@ impl View<'_> {
 
     /// A link taken in turns as the walk reads it ([`Town::read_link`]).
     pub fn read_link(&self, link: Id) -> Option<Seen> {
-        link_seen(self.turns, self.buildings, self.tree, link)
+        link_seen(self.turns, self.link_at, self.buildings, self.tree, link)
     }
 }
 
@@ -804,7 +833,13 @@ impl Town {
     /// A link taken in turns as the walk skill reads it (T9b A3): [`F_TURNS`], and [`F_GRANTED`] the walker its
     /// owner lets in now. Any other link, or none, reads as free (`None`).
     pub fn read_link(&self, link: Id) -> Option<Seen> {
-        link_seen(self.turns.as_ref(), &self.buildings, &self.tree, link)
+        link_seen(
+            self.turns.as_ref(),
+            &self.link_at,
+            &self.buildings,
+            &self.tree,
+            link,
+        )
     }
 
     /// Where a crossing stands a body on `node` for the point `at` (µm, its frame): `at` when the mover's surface
@@ -821,8 +856,14 @@ impl Town {
     }
 }
 
-fn link_seen(turns: Option<&Turns>, buildings: &[Building], tree: &Tree, link: Id) -> Option<Seen> {
-    let l = buildings.iter().find_map(|b| b.link(link))?;
+fn link_seen(
+    turns: Option<&Turns>,
+    link_at: &BTreeMap<Id, (usize, usize)>,
+    buildings: &[Building],
+    tree: &Tree,
+    link: Id,
+) -> Option<Seen> {
+    let l = find_link(link_at, buildings, link)?;
     if !narrow(l) {
         return None;
     }
