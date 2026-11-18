@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671; `timers`: K9, #2672."
 
 [[bin]]
 name = "tree"
@@ -28,6 +28,10 @@ path = "src/frozen.rs"
 name = "commit-cost"
 path = "commit-cost/main.rs"
 
+[[bin]]
+name = "timers"
+path = "src/timers.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 gatewayd = { path = "../../crates/gatewayd" }
@@ -36,3 +40,6 @@ worldd = { path = "../../crates/worldd" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+# The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
+testworld = { path = "../testworld" }
+import-eden = { path = "../import-eden" }

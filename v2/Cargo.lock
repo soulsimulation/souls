@@ -69,9 +69,13 @@ version = "0.0.0"
 dependencies = [
  "futures-util",
  "gatewayd",
+ "import-eden",
  "replica",
+ "sim",
+ "testworld",
  "tokio",
  "tokio-tungstenite",
+ "worldd",
 ]
 
 [[package]]
@@ -91,6 +95,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "body-script"
+version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
 ]
 
 [[package]]
@@ -385,6 +397,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
+name = "log-crash"
+version = "0.0.0"
+dependencies = [
+ "sim",
+]
+
+[[package]]
 name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -539,6 +558,7 @@ dependencies = [
  "i_triangle",
  "import-eden",
  "replica",
+ "skills",
  "testworld",
 ]
 

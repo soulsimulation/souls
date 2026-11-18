@@ -2,15 +2,18 @@
 #![forbid(unsafe_code)]
 
 pub mod clock;
+pub mod commit;
+pub mod controller;
+pub mod frozen;
 pub mod ground;
+pub mod host;
 pub mod links;
 pub mod log;
 pub mod mover;
 pub mod routes;
+pub mod timers;
 pub mod unstick;
 pub mod walk;
-pub mod commit;
-pub mod frozen;
 
 #[cfg(test)]
 mod tests {
