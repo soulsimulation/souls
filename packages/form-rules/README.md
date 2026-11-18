@@ -105,6 +105,14 @@ on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.
 actor to the thing. Effects are worked out in order on a copy, so a later one sees an earlier one; one that cannot be
 done refuses the whole form with `{verdict: "no", reason, effect, detail}`.
 
+A stock's take (an entry's `stock` section names the form, [#2851](https://github.com/soulsimulation/souls/issues/2851))
+is one event: its `create` into `actor_hand`, marked `stock: <name>` (and `carries`, the text fields the thing
+carries by reference), and a `set` of the count with `by: -1`. The make is the other side of that `by`, so `apply`
+counts it and the event balances. A take from an empty stock is refused `empty`, and from a container whose `closed`
+audience does not include the actor (not linked by the link it names) `closed`, each as `{verdict: "no", reason,
+effect, detail}` before the rules are asked. `stockList(kinds, state, node)` answers what a container is known to
+hold, or `null` while it is closed to the actor; a case may name such reads in `lists`.
+
 `apply(state, result)` applies a result to plain state, all of it or none: a refusal changes nothing; a receipt
 already in `state.applied` changes nothing and says `again: true`; an event whose `by`s do not sum to zero, or a
 change that cannot apply or a value outside the profile, refuses the batch with its index.
