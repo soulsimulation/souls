@@ -56,7 +56,11 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 8. **A checked act gets a receipt or a refusal.** A receipt is `{1: actor, 2: sequence, 3: 1, 4: intent id, 5: [log
    sequence, ...]}`, naming the entries that carried it out (one act may be several, since each entry writes one
    node). A refusal is `{.., 3: 2, 4: reason, 5: version now, 6: [node, ...]}`, naming what changed since its basis
-   (6 left out when empty). Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
+   (6 left out when empty). A checked act's refusal also repairs the actor's copy for the nodes the check read (I6,
+   `worldd/src/checkers/refusal.rs`): 7, the candidate it speaks of, by its rank in the act's list; 8, `[[id, stamp,
+   state], ...]`, each read node changed since the basis, as its hash covers it; or, when 8 would pass 2,048 bytes,
+   9, `[[id, stamp, hash], ...]` in its place. A node outside the actor's audience is left out of 6, 8 and 9, and of
+   a node it sees, only the links it sees are carried. 10 is left for E16. Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
    ends later (done, failed, timed out) is I4's.
 9. **A move inside a joint activity is accepted, then resolved:** `{.., 3: 3, 4: intent id}`, then `{.., 3: 4, 4:
    outcome}`; a miss is an outcome, not a refusal. Its parameter may name one of the activity's next beats, at most
