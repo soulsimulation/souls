@@ -9,6 +9,9 @@
 //! biggest tick committed, that tick's work and how late the next tick started. Run from `v2/`:
 //! `cargo run -p bench --release --bin commit-cost`. Declared on #2686.
 
+// A bench times runs with the wall clock; the wall-clock rule (K7, v2/clippy.toml) is for the engine, not a bench.
+#![allow(clippy::disallowed_methods)]
+
 use sim::commit::{Outcome, checks_on_clock, commit, mark_clock_thread};
 use sim::frozen::Publisher;
 use std::sync::Arc;
