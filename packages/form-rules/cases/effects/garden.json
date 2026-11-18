@@ -137,7 +137,16 @@
                 "to": {
                   "node": "b1",
                   "hand": "left"
-                }
+                },
+                "stock": "logs"
+              },
+              {
+                "change": "set",
+                "node": "f1",
+                "field": "logs",
+                "n": 1,
+                "to": 10,
+                "by": -1
               }
             ],
             "events": [
@@ -145,7 +154,8 @@
                 "event": "eden:log_taken",
                 "node": "f1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               }
             ],
@@ -173,7 +183,7 @@
                 "node": "f1",
                 "field": "logs",
                 "n": 1,
-                "to": 12
+                "to": 11
               }
             ],
             "events": [
