@@ -1,11 +1,17 @@
-//! The world process (Engine v2, #2635): so far its clock and watchdog (K7, #2647), and what it tells its service
-//! manager (O1, #2730).
+//! The world process (Engine v2, #2635): so far its clock and watchdog (K7, #2647), what it tells its service
+//! manager (O1, #2730), and the fork request (K6, #2670).
 
+mod fork;
+mod gateway_link;
 mod watchdog;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    std::process::exit(watchdog::run(&args));
+    match args.get(1).map(String::as_str) {
+        Some("fork") => std::process::exit(fork::run(&args)),
+        Some("gateway-link") => std::process::exit(gateway_link::run(&args)),
+        _ => std::process::exit(watchdog::run(&args)),
+    }
 }
 
 /// Tells the service manager `state` over the socket `$NOTIFY_SOCKET` names (systemd's notify protocol); nothing
