@@ -31,6 +31,7 @@ pub mod speech;
 pub mod stream;
 pub mod sync;
 pub mod time;
+pub mod timed;
 pub mod tree;
 pub mod views;
 pub mod walk;
