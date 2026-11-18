@@ -11,6 +11,12 @@
 //     {"op":"act","verb":"..."}  builds the next intent and sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
 //     {"op":"stop"}              ends the process
+//   and R7's (#2701), each answer ending with `at` (the copy's version) and `changed` (what changed since the answer
+//   before, by name, capped, the rest counted), the copy brought current first:
+//     {"op":"look"}                       the brief (`../brief/brief.mjs`)
+//     {"op":"find","words":"..."}         one search over the copy (`../find/find.mjs`)
+//     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks
+//     {"op":"wait","seconds":30}          returns when something addressed to this Soul happened, or at the timeout
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it). Every frame is built and read by replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
@@ -27,6 +33,9 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
+import { brief, changedBlock } from '../brief/brief.mjs';
+import { changedBetween, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { find } from '../find/find.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 const EVENTS_KEPT = 1000;
@@ -95,7 +104,13 @@ const copy = new wire.Copy(); // its scope, by hash (R5b)
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
 const syncs = []; // the last syncs: kind, time and R5's counts
 let syncing = null, asked = 0; // the sync under way: its request's number, step, kind and start
-const note = (e) => { events.push(e); if (events.length > EVENTS_KEPT) events.shift(); };
+let wakers = []; // `wait`s waiting for something addressed to this Soul
+const note = (e) => {
+  events.push(e);
+  if (events.length > EVENTS_KEPT) events.shift();
+  if (e.kind !== 'synced') for (const w of wakers.splice(0)) w();
+};
+let copyVersion = null, copyAt = 0, shown = new Map(); // the copy's version and time, and the rows the last answer saw
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
 let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now();
@@ -117,7 +132,7 @@ function current() {
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
-  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null };
+  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: [] };
   syncing.timer = setTimeout(() => { log('sync: no answer; reconnecting'); sock.close(); }, SYNC_WITHIN);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
 }
@@ -132,9 +147,15 @@ function syncAnswer(sock, n, refused, bytes) {
   if (next.length > 0) { syncing.step = 'records'; sock.send(next); return; }
   const done = { kind: syncing.kind, ms: Math.round(performance.now() - syncing.t0), ...JSON.parse(copy.finish()) };
   clearTimeout(syncing.timer);
-  state.cursor = syncing.version; // the stream carries on from the version the hashes are at
-  save();
+  copyVersion = syncing.version;
+  copyAt = Date.now();
+  const { waiters } = syncing;
   syncing = null;
+  for (const w of waiters) w(true);
+  // A refresh (R7) brings the copy current for an answer; the stream's cursor stays the last frame it was given.
+  if (done.kind === 'refresh') return;
+  state.cursor = copyVersion; // the stream carries on from the version the hashes are at
+  save();
   syncs.push(done);
   if (syncs.length > SYNCS_KEPT) syncs.shift();
   log(`synced (${done.kind}): ${done.fetched} of ${done.held} records in ${done.rounds} rounds, ${done.got} B, ${done.ms} ms`);
@@ -186,7 +207,7 @@ function connect() {
   sock.onclose = (ev) => {
     if (ws === sock) {
       ws = null; signedIn = false;
-      if (syncing) { clearTimeout(syncing.timer); syncing = null; }
+      if (syncing) { clearTimeout(syncing.timer); for (const w of syncing.waiters) w(false); syncing = null; }
     }
     if (stopping) return;
     counts.drops++;
@@ -200,7 +221,30 @@ function connect() {
 }
 
 // --- Commands on the Unix socket --------------------------------------------------------------------------------
-function answer(req) {
+/** The copy brought current through the gateway (a sync under way is waited for); false if it could not be. */
+function refresh() {
+  if (syncing) return new Promise((ok) => syncing.waiters.push(ok));
+  if (!ws || !signedIn) return Promise.resolve(false);
+  startSync(ws, 'refresh');
+  return new Promise((ok) => syncing.waiters.push(ok));
+}
+
+/**
+ * Ends an answer with the copy's version and what changed since the answer before, the copy brought current first
+ * unless `now` (an act answers at once, from the copy as it is).
+ */
+async function closing(out, f, { now = false } = {}) {
+  // A gateway that does not answer leaves the copy as it is, and the answer says it is stale.
+  const current = now ? signedIn && !syncing : await Promise.race([refresh(), new Promise((ok) => setTimeout(ok, REFRESH_WITHIN, false))]);
+  const rows = rowsOf(copy), changes = changedBetween(shown, rows);
+  shown = rows;
+  return { ...out, ...(f ? f(rows, changes) : {}), at: sequenceOf(copyVersion), ...(current ? {} : { stale: true }), changed: changedBlock(changes) };
+}
+
+const ME = `${seat.grant.scope}-${seat.grant.counter}`;
+const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
+
+async function answer(req) {
   switch (req.op) {
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
@@ -211,13 +255,32 @@ function answer(req) {
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since,
       };
     }
+    case 'look': return closing({ ok: true }, (rows, changes) => {
+      const b = brief(rows, { me: ME, changes, ageMs: Date.now() - copyAt });
+      delete b.changed; // the answer's own closes it
+      return b;
+    });
+    case 'find': return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50) }));
+    case 'wait': {
+      const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000;
+      if (!events.some((e) => e.kind !== 'synced')) {
+        await new Promise((ok) => { const t = setTimeout(ok, ms); wakers.push(() => { clearTimeout(t); ok(); }); });
+      }
+      const got = events.splice(0);
+      return closing({ ok: true, events: got, ...(got.some((e) => e.kind !== 'synced') ? {} : { timedOut: true }) });
+    }
     case 'act': {
+      const ranked = (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(String);
+      if (ranked.length === 0 || ranked.length > ACT_MOST || ranked.some((v) => !v || /\s/.test(v))) {
+        return { ok: false, code: 'act-ranked-list', detail: `one to ${ACT_MOST} verbs, best first` };
+      }
       state.sequence++;
-      const bytes = wire.wireIntent(scope, seat.grant.counter, String(req.verb ?? ''), BigInt(state.sequence),
+      const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
         state.cursor ? unhex(state.cursor) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER));
       save();
-      if (signedIn) send(bytes, state.sequence); else queued.push({ bytes, sequence: state.sequence });
-      return { ok: true, sequence: state.sequence, sent: signedIn };
+      const sequence = state.sequence, sent = signedIn;
+      if (signedIn) send(bytes, sequence); else queued.push({ bytes, sequence });
+      return closing({ ok: true, sequence, sent }, null, { now: true });
     }
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stop': setImmediate(stop); return { ok: true };
@@ -232,9 +295,9 @@ const server = createServer((c) => {
     for (let k; (k = buf.indexOf('\n')) >= 0;) {
       const line = buf.slice(0, k);
       buf = buf.slice(k + 1);
-      let out;
-      try { out = answer(JSON.parse(line)); } catch (e) { out = { ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }; }
-      c.write(JSON.stringify(out) + '\n');
+      Promise.resolve().then(() => answer(JSON.parse(line)))
+        .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
+        .then((out) => { if (!c.destroyed) c.write(JSON.stringify(out) + '\n'); });
     }
   });
   c.on('error', () => {});

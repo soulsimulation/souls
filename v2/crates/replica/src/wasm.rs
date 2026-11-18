@@ -16,7 +16,7 @@ use crate::apply::Replica;
 use crate::effects::Actor;
 use crate::encode::{Name, Value, decode, encode, to_hex};
 use crate::ids::{Id, Scope, Version};
-use crate::intents::{Hello, Intent, PROTOCOL};
+use crate::intents::{Fallback, Hello, Intent, PROTOCOL};
 use crate::sync::{Copy, Descent, read_hashes, read_records, wire};
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::{JsError, wasm_bindgen};
@@ -133,7 +133,8 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     Ok(format!("answer {sequence} {version}"))
 }
 
-/// A Soul's intent with no target or parameters, decided against `basis` (a version's bytes; empty for the zero
+/// A Soul's intent with no target or parameters, `verb` a ranked list of verbs split by spaces (the rest are its
+/// fallbacks, R7), decided against `basis` (a version's bytes; empty for the zero
 /// version) and expiring at `expiry` world microseconds; read back as the world reads it.
 #[wasm_bindgen(js_name = wireIntent)]
 pub fn wire_intent(
@@ -160,16 +161,30 @@ pub fn wire_intent(
         .to_value(),
         b => decode(b).map_err(js)?.value,
     };
+    let mut ranked = verb
+        .split(' ')
+        .map(|v| Name::new(v).ok_or_else(|| JsError::new("verb-not-a-name")));
+    let verb = ranked
+        .next()
+        .ok_or_else(|| JsError::new("verb-not-a-name"))??;
+    let fallbacks = ranked.map(|v| {
+        v.map(|verb| Fallback {
+            verb,
+            target: None,
+            parameters: BTreeMap::new(),
+            resources: Vec::new(),
+        })
+    });
     let intent = Intent {
         actor: Actor::Soul(id),
-        verb: Name::new(verb).ok_or_else(|| JsError::new("verb-not-a-name"))?,
+        verb,
         target: None,
         parameters: BTreeMap::new(),
         sequence,
         basis,
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
         resources: Vec::new(),
-        fallbacks: Vec::new(),
+        fallbacks: fallbacks.collect::<Result<_, _>>()?,
         replaces: None,
         body: None,
     };
@@ -279,6 +294,13 @@ impl WasmCopy {
             s.held,
             self.copy.held_bytes()
         ))
+    }
+
+    /// The record a hash names (hex), if held (R7 reads the copy through it).
+    pub fn record(&self, hash: &str) -> Option<Vec<u8>> {
+        self.copy
+            .record(&crate::encode::from_hex(hash).ok()?)
+            .map(<[u8]>::to_vec)
     }
 
     /// Each scope node's hash, as JSON `{"<id's bytes hex>": "<hash hex>"}`.
