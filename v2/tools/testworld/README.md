@@ -25,6 +25,8 @@ layout is in the module doc of `src/lib.rs`):
 | The ring: solid middle 22 m across, walkway 4 m wide | `ring`, `ring.walkway` (a closed line with its width) |
 | The building, turned 33 degrees: rooms `r0a`–`r0d`, `r1a`–`r1d`, the `corridor`; the stair from floor 0 to 1, the ladder from 1 to the roof (floor 2) | `building`, `building/floor-{0,1,2}`, `building/<room>` |
 | Twelve doors, all shut | `door-<thing>-<doorway>`, e.g. `door-building-narrow` (0.9 m, top of the stair), `door-hall-side` (0.9 m, square to the axes) |
+| The yard, 12 m by 8 m, east of the square and south of the ring: a frame stand holding two 8 ft rack frames standing in its slots, four 9 ft rack beams lying loose (B17, #3338; sizes from `content/kinds/construction/`) | `yard` (a place), `yard-stand`, `yard-frame-{1,2}`, `yard-beam-{1..4}` |
+| The build site, a clear 6 m square 25 m east of the yard | `site` (a place) |
 | `--things N` small boxes on a seeded lattice in the rooms, the hall and the square | `box-00001` … |
 
 Tests (`cargo test -p testworld`): every part and size read back from the tree, the same seed giving the same bytes,
