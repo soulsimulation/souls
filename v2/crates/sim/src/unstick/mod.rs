@@ -167,6 +167,12 @@ impl Ladder {
         );
     }
 
+    /// The leg `who` walks as the ladder keeps it: its index in the route and the leg.
+    pub fn leg(&self, who: Id) -> Option<(usize, Leg)> {
+        let w = self.walkers.get(&who)?;
+        Some((w.leg, *w.legs.get(w.leg)?))
+    }
+
     /// Whether every walk has ended (arrived or by name) and no walk-out is under way.
     pub fn done(&self, runner: &Runner) -> bool {
         self.outs.is_empty() && runner.runs.is_empty()
@@ -264,7 +270,8 @@ impl Ladder {
     /// One tick: the runner's tick (the walk-outs under way are carried in it), then the walk-outs ended, then each
     /// walker's clock and rungs.
     pub fn step(&mut self, runner: &mut Runner, town: &mut Town) -> Result<(), Refusal> {
-        runner.tick(town)?;
+        // A refusal is one body's (the runner went on for the others): the rungs go on too, and it is returned last.
+        let ticked = runner.tick(town);
         let now = runner.now;
         // The walk-outs the controller has stood on the ground: the order, if it has one still, goes on from there.
         let outs: Vec<Id> = self.outs.iter().copied().collect();
@@ -410,6 +417,6 @@ impl Ladder {
                 }
             }
         }
-        Ok(())
+        ticked
     }
 }

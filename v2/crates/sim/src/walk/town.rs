@@ -28,7 +28,7 @@
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, Scene};
+use crate::ground::{HUMAN_RADIUS, OpenGround, Scene, exits};
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
@@ -55,6 +55,16 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 
 /// How far a leg's end may lie off the ground and still be aimed at, mm: a link's end on its piece's edge.
 const AT_EDGE: i64 = 20;
+/// How far a crossing's landing may be moved onto the far surface, µm: less than a body's radius (#3168).
+const LAND: i64 = HUMAN_RADIUS * 1000;
+/// How far from a link's near end a crossing may be asked, µm (the walk asks within 50 mm of it, #3168).
+const REACH: i64 = 1_000_000;
+
+/// The squared distance across the ground (x and z), µm².
+fn flat2(a: Vec3, b: Vec3) -> i128 {
+    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+    d(a.x, b.x) + d(a.z, b.z)
+}
 
 /// A crossing the controller carries: the end it went in by, and where the body stood when it began.
 struct Crossing {
@@ -484,7 +494,8 @@ impl Town {
         let door = l.door;
         // The line is in the building's frame; on the open ground it is followed placed there. Between frames it
         // ends where the body stands on the far side: the far end's middle, on its piece (it may lie on the
-        // piece's edge, within the grid's rounding).
+        // piece's edge, within the grid's rounding). Every landing is one the far surface's mover holds
+        // ([`Town::landing`]), or the crossing is refused before the body moves.
         let mut arrive = None;
         if here == self.ground || to == self.ground {
             let place = self
@@ -493,11 +504,16 @@ impl Town {
                 .ok_or_else(|| refusal("link-missing", show(link)))?;
             let out = |e: String| refusal("out-of-range", e);
             if let Some(e) = far {
-                let s = self
+                // Where the map stands it, else the end's middle; then on the mover's surface (#3168).
+                let stand = self
                     .map
                     .spot_near(to, e.middle(), AT_EDGE)
+                    .map_or(e.middle(), |s| {
+                        Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
+                    });
+                let stand = self
+                    .landing(to, stand)
                     .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
-                let stand = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
                 let last = if to == self.ground {
                     back(&place, stand).map_err(out)?
                 } else {
@@ -513,6 +529,21 @@ impl Town {
                     *p = place.point(*p).map_err(out)?;
                 }
             }
+        } else if let Some(last) = line.last_mut() {
+            *last = self
+                .landing(to, *last)
+                .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+        }
+        // The carry starts at the near end: a body asking from further off would be carried there in a straight
+        // line, through whatever stands between (#3168).
+        if line
+            .first()
+            .is_some_and(|s| flat2(*s, p) > i128::from(REACH) * i128::from(REACH))
+        {
+            return Err(refusal(
+                "link-not-here",
+                format!("{} from {} µm", show(link), flat2(line[0], p).isqrt()),
+            ));
         }
         if let Some(door) = door {
             let shut = self
@@ -546,6 +577,19 @@ impl Town {
     /// owner lets in now. Any other link, or none, reads as free (`None`).
     pub fn read_link(&self, link: Id) -> Option<Seen> {
         link_seen(self.turns.as_ref(), &self.buildings, &self.tree, link)
+    }
+
+    /// Where a crossing stands a body on `node` for the point `at` (µm, its frame): `at` when the mover's surface
+    /// holds it, else the surface's nearest legal point within [`LAND`] (N5's map and N6's mover cut the ground
+    /// apart, so a link's end on a map piece's edge can lie just off the mover's), else none (#3168).
+    fn landing(&self, node: Id, at: Vec3) -> Option<Vec3> {
+        let s = self.surfaces.get(&node)?;
+        let frame = Frame { node, slot: None };
+        if s.place(node, frame, at, Quat::IDENTITY).is_ok() {
+            return Some(at);
+        }
+        let (_, q) = exits::nearest(s.pieces(), at)?;
+        (flat2(q, at) <= i128::from(LAND) * i128::from(LAND)).then_some(q)
     }
 }
 
