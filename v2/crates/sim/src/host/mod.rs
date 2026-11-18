@@ -423,6 +423,8 @@ pub struct Runner {
     pub asks: BTreeMap<Id, (Target, Id)>,
     /// The place each asker was granted (µm, the target node's frame).
     pub granted: BTreeMap<Id, Vec3>,
+    /// The last tick's refusals, each of one body (the tick went on for the others), in the order they came.
+    pub refused: Vec<(Id, Refusal)>,
     /// The routes the world gave each body (`F_ROUTE`), counted.
     routes: BTreeMap<Id, u64>,
     seed: u64,
@@ -554,6 +556,7 @@ impl Runner {
             ended: BTreeMap::new(),
             asks: BTreeMap::new(),
             granted: BTreeMap::new(),
+            refused: Vec::new(),
             routes: BTreeMap::new(),
             seed: 1,
             minter: Minter::new(Scope([0x9b; 16])),
@@ -577,12 +580,15 @@ impl Runner {
         self.start(who, skill)
     }
 
-    /// Runs `skill` on `body`, under a new driver claiming what the skill's shape claims.
+    /// Runs `skill` on `body`, under a new driver claiming what the skill's shape claims. The marks a run before it
+    /// left on the body go (#3168): a route the world gave it (`F_ROUTE`; a new walk would take it for its own and
+    /// walk the old route's legs from wherever it stands now), its waiting mark and the shoulder turn.
     pub fn start(&mut self, body: Id, skill: Box<dyn Skill>) -> Result<(), Refusal> {
         let driver = self.controller.claim(body, &skill.shape())?;
-        // A route the world gave an earlier walk is not this one's (#3167: a new walk took it, and ended at once).
         if let Some(f) = self.fields.get_mut(&body) {
             f.remove(&F_ROUTE);
+            f.remove(&F_WAITING);
+            f.remove(&F_SHOULDER);
         }
         self.ended.remove(&body);
         self.asks.remove(&body);
@@ -677,7 +683,8 @@ impl Runner {
 
     /// One tick over `town`: the marks read for the turns, every skill stepped against the bodies as they stood at
     /// the tick's start, inputs and crossings handed on, the skills' entries set on their bodies, and the controller
-    /// stepped. The first refusal is returned once the tick is done; the others went on.
+    /// stepped. The first refusal is returned once the tick is done, and every one is kept in [`Runner::refused`]; the
+    /// others went on.
     pub fn tick(&mut self, town: &mut Town) -> Result<(), Refusal> {
         let at = self.now + self.tick;
         let marks: Vec<Mark> = self
@@ -778,8 +785,9 @@ impl Runner {
         let stepped = self.controller.step(&town.surfaces, self.tick, at);
         refused.extend(stepped.refused);
         self.now = at;
-        match refused.into_iter().next() {
-            Some((_, r)) => Err(r),
+        self.refused = refused;
+        match self.refused.first() {
+            Some((_, r)) => Err(r.clone()),
             None => Ok(()),
         }
     }

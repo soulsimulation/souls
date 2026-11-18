@@ -283,6 +283,10 @@ pub struct Tree {
     time: Vec<TimeEffect>,
     undo: Vec<Undo>,
     dead: Vec<u32>,
+    /// The gaps a view declared for the part being applied ([`Tree::apply_gaps`]), each `(first, count)`, and how many
+    /// were met. Empty between parts.
+    gaps: Vec<(u64, u64)>,
+    gaps_met: usize,
     node_reads: Reads,
     link_reads: Reads,
 }
@@ -318,6 +322,8 @@ impl Tree {
             time: Vec::new(),
             undo: Vec::new(),
             dead: Vec::new(),
+            gaps: Vec::new(),
+            gaps_met: 0,
             node_reads: Reads(Some(AtomicU64::new(0))),
             link_reads: Reads(Some(AtomicU64::new(0))),
         };
@@ -437,6 +443,8 @@ impl Tree {
             time: self.time.clone(),
             undo: Vec::new(),
             dead: self.dead.clone(),
+            gaps: Vec::new(),
+            gaps_met: 0,
             node_reads: Reads(None),
             link_reads: Reads(None),
         }
@@ -865,6 +873,19 @@ impl Tree {
         self.transact(header, part, None)
     }
 
+    /// Applies a part of a view (T7 rule 4) as a viewer does: a view skips the entries it does not hold, and says which.
+    /// Each declared gap, `(first, count)` in sequence order, is the sequences `first..first + count` the view did not
+    /// hold; the entry after it must come at exactly `first + count`, every gap must be met, and any other jump is still
+    /// `sequence-gap`. All of it or none.
+    pub fn apply_gaps(&mut self, header: &Header, part: &Part, gaps: &[(u64, u64)]) -> R<()> {
+        self.gaps = gaps.to_vec();
+        self.gaps_met = 0;
+        let r = self.transact(header, part, None);
+        self.gaps.clear();
+        self.gaps_met = 0;
+        r
+    }
+
     /// Applies a part as the zone's writer commits it: the same apply, plus T2's checks on each change and the
     /// balance of amounts moved over the part ([`Rules`]). All of it or none.
     pub fn commit(&mut self, header: &Header, part: &Part, rules: &Rules) -> R<()> {
@@ -898,6 +919,12 @@ impl Tree {
         {
             result = rules.balanced(effects);
         }
+        if result.is_ok() && self.gaps_met != self.gaps.len() {
+            result = refuse(
+                "gap-unmet",
+                format!("{} declared gaps, {} met", self.gaps.len(), self.gaps_met),
+            );
+        }
         if result.is_err() {
             while let Some(u) = self.undo.pop() {
                 u(self);
@@ -914,6 +941,18 @@ impl Tree {
 
     fn entry(&mut self, header: &Header, e: &Effect, rules: Option<&Rules>) -> R<()> {
         let env = e.envelope;
+        if let Some(&(first, count)) = self.gaps.get(self.gaps_met)
+            && first == self.next
+            && first.checked_add(count) == Some(env.sequence)
+        {
+            // A gap the view declared (`apply_gaps`): the entries it did not hold.
+            self.gaps_met += 1;
+            self.next = env.sequence;
+            self.log(move |t| {
+                t.next = first;
+                t.gaps_met -= 1;
+            });
+        }
         if env.sequence != self.next {
             return refuse(
                 "sequence-gap",
