@@ -25,6 +25,17 @@ export function boxOf(n: NodeRec): THREE.Matrix4 {
   );
 }
 
+/** A box for each solid, for a thing that has no model: a pitch's goals and fences, not one slab over the pitch.
+ *  `ground` gives the ground's height under a solid whose heights are above the ground (a thing laid out in the world's
+ *  frame on the open ground, unless its `abs` flag is set). */
+export function solidBoxes(n: NodeRec, ground: ((x: number, z: number) => number | null) | null = null): THREE.Matrix4[] {
+  return (n.solids ?? []).map(([cx, cz, hx, hz, yaw, y0, y1, , abs]) => new THREE.Matrix4().compose(
+    new THREE.Vector3(cx * MM, y0 * MM + (ground && !abs ? ground(cx * MM, cz * MM) ?? 0 : 0), cz * MM),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (yaw / 1000) * (Math.PI / 180)),
+    new THREE.Vector3(Math.max(0.05, 2 * hx * MM), Math.max(0.05, (y1 - y0) * MM), Math.max(0.05, 2 * hz * MM)),
+  ));
+}
+
 export type PageThings = { layer: ThingLayer | null; apply(nodes: NodeRec[], removed: string[]): void; update(eye: THREE.Vector3): void };
 
 /** The page's things, from its parameters; none (the world view's boxes stay) when no `models` root is given. */
@@ -45,7 +56,8 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
       for (const id of removed) layer.remove(id);
       for (const n of nodes) {
         if (n.at !== null || STRUCTURE.has(n.kind.split('@')[0])) continue;
-        const box = n.solids?.length || (n.origin && layer.opts.index.things[n.origin]) ? boxOf(n) : null;
+        const model = n.origin && layer.opts.index.things[n.origin];
+        const box = model ? boxOf(n) : solidBoxes(n, n.parent === world.groundId && n.pos.every((v) => v === 0) ? (x, z) => world.heightAt(x, z) : null);
         layer.set(n.id, n.origin ?? null, world.frame(n.id).clone().scale(new THREE.Vector3().setScalar((n.scale ?? 1_000_000) / 1_000_000)), box);
       }
     },

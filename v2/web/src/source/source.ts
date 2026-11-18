@@ -20,6 +20,12 @@ export type NodeRec = {
   solids?: number[][];
   /** Slots `[n, x, y, z, yaw mdeg, capacity]` mm (field 13). */
   slots?: number[][];
+  /** An area's outline `[x, z]` mm, world (import-eden's field 11). */
+  outline?: number[][];
+  /** A floor's surfaces `[y, [[x, z] …]]` mm in its thing's frame (field 14). */
+  surfaces?: [number, number[][]][];
+  /** A water's level, mm (field 18). */
+  waterLevel?: number;
   /** Scale in parts per million (field 23). */
   scale?: number;
   /** The open ground's terrain tiles: side mm (field 24) and `[tx, tz, heights, classes]` (field 25). */

@@ -370,6 +370,16 @@ pub fn load(text: &str) -> R<Import> {
     let mut links: Vec<(Id, &str, [Id; 2])> = Vec::new();
     let mut doorway_fields: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
     let mut stair_fields: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
+    // A slot's point in its thing's frame: today's pose of a thing in a slot is from its parent's origin, and K2's is
+    // from the slot's point (T4's carry adds the point), so the point is taken off once here.
+    let mut slot_at: HashMap<(&str, i64), [i64; 3]> = HashMap::new();
+    for t in things {
+        for sl in need(t, "slots").map(Json::arr).unwrap_or(&[]) {
+            let at = need(sl, "at")?.arr();
+            let n = |k: usize| at.get(k).and_then(Json::int).ok_or("a slot's at");
+            slot_at.insert((s(t, "id")?, int(sl, "n")?), [n(0)?, n(1)?, n(2)?]);
+        }
+    }
     for t in things {
         let id = s(t, "id")?;
         let r = s(t, "ref")?;
@@ -459,7 +469,13 @@ pub fn load(text: &str) -> R<Import> {
                 .collect::<R<_>>()?;
             fields.insert(F_SLOTS, Value::Array(rows));
         }
-        let node = b.add(id, parent, slot, &kind, pose4(need(t, "pose")?)?, fields)?;
+        let mut pose = pose4(need(t, "pose")?)?;
+        if let (Some(n), Some(p)) = (slot, t.get("parent").and_then(Json::str))
+            && let Some(at) = slot_at.get(&(p, n as i64))
+        {
+            (0..3).for_each(|k| pose[k] -= at[k]);
+        }
+        let node = b.add(id, parent, slot, &kind, pose, fields)?;
 
         // Floors: one node per level its rooms, floors or stairs name, at the thing's origin.
         let mut levels: BTreeMap<i64, Vec<Value>> = BTreeMap::new();

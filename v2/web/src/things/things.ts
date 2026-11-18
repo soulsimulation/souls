@@ -14,7 +14,7 @@ const OFF = new THREE.Color(0.22, 0.22, 0.22), ON = new THREE.Color(1, 1, 1), WH
 
 /** Where one part of one thing is drawn. */
 type Slot = { batch: Batch; index: number; glow: boolean };
-type Thing = { id: string; model: string | null; matrix: THREE.Matrix4; box: THREE.Matrix4 | null; slots: Slot[]; on: boolean };
+type Thing = { id: string; model: string | null; matrix: THREE.Matrix4; boxes: THREE.Matrix4[]; slots: Slot[]; on: boolean };
 
 /** An instanced draw whose instances are packed: removing one moves the last into its place. */
 class Batch {
@@ -31,6 +31,7 @@ class Batch {
     const mesh = new THREE.InstancedMesh(g, m, n);
     mesh.count = 0;
     mesh.frustumCulled = false;
+    mesh.castShadow = mesh.receiveShadow = true;
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3);
     mesh.onAfterRender = () => void (this.whole = false);
     this.layer.group.add(mesh);
@@ -94,6 +95,7 @@ class Shapes {
     this.mesh.perObjectFrustumCulled = false;
     this.mesh.sortObjects = false;
     this.mesh.frustumCulled = false;
+    this.mesh.castShadow = this.mesh.receiveShadow = true;
     layer.group.add(this.mesh);
   }
   add(g: THREE.BufferGeometry, matrix: THREE.Matrix4, color: THREE.Color): number {
@@ -151,17 +153,19 @@ export class ThingLayer {
     this.boxes = new Batch(this, new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), new THREE.MeshLambertMaterial({ color: 0xb8b2a6 }), 1024);
   }
 
-  /** Places (or moves) a thing: its frame in the world, its origin (today's id), and a box for it until its model. */
-  set(id: string, origin: string | null, frame: THREE.Matrix4, box: THREE.Matrix4 | null): void {
+  /** Places (or moves) a thing: its frame in the world, its origin (today's id), and its boxes (one or a box a solid)
+   *  until its model, or for good when it has none. */
+  set(id: string, origin: string | null, frame: THREE.Matrix4, box: THREE.Matrix4 | THREE.Matrix4[] | null): void {
     const model = origin ? this.opts.index.things[origin] ?? null : null;
-    if (!model && !box) return this.remove(id);
+    const boxes = box === null ? [] : Array.isArray(box) ? box : [box];
+    if (!model && !boxes.length) return this.remove(id);
     for (let c = 0; c < this.copies; c++) {
       const cid = c ? `${id}#${c}` : id;
       const matrix = c ? new THREE.Matrix4().makeTranslation(c * this.spacing, 0, 0).multiply(frame) : frame.clone();
       const old = this.things.get(cid);
       if (old && old.model === model && old.matrix.equals(matrix)) continue;
       if (old) this.remove(cid, true);
-      const t: Thing = { id: cid, model, matrix, box: box ? matrix.clone().multiply(box) : null, slots: [], on: old?.on ?? false };
+      const t: Thing = { id: cid, model, matrix, boxes: boxes.map((b) => matrix.clone().multiply(b)), slots: [], on: old?.on ?? false };
       this.things.set(cid, t);
       if (model) (this.users.get(model) ?? this.users.set(model, new Set()).get(model)!).add(t);
       this.draw(t);
@@ -205,9 +209,9 @@ export class ThingLayer {
     const parts = t.model ? this.models.get(t.model) : undefined;
     if (!parts) {
       if (t.model && !this.pending.has(t.model) && !this.models.has(t.model)) this.pending.add(t.model);
-      if (t.box) {
+      for (const b of t.boxes) {
         const s: Slot = { batch: this.boxes, index: 0, glow: false };
-        s.index = this.boxes.add(s, t.box, WHITE);
+        s.index = this.boxes.add(s, b, WHITE);
         t.slots.push(s);
       }
       return;

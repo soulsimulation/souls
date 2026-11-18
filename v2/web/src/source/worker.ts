@@ -37,8 +37,11 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
     at: moved ? num(moved.get(1)) : null,
   };
   if (f.has(1)) rec.origin = new TextDecoder().decode(f.get(1) as Uint8Array);
+  if (f.has(11)) rec.outline = rows(f.get(11));
   if (f.has(12)) rec.solids = rows(f.get(12));
   if (f.has(13)) rec.slots = rows(f.get(13));
+  if (f.has(14)) rec.surfaces = (f.get(14) as unknown[][]).map((r) => [num(r[0]), rows(r[1])!]);
+  if (f.has(18)) rec.waterLevel = num(f.get(18));
   if (f.has(23)) rec.scale = num(f.get(23));
   if (f.has(24)) rec.tileSize = num(f.get(24));
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
