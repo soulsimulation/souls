@@ -337,6 +337,15 @@ impl Skill for Route {
             }
         }
         let p = me.position;
+        // A point on the way (a leg with no link that is not the last, E10 #2781) is passed without stopping.
+        let mut leg = leg;
+        while leg.link.is_none()
+            && self.leg + 1 < self.legs.len()
+            && len([leg.to.x - p.x, leg.to.z - p.z]) <= AT_GOAL
+        {
+            self.leg += 1;
+            leg = self.legs[self.leg];
+        }
         let gap = len([leg.to.x - p.x, leg.to.z - p.z]);
         // Leave to enter: the link's owner names who it lets in (A3).
         let (narrow, granted) = match leg.link.and_then(|l| host.read(l)) {
