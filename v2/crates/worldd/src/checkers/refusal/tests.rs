@@ -1,7 +1,7 @@
 //! I6 (#2691): each `aN_` test is one acceptance box. Staleness is random but seeded, so a failure repeats.
 
 use super::{STATE_LIMIT, repair, states_of};
-use crate::checkers::lamps::World;
+use crate::checkers::toggles::World;
 use crate::checkers::{Act, Candidate, check};
 use replica::apply::Replica;
 use replica::effects::{Actor, Cause, Part};
@@ -116,7 +116,7 @@ fn a1_a5_a_thousand_stale_refusals_repair_the_copy() {
         let mut client = server.replica.frozen();
         let checks = check(
             &client,
-            &super::super::lamps::rules(),
+            &super::super::toggles::rules(),
             &act(principal, body, thing),
         );
         stale(&mut server, &mut rng, body, thing);
@@ -158,8 +158,8 @@ fn a2_no_field_outside_the_actors_audience() {
     );
     let (body, _) = server.pairs[0];
     let room = server.replica.path(body).unwrap_or_default()[1];
-    let theirs = server.lamp_of(room, Audience::Of(other));
-    let mine = server.lamp_of(room, Audience::Of(me));
+    let theirs = server.toggle_of(room, Audience::Of(other));
+    let mine = server.toggle_of(room, Audience::Of(me));
     let basis = server.replica.version();
     let copy = server.replica.frozen();
     let mut a = act(me, body, theirs);
@@ -167,7 +167,7 @@ fn a2_no_field_outside_the_actors_audience() {
         this: mine,
         form: "switch_on".into(),
     });
-    let checks = check(&copy, &super::super::lamps::rules(), &a);
+    let checks = check(&copy, &super::super::toggles::rules(), &a);
     server.set(theirs, 3, 777_777, Audience::Of(other));
     server.set(mine, 3, 555_555, Audience::Of(me));
     server.set(body, 9, 333_333, Audience::Everyone);
@@ -196,7 +196,7 @@ fn a3_over_the_limit_ids_and_hashes_only() {
     let basis = server.replica.version();
     let checks = check(
         &server.replica.frozen(),
-        &super::super::lamps::rules(),
+        &super::super::toggles::rules(),
         &act(principal, body, thing),
     );
     server.dim(thing, 42);
@@ -242,7 +242,7 @@ fn a4_never_rewinds_a_node_in_either_order() {
         let mut client = server.replica.frozen();
         let checks = check(
             &client,
-            &super::super::lamps::rules(),
+            &super::super::toggles::rules(),
             &act(principal, body, thing),
         );
         let ids = read_set(&checks);

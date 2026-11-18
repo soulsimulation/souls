@@ -13,18 +13,23 @@ use replica::rules::json::{Value, parse};
 use replica::world_model::{Audience, parse_kinds};
 use std::collections::BTreeMap;
 
-const KINDS: &str = r#"
-{1: "souls:place", 2: "place", 11: ["souls:room"]}
-{1: "souls:room", 2: "place", 11: ["body", "thing"]}
-{1: "souls:body", 2: "family", 6: {1: ["thing"], 2: ["thing"]}}
-{1: "souls:cup", 2: "thing"}
-{1: "r2:lamp", 2: "thing"}
-"#;
+/// The world's kinds; the toggle's is the one its entry names.
+fn kinds_text(toggle: &str) -> String {
+    format!(
+        r#"
+{{1: "souls:place", 2: "place", 11: ["souls:room"]}}
+{{1: "souls:room", 2: "place", 11: ["body", "thing"]}}
+{{1: "souls:body", 2: "family", 6: {{1: ["thing"], 2: ["thing"]}}}}
+{{1: "souls:item", 2: "thing"}}
+{{1: "{toggle}", 2: "thing"}}
+"#
+    )
+}
 
 /// Bodies stand 200 mm apart, in micrometres.
 const SPACING: i64 = 200_000;
 
-const LAMP: &str = include_str!("../../../replica/cases/kinds/lamp.json");
+const ENTRY: &str = include_str!("../../../replica/cases/kinds/lamp.json");
 
 /// The world, its header and each body with its lamp.
 pub struct World {
@@ -39,15 +44,28 @@ pub struct World {
 /// The rules for the world's lamps: the lamp's entry and a press that reaches 400 mm, so a body reaches its own
 /// lamp's switch (300 mm up) and the next one's (200 mm along), and no further.
 pub fn rules() -> Rules {
-    let lamp = parse(LAMP).unwrap_or_else(|e| panic!("lamp.json: {e}"));
+    let entry = entry();
     Rules {
-        kinds: Value::Obj(vec![("r2:lamp".into(), lamp)]),
+        kinds: Value::Obj(vec![(toggle_kind(&entry), entry)]),
         moves: parse(r#"{"press": {"reach_mm": 400}}"#).unwrap_or_else(|e| panic!("moves: {e}")),
     }
 }
 
-/// The act of switching a lamp, either way: its candidates are switch_on, then switch_off (one of them holds).
-pub fn toggle(id: u64, body: Id, lamp: Id) -> Act {
+/// The toggle's entry (R2's fixture), parsed.
+fn entry() -> Value {
+    parse(ENTRY).unwrap_or_else(|e| panic!("the toggle's entry: {e}"))
+}
+
+/// The toggle's kind, as its entry names it.
+fn toggle_kind(entry: &Value) -> String {
+    match entry.get("kind") {
+        Some(Value::Str(kind)) => kind.clone(),
+        other => panic!("the entry's kind is {other:?}"),
+    }
+}
+
+/// The act of switching a toggle, either way: its candidates are switch_on, then switch_off (one of them holds).
+pub fn toggle(id: u64, body: Id, thing: Id) -> Act {
     Act {
         id,
         cause: Cause::World,
@@ -55,7 +73,7 @@ pub fn toggle(id: u64, body: Id, lamp: Id) -> Act {
         body,
         candidates: ["switch_on", "switch_off"]
             .map(|form| Candidate {
-                this: lamp,
+                this: thing,
                 form: form.into(),
             })
             .to_vec(),
@@ -84,19 +102,22 @@ fn pose(frame: Id, x: i64) -> Pose {
 
 impl World {
     /// `rooms` rooms, each with `bodies` bodies, a lamp at each body's place and `cups` cups.
-    pub fn build(rooms: usize, bodies: usize, cups: usize) -> World {
-        let parsed = parse_kinds(KINDS).unwrap_or_else(|e| panic!("kinds: {e}"));
+    pub fn build(rooms: usize, bodies: usize, items: usize) -> World {
+        let toggle = toggle_kind(&entry());
+        let parsed = parse_kinds(&kinds_text(&toggle)).unwrap_or_else(|e| panic!("kinds: {e}"));
         let mut kinds = BTreeMap::new();
         for full in parsed.keys() {
+            // Each kind by its plain name, the toggle's as `toggle`.
             let plain = [
-                "souls:place",
-                "souls:room",
-                "souls:body",
-                "souls:cup",
-                "r2:lamp",
+                ("souls:place", "souls:place"),
+                ("souls:room", "souls:room"),
+                ("souls:body", "souls:body"),
+                ("souls:item", "souls:item"),
+                (toggle.as_str(), "toggle"),
             ]
             .into_iter()
-            .find(|p| full.starts_with(&format!("{p}@")))
+            .find(|(p, _)| full.starts_with(&format!("{p}@")))
+            .map(|(_, plain)| plain)
             .unwrap_or_else(|| panic!("a fixture kind: {full}"));
             kinds.insert(plain, name(full));
         }
@@ -123,7 +144,7 @@ impl World {
             pairs: Vec::new(),
         };
         for _ in 0..rooms {
-            w.room(root, bodies, cups);
+            w.room(root, bodies, items);
         }
         w
     }
@@ -181,20 +202,20 @@ impl World {
             .unwrap_or_else(|e| panic!("a part: {e}"))
     }
 
-    fn room(&mut self, root: Id, bodies: usize, cups: usize) {
+    fn room(&mut self, root: Id, bodies: usize, items: usize) {
         let room = self.id();
         let mut changes = vec![(root, self.create(room, "souls:room", root, 0, &[]))];
         for i in 0..bodies as i64 {
             let (b, l) = (self.id(), self.id());
             changes.push((room, self.create(b, "souls:body", room, i * SPACING, &[])));
             // A lamp: unlit, wired, dimmed to 0 (lamp.json's fields 1, 2 and 3), where its body stands.
-            let lamp = self.create(l, "r2:lamp", room, i * SPACING, &[(1, 0), (2, 1), (3, 0)]);
-            changes.push((room, lamp));
+            let toggle = self.create(l, "toggle", room, i * SPACING, &[(1, 0), (2, 1), (3, 0)]);
+            changes.push((room, toggle));
             self.pairs.push((b, l));
         }
-        for i in 0..cups as i64 {
+        for i in 0..items as i64 {
             let c = self.id();
-            changes.push((room, self.create(c, "souls:cup", room, i * 1_000_000, &[])));
+            changes.push((room, self.create(c, "souls:item", room, i * 1_000_000, &[])));
         }
         let part = self.part(changes);
         self.replica
@@ -203,8 +224,8 @@ impl World {
     }
 
     /// A change to a lamp's level, as another act would make it: the lamp's stamp moves on.
-    pub fn dim(&mut self, lamp: Id, level: u64) -> Part {
-        self.set(lamp, 3, level, Audience::Everyone)
+    pub fn dim(&mut self, toggle: Id, level: u64) -> Part {
+        self.set(toggle, 3, level, Audience::Everyone)
     }
 
     /// A field set on a node of `audience`, by an entry of that audience.
@@ -228,7 +249,7 @@ impl World {
     }
 
     /// An unlit lamp of `audience` under `parent`, created by an entry of that audience (I6's audience test).
-    pub fn lamp_of(&mut self, parent: Id, audience: Audience) -> Id {
+    pub fn toggle_of(&mut self, parent: Id, audience: Audience) -> Id {
         let id = self.id();
         let Change::Create {
             node,
@@ -236,7 +257,7 @@ impl World {
             pose,
             fields,
             ..
-        } = self.create(id, "r2:lamp", parent, 0, &[(1, 0), (2, 1), (3, 0)])
+        } = self.create(id, "toggle", parent, 0, &[(1, 0), (2, 1), (3, 0)])
         else {
             unreachable!("create makes a create")
         };
@@ -250,7 +271,7 @@ impl World {
         let part = self.part_of(audience, vec![(parent, create)]);
         self.replica
             .apply(&part)
-            .unwrap_or_else(|e| panic!("a lamp of an audience applies: {e}"));
+            .unwrap_or_else(|e| panic!("a toggle of an audience applies: {e}"));
         id
     }
 }
