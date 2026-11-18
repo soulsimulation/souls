@@ -992,22 +992,48 @@ pub fn count(im: &Import) -> (Vec<Row>, BTreeMap<String, i64>, BTreeMap<String, 
 }
 
 /// A node's position in the world frame, in micrometres: its pose composed up the tree with T4's quaternions, from
-/// the root down. `None` for an id that is no node here.
+/// the root down, a node in a slot at the slot's point plus its pose (T4's carry). `None` for an id that is no node
+/// here.
 pub fn world_of(im: &Import, id: Id) -> Option<Vec3> {
     let t = &im.tree;
     let mut chain = Vec::new();
     let mut at = Some(t.handle(id)?);
     while let Some(h) = at {
         let n = t.node(h)?;
+        let parent = n.parent().and_then(|p| t.handle(p));
         if let Some(p) = n.place() {
-            chain.push(p);
+            let point = match (n.slot(), parent) {
+                (Some(s), Some(ph)) => slot_point(t.node(ph)?.fields(), s)?,
+                _ => Vec3::ZERO,
+            };
+            chain.push((point.plus(p.position).ok()?, p.orientation));
         }
-        at = n.parent().and_then(|p| t.handle(p));
+        at = parent;
     }
     let (mut pos, mut rot) = (Vec3::ZERO, Quat::IDENTITY);
-    for p in chain.iter().rev() {
-        pos = pos.plus(rot.rotate(p.position).ok()?).ok()?;
-        rot = rot.then(p.orientation).ok()?;
+    for (position, orientation) in chain.iter().rev() {
+        pos = pos.plus(rot.rotate(*position).ok()?).ok()?;
+        rot = rot.then(*orientation).ok()?;
     }
     Some(pos)
+}
+
+/// Slot `n`'s point (field 13's `[n, x, y, z, …]` mm) in micrometres.
+fn slot_point(fields: &BTreeMap<u64, Value>, n: u64) -> Option<Vec3> {
+    let num = |v: &Value| match v {
+        Value::Uint(u) => i64::try_from(*u).ok(),
+        Value::Nint(u) => i64::try_from(*u).ok().map(|u| -u - 1),
+        _ => None,
+    };
+    let Value::Array(rows) = fields.get(&F_SLOTS)? else {
+        return None;
+    };
+    rows.iter().find_map(|r| match r {
+        Value::Array(r) if r.first().and_then(num) == i64::try_from(n).ok() => Some(Vec3::new(
+            num(r.get(1)?)? * 1000,
+            num(r.get(2)?)? * 1000,
+            num(r.get(3)?)? * 1000,
+        )),
+        _ => None,
+    })
 }
