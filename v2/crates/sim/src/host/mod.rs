@@ -5,6 +5,10 @@
 //! - **One phase a tick.** [`step`] steps every running skill once, in its body's id order, against the tree as it
 //!   stood at the tick's start: the tree is borrowed read-only for the whole phase, so nothing a skill does can change
 //!   what another reads in the same tick (T1).
+//! - **Side by side** (N17b, #3255). [`Runner::tick`] steps the skills that allow it on [`Runner::threads`] threads,
+//!   a chunk of runs at a time, and joins their stages in body order (`beside`); the controller's step, the inputs
+//!   handed on and the ladder's reads are split the same way (`crate::par`). The outcome is the same, bit for bit,
+//!   at any thread count, and a skill that panics ends its own run by name (`unit-panicked`).
 //! - **Everything staged.** Controller inputs, entries, timers set and cleared are held in [`Staged`] until every
 //!   skill has stepped. The caller applies them after: inputs through [`hand_on`] to the controller (B1 #2680),
 //!   entries to the log, timers to the due list (K9 #2672). A skill does not see its own emits either.

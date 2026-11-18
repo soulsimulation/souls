@@ -22,7 +22,8 @@
 //!   every query of its layer, so it never fills thousands of squares.
 //! - **Integers.** Distances compared squared in `i128`; a distance returned is rounded down by `isqrt`.
 //!
-//! Not here: subscriptions (R4), perception rules, parallel cells (N17), choosing among candidates (E2), whether a
+//! Read side by side: the runner's threads read it at once, and the mover's bodies are entered in id order after
+//! them (N17b, `crate::host`). Not here: subscriptions (R4), perception rules, choosing among candidates (E2), whether a
 //! set-down is allowed (E4, G2). An outline is its box: an exact polygon test is the caller's, on what this returns.
 
 use std::collections::{BTreeMap, HashMap};
