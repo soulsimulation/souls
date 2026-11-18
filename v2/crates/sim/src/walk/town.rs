@@ -17,19 +17,21 @@
 //!   and builds the ground, the links and the route map from the tree as the part leaves it. [`Town::install`] runs
 //!   on the tick the part commits: it commits the part through the zone's one write and swaps the ground in, in the
 //!   same call, so no tick sees new geometry over old ground. Routes carry the versions they were planned on
-//!   ([`World::planned`]); the walk skill plans again on a mismatch.
+//!   ([`World::planned`]); the walk skill plans again on a mismatch. When the open ground is untouched, the rebuild
+//!   reads again only the buildings whose floors the part touches, on the open ground as last cut ([`Basis`]), and
+//!   the install replaces them on the route map ([`Map::replace`]) instead of swapping in a whole one (#3276).
 //! - **Turns** (N8). A link under 1.2 m wide is taken in turns (`crate::links::turns`): at the start of each tick
 //!   the marks of the last are read into each such link's facts (who waits at which end and how far from it, who is
 //!   inside and how far along, whether each end has room to step out into), and its owning node writes who may
 //!   enter. Without turns ([`Town::turns`] `None`) every link is free, as N7 walked them.
 
 use super::{Leg, Mark, Pass, World, node_of};
-use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, Scene, Versions, touched};
+use crate::ground::scene::{FLOOR, xform_to};
+use crate::ground::{HUMAN_RADIUS, OpenGround, Piece, Scene, Versions, touched};
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
-use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
+use crate::links::{Building, Doors, F_OPEN, Open, SquareMeet, back, ground_doors};
 use crate::mover::{Body, Surface};
-use crate::routes::{HANDS, Hop, Map};
+use crate::routes::{HANDS, Hop, Map, on_pieces};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
 use replica::ids::Id;
@@ -37,7 +39,8 @@ use replica::pose::{ControllerInput, Frame, Mode, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
@@ -73,9 +76,25 @@ pub struct Town {
     pub turns: Option<Turns>,
     /// Each node's ground version (G3).
     pub versions: Versions,
+    /// What a building read again off the clock thread needs of the open ground ([`Town::basis`]).
+    basis: Basis,
     crossings: BTreeMap<Id, Crossing>,
     /// The ground the last plan crossed, each node with its version.
     planned: Vec<(Id, u64)>,
+}
+
+/// What a rebuild off the clock thread reads besides the tree (#3276): the open ground as cut (each square's pieces,
+/// its meets and its doors) and each building read, with its links. Cheap to clone: it is shared, not copied.
+#[derive(Clone)]
+pub struct Basis {
+    open: Arc<OpenCut>,
+    known: Arc<BTreeMap<Id, BTreeSet<Id>>>,
+}
+
+struct OpenCut {
+    squares: HashMap<(i32, i32), Vec<Piece>>,
+    meets: Vec<SquareMeet>,
+    doors: BTreeMap<Id, Id>,
 }
 
 /// The ground as a part will leave it, built off the clock thread ([`Town::rebuild`]) and installed on the tick the
@@ -84,18 +103,30 @@ pub struct Rebuilt {
     /// The nodes whose ground the part changes.
     pub touched: BTreeSet<Id>,
     pub versions: Versions,
-    map: Map,
-    surfaces: BTreeMap<Id, Surface>,
-    buildings: Vec<Building>,
+    fresh: Fresh,
 }
 
-type Ground = (Map, BTreeMap<Id, Surface>, Vec<Building>);
+impl Rebuilt {
+    /// Whether the whole ground was built again (the open ground was touched, or a building could not be read
+    /// again alone), not only the touched buildings.
+    pub fn whole(&self) -> bool {
+        matches!(self.fresh, Fresh::Whole(..))
+    }
+}
+
+enum Fresh {
+    Whole(Box<Ground>),
+    /// Each touched building read again, with its floors' surfaces.
+    Buildings(Vec<(Building, BTreeMap<Id, Surface>)>),
+}
+
+type Ground = (Map, BTreeMap<Id, Surface>, Vec<Building>, Basis);
 
 impl Town {
     /// Everything on the open ground `ground`; openings are written by `doors`.
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
         let versions = Versions::default();
-        let (map, surfaces, buildings) = Town::assemble(&tree, ground, &versions)?;
+        let (map, surfaces, buildings, basis) = Town::assemble(&tree, ground, &versions)?;
         Ok(Town {
             tree,
             ground,
@@ -105,18 +136,27 @@ impl Town {
             doors,
             turns: Some(Turns::new()),
             versions,
+            basis,
             crossings: BTreeMap::new(),
             planned: Vec::new(),
         })
     }
 
+    /// What [`Town::rebuild`] reads besides the tree, as the ground stands now.
+    pub fn basis(&self) -> Basis {
+        self.basis.clone()
+    }
+
     /// Off the clock thread: the ground as `part` leaves the tree `base` (a copy of this town's, as it stands when
     /// the part is checked; `header` is the zone's), with the versions of the nodes it touches bumped from `versions`.
+    /// When the open ground is not touched, only the buildings whose floors are touched are read again, on the open
+    /// ground in `basis` (#3276); otherwise, or when one of them cannot be read alone, the whole ground is built.
     pub fn rebuild(
         mut base: Tree,
         header: &Header,
         ground: Id,
         versions: &Versions,
+        basis: &Basis,
         part: &Part,
     ) -> Result<Rebuilt, String> {
         let before = base.frozen();
@@ -125,19 +165,72 @@ impl Town {
         let touched = touched(&before, &base, part);
         let mut versions = versions.clone();
         versions.bump(&touched);
-        let (map, surfaces, buildings) = Town::assemble(&base, ground, &versions)?;
+        let fresh = match Town::reread(&before, &base, ground, &touched, basis) {
+            Some(bs) => Fresh::Buildings(bs),
+            None => Fresh::Whole(Box::new(Town::assemble(&base, ground, &versions)?)),
+        };
         Ok(Rebuilt {
             touched,
             versions,
-            map,
-            surfaces,
-            buildings,
+            fresh,
         })
+    }
+
+    /// Each building whose floors are in `touched`, read again from `after` on the open ground of `basis`, with its
+    /// floors' surfaces; `None` when the whole ground must be built: the open ground is touched, a building is new,
+    /// gone or cannot be read, or a link of the open ground's meets joins or leaves a building (the gates change).
+    fn reread(
+        before: &Tree,
+        after: &Tree,
+        ground: Id,
+        touched: &BTreeSet<Id>,
+        basis: &Basis,
+    ) -> Option<Vec<(Building, BTreeMap<Id, Surface>)>> {
+        if touched.contains(&ground) {
+            return None;
+        }
+        let parent = |t: &Tree, n: Id| t.handle(n).and_then(|h| t.node(h)).and_then(|n| n.parent());
+        let mut things = BTreeSet::new();
+        for &f in touched {
+            things.insert(parent(after, f).or_else(|| parent(before, f))?);
+        }
+        let gh = after.handle(ground)?;
+        let open = &basis.open;
+        let on =
+            |sq: (i32, i32), p: [i64; 2]| open.squares.get(&sq).is_some_and(|ps| on_pieces(ps, p));
+        let mut out = Vec::new();
+        for thing in things {
+            let old = basis.known.get(&thing)?;
+            let place = xform_to(after, after.handle(thing)?, gh).ok()?;
+            let o = Open {
+                ground,
+                place,
+                meets: &open.meets,
+                on: &on,
+                doors: &open.doors,
+            };
+            let b = Building::read_on(after, thing, Some(o)).ok()?;
+            let now: BTreeSet<Id> = b.links.iter().map(|l| l.id).collect();
+            if old
+                .symmetric_difference(&now)
+                .any(|l| open.meets.iter().any(|m| m.1.link == *l))
+            {
+                return None;
+            }
+            let surfaces = b
+                .floors
+                .iter()
+                .map(|(&f, (_, patch))| (f, Surface::new(f, patch.pieces.clone())))
+                .collect();
+            out.push((b, surfaces));
+        }
+        Some(out)
     }
 
     /// On the tick `part` commits: commits it through the zone's one write, its effects numbered from the zone's next
     /// sequence (doors may have opened since it was checked), and installs the ground `r` built for it, in the same
-    /// call. A refused part installs nothing.
+    /// call: the whole ground swapped in, or each building read again replaced on the map. A refused part installs
+    /// nothing.
     pub fn install(&mut self, r: Rebuilt, part: &Part) -> Result<(), Refusal> {
         let mut p = part.clone();
         for (k, e) in p.effects.iter_mut().enumerate() {
@@ -147,21 +240,50 @@ impl Town {
         self.tree
             .commit(&self.doors.header, &Part::read(&bytes)?, &self.doors.rules)?;
         self.doors.next += part.effects.len() as u64;
-        self.map = r.map;
-        self.surfaces = r.surfaces;
-        self.buildings = r.buildings;
-        self.versions = r.versions;
+        let Rebuilt {
+            versions, fresh, ..
+        } = r;
+        match fresh {
+            Fresh::Whole(g) => {
+                let (map, surfaces, buildings, basis) = *g;
+                self.map = map;
+                self.surfaces = surfaces;
+                self.buildings = buildings;
+                self.basis = basis;
+            }
+            Fresh::Buildings(bs) => {
+                let known = Arc::make_mut(&mut self.basis.known);
+                for (b, surfaces) in bs {
+                    self.map.replace(&b, &|n| versions.of(n));
+                    known.insert(b.thing, b.links.iter().map(|l| l.id).collect());
+                    self.surfaces.extend(surfaces);
+                    match self.buildings.iter().position(|o| o.thing == b.thing) {
+                        Some(i) => {
+                            let old = std::mem::replace(&mut self.buildings[i], b);
+                            for f in old.floors.keys() {
+                                if !self.buildings[i].floors.contains_key(f) {
+                                    self.surfaces.remove(f);
+                                }
+                            }
+                        }
+                        None => self.buildings.push(b),
+                    }
+                }
+            }
+        }
+        self.versions = versions;
         Ok(())
     }
 
-    /// The route map, each node's surface and the buildings, read from `tree` at `versions`.
+    /// The route map, each node's surface, the buildings and the basis for a rebuild, read from `tree` at `versions`.
     fn assemble(tree: &Tree, ground: Id, versions: &Versions) -> Result<Ground, String> {
         let map = Map::build(tree, ground, &|n| versions.of(n))?;
         let mut surfaces = BTreeMap::new();
         let open = OpenGround::prepare(&Scene::of(tree, ground)?, HUMAN_RADIUS)?;
-        let (mut pieces, mut meets) = (Vec::new(), Vec::new());
+        let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), HashMap::new());
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
+            squares.insert((i, j), p.pieces.clone());
             pieces.extend(p.pieces);
             meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
         }
@@ -180,7 +302,7 @@ impl Town {
                 let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
                 let open = Open {
                     ground,
-                    place: crate::ground::scene::xform_to(tree, h, gh)?,
+                    place: xform_to(tree, h, gh)?,
                     meets: &meets,
                     on: &on,
                     doors: &gdoors,
@@ -195,10 +317,11 @@ impl Town {
             stack.extend(kids.iter().rev().copied());
         }
         // The open ground's own links: gates in walls and fences.
-        let known = buildings
+        let known: BTreeMap<Id, BTreeSet<Id>> = buildings
             .iter()
-            .flat_map(|b| b.links.iter().map(|l| l.id))
+            .map(|b| (b.thing, b.links.iter().map(|l| l.id).collect()))
             .collect();
+        let all = known.values().flatten().copied().collect();
         let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
         let open = Open {
             ground,
@@ -207,8 +330,16 @@ impl Town {
             on: &on,
             doors: &gdoors,
         };
-        buildings.push(Building::of_ground(tree, open, &known)?);
-        Ok((map, surfaces, buildings))
+        buildings.push(Building::of_ground(tree, open, &all)?);
+        let basis = Basis {
+            open: Arc::new(OpenCut {
+                squares,
+                meets,
+                doors: gdoors,
+            }),
+            known: Arc::new(known),
+        };
+        Ok((map, surfaces, buildings, basis))
     }
 
     fn surface(&self, node: Id) -> Result<&Surface, Refusal> {

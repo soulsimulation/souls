@@ -24,6 +24,7 @@ use sim::ground::exits::piece_of;
 use sim::ground::{HUMAN_RADIUS, Scene, Turn, cut_floor};
 use sim::links::Doors;
 use sim::mover::Body;
+use sim::routes::{HANDS, Hop, Map, Route};
 use sim::unstick::{Ladder, Rung};
 use sim::walk::town::Town;
 use sim::walk::{Crowd, node_of};
@@ -44,9 +45,13 @@ fn id(n: u64) -> Id {
 
 fn town() -> (Town, BTreeMap<String, Id>) {
     let w = testworld::generate(1, 200).expect("the test world");
+    town_of(import_eden::load(&w.text).expect("the test world loads"))
+}
+
+fn town_of(im: Import) -> (Town, BTreeMap<String, Id>) {
     let Import {
         tree, rules, nodes, ..
-    } = import_eden::load(&w.text).expect("the test world loads");
+    } = im;
     let root = nodes["world"];
     let v = Value::Map(BTreeMap::from([
         (
@@ -82,6 +87,11 @@ fn edit(t: &Town, node: Id, at: Micros) -> Part {
         .expect("the box is turned by whole degrees") as u64;
     let mut wall = WALL;
     wall[4] = (360 - deg) % 360 * 1_000;
+    set_solids(t, node, wall, at)
+}
+
+/// One effect setting `node`'s solids to the one box `wall`, by the creator, numbered from the zone's next sequence.
+fn set_solids(t: &Town, node: Id, wall: [u64; 9], at: Micros) -> Part {
     let e = Effect {
         envelope: Envelope {
             sequence: t.doors.next,
@@ -192,6 +202,7 @@ struct Numbers {
     rebuild_us: u128,
     ticks_during: u64,
     install_us: u128,
+    whole: bool,
 }
 
 fn arm(uneven: bool) -> Numbers {
@@ -274,11 +285,16 @@ fn arm(uneven: bool) -> Numbers {
 
     // The edit: its ground cut off the clock thread from a copy, while the clock goes on.
     let part = edit(&t, nodes[BOX], c.now);
-    let (base, header, versions) = (t.tree.frozen(), t.doors.header.clone(), t.versions.clone());
+    let (base, header, versions, basis) = (
+        t.tree.frozen(),
+        t.doors.header.clone(),
+        t.versions.clone(),
+        t.basis(),
+    );
     let t0 = std::time::Instant::now();
     let (rebuilt, rebuild_us, ticks_during) = std::thread::scope(|s| {
         let job = s.spawn(|| {
-            let r = Town::rebuild(base, &header, ground, &versions, &part);
+            let r = Town::rebuild(base, &header, ground, &versions, &basis, &part);
             (r, t0.elapsed().as_micros())
         });
         let mut ticks = 0;
@@ -291,6 +307,7 @@ fn arm(uneven: bool) -> Numbers {
     });
     // The commit tick: the part and its ground in one call, before the crowd's tick.
     let touched: BTreeSet<Id> = rebuilt.touched.clone();
+    let whole = rebuilt.whole();
     let t1 = std::time::Instant::now();
     t.install(rebuilt, &part)
         .unwrap_or_else(|e| panic!("install refused: {}: {}", e.name, e.detail));
@@ -408,6 +425,7 @@ fn arm(uneven: bool) -> Numbers {
         rebuild_us,
         ticks_during,
         install_us,
+        whole,
     }
 }
 
@@ -418,8 +436,8 @@ fn a1_to_a5_ground_rebuilt_where_the_edit_was() {
         for repeat in 1..=2 {
             let n = arm(uneven);
             println!(
-                "G3 {name} arm, repeat {repeat}: touched {:?}; rebuilt off the clock in {} us while the clock stepped {} ticks; installed in {} us",
-                n.touched, n.rebuild_us, n.ticks_during, n.install_us
+                "G3 {name} arm, repeat {repeat}: touched {:?}; rebuilt off the clock in {} us while the clock stepped {} ticks; installed in {} us (whole ground: {})",
+                n.touched, n.rebuild_us, n.ticks_during, n.install_us, n.whole
             );
             println!(
                 "  A1: {} walks planned on the changed ground, each planned again within {} ms of the commit (ended by name: {:?}); {} other walks planned again",
@@ -446,4 +464,174 @@ fn a1_to_a5_ground_rebuilt_where_the_edit_was() {
             }
         }
     }
+}
+
+/// A route as a reader compares it: each patch (its node, square and version, and its piece by its first corner and
+/// size: piece numbers differ between a map replaced in place and one built whole) or link, then the first piece's
+/// line, the waypoints and the length.
+fn route_key(m: &Map, r: &Route) -> String {
+    let hops: Vec<String> = r
+        .hops
+        .iter()
+        .map(|h| match h {
+            Hop::Patch { at, piece } => {
+                let pc = m.piece(*piece);
+                format!("{at:?} {:?}/{}", pc.vertices.first(), pc.triangles.len())
+            }
+            Hop::Link { id, kind } => format!("{} {kind:?}", show(*id)),
+        })
+        .collect();
+    format!("{hops:?} {:?} {:?} {}", r.first_line, r.waypoints, r.length)
+}
+
+/// #3276 A1–A2 on Eden: an edit inside one building reads that building again and replaces its floors and links on
+/// the route map in place; the edit commits within 100 ms of its check, and routes after it equal a whole rebuild's.
+/// `cargo test -p sim --release --test rebuild eden -- --ignored --nocapture`, with the exported Eden facts file.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn eden_an_edit_rebuilds_only_its_building() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../.local/import-eden/eden-2026.facts.json"
+    );
+    let text =
+        std::fs::read_to_string(path).expect("run v2/tools/import-eden/export/export.ts first");
+    let t0 = std::time::Instant::now();
+    let (mut t, _) = town_of(import_eden::load(&text).expect("Eden loads"));
+    println!("Eden town built whole in {} ms", t0.elapsed().as_millis());
+    let ground = t.ground;
+    // The building with the most links that has a thing with solids on a floor: the edit grows it into a wall.
+    let tree = &t.tree;
+    let kids = |f: Id| -> Vec<Id> {
+        let mut out = Vec::new();
+        let mut stack: Vec<_> = tree.handle(f).into_iter().collect();
+        while let Some(h) = stack.pop() {
+            let kids = tree.children(h).unwrap_or(&[]);
+            stack.extend(kids.iter().rev().copied());
+            out.extend(
+                kids.iter()
+                    .filter_map(|&c| tree.node(c))
+                    .filter(|n| n.fields().contains_key(&F_SOLIDS))
+                    .map(|n| n.id()),
+            );
+        }
+        out
+    };
+    let (_, thing, node) = t
+        .buildings
+        .iter()
+        .filter(|b| b.thing != ground)
+        .filter_map(|b| {
+            let k = b.floors.keys().find_map(|&f| kids(f).first().copied())?;
+            Some((b.links.len(), b.thing, k))
+        })
+        .max()
+        .expect("a building with a thing on a floor");
+    let floors: BTreeSet<Id> = t
+        .buildings
+        .iter()
+        .find(|b| b.thing == thing)
+        .map(|b| b.floors.keys().copied().collect())
+        .unwrap_or_default();
+    let part = set_solids(&t, node, WALL, 0);
+    let (base, header, versions, basis) = (
+        t.tree.frozen(),
+        t.doors.header.clone(),
+        t.versions.clone(),
+        t.basis(),
+    );
+    let t1 = std::time::Instant::now();
+    let r = Town::rebuild(base, &header, ground, &versions, &basis, &part).expect("the rebuild");
+    let rebuild_us = t1.elapsed().as_micros();
+    assert!(!r.whole(), "A1: only the touched building is read again");
+    let touched: Vec<String> = r.touched.iter().map(|n| show(*n)).collect();
+    let t2 = std::time::Instant::now();
+    t.install(r, &part)
+        .unwrap_or_else(|e| panic!("install refused: {}: {}", e.name, e.detail));
+    let install_us = t2.elapsed().as_micros();
+    // At worst the check lands just after a tick and the commit waits one whole tick besides the rebuild.
+    let commit_us = rebuild_us + TICK as u128 + install_us;
+    let links = t
+        .buildings
+        .iter()
+        .find(|b| b.thing == thing)
+        .map_or(0, |b| b.links.len());
+    println!(
+        "#3276 Eden: edit to {} in building {} ({links} links, {} floors); touched {touched:?}; rebuilt off the clock in {rebuild_us} us, installed in {install_us} us; check to commit at most {} ms",
+        show(node),
+        show(thing),
+        floors.len(),
+        commit_us / 1000
+    );
+    if !cfg!(debug_assertions) {
+        assert!(
+            commit_us < 100_000,
+            "A2: commits within 100 ms of its check"
+        );
+    }
+
+    // The map built whole from the committed tree, at the same versions.
+    let t3 = std::time::Instant::now();
+    let mut whole = Map::build(&t.tree, ground, &|n| t.versions.of(n)).expect("the whole map");
+    println!(
+        "  the whole map built again in {} ms (for the comparison)",
+        t3.elapsed().as_millis()
+    );
+    // Seeded spots: every standing place on the building's floors, and a sample of the rest of Eden.
+    let mut seed = 0x3276_u64;
+    let mut next = move || {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 33) as usize
+    };
+    let (mut inside, mut rest) = (Vec::new(), Vec::new());
+    for q in 0..whole.counts().0 as u32 {
+        let node = whole.patch_of(q).node;
+        let list = if floors.contains(&node) {
+            &mut inside
+        } else {
+            &mut rest
+        };
+        for s in whole.standing(q) {
+            list.push((node, Vec3::new(s[0] * 1000, s[1] * 1000, s[2] * 1000)));
+        }
+    }
+    let mut pairs = Vec::new();
+    for k in 0..400 {
+        let a = if k % 2 == 0 {
+            inside[next() % inside.len()]
+        } else {
+            rest[next() % rest.len()]
+        };
+        pairs.push((a, rest[next() % rest.len()]));
+    }
+    for _ in 0..100 {
+        pairs.push((inside[next() % inside.len()], inside[next() % inside.len()]));
+    }
+    let go = |m: &mut Map, tree: &replica::tree::Tree, a: (Id, Vec3), b: (Id, Vec3)| {
+        let (Some(from), Some(to)) = (m.spot(a.0, a.1), m.spot(b.0, b.1)) else {
+            return "no spot".to_owned();
+        };
+        match m.route(tree, from, to, HANDS) {
+            Ok(r) => route_key(m, &r),
+            Err(e) => format!("{}: {}", e.name, e.detail),
+        }
+    };
+    let (mut through, mut refused) = (0, BTreeMap::new());
+    for &(a, b) in &pairs {
+        let inc = go(&mut t.map, &t.tree, a, b);
+        let full = go(&mut whole, &t.tree, a, b);
+        assert_eq!(inc, full, "A2: the route from {a:?} to {b:?}");
+        through += usize::from(floors.iter().any(|f| inc.contains(&format!("node: {f:?}"))));
+        if !inc.starts_with('[') {
+            *refused
+                .entry(inc.split(':').next().unwrap_or_default().to_owned())
+                .or_insert(0) += 1;
+        }
+    }
+    println!(
+        "  A2: all {} routes equal the whole rebuild's ({through} cross the building's floors; refused alike: {refused:?})",
+        pairs.len()
+    );
 }
