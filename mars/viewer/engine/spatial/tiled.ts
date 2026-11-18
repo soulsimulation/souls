@@ -960,11 +960,13 @@ export function pagedRoute(nav: GroundNav, scene: SpatialScene, profile: AgentPr
   let acc = 0, k0 = 1;
   for (; k0 < path.length; k0++) { acc += hypot(path[k0][0] - path[k0 - 1][0], path[k0][1] - path[k0 - 1][1]); if (acc >= HOP_M && k0 < path.length - 4) break; }
   if (k0 < path.length) k0 = hopOutdoors(nav, path, k0);
-  const hop = (k: number, margin = WINDOW_MARGIN_M, maxExpand?: number) => {
+  // `apart` (#2631, the wide retry only): when it says the ends cannot meet in this hop's grid, the search is not run
+  const hop = (k: number, margin = WINDOW_MARGIN_M, maxExpand?: number, apart?: (g: LevelGrid, target: Vec2) => boolean) => {
     const last = k >= path.length && goal.level === 0, target: Vec2 = last ? goal.p : path[Math.min(k, path.length - 1)];
     const r = rectOf([start.p, target, ...path.slice(1, k + 1)], margin);
-    const grids: GridSet = { cell: nav.cell, levels: new Map([[0, nav.compose(r, scene.obstacles)]]) };
-    return { k, last, target, grid: grids.levels.get(0)!, res: findRoute(grids, { ...scene, bounds: rectBounds(r), links: [] }, profile, start, { level: 0, p: target }, { ...(last ? opts : { ...opts, goalTolerance: 2.5 }), ...(maxExpand ? { maxExpand } : {}) }) };
+    const grids: GridSet = { cell: nav.cell, levels: new Map([[0, nav.compose(r, scene.obstacles)]]) }, grid = grids.levels.get(0)!;
+    if (apart?.(grid, target)) return { k, last, target, grid, res: failR('route.unreachable', `no route to (${fmt(target)}) in the wider window`, { level: 0, p: target }) };
+    return { k, last, target, grid, res: findRoute(grids, { ...scene, bounds: rectBounds(r), links: [] }, profile, start, { level: 0, p: target }, { ...(last ? opts : { ...opts, goalTolerance: 2.5 }), ...(maxExpand ? { maxExpand } : {}) }) };
   };
   let h = hop(k0);
   // BS3 (b): the coarse path runs through enterable buildings (only big solids are coarse-solid), so the hop's waypoint can
@@ -977,9 +979,15 @@ export function pagedRoute(nav: GroundNav, scene: SpatialScene, profile: AgentPr
   // no walk reaches keeps its old, cheap refusal (review: a sealed goal flooded the wide window on every admission check).
   // The ends are seeded as the fine search snaps them (radius + PLAN_MARGIN, the hop's own tolerances); the wide search is
   // bounded (WIDE_EXPAND) as a backstop for an area sealed only beyond this window's edge.
+  // #2631: the wide search's answer is used only when it finds a route. Where the ends lie in different standing areas of
+  // the wide window (apartIn), it cannot, so it is not run: a refusal repeated for many points near one place (a seat's
+  // approach points, one Soul after another) no longer spends WIDE_EXPAND expansions each on the main thread.
   if (!h.res.ok && opts.routeReachV1 && HOP_RETRY_CODES.has(h.res.diagnostic.code)) {
-    const r = profile.radius + PLAN_MARGIN, goalTol = h.last ? opts.goalTolerance ?? 0.35 : 2.5;
-    if (!enclosedIn(h.grid, h.target, r, goalTol) && !enclosedIn(h.grid, start.p, r, opts.startTolerance ?? 0.5)) { const t = hop(h.k, WINDOW_MARGIN_M + GROUND_TILE_M, WIDE_EXPAND); if (t.res.ok) h = t; }
+    const r = profile.radius + PLAN_MARGIN, goalTol = h.last ? opts.goalTolerance ?? 0.35 : 2.5, startTol = opts.startTolerance ?? 0.5;
+    if (!enclosedIn(h.grid, h.target, r, goalTol) && !enclosedIn(h.grid, start.p, r, startTol)) {
+      const t = hop(h.k, WINDOW_MARGIN_M + GROUND_TILE_M, WIDE_EXPAND, (g, target) => apartIn(g, start.p, startTol, target, goalTol, r));
+      if (t.res.ok) h = t;
+    }
   }
   const { k, last, res } = h;
   if (!res.ok || last) return res;
@@ -1018,6 +1026,48 @@ export function enclosedIn(g: LevelGrid, p: Vec2, r: number, tol: number): boole
   // every cell met is in the seed's area: sealed, or (stopped at the edge or at an open area) open; unvisited ones stay unknown
   for (const k of queue) mark[k] = sealed ? 1 : -1;
   return sealed;
+}
+/** #2631: standing areas of wide windows already flooded whole (a bit per cell), newest last, at most AREAS_KEPT. A window
+ *  grid is named by its content key (compose: the same tiles and solids give the same key), so an area outlives a grid the
+ *  composer let go, and serves every Soul standing in it. */
+const AREAS_KEPT = 4;
+const wideAreas: { key: string | LevelGrid; r: number; bits: Uint8Array }[] = [];
+const wideStats = { searched: 0, skipped: 0, floods: 0 };
+/** #2631: the wide retry's counters (tests): searches run, searches skipped as apart, and area floods. */
+export const wideHopMetrics = () => ({ ...wideStats });
+/**
+ * #2631 (route-reach/1's wide retry): whether the fine search in grid `g` could not join `a` and `b`: their snapped cells
+ * (radius `r`, tolerances as the search snaps them) lie in different standing areas. An area is every cell with clearance
+ * >= r, 8-connected, any diagonal: a superset of the search's own moves (it also forbids cutting corners, and a hop has no
+ * links), so cells apart here are apart for the search, and its answer would have been a refusal. Either end with no
+ * standing cell, or both in one area: false, and the search runs as before. Exact: it decides nothing a search would not.
+ */
+export function apartIn(g: LevelGrid, a: Vec2, aTol: number, b: Vec2, bTol: number, r: number): boolean {
+  const sa = snap(g, a, r, aTol), sb = snap(g, b, r, bTol);
+  if (sa < 0 || sb < 0 || sa === sb) { wideStats.searched++; return false; }
+  const key = gridContentKeys.get(g) ?? g;
+  const i = wideAreas.findIndex((w) => w.key === key && w.r === r && (w.bits[sa >> 3] & (1 << (sa & 7))));
+  if (i < 0) {
+    wideStats.floods++;
+    const n = g.nx * g.nz, bits = new Uint8Array((n + 7) >> 3), queue = new Int32Array(n), cl = g.clearance, nx = g.nx, nz = g.nz;
+    let head = 0, tail = 0; queue[tail++] = sa; bits[sa >> 3] |= 1 << (sa & 7);
+    while (head < tail) {
+      const k = queue[head++], ci = k % nx, cj = (k - ci) / nx;
+      for (let dj = -1; dj <= 1; dj++) {
+        const nj = cj + dj; if (nj < 0 || nj >= nz) continue;
+        for (let di = -1; di <= 1; di++) {
+          const ni = ci + di; if (ni < 0 || ni >= nx) continue;
+          const m = nj * nx + ni;
+          if (!(cl[m] >= r) || bits[m >> 3] & (1 << (m & 7))) continue;
+          bits[m >> 3] |= 1 << (m & 7); queue[tail++] = m;
+        }
+      }
+    }
+    wideAreas.push({ key, r, bits }); if (wideAreas.length > AREAS_KEPT) wideAreas.shift();
+  } else wideAreas.push(...wideAreas.splice(i, 1));
+  const apart = !(wideAreas[wideAreas.length - 1].bits[sb >> 3] & (1 << (sb & 7)));
+  if (apart) wideStats.skipped++; else wideStats.searched++;
+  return apart;
 }
 /** Distances (m along the line to the goal) of the ground points route-reach/1 tries as the end of an upper floor's first chunk. */
 const UPPER_CHUNK_M = [60, 48, 36, 24, 12, 0];

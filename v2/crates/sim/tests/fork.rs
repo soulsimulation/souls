@@ -21,8 +21,8 @@ use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::tree::Tree;
 use replica::world_model::{Audience, End, show};
 use sim::checkpoint::fork::{EPOCH, Forked, Request, fork};
-use sim::checkpoint::{Blobs, Checkpoints, replay, restore};
-use sim::log::{FileStore, Log};
+use sim::checkpoint::{Blobs, Checkpoints, replay, restore, resume_minter};
+use sim::log::{FileStore, HEADER_LEN, Log};
 
 const HEADER: &str = include_str!("../../replica/fixtures/audience/header.diag");
 const LOG: &str = include_str!("../../replica/fixtures/audience/log.diag");
@@ -399,6 +399,7 @@ fn a4_no_body_no_seat_held_by_one_and_what_each_held_rests_where_it_stood() {
         tree,
         log,
         checkpoints,
+        minter,
         ..
     } = f;
     drop(checkpoints);
@@ -407,13 +408,24 @@ fn a4_no_body_no_seat_held_by_one_and_what_each_held_rests_where_it_stood() {
         .expect("restores")
         .expect("a checkpoint");
     let header = Header::read(&fs::read(d.join("fork/header")).expect("read")).expect("a header");
-    let (_, found) =
-        Log::open(FileStore::open(&d.join("fork/log")).expect("opens"), EPOCH).expect("opens");
-    let mut back = r.tree;
+    // Opened from the checkpoint's place, its minter resumed past the head's mints (K4b).
+    let (_, found) = Log::open_at(
+        FileStore::open(&d.join("fork/log")).expect("opens"),
+        EPOCH,
+        r.root.log,
+    )
+    .expect("opens");
     assert_eq!(
-        replay(&mut back, &header, &found.records, r.root.record).expect("replays"),
-        1
+        found.start, HEADER_LEN,
+        "opened from the checkpoint's place"
     );
+    let after = found.after(r.root.record);
+    assert_eq!(
+        resume_minter(&r.root, after).map(|m| m.next()),
+        Some(minter.next())
+    );
+    let mut back = r.tree;
+    assert_eq!(replay(&mut back, &header, after, 0).expect("replays"), 1);
     assert_eq!(back.to_state(), tree.to_state(), "restored from its files");
     assert_ne!(header.lineage, h.lineage);
 }
