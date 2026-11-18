@@ -10,6 +10,10 @@
 #   unlabeled            removing merge:ready takes the PR out of the queue, or disables its auto-merge
 #   dequeued             a PR the queue drops without merging loses merge:ready and gets a comment with the reason
 #   A red head check does not eject in this mode: auto-merge waits, and a fix enters the queue by itself.
+#   mixed cap            a PR with any file outside the low-risk paths (LOW_RISK in .github/scripts/ci-scope.mjs) waits,
+#                        keeping merge:ready, while MIXED_CAP (8, merge-train.mjs) such PRs are queued or set to
+#                        auto-merge; low-risk PRs enqueue up to the queue's own limit. Every queue exit (unlabeled,
+#                        dequeued, merged) starts the train, which then enqueues a waiting PR
 #
 # Without the rule, everything below applies as written.
 #
@@ -23,8 +27,8 @@
 #                        fragment) are waited for, up to 15 minutes, before the mode is chosen; then pending is strict
 #   strict               everything else (T3-T4, strict paths, head not green yet, conflict or unknown mergeability):
 #                        steps 1-3 below. Main is green only when no ci.yml run failed after its newest green
-#                        full-scope run (every qualify job succeeded, or a manual run), or the failed run is re-run
-#                        green; a narrower green run does not clear a failure. ci.yml makes every push to main and
+#                        full-scope run (every qualify job succeeded, or a daily or manual run), or the failed run is re-run
+#                        green; a narrower green run does not clear a failure. ci.yml makes the daily run (06:23 UTC) and
 #                        every manual run full scope (ci-scope.mjs FULL_EVENTS); the run the train dispatches after a
 #                        merge is a manual one, so merges leave that evidence.
 #                        With no green full-scope run among the last 50 runs main is unproven, which counts as red.
@@ -134,7 +138,8 @@ jobs:
         run: gh workflow run merge-train.yml --repo "$REPO" --ref "$DEFAULT_BRANCH" -f exit="$ACTION" -f pr="$PR" -f reason="$REASON"
 
   # The queue's way back to the author (queue mode, see the header). Runs main's script; no PR code. A dequeue is read
-  # after a short wait, so a PR that merged or that the queue re-entered is left alone.
+  # after a short wait, so a PR that merged or that the queue re-entered is left alone. A PR leaving the queue makes
+  # room for one the mixed cap held, so the job then starts the train.
   queue-exit:
     if: github.event_name == 'workflow_dispatch' && inputs.exit != ''
     runs-on: ubuntu-latest
@@ -143,6 +148,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      actions: write
     env:
       GH_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}
       REPO: ${{ github.repository }}
@@ -165,6 +171,11 @@ jobs:
             sleep 20
             node .github/scripts/merge-train.mjs dequeued --repo "$REPO" --pr "$PR" --reason "$REASON"
           fi
+      - name: Start the train
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: gh workflow run merge-train.yml --repo "$REPO" --ref "$DEFAULT_BRANCH" || echo "::warning::could not start the train"
 
   train:
     if: github.event_name == 'workflow_dispatch' && inputs.exit == ''

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":147,"group":"two-things","words":"take the bin outside","obvious":2,"things":{"bin":"eden:bin","door":"eden:door"},"chain":[{"this":"me","form":"pick_up","carry":"bin","args":{"thing":"bin"}},{"this":"door","form":"open"},{"this":"me","form":"put","place":{"at":"next_to","thing":"bin","anchor":"door"},"args":{"thing":"bin"}}]}

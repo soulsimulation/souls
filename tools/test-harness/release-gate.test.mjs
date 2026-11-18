@@ -6,7 +6,7 @@ import { tmpdir, homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { CI_COVERED, ciEvidence, ciLogSkips, cacheAdd, cacheKey, COMPARISON_ONLY, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, validateRenames, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
+import { CI_COVERED, CI_EVENTS, ciEvidence, ciLogSkips, cacheAdd, cacheKey, COMPARISON_ONLY, compareRuns, lookupCache, prepareBundleBaselineCarry, readSuiteRun, suiteTree, DRIVER_ONLY, main, parseArgs, parseTap, readRun, scopeFor, storeCache, validateQuarantine, validateRenames, REQUIRED_PACKAGES, REQUIRED_STEPS } from './release-gate.mjs';
 import { combineReceipts, publicReceipt } from './ship-receipt.mjs';
 import { receiptProblems, releaseReceiptProblems } from '../world-launcher/deploy/ship/root-release.mjs';
 import { JOBS } from '../../.github/scripts/ci-scope.mjs';
@@ -890,7 +890,16 @@ test('CI evidence: only a successful push-to-main or merge_group ci.yml run at t
     { head_branch: 'feature' }, { path: '.github/workflows/other.yml' }]) {
     const g = fakeGithub({ sha, runs: [ciRun(sha, bad)], jobs: { 7: allJobs } });
     const e = ciEvidence(sha, g.args());
-    assert.deepEqual(e.covered, [], JSON.stringify(bad)); assert.match(e.reason, /no successful push\/merge_group ci.yml run/);
+    assert.deepEqual(e.covered, [], JSON.stringify(bad)); assert.match(e.reason, /no successful schedule\/workflow_dispatch\/push\/merge_group ci.yml run/);
+  }
+  // 18 Nov: a push runs only the light legs; the daily or a manual run on main checks every job, so it is preferred
+  assert.deepEqual(CI_EVENTS, ['schedule', 'workflow_dispatch', 'push', 'merge_group']);
+  for (const event of ['schedule', 'workflow_dispatch']) {
+    const daily = fakeGithub({ sha, runs: [ciRun(sha, { id: 5, event }), ciRun(sha, { id: 8 })], jobs: { 5: allJobs, 8: {} } });
+    const d = ciEvidence(sha, daily.args());
+    assert.deepEqual([d.run.id, d.covered], [5, CI_STEPS], event);
+    const elsewhere = fakeGithub({ sha, runs: [ciRun(sha, { id: 5, event, head_branch: 'agent/1-x' })], jobs: { 5: allJobs } });
+    assert.deepEqual(ciEvidence(sha, elsewhere.args()).covered, [], `${event} off main (a requested PR run) never counts`);
   }
   assert.match(ciEvidence(sha, full.args({ repo: null })).reason, /no GitHub repository/);
   assert.match(ciEvidence(sha, full.args({ api: () => { throw Error('HTTP 403'); } })).reason, /could not read CI runs: HTTP 403/);

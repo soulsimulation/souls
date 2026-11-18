@@ -1,0 +1,7 @@
+# The one Rust toolchain for v2/: CI's `v2` job installs exactly this channel, and its cargo cache is keyed on this file.
+# v2/tools/ci.sh adds the components and the target below when the install left them out.
+[toolchain]
+channel = "1.94.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
