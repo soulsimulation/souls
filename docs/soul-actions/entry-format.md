@@ -362,8 +362,9 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   `draw`. The body's `pick_up` and `push` reparent a thing argument into a free hand (a push holds the thing while it
   moves), and its `put` sets a held one down `here` by a placement word and an anchor described by a selector; another
   body has no `motion`, so it is never picked up or pushed. `packages/form-rules/README.md` ("What a form does")
-  defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
-  per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
+  defines what each does. A `set` on a timed value gives its new `rate` (a whole number, in the field's unit per second)
+  and, if it gives no `to`, its value is settled at the act's time; a `to` (a whole number) is the value from the act's
+  time on (SA-V4b: watering soaks the planter's soil full). The kettle's switch gives its heat a rate and a timer for the
   boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
   an `int` field may give `by` (signed, never 0) instead of `to`: it adds to the value, within the field's bounds, for a
   count or an amount used up that nothing balances. A cup's `sip` lowers its `water` by 50 and raises its `sips` by 1.

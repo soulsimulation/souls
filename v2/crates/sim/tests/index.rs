@@ -11,15 +11,14 @@
 // Times its own runs: the wall-clock rule (K7) binds the engine, not this test.
 #![allow(clippy::disallowed_methods)]
 
-use replica::effects::Refusal;
+mod common;
+
 use replica::encode::Name;
 use replica::ids::{Id, Scope};
-use replica::pose::{Frame, Pose, Quat, Support, Vec3};
-use replica::time::Micros;
-use replica::world_model::show;
+use replica::pose::Vec3;
+use sim::controller::Controller;
+use sim::host::Runner;
 use sim::index::{Index, Layers, Rect};
-use sim::mover::Body;
-use sim::walk::{Crowd, Leg, World};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -189,103 +188,58 @@ fn a2_thing_queries_match_a_scan() {
     }
 }
 
-/// A flat world of its own for the walk skill (as N7's test): straight lines, no links.
-struct Plane;
-
-impl World for Plane {
-    fn plan(&mut self, _: &Body, _: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
-        Ok(vec![Leg {
-            to: goal,
-            link: None,
-        }])
-    }
-    fn corner(&mut self, _: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
-        Ok([to.x, to.z])
-    }
-    fn step(&mut self, b: &mut Body, v: [i64; 2], dt: Micros, _: Micros) -> Result<(), Refusal> {
-        let p = b.pose.position;
-        b.pose.position = Vec3::new(p.x + v[0] * dt / 1_000_000, 0, p.z + v[1] * dt / 1_000_000);
-        b.linear = Vec3::new(v[0], 0, v[1]);
-        Ok(())
-    }
-    fn cross(
-        &mut self,
-        _: &mut Body,
-        link: Id,
-        _: Id,
-        _: i64,
-        _: Micros,
-        _: Micros,
-    ) -> Result<bool, Refusal> {
-        Err(Refusal {
-            name: "link-missing",
-            detail: show(link),
-        })
-    }
-}
-
-/// Every walker's position and velocity, tick by tick: its effect stream on the plane.
+/// Every walker's position and velocity, tick by tick: its effect stream, walked by the walk skill through the host's
+/// runner on the test world's open ground, its neighbours read from the controller's index (split or fixed).
 fn walk_crowd(split: bool) -> Vec<Vec<(Vec3, Vec3)>> {
-    let node = id(2);
-    let mut c = Crowd::new(50_000);
-    c.split = split;
+    let (mut t, _) = common::town(b"souls/index-test/1");
+    let ground = t.ground;
+    let mut c = Runner::new(50_000);
+    if !split {
+        c.controller = Controller::with_index(Index::fixed());
+    }
     let mut r = Rng(5);
     // 64 walkers packed 0.2 m apart in one 2 m square (over the split mark), each bound for a seeded spot 20 m off,
     // and 64 more coming the other way through them.
     for k in 0..128u64 {
         let (i, j) = ((k % 64) / 8, k % 8);
-        let at = if k < 64 {
-            Vec3::new(
-                100_000 + i as i64 * 200_000,
-                0,
-                100_000 + j as i64 * 200_000,
-            )
-        } else {
-            Vec3::new(
-                20_000_000 + i as i64 * 200_000,
-                0,
-                100_000 + j as i64 * 200_000,
-            )
-        };
+        let x = if k < 64 { -10_000_000 } else { 10_000_000 };
+        let at = Vec3::new(
+            x + 100_000 + i as i64 * 200_000,
+            0,
+            100_000 + j as i64 * 200_000,
+        );
         let goal = Vec3::new(
-            if k < 64 { 20_000_000 } else { 0 } + r.range(-3_000_000, 3_000_000),
+            -x + r.range(-3_000_000, 3_000_000),
             0,
             r.range(-6_000_000, 6_000_000),
         );
-        let body = Body {
-            id: id(10 + k),
-            pose: Pose {
-                frame: Frame { node, slot: None },
-                position: at,
-                orientation: Quat::IDENTITY,
-                support: Support::Surface {
-                    surface: node,
-                    height: 0,
-                },
-            },
-            linear: Vec3::ZERO,
-            piece: 0,
-            tri: 0,
-        };
-        c.add(&mut Plane, body, 1_400_000, id(1_000 + k), node, goal)
-            .unwrap();
+        let body = common::stand(&t, id(10 + k), ground, at);
+        common::walk(&mut c, &mut t, body, 1_400_000, ground, goal)
+            .unwrap_or_else(|e| panic!("no plan: {}: {}", e.name, e.detail));
     }
-    let mut out = vec![Vec::new(); c.walkers.len()];
-    for _ in 0..800 {
-        if c.done() {
+    let mut out = vec![Vec::new(); 128];
+    for _ in 0..1_200 {
+        if c.runs.is_empty() {
             break;
         }
-        c.step(&mut Plane).unwrap();
-        for (k, w) in c.walkers.iter().enumerate() {
-            out[k].push((w.body.pose.position, w.body.linear));
+        c.tick(&mut t)
+            .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
+        for (k, b) in c.controller.bodies().enumerate() {
+            out[k].push((b.pose.position, b.linear));
         }
     }
-    assert!(c.done(), "the crowd arrives");
+    assert!(c.runs.is_empty(), "the crowd arrives");
+    let ix = c.controller.near();
+    if split {
+        assert!(ix.splits > 0, "the crowded square split");
+    } else {
+        assert_eq!((ix.splits, ix.merges), (0, 0));
+    }
     out
 }
 
-/// A4: each body's stream is identical with cell splitting on and off: the walk skill's crowd (its neighbours read
-/// from the index), and an index kept across 400 steps of a seeded crowd that gathers into one square and spreads
+/// A4: each body's stream is identical with cell splitting on and off: the walk skill's crowd on the host's runner (its
+/// neighbours read from the controller's index), and an index kept across 400 steps of a seeded crowd that gathers into one square and spreads
 /// out again, so its node splits and merges, asked the same questions as an index that never splits.
 #[test]
 fn a4_streams_identical_with_splitting_on_and_off() {
