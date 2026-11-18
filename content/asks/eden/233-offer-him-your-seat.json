@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":233,"group":"with-others","words":"offer him your seat","obvious":2,"things":{"him":"eden:humanoid","chair":"eden:chair"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"chair"}},{"this":"me","form":"stand"},{"say":"take my seat"}]}

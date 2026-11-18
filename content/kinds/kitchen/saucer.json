@@ -11,6 +11,8 @@
   },
   "geometry": { "bounds_mm": [150, 15, 150] },
   "forms": {},
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": { "model": "look:saucer" },
   "text": {
     "card": "A saucer: a cup stands on it, and nothing else does."

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":14,"group":"object","words":"turn on the ceiling light","obvious":2,"things":{"light":"eden:pendant"},"chain":[{"this":"light","form":"switch_on"}]}
