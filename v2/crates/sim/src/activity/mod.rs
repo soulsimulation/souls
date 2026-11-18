@@ -6,9 +6,10 @@
 //!   it expires unstarted. Join links the Soul's body to the activity in a role, against the activity's revision; a
 //!   resent join (the same intent id) is answered from the node and makes no second membership. Start takes every
 //!   role's claims on every member's body through the controller (B1), all or none: a body another started activity
-//!   holds is refused naming that activity, so the first to start has it. Leave is always accepted. The activity ends
-//!   (its node is removed) when its last member leaves. Every step is one effect whose actor is the Soul and whose
-//!   cause is its intent, with an event naming the step (`souls:activity-proposed`, `-joined`, `-started`, `-left`).
+//!   holds is refused naming that activity, so the first to start has it. Leave is always accepted, unless it would
+//!   leave a part of a bay unsupported (B18, [`crate::structure`]). The activity ends (its node is removed) when its
+//!   last member leaves. Every step is one effect whose actor is the Soul and whose cause is its intent, with an event
+//!   naming the step (`souls:activity-proposed`, `-joined`, `-started`, `-left`).
 //! - **Only the activity aims a move at its members.** [`Activities::aim`] starts a B2 move by one member at
 //!   another's body only when both are members of the same started activity; anything else is refused
 //!   (`target-outside-activity`) and changes nothing. A move whose claims meet the activity's own claim on the actor
@@ -40,6 +41,7 @@ use replica::world_model::{Audience, End, show};
 
 use crate::controller::{Controller, Driver};
 use crate::moves::{Instance, Moves, Reach};
+use crate::structure::Structure;
 use crate::timers::{DueList, Timer};
 
 type R<T> = Result<T, Refusal>;
@@ -94,6 +96,8 @@ struct Leaving {
 pub struct Activities {
     pub header: Header,
     pub rules: Rules,
+    /// The structure rule (B18): a leave that would leave a part of a bay unsupported is refused.
+    pub structure: Structure,
     /// The zone's next sequence.
     pub next: u64,
     /// Every effect written, in order: the activities' share of the log.
@@ -112,6 +116,7 @@ impl Activities {
         Activities {
             header,
             rules,
+            structure: Structure::default(),
             next,
             stream: Vec::new(),
             kinds: kinds.into_iter().map(|k| (k.name.clone(), k)).collect(),
@@ -194,7 +199,9 @@ impl Activities {
             name: "encoding",
             detail: e.to_string(),
         })?;
-        tree.commit(&self.header, &Part::read(&bytes)?, &self.rules)?;
+        let part = Part::read(&bytes)?;
+        self.structure.check(tree, &part.effects)?;
+        tree.commit(&self.header, &part, &self.rules)?;
         self.next += 1;
         self.stream.push(effect);
         Ok(())

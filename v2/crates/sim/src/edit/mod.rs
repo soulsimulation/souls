@@ -8,7 +8,8 @@
 //! Each effect is written by its own node (T6 rule 6): a place by its parent, a move, set or remove by the node itself.
 //! Operations in a row with the same writer and audience share one effect.
 
-use crate::commit::write;
+use crate::commit::write_guarded;
+use crate::structure::Structure;
 use replica::apply::Replica;
 use replica::edit::{Checked, Op, Ref, Refused, confirm};
 use replica::effects::{Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
@@ -34,6 +35,17 @@ pub fn commit(
     minter: &mut Minter,
     checked: &Checked,
     at: Micros,
+) -> Result<Committed, Refused> {
+    commit_guarded(live, minter, checked, at, &Structure::default())
+}
+
+/// [`commit`], with the world's structure rule checked on the write (B18, `crate::structure`).
+pub fn commit_guarded(
+    live: &mut Replica,
+    minter: &mut Minter,
+    checked: &Checked,
+    at: Micros,
+    structure: &Structure,
 ) -> Result<Committed, Refused> {
     confirm(live, checked)?;
     let edit = &checked.edit;
@@ -149,7 +161,7 @@ pub fn commit(
             rest: Rest::new(),
         })
         .collect();
-    let part = write(live, &effects).map_err(|r| Refused {
+    let part = write_guarded(live, &effects, structure).map_err(|r| Refused {
         op: None,
         name: r.name,
         detail: r.detail,

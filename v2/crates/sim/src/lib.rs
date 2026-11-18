@@ -21,6 +21,7 @@ pub mod routes;
 pub mod slots;
 pub mod speech;
 pub mod spots;
+pub mod structure;
 pub mod timers;
 pub mod unstick;
 pub mod walk;

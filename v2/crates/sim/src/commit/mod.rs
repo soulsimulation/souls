@@ -2,8 +2,9 @@
 //! `checkers`) run the form rules (R2) on a frozen copy (K8) for each candidate of an act's ranked list and hand over
 //! [`Checks`]: each candidate's verdict, its prepared changes and its read set, the version stamp of every node the
 //! check read. At commit the clock thread compares those stamps with the live replica's, in rank order, and applies
-//! the first candidate whose reads are unchanged and whose verdict is yes. That is all it does: it runs no rule and
-//! no route search ([`off_clock`] catches one that does).
+//! the first candidate whose reads are unchanged and whose verdict is yes. That is all it does: it runs no form rule
+//! and no route search ([`off_clock`] catches one that does). The one rule it runs is the structure rule
+//! ([`crate::structure`], B18), on [`write_guarded`]: it reads only the bays the part changes.
 //!
 //! This is optimistic concurrency, as HTTP's `If-Match`: what was read is confirmed unchanged at commit. A stamp is
 //! per node, so a change to any field of a node read invalidates the check (a false conflict costs a re-check, never
@@ -14,6 +15,7 @@
 
 pub mod acts;
 
+use crate::structure::Structure;
 use replica::apply::Replica;
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Refusal, Rest,
@@ -80,6 +82,16 @@ pub fn unchanged(live: &impl Read, reads: &[(Id, u64)]) -> bool {
 /// The clock thread: confirms `checks` against `live` and applies the first candidate that holds (see the module's
 /// notes), as one effect at the live version, written at `at`.
 pub fn commit(live: &mut Replica, checks: &Checks, at: Micros) -> Outcome {
+    commit_guarded(live, checks, at, &Structure::default())
+}
+
+/// [`commit`], with the world's structure rule ([`crate::structure`], B18) checked on the write.
+pub fn commit_guarded(
+    live: &mut Replica,
+    checks: &Checks,
+    at: Micros,
+    structure: &Structure,
+) -> Outcome {
     let mut stale = false;
     let mut first_no: Option<&str> = None;
     for (rank, c) in checks.candidates.iter().enumerate() {
@@ -92,7 +104,7 @@ pub fn commit(live: &mut Replica, checks: &Checks, at: Micros) -> Outcome {
                 first_no.get_or_insert(reason);
             }
             Verdict::Yes => {
-                return match apply(live, checks, c, at) {
+                return match apply(live, checks, c, at, structure) {
                     Ok(part) => Outcome::Applied { rank, part },
                     Err(r) => Outcome::Refused {
                         reason: r.name.to_owned(),
@@ -121,6 +133,7 @@ fn apply(
     checks: &Checks,
     c: &Checked,
     at: Micros,
+    structure: &Structure,
 ) -> Result<Arc<Part>, Refusal> {
     let effect = Effect {
         envelope: Envelope {
@@ -143,12 +156,21 @@ fn apply(
         events: None,
         rest: Rest::new(),
     };
-    write(live, &[effect])
+    write_guarded(live, &[effect], structure)
 }
 
 /// The one write path: `effects` as one part, applied to `live` whole or not at all. Acts (above) and a creator's
 /// edits (`crate::edit`, G1, #2746) both commit through it.
 pub fn write(live: &mut Replica, effects: &[Effect]) -> Result<Arc<Part>, Refusal> {
+    write_guarded(live, effects, &Structure::default())
+}
+
+/// [`write`], refused before anything applies when it would leave a part of a bay unsupported ([`Structure`], B18).
+pub fn write_guarded(
+    live: &mut Replica,
+    effects: &[Effect],
+    structure: &Structure,
+) -> Result<Arc<Part>, Refusal> {
     let v = Value::Map(BTreeMap::from([
         (1, Value::Bytes(live.header().hash().to_bytes())),
         (
@@ -161,6 +183,7 @@ pub fn write(live: &mut Replica, effects: &[Effect]) -> Result<Arc<Part>, Refusa
         detail: e.to_string(),
     })?;
     let part = Part::read(&bytes)?;
+    structure.check(live.tree(), &part.effects)?;
     live.apply(&part)?;
     Ok(Arc::new(part))
 }
