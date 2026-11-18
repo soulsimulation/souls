@@ -38,8 +38,9 @@ test("A1: how for tea returns at most six steps naming real things, cut at the w
   t.after(() => w.server.close());
   const r = (await run(home(w.url), "how", "tea")).out;
   assert.equal(r.how, "tea");
-  assert.match(r.text, /Switch the kettle on/);
+  assert.match(r.text, /Fill the kettle at a tap, switch it on/);
   assert.equal(r.with.thing, "kettle");
+  assert.deepEqual(r.done, [{ form: "fill", act: "object:kettle:fill", why: 'already so on this copy: water is "cold"' }], "a kettle already filled passes over fill and says so");
   assert.ok(r.steps.length >= 1 && r.steps.length <= HOW_STEPS_MAX);
   assert.deepEqual(r.steps.map((s) => s.act), ["object:kettle:switch_on", "object:kettle:pour"], "each step is a form of a real thing");
   assert.equal(r.steps[0].can, "yes", "the first step is checked on this copy");
@@ -66,6 +67,7 @@ test("a first step that is not possible is said, and --run starts nothing", asyn
   t.after(() => w.server.close());
   const dir = home(w.url);
   const r = (await run(dir, "how", "tea")).out;
+  assert.equal(r.steps[0].form, "fill", "an empty kettle's tea starts with fill");
   assert.equal(r.steps[0].can, "no");
   assert.match(r.next, /not possible now/);
   const started = await run(dir, "how", "tea", "--run");
