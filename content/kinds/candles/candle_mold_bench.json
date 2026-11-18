@@ -41,6 +41,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:candle_mold_bench",
     "table": [
