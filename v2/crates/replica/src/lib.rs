@@ -7,12 +7,16 @@
 pub mod apply;
 pub mod audience;
 pub mod bodies;
+pub mod directory;
+pub mod durability;
 pub mod effects;
 pub mod encode;
 pub mod hash;
 pub mod host;
 pub mod ids;
+pub mod intents;
 pub mod kinds;
+pub mod moves;
 pub mod pose;
 pub mod query;
 pub mod read;

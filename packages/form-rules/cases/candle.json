@@ -1,0 +1,320 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "The candle (core/candle@1, 1 placed): light and put out, anyone, within touch, as today. Lighting needs nothing in the hand: today's candle lights the same way, and a match is not a kind yet.",
+ "cases": [
+  {
+   "name": "candle_light_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:candle",
+      "fields": {
+       "lit": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       186,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "candle_light_when_already_on_names_put_out",
+   "act": {
+    "this": "l1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:candle",
+      "fields": {
+       "lit": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       186,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lit",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "put_out"
+    }
+   }
+  },
+  {
+   "name": "candle_light_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:candle",
+      "fields": {
+       "lit": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       186,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "wick",
+     "move": "touch"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "wick"
+    }
+   }
+  },
+  {
+   "name": "candle_put_out_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:candle",
+      "fields": {
+       "lit": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       186,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "candle_put_out_when_already_off_names_light",
+   "act": {
+    "this": "l1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:candle",
+      "fields": {
+       "lit": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       186,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lit",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "light"
+    }
+   }
+  },
+  {
+   "name": "candle_put_out_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:candle",
+      "fields": {
+       "lit": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       186,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "wick",
+     "move": "touch"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "wick"
+    }
+   }
+  }
+ ]
+}

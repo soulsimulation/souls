@@ -2,12 +2,159 @@
   "format": "souls-entry/1",
   "kind": "eden:chair",
   "owner": "thing",
-  "geometry": { "bounds_mm": [450, 900, 450] },
+  "state": { "tucked": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 509], "yaw_mdeg": 180000 },
+    "back": { "role": "grip", "at_mm": [0, 765, -200] }
+  },
+  "slots": { "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 470, 20], "stand": "front" } },
+  "geometry": { "bounds_mm": [440, 915, 418] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    },
+    "pull_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "within_reach", "point": "back" }],
+      "steps": [{ "step": "walk_to", "point": "back" }, { "step": "move", "move": "press", "at": "back" }],
+      "effects": [{ "change": "set", "field": "tucked", "to": false, "event": "pulled_out" }]
+    },
+    "push_in": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "slot_free", "slot": "seat" }, { "need": "within_reach", "point": "back" }],
+      "steps": [{ "step": "walk_to", "point": "back" }, { "step": "move", "move": "press", "at": "back" }],
+      "effects": [{ "change": "set", "field": "tucked", "to": true, "event": "pushed_in" }]
+    }
+  },
   "motion": { "how": "two_hands" },
   "loose": { "ever": true },
-  "looks": { "model": "look:chair" },
-  "text": {
-    "card": "A chair, carried in two hands."
+  "looks": {
+    "model": "look:chair",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [-160, 215, -150],
+          "r": 22,
+          "h": 430,
+          "segments": 6,
+          "r2": 18,
+          "tint": "wood",
+          "role": "body",
+          "pivot": [-160, 215, -150]
+        },
+        {
+          "kind": "cyl",
+          "at": [160, 215, -150],
+          "r": 22,
+          "h": 430,
+          "segments": 6,
+          "r2": 18,
+          "tint": "wood",
+          "role": "body",
+          "pivot": [160, 215, -150]
+        },
+        {
+          "kind": "cyl",
+          "at": [-160, 215, 150],
+          "r": 22,
+          "h": 430,
+          "segments": 6,
+          "r2": 18,
+          "tint": "wood",
+          "role": "body",
+          "pivot": [-160, 215, 150]
+        },
+        {
+          "kind": "cyl",
+          "at": [160, 215, 150],
+          "r": 22,
+          "h": 430,
+          "segments": 6,
+          "r2": 18,
+          "tint": "wood",
+          "role": "body",
+          "pivot": [160, 215, 150]
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 440, 0],
+          "polygon": [[-215, -205], [215, -205], [215, 205], [-215, 205]],
+          "h": 20,
+          "tint": "wood",
+          "role": "body",
+          "pivot": [0, 440, 0]
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 485, 10],
+          "polygon": [[-185, -175], [185, -175], [185, 175], [-185, 175]],
+          "h": 10,
+          "tint": "cushion",
+          "role": "body",
+          "pivot": [0, 485, 10]
+        },
+        {
+          "kind": "cyl",
+          "at": [-200, 690, -190],
+          "r": 20,
+          "h": 450,
+          "segments": 6,
+          "tint": "wood",
+          "role": "body",
+          "pivot": [-200, 690, -190]
+        },
+        {
+          "kind": "cyl",
+          "at": [200, 690, -190],
+          "r": 20,
+          "h": 450,
+          "segments": 6,
+          "tint": "wood",
+          "role": "body",
+          "pivot": [200, 690, -190]
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 765, -200],
+          "polygon": [[-195, -3], [195, -3], [195, 3], [-195, 3]],
+          "h": 110,
+          "tint": "wood",
+          "role": "body",
+          "pivot": [0, 765, -200]
+        },
+        {
+          "kind": "box",
+          "at": [0, 640, -200],
+          "size": [380, 40, 25],
+          "round": 0,
+          "tint": "wood",
+          "role": "body",
+          "pivot": [0, 640, -200]
+        }
+      ],
+      "round": 15,
+      "palette": { "wood": "#9a6b43", "cushion": "#8ea47f" },
+      "tags": ["furniture", "seat", "chair"]
+    },
+    "table": [{ "part": "body", "field": "tucked", "do": "slide", "axis": "z", "at": { "true": -180, "false": 0 } }]
   },
-  "card": { "text": "card" }
+  "text": {
+    "card": "A wooden chair with one cushioned seat; pulled out to sit, pushed in after.",
+    "furniture": "furniture",
+    "seat": "seat"
+  },
+  "card": { "text": "card", "category": "furniture", "synonyms": ["seat"] }
 }
