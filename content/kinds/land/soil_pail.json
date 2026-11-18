@@ -18,6 +18,8 @@
       "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:soil_pail",
     "table": [
