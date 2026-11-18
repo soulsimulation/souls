@@ -3,6 +3,7 @@
 
 pub mod checkpoint;
 pub mod clock;
+pub mod commit;
 pub mod controller;
 pub mod forms;
 pub mod frozen;
