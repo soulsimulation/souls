@@ -168,9 +168,10 @@ test('A1, A4, A5: login once, run again, list the account, and nothing prints a 
   assert.deepEqual(listed.d.souls.map((s) => [s.name, s.id, s.control.held, s.agent?.label?.replace(/^eden [0-9.]+/, 'eden') ?? null, s.here]), [['Mira', 's_acct1', true, 'eden on studio laptop', true], ['Ivo', 's_acct9', false, null, false]]);   // #2257 A6: an approval names its device
   assert.deepEqual((await run('list')).d.souls.map((s) => s.name), ['Mira'], 'list with no flag is as before');
   assert.deepEqual((await run('doctor')).d.orphanCredentials, [], 'a login is not an orphan credential');
-  // A5: the guide a fresh chat reads names the commands, and help account is one screen.
-  const guide = readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), head = guide.slice(0, guide.indexOf('not in your own memory.'));
-  for (const said of ['`node eden.mjs accounts`', '`node eden.mjs login`', '`node eden.mjs help account`']) assert.ok(head.includes(said), said);
+  // A5: the skill a fresh chat reads names the commands (#3312: the folder guide points at the skill and help), and help account is one screen.
+  const skill = readFileSync(new URL('./soul/skill.md', import.meta.url), 'utf8');
+  for (const said of ['`login`', '`help account`']) assert.ok(skill.includes(said), said);
+  assert.match(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), /the `souls` skill, then `node eden\.mjs help`/);
   const topic = await run('help', 'account');
   assert.ok(topic.out.split('\n').length <= 24, 'one screen'); for (const said of ['login wait', 'accounts switch', 'logout', '--as']) assert.ok(topic.out.includes(said), said);
   // Nothing printed holds a secret, and no file but credentials.json does.

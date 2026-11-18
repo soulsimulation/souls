@@ -33,10 +33,10 @@
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, Scene, exits};
+use crate::ground::{HUMAN_RADIUS, OpenGround, exits};
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
-use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
+use crate::links::{Building, Doors, F_OPEN, Open, back, floor_joins, ground_doors};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map};
 use crate::spots::{Ask, CLEAR, Ground, Spots, Target, flat, to_segment};
@@ -150,7 +150,7 @@ impl Town {
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
         let map = Map::build(&tree, ground, &|_| 0)?;
         let mut surfaces = BTreeMap::new();
-        let open = OpenGround::prepare(&Scene::of(&tree, ground)?, HUMAN_RADIUS)?;
+        let open = OpenGround::of(&tree, ground, HUMAN_RADIUS)?;
         let (mut pieces, mut meets) = (Vec::new(), Vec::new());
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
@@ -159,7 +159,12 @@ impl Town {
         }
         let gh = tree.handle(ground).ok_or("no such ground")?;
         let gdoors = ground_doors(&tree, ground)?;
-        surfaces.insert(ground, Surface::new(ground, pieces));
+        let on = open.on_terrain(&pieces);
+        let mut surface = Surface::new(ground, pieces);
+        if let Some(t) = open.terrain() {
+            surface = surface.on_terrain(t.clone(), on);
+        }
+        surfaces.insert(ground, surface);
         let mut buildings = Vec::new();
         let mut stack = vec![gh];
         while let Some(h) = stack.pop() {
@@ -176,6 +181,7 @@ impl Town {
                     meets: &meets,
                     on: &on,
                     doors: &gdoors,
+                    terrain: open.terrain(),
                 };
                 if let Ok(b) = Building::read_on(&tree, id, Some(open)) {
                     for (&floor, (_, patch)) in &b.floors {
@@ -198,8 +204,12 @@ impl Town {
             meets: &meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
         buildings.push(Building::of_ground(&tree, open, &known)?);
+        for (i, l) in floor_joins(&buildings.iter().collect::<Vec<_>>()) {
+            buildings[i].links.push(l);
+        }
         let link_at = link_index(&buildings);
         Ok(Town {
             tree,
@@ -224,6 +234,14 @@ impl Town {
 
     fn building(&self, link: Id) -> Option<&Building> {
         self.buildings.iter().find(|b| b.link(link).is_some())
+    }
+
+    /// The frame on the open ground of the building that holds the floor `node`.
+    fn frame_of(&self, node: Id) -> Option<crate::ground::scene::Xform> {
+        self.buildings
+            .iter()
+            .find(|b| b.floors.contains_key(&node))
+            .map(|b| b.place)
     }
 
     /// The town as the host's questions read it in a tick: the map behind a cell (a route is cached as it is
@@ -723,6 +741,35 @@ impl View<'_> {
 }
 
 impl Town {
+    /// The legs of a walk shaped by `way` (E10, #2781): the routes from where `body` stands through each of the way's
+    /// points (`crate::routes::way`) and on to `goal` when one is named, joined into one walk. A point is a leg with
+    /// no link that is not the last, which the walk passes without stopping. Each point is one route search, counted
+    /// in the points returned.
+    pub fn plan_way(
+        &mut self,
+        body: &Body,
+        way: &replica::walk::Way,
+        goal: Option<Vec3>,
+    ) -> Result<(Vec<Leg>, crate::routes::way::Points), Refusal> {
+        let from = body.pose.position;
+        let pts = crate::routes::way::points(&self.tree, &self.map, self.ground, from, goal, way)?;
+        let mut stops = pts.on.clone();
+        stops.extend(goal.map(|g| (self.ground, g)));
+        if stops.is_empty() {
+            return Err(refusal("way-empty", "a walk with no point and no goal"));
+        }
+        let (mut legs, mut at) = (Vec::new(), *body);
+        for (node, p) in stops {
+            legs.extend(self.plan(&at, node, p)?);
+            at = self
+                .surfaces
+                .get(&node)
+                .ok_or_else(|| refusal("no-surface", show(node)))?
+                .place(body.id, Frame { node, slot: None }, p, Quat::IDENTITY)?;
+        }
+        Ok((legs, pts))
+    }
+
     /// The track across `link` for `body` from where it stands, at `speed`, and the end it goes in by. A shut door
     /// in the link is asked open and the opening written at once (`cause`, the body as the acting Soul), and there is
     /// no track yet: the body stands this tick and asks again the next (T1).
@@ -772,9 +819,23 @@ impl Town {
                     .map_or(e.middle(), |s| {
                         Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
                     });
-                let stand = self
+                let mut stand = self
                     .landing(to, stand)
                     .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+                // The open ground's pieces are a plan at 0; a body there stands on its terrain (#3227).
+                if to == self.ground {
+                    let at = Frame {
+                        node: to,
+                        slot: None,
+                    };
+                    stand = self
+                        .surfaces
+                        .get(&to)
+                        .ok_or_else(|| refusal("no-surface", show(to)))?
+                        .place(body.id, at, stand, body.pose.orientation)?
+                        .pose
+                        .position;
+                }
                 let last = if to == self.ground {
                     back(&place, stand).map_err(out)?
                 } else {
@@ -789,6 +850,36 @@ impl Town {
                 for p in &mut line {
                     *p = place.point(*p).map_err(out)?;
                 }
+            }
+        } else if let Some(b) = self.building(link)
+            && let (Some(ph), Some(pt)) = (self.frame_of(here), self.frame_of(to))
+            && (!b.floors.contains_key(&here) || !b.floors.contains_key(&to))
+        {
+            // A step from one thing's floor onto another's (#3227): the line is followed in the frame of the floor
+            // the body stands on, and ends where it stands on the far floor, as on the open ground above.
+            let out = |e: String| refusal("out-of-range", e);
+            let to_here = |p: Vec3, from: &crate::ground::scene::Xform| {
+                from.point(p).and_then(|w| back(&ph, w))
+            };
+            if !b.floors.contains_key(&here) {
+                for p in &mut line {
+                    *p = to_here(*p, &b.place).map_err(out)?;
+                }
+            }
+            if let Some(e) = far {
+                let stand = self
+                    .map
+                    .spot_near(to, e.middle(), AT_EDGE)
+                    .map_or(e.middle(), |s| {
+                        Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
+                    });
+                let stand = self
+                    .landing(to, stand)
+                    .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+                if let Some(p) = line.last_mut() {
+                    *p = to_here(stand, &pt).map_err(out)?;
+                }
+                arrive = Some(stand);
             }
         } else if let Some(last) = line.last_mut() {
             *last = self

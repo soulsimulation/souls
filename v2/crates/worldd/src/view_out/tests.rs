@@ -397,3 +397,189 @@ fn an_undeclared_gap_is_refused_by_the_replica() {
     assert!(matches!(refused, Some((_, "sequence-gap"))));
     let _ = fs::remove_dir_all(&root);
 }
+
+fn part_of(h: &Header, records: Vec<Value>) -> Part {
+    let v = Value::Map(
+        [
+            (1, Value::Bytes(h.hash().to_bytes())),
+            (2, Value::Array(records)),
+        ]
+        .into(),
+    );
+    Part::read(&encode(&v).expect("bytes")).expect("a part")
+}
+
+/// #3300 A1 and A2: a small world (three things, a link, the root's field, 41 entries) is checkpointed and forked
+/// (K6). The writer starts at the fork's head: part 0 holds the fork's state, numbered just below its next sequence
+/// with the sequences before declared as one gap, and carries the state hash. Then 10 s of ticks, 20 a second, go
+/// through the view tier (R3) to the writer, and a fresh reader plays every part to the live world's state hash.
+#[test]
+fn a_fork_streams_from_its_head_and_a_fresh_reader_holds_the_live_state() {
+    use crate::views::Tier;
+    use replica::ids::{Hash, Purpose, Version};
+    use replica::tree::Tree;
+    use replica::views::Redactions;
+    use sim::checkpoint::fork::{Request, fork};
+    use sim::checkpoint::{Blobs, Checkpoints};
+
+    let h = header();
+    let place = h
+        .kinds
+        .iter()
+        .find(|k| k.as_str().starts_with("souls:place@"))
+        .expect("a place kind")
+        .clone();
+    let n = ids();
+    // The parent: three things, a link between two, the root's field, then 36 ticks of changes.
+    let mut t = Tree::start(h.zone, place);
+    let mut parent: Vec<Value> = n
+        .iter()
+        .enumerate()
+        .map(|(s, i)| entry(s as u64, 0, h.zone, create(&h, *i)))
+        .collect();
+    let link = Change::Link {
+        link: Id::new(Scope([0x71; 16]), 9).expect("an id"),
+        ty: replica::encode::Name::new("souls:near").expect("a name"),
+        ends: [n[0], n[1]],
+        owner: replica::world_model::End::First,
+        audience: Audience::Everyone,
+    };
+    parent.push(entry(3, 0, n[0], link));
+    parent.push(entry(4, 0, h.zone, set(h.zone, 3, Value::Uint(7))));
+    for s in 5..41u64 {
+        let node = n[(s % 3) as usize];
+        parent.push(entry(
+            s,
+            s as i64 * 50_000,
+            node,
+            set(node, 1, Value::Uint(s)),
+        ));
+    }
+    t.apply(&h, &part_of(&h, parent))
+        .expect("the parent applies");
+    let d = scratch("fork");
+    let mut c = Checkpoints::open(&d.join("parent"), 1 << 20, Blobs::default()).expect("opens");
+    let v = Version {
+        lineage: h.lineage,
+        zone: h.zone,
+        epoch: 1,
+        sequence: t.next(),
+    };
+    c.take(&mut t, v, 1, b"the parent's seed").expect("taken");
+    c.wait().expect("written");
+    let mut f = fork(
+        &d.join("parent"),
+        &d.join("fork"),
+        Request {
+            through: Id::new(Scope([0x77; 16]), 1).expect("an id"),
+            scope: Scope([0xf3; 16]),
+            seed: vec![0xf3; 32],
+            real_us: 1_763_337_700_000_000,
+            build: Hash::of(Purpose::Fixture, b"souls/3300-test/1").to_bytes(),
+            every: 1 << 20,
+        },
+    )
+    .expect("forks");
+    let head = f.tree.next();
+    assert!(head > 41, "the fork starts mid-sequence, after its head");
+
+    // A1: the writer starts at the fork's head, from the state the tier starts on.
+    let key = key(&f.header);
+    let tier = Tier::start(
+        f.header.clone(),
+        f.tree.to_state(),
+        Redactions::default(),
+        f.log.durable_mark(),
+    )
+    .expect("a tier");
+    let sub = tier.subscribe(vec![key], 1 << 12);
+    let root = d.join("stream");
+    let w = Writer::fork(&root, &f.header, &key, (0, 1_000_000), &f.tree.to_state())
+        .expect("a fork's writer");
+    let stop = Arc::new(AtomicBool::new(false));
+    let following = follow(w, sub, stop.clone());
+
+    // A2: 10 s of ticks, 20 a second, each written to the fork's log and handed to the tier.
+    for tick in 1..=200i64 {
+        let seq = f.tree.next();
+        let e = if tick % 50 == 0 {
+            entry(
+                seq,
+                tick * 50_000,
+                h.zone,
+                set(h.zone, 3, Value::Uint(tick as u64)),
+            )
+        } else {
+            let node = n[(tick % 3) as usize];
+            entry(
+                seq,
+                tick * 50_000,
+                node,
+                set(node, 1, Value::Uint(tick as u64)),
+            )
+        };
+        let p = part_of(&f.header, vec![e]);
+        f.tree.apply(&f.header, &p).expect("the tick applies");
+        let record = f.log.append(p.stored().to_vec()).expect("appended");
+        tier.offer(record, p.stored().to_vec());
+    }
+    let stats = tier.close();
+    assert!(stats.fault.is_none(), "{:?}", stats.fault);
+    stop.store(true, Ordering::Relaxed);
+    let w = following.join().expect("joined").expect("the writer wrote");
+
+    // A1: part 0 carries the fork's header (its kinds added) and its whole state.
+    let hb = fs::read(root.join(stream::header_path(&w.header))).expect("the header");
+    let written = Header::read(&hb).expect("a header");
+    assert_eq!(
+        (written.lineage, written.zone, written.epoch, &written.build),
+        (
+            f.header.lineage,
+            f.header.zone,
+            f.header.epoch,
+            &f.header.build
+        )
+    );
+    let p0 = StreamPart::read(&fs::read(w.dir().join("0")).expect("part 0")).expect("reads");
+    assert!(p0.hash.is_some(), "part 0 carries the state hash");
+    assert_eq!(
+        p0.first + p0.entries,
+        head,
+        "part 0 ends at the fork's head"
+    );
+    assert_eq!(p0.gaps, vec![(0, p0.first)]);
+
+    // A2: a fresh reader plays every part and holds the live world's state.
+    let mut p = Player::start(&hb).expect("a player");
+    let mut hashed = 0;
+    for i in 0..w.written().parts {
+        let played = p
+            .play(&fs::read(w.dir().join(i.to_string())).expect("a part"))
+            .expect("plays");
+        if played.hash.is_some() {
+            assert_eq!(played.hash, Some(true), "part {i}'s hash");
+            hashed += 1;
+        }
+    }
+    let live = replica::hash::state_hash(&f.tree).expect("a hash");
+    assert_eq!(p.replica().version(), f.tree.next());
+    assert_eq!(
+        replica::hash::state_hash(p.replica().tree()).expect("a hash"),
+        live
+    );
+    assert_eq!(
+        replica::hash::state_hash(w.copy.tree()).expect("a hash"),
+        live
+    );
+    println!(
+        "view_out fork: head at sequence {head}; part 0: {} entries from {} (gap {:?}), {} bytes; {} parts for 10 s, \
+         {hashed} hashes checked; the reader at version {} holds the live state {live}",
+        p0.entries,
+        p0.first,
+        p0.gaps,
+        w.written().bytes[0],
+        w.written().parts,
+        p.replica().version()
+    );
+    let _ = fs::remove_dir_all(&d);
+}

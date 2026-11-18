@@ -13,7 +13,8 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    2 manipulator, 3 gaze, 4 voice (a class added later takes the next number; another is `class-unknown`), and for a
    manipulator the body's slot that holds what it holds. There is no fixed body plan: four legs and no hands, two of
    each, a beak. A family is authored as a kind whose owner is `family` (SA-F1, E21), with its resources in a
-   meaning section of its entry, below 20 and outside the register's 9 to 12 and 17 (B2 picks the number);
+   meaning section of its entry: section 13, `{1: resources, 2: actions, 3: full model, 4: simple model}` (B13,
+   `kinds/body.rs`; `v2/tools/import-body` writes it for a body from the authoring kit);
    `replica` holds it decoded as `{1: name, 2: [{1: name, 2: class, 3: slot}, ...]}`, never an authored or stored
    form. Unknown fields, and two resources of one name, are refused (`not-a-family`, `resource-duplicate`).
 2. **A skill claims classes or names, never anatomy:** every resource of a class (a walk takes all the legs), any
@@ -67,10 +68,7 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    44 (1: the shoulder turn, no body pushes it), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
    ...]]`, walked from its first leg: N10's reroute, or the way to a standing spot N9 granted) and field 46 (1: the
    world walks it out to legal ground, and the walk stands); it shows field 47 (1) on a body standing on its own
-   granted spot. Ending a walk by name is the world's: it ends the run. A new run on a body starts without the marks
-   of the run before it: fields 41, 44 and 45 go when it starts (#3168). A crossing is carried only from within 1 m
-   of the link's near end (else `link-not-here`), and lands on a point the far surface's mover holds, moved onto it
-   by less than a body's radius if need be (else `link-end-off-ground`); both are refused before the body moves.
+   granted spot. Ending a walk by name is the world's: it ends the run.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
@@ -97,7 +95,9 @@ timer. The world writes each as `souls:said {1: {21: words}, 2: reach mm, 3: [he
 entry whose audience says who may read it ([audience.md](audience.md) rule 4, `replica::speech`). Its hearers are
 resolved when it is written and recorded (`sim::speech`): for ordinary talk, the Souls whose interest set (R4) holds
 the speaker, found from the bodies within the set's leave distance, never a scan. So a body walks, carries and talks
-at once, each under its own driver.
+at once, each under its own driver. Each tick the world brings the interest sets up to date after the controller's step and
+writes the utterances it started (`sim::speech::heard`, #3231); the view tier addresses each utterance's entry to the
+subscriptions that follow one of its recorded hearers, and to no other.
 
 ## Moves (B2)
 
@@ -108,6 +108,42 @@ contact point by name. Fixtures: `v2/crates/replica/fixtures/moves/`. `v2/crates
 asked of the geometry first (`out-of-reach` with the distance), the claim is a controller driver with the move set on
 each resource it holds, and each phase end is one timer in K9's due list. Nothing polls; a later claim that takes the
 move's resources cancels it at its next phase end (`claim-taken`).
+
+## Postures and seats (B3)
+
+`v2/crates/sim/src/slots` (B3 #2682) seats bodies. A seat is one slot of a thing, with its kind's data
+(`replica::moves::Place`, fixture `v2/crates/replica/fixtures/seats/`): the slot's height above the floor, taken from
+the model geometry, and a point to stand at. Sitting and lying are moves (`sit.diag`, `lie.diag`). At a move's contact
+instant the controller hands the body from the floor into the slot (`Controller::slot_in`, T4's hand-off from mover to
+slot) with the stance the request named. Postures are the controller's stance input: stand, sit, lie. Rising
+(`rise.diag`) is the reverse: at contact the body is handed back onto the floor at the stand point
+(`Controller::stand`).
+
+- **Reserved at commit.** One tick's requests are taken together and ordered by a stable key: the body's id, then the
+  seat's. The first takes the seat. Each later request is refused `place-taken`, and the refusal names the holder. The
+  hold is keyed by the seat's thing, so finding the holder is one lookup, never a scan.
+- **A seat above standing reach is refused** `place-out-of-reach`. Its height alone is compared with the move's reach.
+- **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
+  controller keeps it apart from the bodies it steps, so a tick never visits it.
+- **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
+  when the sit is cancelled before contact by a later claim on its legs.
+- **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is
+  then handed back onto the floor at the stand point, under the new claim's driver, and the seat is released. Left in
+  the slot, it would be stuck, because a tick never steps a body in a slot.
+- **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
+  appears there.
+
+## Moves from the gateway (I4b)
+
+`v2/crates/worldd/src/bodies.rs` (I4b #3156) lets an intent from the gateway drive a body. A form's verb named `walk`,
+`sit` or `rise` (`eden:sit`, as T10's fixtures) is taken like any act (I4), then committed at the next tick by what
+already moves bodies: a walk is N7's walk behind the host, sent to a point (`Runner::send`, N9), to a target's point
+(parameter 1, `[x, y, z]` µm) or a seat's stand point; a sit is B3's `Slots::commit`, one tick's sits together; a
+rise is B3's `Slots::rise`. The checks are the moves' own, made as they start: claims, reach, the seat, the route.
+Bodies step in ticks caught up to world time. A move writes an entry when it starts and one when it ends, both caused
+by the intent, and is answered once, at its end: a receipt naming both when done, else a refusal naming how it ended
+(`claim-taken`, `resource-held`, ...). A new move ends a walk still going for an earlier intent as `claim-taken`. A
+sit or a rise past its act's deadline runs to its end, so a seat is never left half taken.
 
 ## The code hatch, shape only
 

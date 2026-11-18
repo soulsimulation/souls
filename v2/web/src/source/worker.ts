@@ -36,8 +36,12 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
     rot: ((pose?.get(3) as unknown[]) ?? [1 << 30, 0, 0, 0]).map(num) as NodeRec['rot'],
     at: moved ? num(moved.get(1)) : null,
   };
+  if (f.has(1)) rec.origin = new TextDecoder().decode(f.get(1) as Uint8Array);
+  if (f.has(11)) rec.outline = rows(f.get(11));
   if (f.has(12)) rec.solids = rows(f.get(12));
   if (f.has(13)) rec.slots = rows(f.get(13));
+  if (f.has(14)) rec.surfaces = (f.get(14) as unknown[][]).map((r) => [num(r[0]), rows(r[1])!]);
+  if (f.has(18)) rec.waterLevel = num(f.get(18));
   if (f.has(23)) rec.scale = num(f.get(23));
   if (f.has(24)) rec.tileSize = num(f.get(24));
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
@@ -79,7 +83,8 @@ async function run(stream: URL) {
             removed.push(key(id));
           }
         }
-        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, hash: played.hash } }, transfer);
+        const samples = JSON.parse(player.samples());
+        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, samples, hash: played.hash } }, transfer);
       }
     } catch (e) {
       post({ t: 'error', message: String((e as Error)?.message ?? e) });
