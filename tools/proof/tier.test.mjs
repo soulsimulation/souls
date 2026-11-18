@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { POLICY_PATH, globToRegExp, loadPolicy, tierFor, tierForFile } from './tier.mjs';
-import { SCOPE_RULES } from '../test-harness/release-gate.mjs';
+import { SCOPE_RULES, scopeFor } from '../test-harness/release-gate.mjs';
 
 const policy = loadPolicy();
 const tier = (files, labels) => tierFor(files, policy, labels).tier;
@@ -78,6 +78,17 @@ test('unknown paths take default_tier', () => {
 
 test('every release-gate scope prefix has its own rule (the two maps stay in step)', () => {
   for (const [prefix] of SCOPE_RULES) assert.notEqual(tierForFile(`${prefix}x/y.ts`, policy).rule, 'default_tier', prefix);
+});
+
+// K15 (#2637): Engine v2 is T1 until the cut-over, docs included, and never runs today's release gate.
+test('a v2/-only change is T1 with gate scope none', () => {
+  for (const file of ['v2/crates/seed/src/lib.rs', 'v2/docs/TRUNK.md', 'v2/Cargo.toml', 'v2/tools/ci.sh']) {
+    assert.deepEqual(tierForFile(file, policy), { tier: 'T1', rule: 'v2/' }, file);
+  }
+  assert.equal(tier(['v2/crates/seed/src/lib.rs', 'v2/docs/TRUNK.md', 'changes/x.md']), 'T1');
+  assert.equal(scopeFor(['v2/crates/seed/src/lib.rs', 'v2/docs/TRUNK.md']).resolved, 'none');
+  assert.equal(scopeFor(['v2/x.rs', 'apps/web/src/hud.ts']).resolved, 'scoped', 'v2 adds nothing to another change\'s scope');
+  assert.equal(tierForFile('v2-notes/x.md', policy).rule, 'default_tier', 'only the v2/ directory');
 });
 
 test('globs support *, ** and {a,b}', () => {
