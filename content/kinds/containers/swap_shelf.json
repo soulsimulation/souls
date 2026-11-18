@@ -1,0 +1,371 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:swap_shelf",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        800
+      ],
+      "yaw_mdeg": 180000
+    },
+    "rail": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        1040,
+        185
+      ]
+    }
+  },
+  "slots": {
+    "shelf": {
+      "admits": "thing",
+      "most": 3,
+      "at_mm": [
+        0,
+        1015,
+        -10
+      ],
+      "fits_mm": [
+        300,
+        280,
+        300
+      ],
+      "stand": "stand"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1000,
+      1740,
+      400
+    ]
+  },
+  "forms": {
+    "leave": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "thing"
+          }
+        },
+        {
+          "need": "slot_free",
+          "slot": "shelf"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "put",
+          "slot": "shelf"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "shelf",
+          "event": "left"
+        }
+      ]
+    },
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "this",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "take",
+          "slot": "shelf"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:swap_shelf",
+    "shape": {
+      "round": 10,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            -485,
+            775,
+            0
+          ],
+          "size": [
+            30,
+            1550,
+            400
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            485,
+            775,
+            0
+          ],
+          "size": [
+            30,
+            1550,
+            400
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            775,
+            -190
+          ],
+          "size": [
+            940,
+            1550,
+            20
+          ],
+          "round": 0,
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1535,
+            0
+          ],
+          "size": [
+            1000,
+            30,
+            400
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            60,
+            0
+          ],
+          "size": [
+            940,
+            30,
+            380
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            520,
+            0
+          ],
+          "size": [
+            940,
+            30,
+            380
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1000,
+            0
+          ],
+          "size": [
+            940,
+            30,
+            380
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1040,
+            185
+          ],
+          "size": [
+            940,
+            50,
+            20
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1650,
+            0
+          ],
+          "size": [
+            840,
+            170,
+            30
+          ],
+          "round": 0,
+          "tint": "sign"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1650,
+            16
+          ],
+          "size": [
+            600,
+            50,
+            4
+          ],
+          "round": 0,
+          "tint": "letters"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -280,
+            660,
+            -40
+          ],
+          "size": [
+            300,
+            250,
+            220
+          ],
+          "round": 0,
+          "tint": "b0"
+        },
+        {
+          "kind": "box",
+          "at": [
+            120,
+            640,
+            -40
+          ],
+          "size": [
+            220,
+            210,
+            220
+          ],
+          "round": 0,
+          "tint": "b1"
+        }
+      ],
+      "palette": {
+        "wood": "#8a6240",
+        "back": "#6f4d32",
+        "sign": "#2f6b5a",
+        "letters": "#f1ead8",
+        "b0": "#9a3b32",
+        "b1": "#3b5f8a"
+      },
+      "tags": [
+        "furniture",
+        "storage",
+        "shelf",
+        "swap"
+      ]
+    }
+  },
+  "text": {
+    "card": "An open swap shelf: leave a small thing on it, take one someone left.",
+    "storage": "storage",
+    "free_shelf": "free shelf",
+    "giveaway": "giveaway shelf",
+    "howto_swap": "Leave a thing you hold on the shelf, then take one that someone else left.",
+    "full": "The swap shelf is full (3 things)."
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "free_shelf",
+      "giveaway"
+    ]
+  },
+  "howtos": {
+    "swap": {
+      "text": "howto_swap",
+      "steps": [
+        {
+          "form": "leave"
+        },
+        {
+          "form": "take"
+        }
+      ]
+    }
+  }
+}
