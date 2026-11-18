@@ -1,0 +1,90 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:reed_basket_frame (from #1892). Eight reeds (reeds) become eight courses, natural or rust (natural, rust): weaving moves a chosen count of reeds into the colour's courses, four seconds with empty hands; once every reed is woven, finishing opens the basket (open), two seconds. Refused with the original's words: weaving a finished basket ('This basket is finished and in use; its woven reeds are not a refillable supply.'), more courses asked than reeds left ('Not enough supplied reeds remain; choose fewer courses, or open the completed eight-course basket.'), finishing before all eight are woven ('Weave all eight supplied reed courses before opening this basket for real storage.'), finishing twice ('The finished basket is already open; put a compatible small object inside.') and a hand holding something ('Put down held objects before weaving or opening this fixed basket.').",
+  "cases": [
+    {
+      "name": "basket_weave_natural_every_need_met",
+      "act": {"this":"r1","form":"weave_natural","args":{"courses":2}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "basket_weave_natural_finished",
+      "act": {"this":"r1","form":"weave_natural","args":{"courses":1}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame","fields":{"reeds":0,"natural":8,"open":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"open","found":true,"wanted":{"is":false}},"fix":null,"says":"finished_in_use"}
+    },
+    {
+      "name": "basket_weave_natural_not_enough_reeds",
+      "act": {"this":"r1","form":"weave_natural","args":{"courses":4}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame","fields":{"reeds":2,"natural":6}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"r1","field":"reeds","has":2,"amount":4},"fix":null,"says":"not_enough_reeds"}
+    },
+    {
+      "name": "basket_weave_natural_holding_something",
+      "act": {"this":"r1","form":"weave_natural","args":{"courses":1}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "basket_weave_rust_every_need_met",
+      "act": {"this":"r1","form":"weave_rust","args":{"courses":2}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "basket_weave_rust_finished",
+      "act": {"this":"r1","form":"weave_rust","args":{"courses":1}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame","fields":{"reeds":0,"natural":8,"open":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"open","found":true,"wanted":{"is":false}},"fix":null,"says":"finished_in_use"}
+    },
+    {
+      "name": "basket_weave_rust_not_enough_reeds",
+      "act": {"this":"r1","form":"weave_rust","args":{"courses":4}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame","fields":{"reeds":2,"natural":6}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"r1","field":"reeds","has":2,"amount":4},"fix":null,"says":"not_enough_reeds"}
+    },
+    {
+      "name": "basket_weave_rust_holding_something",
+      "act": {"this":"r1","form":"weave_rust","args":{"courses":1}},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "basket_finish_every_need_met",
+      "act": {"this":"r1","form":"finish"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame","fields":{"reeds":0,"natural":4,"rust":4}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "basket_finish_reeds_left",
+      "act": {"this":"r1","form":"finish"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame","fields":{"reeds":1,"natural":7}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"reeds","found":1,"wanted":{"at_most":0}},"fix":{"form":"weave_natural"},"says":"weave_all_first"}
+    },
+    {
+      "name": "basket_finish_already_open",
+      "act": {"this":"r1","form":"finish"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame","fields":{"reeds":0,"rust":8,"open":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"detail":{"field":"open","found":true,"wanted":{"is":false}},"fix":null,"says":"already_open"}
+    },
+    {
+      "name": "basket_finish_holding_something",
+      "act": {"this":"r1","form":"finish"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:reed_basket_frame","fields":{"reeds":0,"natural":8}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    }
+  ]
+}
