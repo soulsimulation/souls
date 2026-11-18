@@ -61,6 +61,10 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
+A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
+thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
+chain with a wake entry of its own; the world never waits for a time or a condition.
+
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
 (SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
 
@@ -109,8 +113,14 @@ A row of places names the slots in it with `row` and `place` (1 at the first end
 back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are data (`tools/entry/cases/slots.json`).
 
 `looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
+<<<<<<< /private/tmp/claude-501/-Users-gene-Souls/7a5b0788-c615-4a87-8bc7-2b39f1024fc1/scratchpad/mf.o
 `tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
 `look.mjs` converts to metres only when it draws.
+=======
+`tags`, in whole millimetres (a polygon's points too), with an angle in whole millidegrees and a part's `scale` and
+`glow` in permille. The format has no floating-point number and `look.mjs` converts to metres and fractions only when it
+draws; a text, list or schedule field changes no part, so it is not drawn.
+>>>>>>> /private/tmp/claude-501/-Users-gene-Souls/7a5b0788-c615-4a87-8bc7-2b39f1024fc1/scratchpad/mf.t
 
 ## A form
 
@@ -193,6 +203,7 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   anyone is in it, the form is refused and nothing changes.
   The example is `packages/form-rules/cases/kinds/test/talk.json`.
 
+<<<<<<< /private/tmp/claude-501/-Users-gene-Souls/7a5b0788-c615-4a87-8bc7-2b39f1024fc1/scratchpad/mf.o
 - **A standing activity** (proposed: a `standing` section; SA-G2, [#2874](https://github.com/soulsimulation/souls/issues/2874))
   outlasts a sitting: a course or a job. It names `members`, a link type for those who belong across days; `present`,
   a link type (a role with places) for those at the sitting now; `enough`, how many present start a sitting; and
@@ -211,6 +222,33 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   who is present cannot part (`still_present`). At its end date (its `ends` field, as above) its world form removes it,
   members or not: each member is unlinked first (event `released`) and no body moves. Nothing waits for a time: hours
   are a schedule (SA-F16). The example is `packages/form-rules/cases/kinds/test/class.json`.
+=======
+## A move
+
+A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
+(SA-D4, [#2856](https://github.com/soulsimulation/souls/issues/2856); feeds Engine v2 B2, [#2681](https://github.com/soulsimulation/souls/issues/2681),
+and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
+classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
+`effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
+`start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
+includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
+point and then to a second one. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
+`held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
+contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
+the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free. `strike` and `pump` (SA-D5b, [#2859](https://github.com/soulsimulation/souls/issues/2859)) are the same shape with the effector at the tool's head (a hammer's face, a pump's nozzle): a window `strike_us` per blow or `pump_us` per stroke, `count` of them in the record, claiming the hand only.
+
+```sh
+node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
+node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/entry/cases/moves.json
+```
+
+`tools/entry/pose.mjs` gives the hand's position in whole millimetres at any time from a move, a record
+(`start_us`, `from_mm`, `contact_mm`, and `to_mm` for a slide) and a time. It has no imports and uses whole-number
+arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
+rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
+move the thing's frame into the world's: the caller passes world positions.
+
+>>>>>>> /private/tmp/claude-501/-Users-gene-Souls/7a5b0788-c615-4a87-8bc7-2b39f1024fc1/scratchpad/mf.t
 ## The looks table
 
 `looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
