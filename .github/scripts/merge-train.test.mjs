@@ -574,3 +574,12 @@ test('release freeze (#1838): merge:ready during a freeze is not enqueued, and i
   const after = queueTrain({ prs: { 20: {} } }).run();
   assert.deepEqual([after.pr, after.mode, after.frozen], [20, 'queue', undefined]);
 });
+
+test('a pinned-sha release (release.yml -f sha) sets no freeze: the train keeps the queue and keeps enqueueing while it runs', () => {
+  // the release reads only its pinned commit, so what is queued stays queued and the next ready PR goes in
+  const state = { 20: { id: 'P20', isInMergeQueue: true }, 21: { id: 'P21', autoMergeRequest: { enabledAt: 'x' } } };
+  const during = queueTrain({ prs: { 20: {}, 21: {}, 22: {} }, state, freeze: releaseFreeze('') });
+  const r = during.run();
+  assert.deepEqual([r.pr, r.mode, r.frozen], [22, 'queue', undefined]);
+  assert.deepEqual(during.reads.held, [], 'nothing is dequeued or has its auto-merge disabled');
+});

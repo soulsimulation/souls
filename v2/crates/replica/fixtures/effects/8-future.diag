@@ -1,0 +1,16 @@
+# From the future (Engine v2 T6, #2645): 4-set.diag as a later schema might write it. The first entry has a field 20,
+# its set a field 9 and its event a field 6, none of which this build knows, and the event's name is new. It is
+# applied, kept whole (it re-encodes to these bytes) and leaves 4-set.diag's state hash: a later field on a known
+# change never changes how it applies (rule 8).
+{
+  1: h'12201b6152bdcb78adacbc5eb70d3aff3ee1fff947060db15527395c3c0706158db5',
+  2: [
+    {1: 2, 2: 2500000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 7]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7],
+     7: [{1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7], 3: 1, 4: 750, 5: -250, 9: [1, 2]}],
+     8: [{1: "souls:sloshed", 2: {1: 250, 4: [1]}, 3: [0], 6: 7}],
+     20: [3, 4]},
+    {1: 3, 2: 2550000, 3: {1: 2, 2: 2}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],
+     7: [{1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 3: 1, 4: 250, 5: 250}],
+     8: [{1: "souls:filled", 2: {1: 250}, 3: [0]}]}
+  ]
+}
