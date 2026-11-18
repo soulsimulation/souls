@@ -1,6 +1,6 @@
 //! I3 (#2686): each `aN_` test is one acceptance box (A1 and A2 are the `commit-cost` bench).
 
-use super::lamps::{World, rules, toggle};
+use super::toggles::{World, rules, toggle};
 use super::{Act, Candidate, check, start};
 use replica::effects::{Actor, Cause};
 use replica::encode::Value as Cbor;
@@ -10,8 +10,8 @@ use sim::commit::{Outcome, commit, mark_clock_thread};
 use sim::frozen::Publisher;
 use std::sync::Arc;
 
-fn lit(w: &World, lamp: Id) -> u64 {
-    match w.replica.node(lamp) {
+fn lit(w: &World, toggle: Id) -> u64 {
+    match w.replica.node(toggle) {
         Some(Cbor::Map(m)) => match m.get(&6) {
             Some(Cbor::Map(f)) => match f.get(&1) {
                 Some(Cbor::Uint(n)) => *n,
@@ -19,17 +19,17 @@ fn lit(w: &World, lamp: Id) -> u64 {
             },
             other => panic!("fields are {other:?}"),
         },
-        other => panic!("the lamp is {other:?}"),
+        other => panic!("the toggle is {other:?}"),
     }
 }
 
-fn switch_on(id: u64, body: Id, lamps: &[Id]) -> Act {
+fn switch_on(id: u64, body: Id, toggles: &[Id]) -> Act {
     Act {
         id,
         cause: Cause::World,
         actor: Actor::World,
         body,
-        candidates: lamps
+        candidates: toggles
             .iter()
             .map(|l| Candidate {
                 this: *l,
@@ -57,7 +57,7 @@ fn a3_checks_run_off_the_clock_thread() {
         let (_, checks) = checked.recv().expect("checked");
         match commit(&mut w.replica, &checks, 0) {
             Outcome::Applied { rank, part } => {
-                assert_eq!(rank, 0, "switch_on holds on an unlit lamp");
+                assert_eq!(rank, 0, "switch_on holds on an unlit toggle");
                 publisher.publish(vec![part]);
             }
             other => panic!("not applied: {other:?}"),
