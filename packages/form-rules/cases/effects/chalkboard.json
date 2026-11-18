@@ -1,0 +1,149 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:chalkboard (SA-X34, #2924): write on a clean board, wipe it clean to write again.",
+  "cases": [
+    {
+      "name": "chalkboard_write_wipe_write",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:chalkboard"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "write",
+            "args": {
+              "words": "w_soup"
+            }
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "words",
+                "n": 1,
+                "to": {
+                  "text": "w_soup"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:written",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "write",
+            "args": {
+              "words": "w_tea"
+            }
+          },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "wipe"
+          },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "words",
+                "n": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:wiped",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "write",
+            "args": {
+              "words": "w_tea"
+            }
+          },
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "words",
+                "n": 1,
+                "to": {
+                  "text": "w_tea"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:written",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:chalkboard",
+          "fields": {
+            "words": {
+              "text": "w_tea"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

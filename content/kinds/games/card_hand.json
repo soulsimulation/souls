@@ -1,0 +1,104 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:card_hand",
+  "owner": "thing",
+  "state": {
+    "cards": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 52,
+      "audience": {"rule": "linked", "link": "player"}
+    }
+  },
+  "links": {"player": {"n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"}}},
+  "geometry": {"bounds_mm": [150, 100, 12]},
+  "forms": {
+    "take_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need": "unlinked", "link": "player"}],
+      "steps": [],
+      "effects": [{"change": "link", "link": "player", "from": "actor", "event": "took_up_the_hand"}]
+    },
+    "draw": {
+      "who": {"link": "player"},
+      "starts": "act",
+      "takes": {
+        "pack": {
+          "type": "thing",
+          "select": {"of": "things", "kind": "eden:card_table", "in": "here", "anchor": "me", "order": "nearest", "rank": 1}
+        }
+      },
+      "needs": [{"need": "room"}, {"need": "enough"}],
+      "steps": [],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "cards",
+          "from": {"arg": "pack"},
+          "into": "this",
+          "amount": 1,
+          "event": "drew_a_card"
+        }
+      ]
+    },
+    "play": {
+      "who": {"link": "player"},
+      "starts": "act",
+      "takes": {
+        "pack": {
+          "type": "thing",
+          "select": {"of": "things", "kind": "eden:card_table", "in": "here", "anchor": "me", "order": "nearest", "rank": 1}
+        }
+      },
+      "needs": [{"need": "room"}, {"need": "enough"}],
+      "steps": [],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "cards",
+          "from": "this",
+          "into": {"arg": "pack"},
+          "amount": 1,
+          "event": "played_a_card"
+        }
+      ]
+    },
+    "lay_down": {
+      "who": {"link": "player"},
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": [{"change": "unlink", "link": "player", "from": "actor", "event": "laid_the_hand_down"}]
+    }
+  },
+  "motion": {"how": "one_hand"},
+  "loose": {"ever": true},
+  "looks": {
+    "model": "look:card_hand",
+    "table": [{"part": "fill", "field": "cards", "do": "scale", "axis": "y", "range": [0, 1], "to": [0, 1000]}],
+    "shape": {
+      "round": 1,
+      "shapes": [
+        {"kind": "box", "at": [-20, 41, -4], "size": [60, 86, 1], "tint": "pale", "roll": 30000, "role": "fill"},
+        {"kind": "box", "at": [-10, 45, -2], "size": [60, 86, 1], "tint": "face", "roll": 15000, "role": "fill"},
+        {"kind": "box", "at": [0, 46, 0], "size": [60, 86, 1], "tint": "pale", "roll": 0, "role": "fill"},
+        {"kind": "box", "at": [10, 45, 2], "size": [60, 86, 1], "tint": "face", "roll": -15000, "role": "fill"},
+        {"kind": "box", "at": [20, 41, 4], "size": [60, 86, 1], "tint": "pale", "roll": -30000, "role": "fill"}
+      ],
+      "palette": {"face": "#f6f1e4", "pale": "#e8dcc4"},
+      "tags": ["cards", "game", "object"]
+    }
+  },
+  "text": {
+    "card": "A hand of cards at a card table; only the Soul holding it sees how many.",
+    "cards": "cards",
+    "hand": "hand",
+    "howto_draw": "Take up the hand, draw from the pack, then play cards back onto the table."
+  },
+  "card": {"text": "card", "category": "cards", "synonyms": ["hand"]},
+  "howtos": {"draw": {"text": "howto_draw", "steps": [{"form": "take_up"}, {"form": "draw"}, {"form": "play"}]}}
+}

@@ -1,0 +1,348 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The radial sculpture (from #1879): band 3 is carved down to its core and refused a fourth cut; every other band is carved once.",
+ "cases": [
+  {
+   "name": "carve_band_three_to_its_core_then_every_band_once",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_3"
+     },
+     "receipt": "rr1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_3",
+        "n": 3,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_3"
+     },
+     "receipt": "rr2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_3",
+        "n": 3,
+        "to": 2
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_3"
+     },
+     "receipt": "rr3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_3",
+        "n": 3,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_3"
+     },
+     "receipt": "rr4",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_1"
+     },
+     "receipt": "rs1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_1",
+        "n": 1,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_2"
+     },
+     "receipt": "rs2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_2",
+        "n": 2,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_4"
+     },
+     "receipt": "rs4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_4",
+        "n": 4,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_5"
+     },
+     "receipt": "rs5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_5",
+        "n": 5,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_6"
+     },
+     "receipt": "rs6",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_6",
+        "n": 6,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_7"
+     },
+     "receipt": "rs7",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_7",
+        "n": 7,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "carve_band_8"
+     },
+     "receipt": "rs8",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "band_8",
+        "n": 8,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:band_carved",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:radial_sculpture",
+     "fields": {
+      "band_1": 3,
+      "band_2": 3,
+      "band_3": 1,
+      "band_4": 3,
+      "band_5": 3,
+      "band_6": 3,
+      "band_7": 3,
+      "band_8": 3
+     }
+    }
+   }
+  }
+ ]
+}

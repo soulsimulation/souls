@@ -1,0 +1,64 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:honing_stone",
+  "owner": "thing",
+  "state": {
+    "honings": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 40, 0] }
+  },
+  "geometry": { "bounds_mm": [240, 60, 90] },
+  "forms": {
+    "hone_knife": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "knife": { "type": "thing", "select": { "of": "things", "kind": "eden:camp_knife", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "enough" },
+        { "need": "room" },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": { "arg": "knife" } }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "knife" } },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "honings", "from": "this", "into": { "arg": "knife" }, "amount": 1, "event": "knife_honed" }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:honing_stone",
+    "table": [
+      { "part": "fill", "field": "honings", "do": "scale", "axis": "y", "range": [0, 3], "to": [0, 1000] },
+      { "part": "body", "field": "honings", "do": "tint", "at": { "0": "#8d8a84", "1": "#6f6c66", "2": "#5d5a55", "3": "#4b4844" } }
+    ],
+    "shape": {
+      "round": 3,
+      "shapes": [
+        { "kind": "box", "at": [0, 8, 0], "size": [240, 16, 90], "tint": "base" },
+        { "kind": "box", "at": [0, 32, 0], "size": [200, 32, 60], "tint": "stone", "role": "body" },
+        { "kind": "box", "at": [0, 50, 0], "size": [190, 4, 54], "tint": "water", "role": "fill", "pivot": [0, 48, 0] }
+      ],
+      "palette": { "base": "#6b4f35", "stone": "#4b4844", "water": "#5f8fae" },
+      "tags": ["camping", "tool", "item", "whetstone", "object"]
+    }
+  },
+  "text": {
+    "card": "A camp whetstone with three wet honings: hone a camp knife's edge on it.",
+    "whetstone": "whetstone",
+    "sharpen": "sharpen",
+    "knife": "knife",
+    "howto_hone": "Set the stone by a camp knife and hone it: each honing uses one portion of water and abrasive and brings the same knife one level up, dull to fully maintained."
+  },
+  "card": { "text": "card", "category": "knife", "synonyms": ["whetstone", "sharpen"] },
+  "howtos": {
+    "hone": { "text": "howto_hone", "steps": [{ "form": "hone_knife" }] }
+  }
+}
