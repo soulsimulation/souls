@@ -6,7 +6,7 @@
     "label": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "links": {
-    "vote": { "n": 1, "from": "soul", "most": 500, "audience": { "rule": "everyone" } }
+    "vote": { "n": 1, "from": "soul", "most": 500, "most_per": 1, "per": "parent", "audience": { "rule": "everyone" } }
   },
   "points": {
     "tally": { "role": "contact", "at_mm": [220, 50, 6] }
@@ -17,11 +17,24 @@
       "who": "anyone",
       "starts": "act",
       "needs": [
-        { "need": "within_reach", "point": "tally" }
+        { "need": "within_reach", "point": "tally" },
+        { "need": "most_per", "link": "vote", "says": "already_voted" }
       ],
       "steps": [{ "step": "move", "move": "slide", "at": "tally" }],
       "effects": [
         { "change": "link", "link": "vote", "from": "actor", "event": "voted" }
+      ]
+    },
+    "take_back": {
+      "who": { "link": "vote" },
+      "starts": "act",
+      "needs": [
+        { "need": "linked", "link": "vote", "end": "actor", "says": "no_vote_here" },
+        { "need": "within_reach", "point": "tally" }
+      ],
+      "steps": [{ "step": "move", "move": "slide", "at": "tally" }],
+      "effects": [
+        { "change": "unlink", "link": "vote", "from": "actor", "event": "vote_taken_back" }
       ]
     }
   },
@@ -33,6 +46,8 @@
   },
   "text": {
     "card": "One choice on a poll board; a Soul votes for it with a tally mark.",
+    "already_voted": "You have already voted in this poll; take your vote back to vote again.",
+    "no_vote_here": "You have no vote on this choice to take back.",
     "option": "option"
   },
   "card": { "text": "card", "category": "option" }

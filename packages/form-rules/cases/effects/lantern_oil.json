@@ -1,6 +1,6 @@
 {
  "format": "souls-effect-cases/1",
- "about": "Lantern oil (from #1700): a Soul with empty hands refills the empty lantern on the tray (supply 3 to 2, lantern 0 to 1); a second refill is refused for want of room; the Soul takes the same lantern, lights it and puts it out, which spends the charge.",
+ "about": "Lantern oil (from #1700): a Soul with empty hands refills the empty lantern on the tray (supply 3 to 2, lantern 0 to 1); a second refill is refused for want of room; the Soul lights the lantern where it stands on the tray and puts it out, which spends the charge, and lighting it again is refused; then she takes it. (Lit only when set down: the wick rule.)",
  "cases": [
   {
    "name": "refill_refuse_take_light_put_out",
@@ -94,35 +94,6 @@
     {
      "act": {
       "this": "l1",
-      "form": "take"
-     },
-     "receipt": "ro3",
-     "expect": {
-      "verdict": "yes",
-      "changes": [
-       {
-        "change": "reparent",
-        "node": "l1",
-        "to": {
-         "node": "b1",
-         "hand": "left"
-        }
-       }
-      ],
-      "events": [
-       {
-        "event": "eden:taken",
-        "node": "l1",
-        "changes": [
-         0
-        ]
-       }
-      ]
-     }
-    },
-    {
-     "act": {
-      "this": "l1",
       "form": "light"
      },
      "receipt": "ro4",
@@ -201,6 +172,35 @@
       "reason": "field_differs",
       "need": 1,
       "says": "empty"
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "take"
+     },
+     "receipt": "ro3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "l1",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:taken",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ]
      }
     }
    ],
