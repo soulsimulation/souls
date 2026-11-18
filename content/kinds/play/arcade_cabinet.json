@@ -1,0 +1,59 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:arcade_cabinet",
+  "owner": "thing",
+  "state": { "on": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "points": {
+    "player": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 },
+    "joystick": { "role": "grip", "at_mm": [-150, 1200, 280] },
+    "power": { "role": "contact", "at_mm": [250, 1100, 300] }
+  },
+  "geometry": { "bounds_mm": [660, 1800, 803] },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "on", "is": false }],
+      "steps": [{ "step": "walk_to", "point": "player" }, { "step": "move", "move": "press", "at": "power" }],
+      "effects": [{ "change": "set", "field": "on", "to": true, "event": "switched_on" }]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "on", "is": true }],
+      "steps": [{ "step": "walk_to", "point": "player" }, { "step": "move", "move": "press", "at": "power" }],
+      "effects": [{ "change": "set", "field": "on", "to": false, "event": "switched_off" }]
+    },
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "on", "is": true }, { "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "player" },
+        { "step": "move", "move": "press", "at": "joystick" },
+        { "step": "wait", "us": 60000000 }
+      ],
+      "effects": []
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:arcade_cabinet",
+    "shape": {"shapes":[{"kind":"box","at":[0,550,-50],"size":[640,1040,640],"round":0,"tint":"paint"},{"kind":"box","at":[0,1400,-150],"size":[640,640,440],"round":0,"tint":"paint"},{"kind":"box","at":[0,1720,-50],"size":[660,160,540],"round":0,"tint":"paint"},{"kind":"box","at":[0,1720,260],"size":[600,150,20],"round":0,"tint":"marquee","role":"light"},{"kind":"box","at":[0,1350,110],"size":[520,420,20],"round":0,"tint":"screen","pitch":-11459,"role":"screen"},{"kind":"rbox","at":[0,1080,280],"size":[660,60,300],"tint":"panel","round":30,"pitch":8594},{"kind":"cyl","at":[-150,1150,280],"r":12,"h":80,"segments":4,"tint":"iron"},{"kind":"sphere","at":[-150,1200,280],"r":30,"segments":5,"tint":"red"},{"kind":"cyl","at":[50,1120,300],"r":25,"h":20,"segments":6,"tint":"red"},{"kind":"cyl","at":[130,1120,300],"r":25,"h":20,"segments":6,"tint":"red"},{"kind":"cyl","at":[210,1120,300],"r":25,"h":20,"segments":6,"tint":"red"}],"palette":{"paint":"#2f2a4a","marquee":"#ffcf5a","screen":"#5ad0e0","dark":"#1a1a1e","panel":"#2b2623","iron":"#3b3d40","red":"#e04a3a"},"tags":["furniture","game"]},
+    "table": [
+      { "part": "screen", "field": "on", "do": "tint", "at": { "true": "#5ad0e0", "false": "#1a1a1e" } },
+      { "part": "screen", "field": "on", "do": "glow", "at": { "true": 900, "false": 0 } },
+      { "part": "light", "field": "on", "do": "tint", "at": { "true": "#ffcf5a", "false": "#1a1a1e" } },
+      { "part": "light", "field": "on", "do": "glow", "at": { "true": 800, "false": 0 } }
+    ]
+  },
+  "text": {
+    "card": "An upright arcade cabinet: switch it on and play at the joystick.",
+    "game": "game",
+    "arcade": "arcade",
+    "video_game": "video game",
+    "play": "play"
+  },
+  "card": { "text": "card", "category": "game", "synonyms": ["arcade", "video_game", "play"] }
+}

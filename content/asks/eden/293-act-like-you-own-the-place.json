@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":293,"group":"open-ended","words":"act like you own the place","obvious":2,"things":{"armchair":"eden:armchair","sofa":"eden:sofa"},"chain":[{"any":[[{"this":"me","form":"lie_down","args":{"spot":"sofa"}}],[{"this":"me","form":"sit_down","args":{"spot":"armchair"}}]]}]}

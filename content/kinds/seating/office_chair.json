@@ -1,0 +1,143 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:office_chair",
+  "owner": "thing",
+  "state": { "spinning": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "points": { "front": { "role": "stand", "at_mm": [0, 0, 599], "yaw_mdeg": 180000 } },
+  "slots": { "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 520, 30], "stand": "front" } },
+  "geometry": { "bounds_mm": [592, 1097, 598] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    },
+    "spin": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "spinning", "is": false }],
+      "steps": [],
+      "effects": [
+        { "change": "set", "field": "spinning", "to": true, "event": "spun" },
+        { "change": "timer", "form": "stop", "after_us": 3000000, "event": "slowing" }
+      ]
+    },
+    "stop": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "spinning", "to": false, "event": "stopped" }]
+    }
+  },
+  "motion": { "how": "wheeled" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:office_chair",
+    "shape": {
+      "shapes": [
+        { "kind": "cyl", "at": [0, 65, 140], "r": 20, "h": 282, "segments": 4, "tint": "iron", "pitch": 96142 },
+        { "kind": "sphere", "at": [0, 30, 280], "r": 30, "segments": 4, "tint": "iron" },
+        {
+          "kind": "cyl",
+          "at": [133, 65, 43],
+          "r": 20,
+          "h": 282,
+          "segments": 4,
+          "tint": "iron",
+          "pitch": 96142,
+          "yaw": 72021
+        },
+        { "kind": "sphere", "at": [266, 30, 87], "r": 30, "segments": 4, "tint": "iron" },
+        {
+          "kind": "cyl",
+          "at": [82, 65, -113],
+          "r": 20,
+          "h": 282,
+          "segments": 4,
+          "tint": "iron",
+          "pitch": 96142,
+          "yaw": 143984
+        },
+        { "kind": "sphere", "at": [165, 30, -227], "r": 30, "segments": 4, "tint": "iron" },
+        {
+          "kind": "cyl",
+          "at": [-82, 65, -113],
+          "r": 20,
+          "h": 282,
+          "segments": 4,
+          "tint": "iron",
+          "pitch": 96142,
+          "yaw": -143984
+        },
+        { "kind": "sphere", "at": [-165, 30, -227], "r": 30, "segments": 4, "tint": "iron" },
+        {
+          "kind": "cyl",
+          "at": [-133, 65, 43],
+          "r": 20,
+          "h": 282,
+          "segments": 4,
+          "tint": "iron",
+          "pitch": 96142,
+          "yaw": -72021
+        },
+        { "kind": "sphere", "at": [-266, 30, 87], "r": 30, "segments": 4, "tint": "iron" },
+        { "kind": "cyl", "at": [0, 270, 0], "r": 25, "h": 400, "segments": 6, "tint": "chrome" },
+        {
+          "kind": "extrude",
+          "at": [0, 470, 20],
+          "polygon": [[-220, -210], [220, -210], [220, 210], [-220, 210]],
+          "h": 20,
+          "tint": "pad",
+          "role": "body",
+          "pivot": [0, 470, 0]
+        },
+        {
+          "kind": "rbox",
+          "at": [0, 820, -220],
+          "size": [460, 550, 70],
+          "tint": "pad",
+          "round": 30,
+          "pitch": -6875,
+          "role": "body",
+          "pivot": [0, 820, 0]
+        },
+        {
+          "kind": "box",
+          "at": [0, 550, -200],
+          "size": [50, 200, 40],
+          "round": 0,
+          "tint": "iron",
+          "role": "body",
+          "pivot": [0, 550, 0]
+        }
+      ],
+      "palette": { "pad": "#2f3a4a", "iron": "#3b3d40", "chrome": "#c9ccd0" },
+      "tags": ["furniture", "seat", "office"]
+    },
+    "table": [
+      {
+        "part": "body",
+        "field": "spinning",
+        "do": "rotate",
+        "axis": "y",
+        "at": { "true": 120000, "false": 0 },
+        "over_us": 3000000
+      }
+    ]
+  },
+  "text": {
+    "card": "A swivel office chair on castors whose padded seat spins; one Soul rolls it.",
+    "furniture": "furniture",
+    "seat": "seat"
+  },
+  "card": { "text": "card", "category": "furniture", "synonyms": ["seat"] }
+}

@@ -1,0 +1,253 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:signpost",
+  "owner": "thing",
+  "state": {
+    "points_to": {
+      "n": 1,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1780,
+      2640,
+      977
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:signpost",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            12,
+            0
+          ],
+          "polygon": [
+            [
+              -38,
+              -38
+            ],
+            [
+              38,
+              -38
+            ],
+            [
+              38,
+              38
+            ],
+            [
+              -38,
+              38
+            ]
+          ],
+          "h": 2476,
+          "tint": "post"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            2570,
+            0
+          ],
+          "r": 90,
+          "h": 140,
+          "segments": 4,
+          "tint": "cap",
+          "yaw": 45000
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            400,
+            2107,
+            60
+          ],
+          "polygon": [
+            [
+              -348,
+              -6
+            ],
+            [
+              348,
+              -6
+            ],
+            [
+              348,
+              6
+            ],
+            [
+              -348,
+              6
+            ]
+          ],
+          "h": 146,
+          "tint": "b1"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            820,
+            2180,
+            60
+          ],
+          "r": 120,
+          "h": 140,
+          "segments": 3,
+          "tint": "b1",
+          "roll": -90000,
+          "scale": [
+            1000,
+            1000,
+            250
+          ]
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            60,
+            1867,
+            380
+          ],
+          "polygon": [
+            [
+              -6,
+              -328
+            ],
+            [
+              6,
+              -328
+            ],
+            [
+              6,
+              328
+            ],
+            [
+              -6,
+              328
+            ]
+          ],
+          "h": 146,
+          "tint": "b2"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            60,
+            1940,
+            780
+          ],
+          "r": 120,
+          "h": 140,
+          "segments": 3,
+          "tint": "b2",
+          "pitch": 90000,
+          "scale": [
+            250,
+            1000,
+            1000
+          ]
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -400,
+            1627,
+            -60
+          ],
+          "polygon": [
+            [
+              -348,
+              -6
+            ],
+            [
+              348,
+              -6
+            ],
+            [
+              348,
+              6
+            ],
+            [
+              -348,
+              6
+            ]
+          ],
+          "h": 146,
+          "tint": "b3"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            -820,
+            1700,
+            -60
+          ],
+          "r": 120,
+          "h": 140,
+          "segments": 3,
+          "tint": "b3",
+          "roll": 90000,
+          "scale": [
+            1000,
+            1000,
+            250
+          ]
+        }
+      ],
+      "round": 12,
+      "palette": {
+        "post": "#5e4630",
+        "cap": "#3f3a33",
+        "b1": "#efe2c0",
+        "b2": "#d9e6d0",
+        "b3": "#efd9c9"
+      },
+      "tags": [
+        "signage",
+        "signpost",
+        "wayfinding",
+        "direction"
+      ]
+    }
+  },
+  "text": {
+    "card": "A wayfinding signpost: three arrows, each naming the place it points to.",
+    "signs": "signs",
+    "fingerpost": "fingerpost",
+    "waymark": "waymark"
+  },
+  "card": {
+    "text": "card",
+    "category": "signs",
+    "synonyms": [
+      "fingerpost",
+      "waymark"
+    ]
+  }
+}

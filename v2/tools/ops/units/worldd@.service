@@ -1,0 +1,44 @@
+# One world, one process (Engine v2 O1, #2730): worldd@<world>.service, <world> being
+# <lineage hex>-<zone scope hex>-<zone counter>. Runbook: v2/docs/runbook/world-restarting.md.
+#
+# Never held: no start limit, no breaker, no resting state. Every failure, a missing build included, is retried, the
+# delay growing from 100 ms to 29 s (supervisor's RESTART_* constants), for ever. Never a CPU quota: it throttles the
+# clock and slows world time; CPUWeight shares the processor instead. Limits per world go in a drop-in,
+# worldd@<world>.service.d/limits.conf.
+
+[Unit]
+Description=Souls world %i
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+# Start-up is judged by progress, never a deadline: worldd says READY=1 once it ticks, and a long start (K5's load)
+# extends this with EXTEND_TIMEOUT_USEC while it makes progress. After READY it says WATCHDOG=1 while it owes no tick
+# or completed one; K7's own watchdog inside ends a stalled tick in 0.5 s, this one is outside it.
+TimeoutStartSec=30s
+WatchdogSec=5
+Environment=WORLDS_ROOT=/var/lib/souls/worlds
+EnvironmentFile=-/etc/souls/directory.env
+ExecStart=/usr/local/lib/souls/supervisor launch %i
+ExecStartPost=-/usr/local/lib/souls/supervisor ready %i
+ExecStopPost=-/usr/local/lib/souls/supervisor exited %i
+Restart=always
+RestartSec=100ms
+RestartSteps=10
+RestartMaxDelaySec=29s
+# Memory: MemoryMax ends a world whose anonymous memory (what a leak grows) passes it; file cache from log writes is
+# reclaimed first and never ends one. MemoryHigh stays off: below MemoryMax with no swap it throttles a leaking world
+# to a crawl that never reaches the limit, a world held slow instead of restarted (O1's leak run measured it). No swap.
+MemoryHigh=infinity
+MemoryMax=2G
+MemorySwapMax=0
+OOMPolicy=stop
+CPUWeight=100
+KillMode=mixed
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target

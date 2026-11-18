@@ -1,0 +1,60 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:chair (SA-X24): sit in its one seat; pull it out and push it in by its back rail, never with someone in it.",
+  "cases": [
+    {
+      "name": "chair_push_in_pull_out_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "c1"] },
+          "c1": { "kind": "eden:chair" },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 760, -150] },
+          "b2": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "do": [
+        {
+          "act": { "this": "c1", "form": "push_in" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "c1", "field": "tucked", "n": 1, "to": 1 }],
+            "events": [{ "event": "eden:pushed_in", "node": "c1", "changes": [0] }],
+            "timers": []
+          }
+        },
+        {
+          "act": { "this": "c1", "form": "pull_out" },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "c1", "field": "tucked", "n": 1, "to": 0 }],
+            "events": [{ "event": "eden:pulled_out", "node": "c1", "changes": [0] }],
+            "timers": []
+          }
+        },
+        {
+          "act": { "this": "c1", "form": "sit", "args": { "seat": "seat" } },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b1", "to": { "node": "c1", "slot": "seat" } }],
+            "events": [{ "event": "eden:sat_down", "node": "c1", "changes": [0] }]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "c1", "form": "push_in" },
+          "receipt": "rc4",
+          "expect": { "verdict": "no", "reason": "slot_taken", "need": 0 }
+        }
+      ],
+      "after": {
+        "room": { "loose": ["b2", "c1"] },
+        "c1": { "kind": "eden:chair", "fields": { "tucked": 0 }, "slots": { "seat": ["b1"] } }
+      }
+    }
+  ]
+}

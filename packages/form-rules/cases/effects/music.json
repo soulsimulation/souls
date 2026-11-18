@@ -1,0 +1,1317 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "SA-X31, Eden's music kinds (#2921), every form done in turn: each instrument played or sung in each mood and stopped, a second Soul refused while the first plays; a speaker on and off; a guitar and a bass taken from their stands, played and put back.",
+  "cases": [
+    {
+      "name": "piano_each_mood_in_turn",
+      "about": "One Soul plays each mood in turn and stops; while it plays, a second Soul can neither take it up nor stop it.",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {"loose":["b1","b2","p1"]},
+          "p1": {"kind":"eden:piano"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"p1","form":"play"},
+          "receipt": "piano_each_mood_in_turn-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"p1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"p1","field":"music","n":1,"to":"calm"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"p1","changes":[0]},
+              {"event":"eden:played_calm","node":"p1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"p1","form":"play"},
+          "actor": "b2",
+          "receipt": "piano_each_mood_in_turn-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"p1","form":"stop"},
+          "actor": "b2",
+          "receipt": "piano_each_mood_in_turn-2",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"p1","form":"stop"},
+          "receipt": "piano_each_mood_in_turn-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"p1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"p1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"p1","changes":[0]},
+              {"event":"eden:stepped_away","node":"p1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"p1","form":"play_happy"},
+          "receipt": "piano_each_mood_in_turn-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"p1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"p1","field":"music","n":1,"to":"happy"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"p1","changes":[0]},
+              {"event":"eden:played_happy","node":"p1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"p1","form":"stop"},
+          "receipt": "piano_each_mood_in_turn-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"p1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"p1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"p1","changes":[0]},
+              {"event":"eden:stepped_away","node":"p1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"p1","form":"play_sad"},
+          "receipt": "piano_each_mood_in_turn-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"p1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"p1","field":"music","n":1,"to":"sad"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"p1","changes":[0]},
+              {"event":"eden:played_sad","node":"p1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"p1","form":"stop"},
+          "receipt": "piano_each_mood_in_turn-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"p1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"p1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"p1","changes":[0]},
+              {"event":"eden:stepped_away","node":"p1","changes":[1]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","b2","p1"]},
+        "p1": {"kind":"eden:piano","links":{"player":[]},"fields":{"music":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "keyboard_each_mood_in_turn",
+      "about": "One Soul plays each mood in turn and stops; while it plays, a second Soul can neither take it up nor stop it.",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {"loose":["b1","b2","k1"]},
+          "k1": {"kind":"eden:keyboard_stand"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"k1","form":"play"},
+          "receipt": "keyboard_each_mood_in_turn-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"k1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"k1","field":"music","n":1,"to":"calm"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"k1","changes":[0]},
+              {"event":"eden:played_calm","node":"k1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"k1","form":"play"},
+          "actor": "b2",
+          "receipt": "keyboard_each_mood_in_turn-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"k1","form":"stop"},
+          "actor": "b2",
+          "receipt": "keyboard_each_mood_in_turn-2",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"k1","form":"stop"},
+          "receipt": "keyboard_each_mood_in_turn-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"k1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"k1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"k1","changes":[0]},
+              {"event":"eden:stepped_away","node":"k1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"k1","form":"play_happy"},
+          "receipt": "keyboard_each_mood_in_turn-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"k1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"k1","field":"music","n":1,"to":"happy"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"k1","changes":[0]},
+              {"event":"eden:played_happy","node":"k1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"k1","form":"stop"},
+          "receipt": "keyboard_each_mood_in_turn-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"k1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"k1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"k1","changes":[0]},
+              {"event":"eden:stepped_away","node":"k1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"k1","form":"play_sad"},
+          "receipt": "keyboard_each_mood_in_turn-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"k1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"k1","field":"music","n":1,"to":"sad"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"k1","changes":[0]},
+              {"event":"eden:played_sad","node":"k1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"k1","form":"stop"},
+          "receipt": "keyboard_each_mood_in_turn-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"k1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"k1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"k1","changes":[0]},
+              {"event":"eden:stepped_away","node":"k1","changes":[1]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","b2","k1"]},
+        "k1": {"kind":"eden:keyboard_stand","links":{"player":[]},"fields":{"music":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "violin_each_mood_in_turn",
+      "about": "One Soul plays each mood in turn and stops; while it plays, a second Soul can neither take it up nor stop it.",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {"loose":["b1","b2","v1"]},
+          "v1": {"kind":"eden:music_stand_violin"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"v1","form":"play"},
+          "receipt": "violin_each_mood_in_turn-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"v1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"v1","field":"music","n":1,"to":"calm"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"v1","changes":[0]},
+              {"event":"eden:played_calm","node":"v1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"v1","form":"play"},
+          "actor": "b2",
+          "receipt": "violin_each_mood_in_turn-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"v1","form":"stop"},
+          "actor": "b2",
+          "receipt": "violin_each_mood_in_turn-2",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"v1","form":"stop"},
+          "receipt": "violin_each_mood_in_turn-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"v1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"v1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"v1","changes":[0]},
+              {"event":"eden:stepped_away","node":"v1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"v1","form":"play_happy"},
+          "receipt": "violin_each_mood_in_turn-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"v1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"v1","field":"music","n":1,"to":"happy"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"v1","changes":[0]},
+              {"event":"eden:played_happy","node":"v1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"v1","form":"stop"},
+          "receipt": "violin_each_mood_in_turn-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"v1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"v1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"v1","changes":[0]},
+              {"event":"eden:stepped_away","node":"v1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"v1","form":"play_sad"},
+          "receipt": "violin_each_mood_in_turn-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"v1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"v1","field":"music","n":1,"to":"sad"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"v1","changes":[0]},
+              {"event":"eden:played_sad","node":"v1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"v1","form":"stop"},
+          "receipt": "violin_each_mood_in_turn-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"v1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"v1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"v1","changes":[0]},
+              {"event":"eden:stepped_away","node":"v1","changes":[1]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","b2","v1"]},
+        "v1": {"kind":"eden:music_stand_violin","links":{"player":[]},"fields":{"music":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "cello_each_mood_in_turn",
+      "about": "One Soul plays each mood in turn and stops; while it plays, a second Soul can neither take it up nor stop it.",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {"loose":["b1","b2","c1"]},
+          "c1": {"kind":"eden:music_stand_cello"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"c1","form":"play"},
+          "receipt": "cello_each_mood_in_turn-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"c1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"c1","field":"music","n":1,"to":"calm"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"c1","changes":[0]},
+              {"event":"eden:played_calm","node":"c1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"c1","form":"play"},
+          "actor": "b2",
+          "receipt": "cello_each_mood_in_turn-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"c1","form":"stop"},
+          "actor": "b2",
+          "receipt": "cello_each_mood_in_turn-2",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"c1","form":"stop"},
+          "receipt": "cello_each_mood_in_turn-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"c1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"c1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"c1","changes":[0]},
+              {"event":"eden:stepped_away","node":"c1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"c1","form":"play_happy"},
+          "receipt": "cello_each_mood_in_turn-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"c1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"c1","field":"music","n":1,"to":"happy"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"c1","changes":[0]},
+              {"event":"eden:played_happy","node":"c1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"c1","form":"stop"},
+          "receipt": "cello_each_mood_in_turn-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"c1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"c1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"c1","changes":[0]},
+              {"event":"eden:stepped_away","node":"c1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"c1","form":"play_sad"},
+          "receipt": "cello_each_mood_in_turn-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"c1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"c1","field":"music","n":1,"to":"sad"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"c1","changes":[0]},
+              {"event":"eden:played_sad","node":"c1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"c1","form":"stop"},
+          "receipt": "cello_each_mood_in_turn-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"c1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"c1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"c1","changes":[0]},
+              {"event":"eden:stepped_away","node":"c1","changes":[1]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","b2","c1"]},
+        "c1": {"kind":"eden:music_stand_cello","links":{"player":[]},"fields":{"music":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "viola_each_mood_in_turn",
+      "about": "One Soul plays each mood in turn and stops; while it plays, a second Soul can neither take it up nor stop it.",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {"loose":["b1","b2","a1"]},
+          "a1": {"kind":"eden:music_stand_viola"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"a1","form":"play"},
+          "receipt": "viola_each_mood_in_turn-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"a1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"a1","field":"music","n":1,"to":"calm"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"a1","changes":[0]},
+              {"event":"eden:played_calm","node":"a1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"a1","form":"play"},
+          "actor": "b2",
+          "receipt": "viola_each_mood_in_turn-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"a1","form":"stop"},
+          "actor": "b2",
+          "receipt": "viola_each_mood_in_turn-2",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"a1","form":"stop"},
+          "receipt": "viola_each_mood_in_turn-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"a1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"a1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"a1","changes":[0]},
+              {"event":"eden:stepped_away","node":"a1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"a1","form":"play_happy"},
+          "receipt": "viola_each_mood_in_turn-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"a1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"a1","field":"music","n":1,"to":"happy"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"a1","changes":[0]},
+              {"event":"eden:played_happy","node":"a1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"a1","form":"stop"},
+          "receipt": "viola_each_mood_in_turn-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"a1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"a1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"a1","changes":[0]},
+              {"event":"eden:stepped_away","node":"a1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"a1","form":"play_sad"},
+          "receipt": "viola_each_mood_in_turn-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"a1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"a1","field":"music","n":1,"to":"sad"}
+            ],
+            "events": [
+              {"event":"eden:took_up_playing","node":"a1","changes":[0]},
+              {"event":"eden:played_sad","node":"a1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"a1","form":"stop"},
+          "receipt": "viola_each_mood_in_turn-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"a1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"a1","link":"player","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"a1","changes":[0]},
+              {"event":"eden:stepped_away","node":"a1","changes":[1]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","b2","a1"]},
+        "a1": {"kind":"eden:music_stand_viola","links":{"player":[]},"fields":{"music":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "drums_each_mood_in_turn",
+      "about": "One Soul plays each mood in turn and stops; while it plays, a second Soul can neither take it up nor stop it.",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {"loose":["b1","b2","d1"]},
+          "d1": {"kind":"eden:drum_kit"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"d1","form":"play"},
+          "receipt": "drums_each_mood_in_turn-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"d1","slot":"stool"}},
+              {"change":"link","node":"d1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"d1","field":"music","n":1,"to":"calm"}
+            ],
+            "events": [
+              {"event":"eden:sat_to_play","node":"d1","changes":[0]},
+              {"event":"eden:took_up_playing","node":"d1","changes":[1]},
+              {"event":"eden:played_calm","node":"d1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"d1","form":"play"},
+          "actor": "b2",
+          "receipt": "drums_each_mood_in_turn-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"d1","form":"stop"},
+          "actor": "b2",
+          "receipt": "drums_each_mood_in_turn-2",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"d1","form":"stop"},
+          "receipt": "drums_each_mood_in_turn-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"d1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"d1","link":"player","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"d1","changes":[0]},
+              {"event":"eden:stepped_away","node":"d1","changes":[1]},
+              {"event":"eden:rose","node":"d1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"d1","form":"play_happy"},
+          "receipt": "drums_each_mood_in_turn-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"d1","slot":"stool"}},
+              {"change":"link","node":"d1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"d1","field":"music","n":1,"to":"happy"}
+            ],
+            "events": [
+              {"event":"eden:sat_to_play","node":"d1","changes":[0]},
+              {"event":"eden:took_up_playing","node":"d1","changes":[1]},
+              {"event":"eden:played_happy","node":"d1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"d1","form":"stop"},
+          "receipt": "drums_each_mood_in_turn-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"d1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"d1","link":"player","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"d1","changes":[0]},
+              {"event":"eden:stepped_away","node":"d1","changes":[1]},
+              {"event":"eden:rose","node":"d1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"d1","form":"play_sad"},
+          "receipt": "drums_each_mood_in_turn-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"d1","slot":"stool"}},
+              {"change":"link","node":"d1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"d1","field":"music","n":1,"to":"sad"}
+            ],
+            "events": [
+              {"event":"eden:sat_to_play","node":"d1","changes":[0]},
+              {"event":"eden:took_up_playing","node":"d1","changes":[1]},
+              {"event":"eden:played_sad","node":"d1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"d1","form":"stop"},
+          "receipt": "drums_each_mood_in_turn-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"d1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"d1","link":"player","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"d1","changes":[0]},
+              {"event":"eden:stepped_away","node":"d1","changes":[1]},
+              {"event":"eden:rose","node":"d1","changes":[2]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b2","d1","b1"]},
+        "d1": {"kind":"eden:drum_kit","slots":{"stool":[]},"links":{"player":[]},"fields":{"music":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "stool_each_mood_in_turn",
+      "about": "One Soul plays each mood in turn and stops; while it plays, a second Soul can neither take it up nor stop it.",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {"loose":["b1","b2","s1"]},
+          "s1": {"kind":"eden:guitar_stool"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"s1","form":"play"},
+          "receipt": "stool_each_mood_in_turn-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"s1","slot":"seat"}},
+              {"change":"link","node":"s1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"s1","field":"music","n":1,"to":"calm"}
+            ],
+            "events": [
+              {"event":"eden:sat_to_play","node":"s1","changes":[0]},
+              {"event":"eden:took_up_playing","node":"s1","changes":[1]},
+              {"event":"eden:played_calm","node":"s1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"s1","form":"play"},
+          "actor": "b2",
+          "receipt": "stool_each_mood_in_turn-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"s1","form":"stop"},
+          "actor": "b2",
+          "receipt": "stool_each_mood_in_turn-2",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"s1","form":"stop"},
+          "receipt": "stool_each_mood_in_turn-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"s1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"s1","link":"player","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"s1","changes":[0]},
+              {"event":"eden:stepped_away","node":"s1","changes":[1]},
+              {"event":"eden:rose","node":"s1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"s1","form":"play_happy"},
+          "receipt": "stool_each_mood_in_turn-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"s1","slot":"seat"}},
+              {"change":"link","node":"s1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"s1","field":"music","n":1,"to":"happy"}
+            ],
+            "events": [
+              {"event":"eden:sat_to_play","node":"s1","changes":[0]},
+              {"event":"eden:took_up_playing","node":"s1","changes":[1]},
+              {"event":"eden:played_happy","node":"s1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"s1","form":"stop"},
+          "receipt": "stool_each_mood_in_turn-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"s1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"s1","link":"player","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"s1","changes":[0]},
+              {"event":"eden:stepped_away","node":"s1","changes":[1]},
+              {"event":"eden:rose","node":"s1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"s1","form":"play_sad"},
+          "receipt": "stool_each_mood_in_turn-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"s1","slot":"seat"}},
+              {"change":"link","node":"s1","link":"player","n":1,"end":"b1"},
+              {"change":"set","node":"s1","field":"music","n":1,"to":"sad"}
+            ],
+            "events": [
+              {"event":"eden:sat_to_play","node":"s1","changes":[0]},
+              {"event":"eden:took_up_playing","node":"s1","changes":[1]},
+              {"event":"eden:played_sad","node":"s1","changes":[2]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"s1","form":"stop"},
+          "receipt": "stool_each_mood_in_turn-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"s1","field":"music","n":1,"to":"silent"},
+              {"change":"unlink","node":"s1","link":"player","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
+            ],
+            "events": [
+              {"event":"eden:stopped_playing","node":"s1","changes":[0]},
+              {"event":"eden:stepped_away","node":"s1","changes":[1]},
+              {"event":"eden:rose","node":"s1","changes":[2]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b2","s1","b1"]},
+        "s1": {"kind":"eden:guitar_stool","slots":{"seat":[]},"links":{"player":[]},"fields":{"music":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "mic_each_mood_in_turn",
+      "about": "One Soul sings each mood in turn and stops; while it sings, a second Soul can neither take it up nor stop it.",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {"loose":["b1","b2","m1"]},
+          "m1": {"kind":"eden:microphone"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"m1","form":"sing"},
+          "receipt": "mic_each_mood_in_turn-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"m1","link":"singer","n":1,"end":"b1"},
+              {"change":"set","node":"m1","field":"voice","n":1,"to":"calm"}
+            ],
+            "events": [
+              {"event":"eden:took_up_singing","node":"m1","changes":[0]},
+              {"event":"eden:sang_calm","node":"m1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"m1","form":"sing"},
+          "actor": "b2",
+          "receipt": "mic_each_mood_in_turn-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"m1","form":"stop_singing"},
+          "actor": "b2",
+          "receipt": "mic_each_mood_in_turn-2",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"m1","form":"stop_singing"},
+          "receipt": "mic_each_mood_in_turn-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"m1","field":"voice","n":1,"to":"silent"},
+              {"change":"unlink","node":"m1","link":"singer","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_singing","node":"m1","changes":[0]},
+              {"event":"eden:stepped_away","node":"m1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"m1","form":"sing_happy"},
+          "receipt": "mic_each_mood_in_turn-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"m1","link":"singer","n":1,"end":"b1"},
+              {"change":"set","node":"m1","field":"voice","n":1,"to":"happy"}
+            ],
+            "events": [
+              {"event":"eden:took_up_singing","node":"m1","changes":[0]},
+              {"event":"eden:sang_happy","node":"m1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"m1","form":"stop_singing"},
+          "receipt": "mic_each_mood_in_turn-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"m1","field":"voice","n":1,"to":"silent"},
+              {"change":"unlink","node":"m1","link":"singer","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_singing","node":"m1","changes":[0]},
+              {"event":"eden:stepped_away","node":"m1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"m1","form":"sing_sad"},
+          "receipt": "mic_each_mood_in_turn-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"link","node":"m1","link":"singer","n":1,"end":"b1"},
+              {"change":"set","node":"m1","field":"voice","n":1,"to":"sad"}
+            ],
+            "events": [
+              {"event":"eden:took_up_singing","node":"m1","changes":[0]},
+              {"event":"eden:sang_sad","node":"m1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"m1","form":"stop_singing"},
+          "receipt": "mic_each_mood_in_turn-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"set","node":"m1","field":"voice","n":1,"to":"silent"},
+              {"change":"unlink","node":"m1","link":"singer","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stopped_singing","node":"m1","changes":[0]},
+              {"event":"eden:stepped_away","node":"m1","changes":[1]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","b2","m1"]},
+        "m1": {"kind":"eden:microphone","links":{"singer":[]},"fields":{"voice":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "speaker_on_off",
+      "about": "Music switched on, then off, at the switch.",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose":["b1","sp1"]},
+          "sp1": {"kind":"eden:speaker"},
+          "b1": {"hands":{"left":null,"right":null},"effector_mm":[0,1250,150]}
+        },
+        "moves": {"press":{"reach_mm":600}}
+      },
+      "do": [
+        {
+          "act": {"this":"sp1","form":"play_music"},
+          "receipt": "speaker_on_off-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"sp1","field":"playing","n":1,"to":1}],
+            "events": [{"event":"eden:music_started","node":"sp1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"sp1","form":"play_music"},
+          "receipt": "speaker_on_off-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"sp1","form":"stop_music"},
+          "receipt": "speaker_on_off-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"sp1","field":"playing","n":1,"to":0}],
+            "events": [{"event":"eden:music_stopped","node":"sp1","changes":[0]}],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","sp1"]},
+        "sp1": {"kind":"eden:speaker","fields":{"playing":0}},
+        "b1": {"hands":{"left":null,"right":null},"effector_mm":[0,1250,150]}
+      }
+    },
+    {
+      "name": "guitar_from_the_stand_played_and_put_back",
+      "about": "The guitar is taken from its stand, played in each mood, stopped and put back in the cradle.",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose":["b1","gs1"]},
+          "gs1": {"kind":"eden:guitar_stand","slots":{"cradle":["i1"]}},
+          "i1": {"kind":"eden:guitar"},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"gs1","form":"take","args":{"guitar":"i1"}},
+          "receipt": "guitar_from_the_stand_played_and_put_back-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"reparent","node":"i1","to":{"node":"b1","hand":"left"}}],
+            "events": [{"event":"eden:took_the_guitar","node":"gs1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"play"},
+          "receipt": "guitar_from_the_stand_played_and_put_back-1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"calm"}],
+            "events": [{"event":"eden:played_calm","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"stop"},
+          "receipt": "guitar_from_the_stand_played_and_put_back-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"play_happy"},
+          "receipt": "guitar_from_the_stand_played_and_put_back-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"happy"}],
+            "events": [{"event":"eden:played_happy","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"stop"},
+          "receipt": "guitar_from_the_stand_played_and_put_back-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"play_sad"},
+          "receipt": "guitar_from_the_stand_played_and_put_back-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"sad"}],
+            "events": [{"event":"eden:played_sad","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"stop"},
+          "receipt": "guitar_from_the_stand_played_and_put_back-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"gs1","form":"put_back","args":{"guitar":"i1"}},
+          "receipt": "guitar_from_the_stand_played_and_put_back-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"reparent","node":"i1","to":{"node":"gs1","slot":"cradle"}}],
+            "events": [{"event":"eden:put_the_guitar_back","node":"gs1","changes":[0]}],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","gs1"]},
+        "gs1": {"kind":"eden:guitar_stand","slots":{"cradle":["i1"]}},
+        "i1": {"kind":"eden:guitar","fields":{"music":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "bass_from_the_stand_played_and_put_back",
+      "about": "The bass guitar is taken from its stand, played in each mood, stopped and put back in the cradle.",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose":["b1","bs1"]},
+          "bs1": {"kind":"eden:bass_stand","slots":{"cradle":["i1"]}},
+          "i1": {"kind":"eden:bass_guitar"},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"bs1","form":"take","args":{"bass_guitar":"i1"}},
+          "receipt": "bass_from_the_stand_played_and_put_back-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"reparent","node":"i1","to":{"node":"b1","hand":"left"}}],
+            "events": [{"event":"eden:took_the_bass_guitar","node":"bs1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"play"},
+          "receipt": "bass_from_the_stand_played_and_put_back-1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"calm"}],
+            "events": [{"event":"eden:played_calm","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"stop"},
+          "receipt": "bass_from_the_stand_played_and_put_back-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"play_happy"},
+          "receipt": "bass_from_the_stand_played_and_put_back-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"happy"}],
+            "events": [{"event":"eden:played_happy","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"stop"},
+          "receipt": "bass_from_the_stand_played_and_put_back-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"play_sad"},
+          "receipt": "bass_from_the_stand_played_and_put_back-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"sad"}],
+            "events": [{"event":"eden:played_sad","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"i1","form":"stop"},
+          "receipt": "bass_from_the_stand_played_and_put_back-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"i1","field":"music","n":1,"to":"silent"}],
+            "events": [{"event":"eden:stopped_playing","node":"i1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"bs1","form":"put_back","args":{"bass_guitar":"i1"}},
+          "receipt": "bass_from_the_stand_played_and_put_back-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"reparent","node":"i1","to":{"node":"bs1","slot":"cradle"}}],
+            "events": [{"event":"eden:put_the_bass_guitar_back","node":"bs1","changes":[0]}],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","bs1"]},
+        "bs1": {"kind":"eden:bass_stand","slots":{"cradle":["i1"]}},
+        "i1": {"kind":"eden:bass_guitar","fields":{"music":"silent"}},
+        "b1": {"hands":{"left":null,"right":null}}
+      }
+    }
+  ]
+}
