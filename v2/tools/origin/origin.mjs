@@ -11,7 +11,7 @@
 // Usage: node origin.mjs <dir> [port] [host]. Prints `origin <port>`; on SIGTERM or SIGINT prints `stats {json}`
 // (requests by kind, requests per part path, processor seconds) and exits.
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,7 @@ export function kindOf(path) {
 /** An origin over `dir`. `stats` counts what it served. */
 export function createOrigin(dir) {
   const root = resolve(dir);
-  const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map() };
+  const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
   const etags = new Map();
   const server = createServer(async (req, res) => {
     const miss = () => {
@@ -58,6 +58,7 @@ export function createOrigin(dir) {
     }
     stats[kind]++;
     stats.perPath.set(rel, (stats.perPath.get(rel) ?? 0) + 1);
+    if (req.method === 'GET') stats.bytes[rel.split('/')[0]] = (stats.bytes[rel.split('/')[0]] ?? 0) + body.length;
     let etag = kind === 'immutable' ? etags.get(file) : undefined;
     if (!etag) {
       etag = `"${createHash('sha256').update(body).digest('hex')}"`;
@@ -80,6 +81,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!dir) throw new Error('usage: node origin.mjs <dir> [port] [host]');
   const { server, stats } = createOrigin(dir);
   server.listen(Number(port), host, () => console.log(`origin ${server.address().port}`));
+  // O11 (#2721): bytes served by first path segment (a world's name), every 10 s, for v2/tools/ops/cost.
+  const statsFile = process.env.ORIGIN_STATS, started = Date.now();
+  if (statsFile) setInterval(() => writeFile(`${statsFile}.tmp`, JSON.stringify({ started, bytes: stats.bytes }))
+    .then(() => rename(`${statsFile}.tmp`, statsFile)).catch(() => {}), 10_000).unref();
   const end = () => {
     const cpu = process.cpuUsage();
     const parts = [...stats.perPath].filter(([p]) => /(^|\/)\d+$/.test(p)).map(([, n]) => n);
