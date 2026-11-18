@@ -262,8 +262,14 @@ on a timed runner rather than a loaded workstation. `args` is `--bin <name>`, a 
 directory, builds the bench in release (untimed), then runs `cargo run -p bench --release --locked --bin <name> -- <args>`
 from `v2/` once per repeat, on the runner's own cores as `walk` does. Each repeat's stdout (the bench's table) is in the
 job summary, and the artifact `timed-run-v2-bench-<run>` holds `v2-bench-build.log`, `v2-bench-r<k>.log` and
-`timed-run.json` (each repeat's exit code, wall time, CPU count and the 1- and 5-minute load at its start and end). To
-test a change to the workflow itself, dispatch with `--ref` set to its branch:
+`timed-run.json` (each repeat's exit code, wall time, CPU count and the 1- and 5-minute load at its start and end).
+A bench that reads generated inputs names a prep after the bin: `--prep eden-facts` (#3185) installs the ref's
+packages (no media), then, before the build and untimed, writes N1's export of Eden 2026 and N18's labels of today's
+engine (`.github/scripts/v2-prep/eden-labels.ts`, run against the ref) into the per-run directory; the bench's
+arguments name them `@facts` and `@labels`. The prep's log is `v2-bench-prep.log`, and `timed-run.json` records each
+input's size and SHA-256. N15's scene:
+`gh workflow run timed-run.yml -f ref=<branch> -f command=v2-bench -f args='--bin walkers --prep eden-facts -- @facts @labels uniform 1 1000 600'`.
+To test a change to the workflow itself, dispatch with `--ref` set to its branch:
 `gh workflow run timed-run.yml -f ref=agent/2697-view-tier -f command=v2-bench -f args='--bin view-tier -- 400 2' -f repeats=2`.
 
 The runners use a dedicated, unprivileged account: the
