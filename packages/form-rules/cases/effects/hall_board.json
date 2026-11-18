@@ -1,0 +1,98 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:hall_board (SA-X17, #2878) beside a lecture: the speaker begins the lecture, a listener sits on a bench, the speaker presents at the board, shows two pages by reference, clears the board, shows a third, stops presenting (which clears it) and finishes the lecture. The board's forms change only the board.",
+  "cases": [
+    {
+      "name": "hall_board_a_lecture_with_pages",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "e1", "l1", "w1"] },
+          "l1": { "kind": "eden:lecture" },
+          "w1": { "kind": "eden:hall_board" },
+          "e1": { "kind": "eden:bench" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "l1", "form": "begin", "args": { "topic": "t_tides" } },
+          "receipt": "hb1",
+          "expect": { "verdict": "yes" }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "l1", "form": "attend", "args": { "seat": { "node": "e1", "slot": "left" } } },
+          "receipt": "hb2",
+          "expect": { "verdict": "yes" }
+        },
+        {
+          "act": { "this": "w1", "form": "present" },
+          "receipt": "hb3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "link", "node": "w1", "link": "presenter", "n": 1, "end": "b1" }],
+            "events": [{ "event": "eden:began_presenting", "node": "w1", "changes": [0] }]
+          }
+        },
+        {
+          "act": { "this": "w1", "form": "show_page", "args": { "page": "p_tides_1" } },
+          "receipt": "hb4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "w1", "field": "page", "n": 1, "to": { "text": "p_tides_1" } }],
+            "events": [{ "event": "eden:page_shown", "node": "w1", "changes": [0] }]
+          }
+        },
+        {
+          "act": { "this": "w1", "form": "show_page", "args": { "page": "p_tides_2" } },
+          "receipt": "hb5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "w1", "field": "page", "n": 1, "to": { "text": "p_tides_2" } }],
+            "events": [{ "event": "eden:page_shown", "node": "w1", "changes": [0] }]
+          }
+        },
+        {
+          "act": { "this": "w1", "form": "clear" },
+          "receipt": "hb6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "w1", "field": "page", "n": 1 }],
+            "events": [{ "event": "eden:board_cleared", "node": "w1", "changes": [0] }]
+          }
+        },
+        {
+          "act": { "this": "w1", "form": "show_page", "args": { "page": "p_tides_3" } },
+          "receipt": "hb7",
+          "expect": { "verdict": "yes" }
+        },
+        {
+          "act": { "this": "w1", "form": "stop_presenting" },
+          "receipt": "hb8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "unlink", "node": "w1", "link": "presenter", "n": 1, "end": "b1" },
+              { "change": "set", "node": "w1", "field": "page", "n": 1 }
+            ],
+            "events": [
+              { "event": "eden:stopped_presenting", "node": "w1", "changes": [0] },
+              { "event": "eden:board_cleared", "node": "w1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "act": { "this": "l1", "form": "finish" },
+          "receipt": "hb9",
+          "expect": { "verdict": "yes" }
+        }
+      ],
+      "after": {
+        "w1": { "kind": "eden:hall_board", "fields": {}, "links": { "presenter": [] } },
+        "l1": { "kind": "eden:lecture", "fields": { "topic": { "text": "t_tides" }, "running": 0 }, "links": { "speaker": [], "listener": ["b2"] } }
+      }
+    }
+  ]
+}
