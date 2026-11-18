@@ -37,9 +37,8 @@ permissions:
 concurrency:
   group: ${{ github.event_name == 'push' && 'ci-main' || github.event_name == 'schedule' && 'ci-daily' || format('ci-{0}', github.event.pull_request.number || inputs.pr || github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled') }}
-env:
-  # Where tools/assets pull keeps its content-addressed download cache (restored by actions/cache below).
-  SIM_ASSETS_CACHE: ${{ github.workspace }}/../.sim-assets-cache
+# tools/assets pull keeps its content-addressed download cache in its default ~/.cache/sim-assets: on a self-hosted
+# runner that persists on the host's disk across jobs; on a GitHub-hosted one, the media cache steps below carry it.
 jobs:
   # scope, repo and ci-ok (and the required security, fragment and merge_group proof jobs) run on
   # CI_LIGHT_RUNNER when set (a label, or a JSON label list), else GitHub-hosted. Unset it to go back to hosted runners.
@@ -174,22 +173,33 @@ jobs:
             v2/target
           key: v2-cargo-${{ runner.os }}-${{ hashFiles('v2/rust-toolchain.toml', 'v2/Cargo.lock') }}
           restore-keys: v2-cargo-${{ runner.os }}-
+      # GitHub-hosted only (a self-hosted runner keeps ~/.cache/sim-assets on disk). The path must have no `.` or `..`
+      # segment, or actions/cache refuses to save it. Saved below, right after a pull on main, whatever the tests do; a
+      # PR or merge-queue ref restores main's cache (its own entries would be scoped to that ref and only evict main's).
       - name: Restore media cache
-        if: matrix.assets
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: media-cache
+        if: matrix.assets && runner.environment == 'github-hosted'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ env.SIM_ASSETS_CACHE }}
+          path: ~/.cache/sim-assets
           key: sim-assets-${{ hashFiles('tools/assets/manifest.json') }}
           restore-keys: sim-assets-
-      # Bounded: an object missing from the CDN (not yet published) fails the job with the list of paths, never hangs.
+      # Bounded: every request that stalls for 20 s is aborted and retried (5 tries); each path that still fails is
+      # printed with its reason (HTTP status, timeout, network error, hash mismatch) as it happens.
       - name: Pull media
         if: matrix.assets
         timeout-minutes: 15
         run: |
           if ! timeout 840 pnpm assets:pull --quiet; then
-            echo "::error::Media pull failed or timed out. The paths above are missing from the CDN or failed verification against tools/assets/manifest.json; publish them first (tools/cdn/publish.mjs, see tools/assets/README.md), then re-run."
+            echo "::error::Media pull failed or timed out. Each failed path is listed above with its reason: HTTP 404/403 means it is not on the CDN (publish it first: tools/cdn/publish.mjs, see tools/assets/README.md); timeouts, 5xx and network errors are the CDN or the runner's network, so re-run."
             exit 1
           fi
+      - name: Save media cache
+        if: matrix.assets && runner.environment == 'github-hosted' && github.ref == 'refs/heads/main' && steps.media-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/sim-assets
+          key: sim-assets-${{ hashFiles('tools/assets/manifest.json') }}
       - name: Run assigned checks
         env:
           CHECK_KIND: ${{ matrix.kind }}
@@ -318,10 +328,11 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # Restore only: this job pulls only web,runtime, and a save under the shared key would leave out the test set.
       - name: Restore media cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ env.SIM_ASSETS_CACHE }}
+          path: ~/.cache/sim-assets
           key: sim-assets-${{ hashFiles('tools/assets/manifest.json') }}
           restore-keys: sim-assets-
       - name: Pull media (web, runtime)
