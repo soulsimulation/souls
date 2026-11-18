@@ -18,6 +18,7 @@ pub mod kinds;
 pub mod pose;
 pub mod query;
 pub mod read;
+pub mod stream;
 pub mod time;
 pub mod tree;
 pub mod views;
