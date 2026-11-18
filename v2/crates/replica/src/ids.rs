@@ -18,8 +18,22 @@ pub const COUNTER_LIMIT: u64 = 1 << 53;
 
 /// Who minted an id: 16 random bytes, new for every world and every fork (rule 1). The bytes come from the caller
 /// (the directory, or the operating system's random source); nothing here draws them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Scope(pub [u8; 16]);
+
+/// The bytes' own order (lexicographic), compared as one big-endian number: the same order, without a byte-by-byte
+/// compare on every lookup by id (#3213).
+impl Ord for Scope {
+    fn cmp(&self, other: &Scope) -> std::cmp::Ordering {
+        u128::from_be_bytes(self.0).cmp(&u128::from_be_bytes(other.0))
+    }
+}
+
+impl PartialOrd for Scope {
+    fn partial_cmp(&self, other: &Scope) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 /// A node's id: its scope and a counter below [`COUNTER_LIMIT`]. Encoded as `[h'<scope>', counter]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

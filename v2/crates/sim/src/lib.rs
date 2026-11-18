@@ -17,6 +17,7 @@ pub mod moves;
 pub mod random;
 pub mod recorder;
 pub mod routes;
+pub mod slots;
 pub mod speech;
 pub mod spots;
 pub mod timers;
