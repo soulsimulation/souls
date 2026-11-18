@@ -85,7 +85,7 @@ pub fn spot(
 
 impl super::SpotAct {
     /// Resolves this act's spot on a checker's copy ([`spot`]). B3's holds are not in the copy yet (as for
-    /// [`SeatsSeen`]), so a slot taken since is caught when it is bound, at commit.
+    /// [`PlacesSeen`]), so a slot taken since is caught when it is bound, at commit.
     pub fn resolve(&mut self, copy: &Tree, body: Id) {
         self.resolved = Some(spot(copy, &self.spot, body, &|_, _| false));
     }

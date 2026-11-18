@@ -361,7 +361,7 @@ fn a_described_spot_is_resolved_by_a_checker_bound_at_commit_or_refused_by_name(
     let between = Spot::Between(n("building"), n("hall"));
     let want = resolve(&client, &between, None, &free).expect("the client resolves it");
     assert_eq!(
-        worldd::checkers::seats::spot(world_copy.tree(), &between, body_id(), &free),
+        worldd::checkers::places::spot(world_copy.tree(), &between, body_id(), &free),
         Ok(want.clone()),
         "the checker gives the client's answer"
     );
@@ -373,7 +373,7 @@ fn a_described_spot_is_resolved_by_a_checker_bound_at_commit_or_refused_by_name(
     cfg.tick = Duration::from_millis(50);
     cfg.bodies = Some(Box::new(bodies));
     let world =
-        answers::start(world_copy, lamps::rules(), store.clone(), cfg).expect("the world starts");
+        answers::start(world_copy, toggles::rules(), store.clone(), cfg).expect("the world starts");
     let path = std::env::temp_dir().join(format!("e2-spot-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).unwrap();
