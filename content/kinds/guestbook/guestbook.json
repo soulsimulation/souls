@@ -1,0 +1,28 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:guestbook",
+  "owner": "thing",
+  "state": {
+    "title": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 550], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [800, 1500, 440] },
+  "children": {
+    "line": { "kind": "eden:guestbook_line", "most": 16 }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:guestbook",
+    "shape": {"round":6,"shapes":[{"kind":"box","at":[0,15,-20],"size":[440,30,440],"tint":"wood"},{"kind":"box","at":[0,600,-20],"size":[50,1200,50],"tint":"wood"},{"kind":"box","at":[0,1250,-12],"size":[760,540,20],"tint":"wood","pitch":-20000},{"kind":"box","at":[0,1250,2],"size":[730,500,12],"tint":"cover","pitch":-20000},{"kind":"box","at":[-177,1250,14],"size":[340,460,12],"tint":"page","pitch":-20000},{"kind":"box","at":[177,1250,14],"size":[340,460,12],"tint":"page","pitch":-20000},{"kind":"box","at":[0,1000,100],"size":[780,30,60],"tint":"wood","pitch":-20000}],"palette":{"wood":"#6b4a2e","cover":"#6e2a2a","page":"#f6efdc"},"tags":["book","signage","object"]}
+  },
+  "text": {
+    "card": "A visitors' book open on a stand: sign it once with your name and a few words.",
+    "guestbook": "guestbook",
+    "visitors_book": "visitors' book",
+    "guest_book": "guest book"
+  },
+  "card": { "text": "card", "category": "guestbook", "synonyms": ["visitors_book", "guest_book"] }
+}
