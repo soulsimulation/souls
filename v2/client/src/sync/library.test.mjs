@@ -86,6 +86,7 @@ test('A5: a build that never returns is ended at its time limit, and this thread
   await assert.rejects(run(SPIN, buildHash(SPIN), 'spin', [], { ms: 200 }), { code: 'checker-timed-out' });
   clearInterval(clock);
   const ms = performance.now() - t0;
-  assert.ok(ms >= 200 && ms < 2000, `${ms} ms`);
+  // A timer may fire a fraction of a millisecond before the limit by performance.now(); 199.8 ms was seen under load.
+  assert.ok(ms >= 195 && ms < 2000, `${ms} ms`);
   assert.ok(ticks >= 5, `the main thread ran ${ticks} ticks while the worker spun`);
 });
