@@ -18,6 +18,7 @@ use replica::intent_decode::{LIMITS, decode as decode_intent};
 use replica::intents::{Answer, PROTOCOL, answer_hello};
 
 use crate::Gateway;
+use crate::times;
 use crate::token::{self, Grant, Token};
 use crate::world_link::{RESTARTING, Sent, sync_refused};
 use replica::sync::wire;
@@ -162,24 +163,25 @@ async fn serve(
     let mut attached = gw.attach(grant, cursor.as_ref());
     let mut ok = send(&mut socket, control(attached.outcome)).await;
     for frame in std::mem::take(&mut attached.replay) {
-        ok = ok && send(&mut socket, frame).await;
+        ok = ok && send(&mut socket, times::finish(frame)).await;
     }
 
     // 4. Intents in, the stream out.
     while ok {
         tokio::select! {
             incoming = socket.recv() => {
+                let received = times::stamp();
                 let bytes = match incoming {
                     Some(Ok(Message::Binary(b))) => b.to_vec(),
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
                     _ => break,
                 };
-                if let Some(answer) = take_intent(&gw, actor, grant, bytes) {
+                if let Some(answer) = take_intent(&gw, actor, grant, bytes, received) {
                     ok = send(&mut socket, answer).await;
                 }
             }
             out = attached.frames.recv() => match out {
-                Some(frame) => ok = send(&mut socket, frame).await,
+                Some(frame) => ok = send(&mut socket, times::finish(frame)).await,
                 // Another socket signed in for this grant, or this one fell too far behind.
                 None => break,
             },
@@ -189,7 +191,13 @@ async fn serve(
 }
 
 /// Reads an intent and hands it to the world; the gateway's own answer, if it gives one.
-fn take_intent(gw: &Gateway, actor: Actor, grant: Grant, bytes: Vec<u8>) -> Option<Vec<u8>> {
+fn take_intent(
+    gw: &Gateway,
+    actor: Actor,
+    grant: Grant,
+    bytes: Vec<u8>,
+    received: u64,
+) -> Option<Vec<u8>> {
     // A sync request (R5b, `replica::sync::wire`), not an intent: to the world, for this grant's actor.
     if let Ok(d) = decode(&bytes)
         && let Value::Map(mut m) = d.value
@@ -219,7 +227,10 @@ fn take_intent(gw: &Gateway, actor: Actor, grant: Grant, bytes: Vec<u8>) -> Opti
             gw.link.now(),
         ));
     }
-    match gw.link.submit(grant.key(), intent.sequence, bytes) {
+    match gw
+        .link
+        .submit(grant.key(), intent.sequence, bytes, received)
+    {
         Sent::Sent => None,
         Sent::Restarting => Some(refused(actor, intent.sequence, RESTARTING, gw.link.now())),
     }

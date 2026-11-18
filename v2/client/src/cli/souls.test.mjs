@@ -1,6 +1,6 @@
-// The thin command (Engine v2 R7, #2701) against the real gateway (`gatewayd`, I1) and the world's stand-in end of it
-// (`worldd gateway-link`) holding a hall of 1,000 items, with two Souls: the one the commands drive, and another whose
-// acts change the world between them. Run from v2/ after
+// The thin command (Engine v2 R7, #2701) against the real gateway (`gatewayd`, I1) and the world's end of it
+// (`worldd gateway-link`, I4's world of lamps) holding a hall of 1,000 items, with two Souls, each a body beside its
+// lamp: the one the commands drive, and another whose acts change the world between them. Run from v2/ after
 //   cargo build -p gatewayd -p worldd --locked, and replica's wasm-bindgen package in target/wasm-load/pkg.
 // R7_REPORT=1 prints the timings and the brief's size, for the PR.
 
@@ -23,14 +23,17 @@ const WORLDD = process.env.WORLDD ?? join(v2, 'target/debug/worldd');
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const CLI = join(here, 'souls.mjs');
 const CUPS = 1000, SEQUENCES = 100;
+// `worldd gateway-link`'s world mints from scope 2b: the place, the room, each body and its lamp, then the items.
+const WORLD_SCOPE = '2b'.repeat(16), BODIES = 2, FIRST_ITEM = 2 + 2 * BODIES, THINGS = CUPS + BODIES;
+const LAMP_B = `${WORLD_SCOPE}-5`, LAMP_B_NAME = 'lamp 5';
 const A = 's_r7me', B = 's_r7other';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const dir = mkdtempSync(join(tmpdir(), 'souls-r7-'));
 const home = join(dir, '.souls');
 const procs = [];
-const seat = () => { const scope = randomBytes(16).toString('hex'); return { scope, token: `soul-${scope}-7.${randomBytes(32).toString('hex')}` }; };
-const a = seat(), b = seat();
+const seat = (counter) => ({ grant: `soul-${WORLD_SCOPE}-${counter}`, token: `soul-${WORLD_SCOPE}-${counter}.${randomBytes(32).toString('hex')}` });
+const a = seat(2), b = seat(4); // the world's two bodies
 const times = { status: [], look: [], find: [], act: [], wait: [] };
 let rtA, rtB;
 
@@ -67,8 +70,8 @@ function souls(args, { soul = A, env = {}, node = [] } = {}) {
 
 before(async () => {
   const world = join(dir, 'w.sock'), tokens = join(dir, 'tokens.txt');
-  writeFileSync(tokens, [a, b].map((s) => `soul-${s.scope}-7 ${createHash('sha256').update(s.token).digest('hex')}\n`).join(''));
-  procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--room', String(CUPS)], { stdio: 'ignore' }));
+  writeFileSync(tokens, [a, b].map((s) => `${s.grant} ${createHash('sha256').update(s.token).digest('hex')}\n`).join(''));
+  procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--rooms', '1', '--bodies', String(BODIES), '--items', String(CUPS)], { stdio: 'ignore' }));
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
   const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   mkdirSync(home, { recursive: true });
@@ -97,11 +100,12 @@ test('the arguments make the daemon request: act takes a ranked list, find its w
   assert.equal(requestOf(['dance']).refused, 'unknown-command');
 });
 
-/** What the world's log changed between two of its versions: the stand-in sets item `s % CUPS` at sequence `s`. */
+/**
+ * What the world's log changed between two of its versions. Only the other Soul's acts change it, each one log entry
+ * that switches its lamp (on, else off): the lamp differs when it was switched an odd number of times.
+ */
 function logChanged(from, to) {
-  const names = new Set();
-  for (let s = from + 1; s <= to; s++) names.add(`item ${2 + (s % CUPS)}`);
-  return [...names].sort((x, y) => x.localeCompare(y, 'en', { numeric: true }));
+  return (to - from) % 2 === 1 ? [LAMP_B_NAME] : [];
 }
 
 test('A2: over 100 scripted command sequences, each answer\'s "changed" equals the log\'s changes since the answer before', async () => {
@@ -114,9 +118,9 @@ test('A2: over 100 scripted command sequences, each answer\'s "changed" equals t
     const steps = 1 + next(4);
     for (let j = 0; j < steps; j++) {
       // The other Soul acts between my commands, so not every change is mine.
-      for (let m = next(3); m > 0; m--) await request(rtB.socket, { op: 'act', verbs: ['eden:wave'] });
+      for (let m = next(3); m > 0; m--) await request(rtB.socket, { op: 'act', verbs: ['r2:switch_on', 'r2:switch_off'], target: LAMP_B });
       const pick = next(4);
-      const answer = pick === 0 ? souls(['look']) : pick === 1 ? souls(['find', 'item', String(2 + next(CUPS))]) : pick === 2 ? souls(['act', 'eden:sit', 'eden:lean']) : souls(['wait', '0']);
+      const answer = pick === 0 ? souls(['look']) : pick === 1 ? souls(['find', 'item', String(FIRST_ITEM + next(CUPS))]) : pick === 2 ? souls(['act', 'eden:sit', 'eden:lean']) : souls(['wait', '0']);
       assert.equal(answer.ok, true, JSON.stringify(answer));
       assert.ok(answer.at >= last, `at ${answer.at} after ${last}`);
       const want = logChanged(last, answer.at);
@@ -136,12 +140,12 @@ test('A1 (hall of 1,000), A4, A5: the brief is under 2,000 bytes, says what it l
   assert.ok(bytes < 2000, `${bytes} bytes`);
   assert.equal(look.room.name, 'room 1');
   assert.ok(look.here.length > 20 && look.here.every((n) => /^item \d+$/.test(n)), 'things are named');
-  assert.match(look.left[0], new RegExp(`^${CUPS - look.here.length} more things in room 1: find them by name$`));
+  assert.match(look.left[0], new RegExp(`^${THINGS - look.here.length} more things in room 1: find them by name$`));
   assert.deepEqual(look.outward, [{ name: 'place 0', kind: 'souls:place' }], 'the room\'s parent by name, no counts');
   const text = JSON.stringify(look);
   assert.ok(!/"(at|position|x|y|z|pose)":\s*\[/.test(text), 'no coordinates');
   // find: one search over the copy; an item beyond what the brief named is found by its name.
-  const far = `item ${2 + CUPS - 1}`;
+  const far = `item ${FIRST_ITEM + CUPS - 1}`;
   assert.ok(!look.here.includes(far));
   const found = souls(['find', far]);
   assert.deepEqual(found.found[0], { id: found.found[0].id, name: far, kind: 'souls:item', in: 'room 1, place 0' });
