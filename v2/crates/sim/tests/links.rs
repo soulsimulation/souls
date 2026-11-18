@@ -5,6 +5,7 @@
 //! largest step.
 
 use import_eden::{F_DOORWAY, Import};
+use replica::effects::Refusal;
 use replica::effects::{Actor, Body, Cause, Change, Header, schema_hash};
 use replica::encode::{Value, encode};
 use replica::ids::{Hash, Id, Purpose, Scope};
@@ -12,7 +13,7 @@ use replica::pose::Vec3;
 use replica::tree::Tree;
 use replica::world_model::show;
 use sim::ground::Scene;
-use sim::links::{Abilities, Building, DOOR_OPENED, Doors, F_OPEN, Kind, Leg, Walker};
+use sim::links::{Abilities, Building, DOOR_OPENED, Doors, F_OPEN, Kind, on_patch};
 use std::collections::BTreeMap;
 
 use testworld::WALL;
@@ -250,4 +251,212 @@ fn a4_a_body_without_hands_is_refused_at_a_shut_door_by_name() {
         body.floor, w.nodes["building/floor-0"],
         "still on this side"
     );
+}
+
+// --- The proof walker (N4), moved here from `sim::links` by B1 (#2680) -------------------------------------------
+
+fn sq(v: i64) -> i128 {
+    i128::from(v) * i128::from(v)
+}
+
+/// The squared length of `b − a`, µm².
+fn dist2(a: Vec3, b: Vec3) -> i128 {
+    sq(b.x - a.x) + sq(b.y - a.y) + sq(b.z - a.z)
+}
+
+fn gone(id: Id) -> Refusal {
+    Refusal {
+        name: "node-missing",
+        detail: show(id),
+    }
+}
+
+fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
+    Refusal {
+        name,
+        detail: detail.into(),
+    }
+}
+
+/// One leg of a walk order the agent wrote.
+#[derive(Clone, Copy, Debug)]
+pub enum Leg {
+    /// Walk straight to this point (x, z µm) on the floor the body is on.
+    Walk([i64; 2]),
+    /// Go to the near end of this link and cross it by its move, opening its door first if it is shut.
+    Cross(Id),
+}
+
+/// A body run by a script: no route search and no walk skill, only the legs it is given, a fixed speed and a tick.
+/// Proof only: it moves a body without the mover, so it lives here, not in `sim` (B1 #2680: nothing under
+/// `v2/crates/*/src` moves a body but the controller).
+pub struct Walker {
+    /// Its centre, µm, in the building's frame.
+    pub at: Vec3,
+    /// The floor node whose patch it stands on.
+    pub floor: Id,
+    pub abilities: Abilities,
+    /// µm a second.
+    pub speed: i64,
+    /// µs a tick.
+    pub tick: i64,
+    /// The world time, µs.
+    pub now: i64,
+    /// Every step's squared length, µm², in order.
+    pub steps: Vec<i128>,
+    /// Where each step ended, and the link it was crossing, if any.
+    pub trail: Vec<(Vec3, Option<Id>)>,
+    crossing: Option<Id>,
+    pub soul: Id,
+    pub order: Id,
+}
+
+impl Walker {
+    /// A body at `at` on `floor`'s patch, at world time 0, acting for `soul` under the order `order`.
+    pub fn new(
+        at: Vec3,
+        floor: Id,
+        abilities: Abilities,
+        speed: i64,
+        tick: i64,
+        soul: Id,
+        order: Id,
+    ) -> Walker {
+        Walker {
+            at,
+            floor,
+            abilities,
+            speed,
+            tick,
+            now: 0,
+            steps: Vec::new(),
+            trail: Vec::new(),
+            crossing: None,
+            soul,
+            order,
+        }
+    }
+
+    fn reach(&self) -> i64 {
+        self.speed * self.tick / 1_000_000
+    }
+
+    /// One tick toward `to`, never longer than speed times the tick. Returns whether it got there.
+    fn step(&mut self, to: Vec3) -> bool {
+        let d2 = dist2(self.at, to);
+        let r = self.reach();
+        let next = if d2 <= sq(r) {
+            to
+        } else {
+            let d = d2.isqrt();
+            let part = |a: i64, b: i64| a + ((i128::from(b - a) * i128::from(r)) / d) as i64;
+            Vec3::new(
+                part(self.at.x, to.x),
+                part(self.at.y, to.y),
+                part(self.at.z, to.z),
+            )
+        };
+        self.steps.push(dist2(self.at, next));
+        self.trail.push((next, self.crossing));
+        self.at = next;
+        self.now += self.tick;
+        next == to
+    }
+
+    /// Walks straight to `to` on its floor's patch; every step stands on it, or the walk is refused as `off-ground`.
+    fn walk(&mut self, b: &Building, to: Vec3) -> Result<(), Refusal> {
+        let patch = &b.floors.get(&self.floor).ok_or_else(|| gone(self.floor))?.1;
+        loop {
+            let done = self.step(to);
+            if !on_patch(patch, self.at, 2) {
+                return Err(refusal(
+                    "off-ground",
+                    format!("({}, {}, {}) µm", self.at.x, self.at.y, self.at.z),
+                ));
+            }
+            if done {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Carries out a walk order, leg by leg.
+    pub fn run(
+        &mut self,
+        b: &Building,
+        tree: &mut Tree,
+        doors: &mut Doors,
+        legs: &[Leg],
+    ) -> Result<(), Refusal> {
+        for leg in legs {
+            match *leg {
+                Leg::Walk([x, z]) => self.walk(b, Vec3::new(x, self.at.y, z))?,
+                Leg::Cross(id) => self.cross(b, tree, doors, id)?,
+            }
+        }
+        Ok(())
+    }
+
+    fn cross(
+        &mut self,
+        b: &Building,
+        tree: &mut Tree,
+        doors: &mut Doors,
+        id: Id,
+    ) -> Result<(), Refusal> {
+        let show = || replica::world_model::show(id);
+        let link = b.link(id).ok_or_else(|| refusal("link-missing", show()))?;
+        if let Some(why) = link.blocked {
+            return Err(refusal(why, show()));
+        }
+        let needs = link.kind.needs();
+        if needs.legs && !self.abilities.legs {
+            return Err(refusal("link-needs-legs", show()));
+        }
+        if needs.hands && !self.abilities.hands {
+            return Err(refusal("link-needs-hands", show()));
+        }
+        // The near end is the one on this floor nearest the body.
+        let near = (0..2)
+            .filter(|&k| link.ends[k].is_some_and(|e| e.floor == self.floor))
+            .min_by_key(|&k| link.ends[k].map_or(i128::MAX, |e| dist2(self.at, e.middle())))
+            .ok_or_else(|| refusal("link-not-here", show()))?;
+        let mut line = link.line.clone();
+        if near == 1 {
+            line.reverse();
+        }
+        self.walk(b, line[0])?;
+        if let Some(door) = link.door {
+            let shut = tree
+                .node(tree.handle(door).ok_or_else(|| gone(door))?)
+                .and_then(|n| n.fields().get(&F_OPEN).cloned())
+                != Some(Value::Uint(1));
+            if shut {
+                if !self.abilities.hands {
+                    return Err(refusal("door-needs-hands", show()));
+                }
+                // Stand, open: the opening is written at the end of this tick and read the next.
+                self.steps.push(0);
+                self.trail.push((self.at, None));
+                self.now += self.tick;
+                doors.ask(door, id, Cause::Intent(self.order), Actor::Soul(self.soul));
+                doors.flush(tree, self.now)?;
+            }
+        }
+        self.crossing = Some(id);
+        for &p in &line[1..] {
+            while !self.step(p) {}
+        }
+        self.crossing = None;
+        self.floor = link.ends[1 - near].map_or(self.floor, |e| e.floor);
+        Ok(())
+    }
+
+    /// The largest step taken, µm (rounded down), and the bar it is held to: speed times the tick.
+    pub fn largest_step(&self) -> (i64, i64) {
+        (
+            self.steps.iter().max().copied().unwrap_or(0).isqrt() as i64,
+            self.reach(),
+        )
+    }
 }

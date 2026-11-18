@@ -1,0 +1,142 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:toilet (core/toilet@1): a seat for one body, and a flush that empties the 6 kg cistern; the world refills it 30 s later, and until then it will not flush.",
+ "cases": [
+  {
+   "name": "toilet_flush_wait_refill_flush",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:toilet",
+      "fields": {}
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       140,
+       860,
+       -50
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    },
+    "now_us": 0
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "flush"
+     },
+     "now_us": 0,
+     "receipt": "rflush0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cistern",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:flushed",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cistern_filling",
+        "node": "t1",
+        "changes": []
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "flush"
+     },
+     "now_us": 10000000,
+     "receipt": "rflush10000000",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "refill"
+     },
+     "now_us": 30000000,
+     "receipt": "rrefill30000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "cistern",
+        "n": 1,
+        "to": 6000
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:cistern_full",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "flush"
+     },
+     "now_us": 40000000,
+     "receipt": "rflush40000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    }
+   ]
+  }
+ ]
+}

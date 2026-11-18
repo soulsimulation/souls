@@ -75,10 +75,13 @@ and rolling builds (O1, O7) are not here.
     so a build change and a claim cannot both win: the loser reads again. A record is created once. A real store's
     version is an ETag, a hash of the content; that serves because every write adds one to field 9, so no write
     leaves the bytes as they were, a heartbeat included, and no version repeats.
-11. **Per Soul, the directory records where it is:** `soul/<soul>`, `{1: soul, 2: lineage of its world, 3: zone}`,
-    changed the same way when a Soul travels (T1).
+11. **Per Soul, the directory records where it is:** `soul/<soul>`, `{1: soul, 2: lineage of its world, 3: zone,
+    5: writes}`, or `{1: soul, 4: transfer, 5: writes}` while it is in transit (X9), changed the same way, and only
+    from where it is, when a Soul travels (T1). 5 counts the writes, as field 9 does for a world (rule 10).
 12. **The directory's truth is a few small objects in the object store,** each written conditionally; machines keep
-    a cached copy; there is no other database.
+    a cached copy; there is no other database. W8 (#2729) builds it: `v2/crates/directoryd/src/directory` (claim,
+    alarm, pinned build, a Soul's place and the claim holder's ship, each decided by the store, never the cache; a
+    real S3-compatible store client) and the records in `v2/crates/replica/src/directory`.
 13. **Checkpoints are taken by amount of log,** so restart time does not grow with the world (K5 builds it).
 
 **Step 0, the paused writer as a timeline** (`a2_...`): a holds epoch 1, writes 0 to 2 and ships them (mark 2); a

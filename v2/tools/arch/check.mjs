@@ -46,11 +46,16 @@ export const problem = (rule, where, what) => `${rule}: ${where}: ${what} [${RUL
 /** The dependencies each crate under v2/crates may have (normal, dev and build alike). A crate not listed fails. */
 export const ALLOWED = {
   replica: ['wasm-bindgen'],
-  sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld'],
+  // skills: a dev-dependency, so the world host's tests step the built-in skills (K13a, #2676).
+  sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld', 'skills'],
   worldd: ['replica', 'sim'],
   gatewayd: [],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
   skills: ['replica'],
+  // W8 (#2729): the object store's SigV4 signature (ring) and HTTP (ureq); sim's tick loop in a test (dev only).
+  directoryd: ['replica', 'ring', 'ureq', 'sim'],
+  // O1 (#2730): the launcher reads a world's pin from its directory record.
+  supervisor: ['replica', 'directoryd'],
 };
 
 const rsFiles = dir => readdirSync(dir, { recursive: true }).filter(f => /\.rs$/.test(f)).map(f => join(dir, f));

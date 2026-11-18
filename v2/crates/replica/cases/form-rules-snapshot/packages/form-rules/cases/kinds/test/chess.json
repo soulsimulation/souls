@@ -1,0 +1,28 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:chess",
+  "owner": "thing",
+  "links": {
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"} },
+    "player": { "n": 2, "from": "soul", "most": 2, "audience": "players" },
+    "turn": { "n": 3, "from": "soul", "most": 1, "audience": {"rule": "everyone"} }
+  },
+  "forms": {
+    "move": {
+      "who": { "link": "turn" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": []
+    },
+    "resign": {
+      "who": { "link": "player" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": []
+    }
+  },
+  "text": { "card": "A test chess game for who may: the Soul whose turn it is moves, a player may resign, and only players see who plays." },
+  "card": { "text": "card" }
+}

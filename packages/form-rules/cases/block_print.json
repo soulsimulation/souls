@@ -1,0 +1,289 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:block_print_sheet (from #1692). Four cells, each blank or printed with a red or blue disc or bar, and four supplied inks. Printing a cell takes six seconds and one ink. Refused as the original refused: no ink ('The supplied ink is exhausted.'), the cell already that motif ('That cell already has the chosen motif and color.', fixed by the same print with the next motif), something held ('Empty your hands before printing.'); a cell outside the four is bad input, so a print never writes the ink.",
+  "cases": [
+    {
+      "name": "print_every_need_met",
+      "act": {
+        "this": "s1",
+        "form": "print",
+        "args": {
+          "cell": "back_left",
+          "motif": "red_disc"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:block_print_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "print_ink_exhausted",
+      "act": {
+        "this": "s1",
+        "form": "print",
+        "args": {
+          "cell": "back_left",
+          "motif": "red_disc"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:block_print_sheet",
+            "fields": {
+              "ink": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "ink",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null,
+        "says": "ink_out"
+      }
+    },
+    {
+      "name": "print_same_motif_names_the_next_motif",
+      "act": {
+        "this": "s1",
+        "form": "print",
+        "args": {
+          "cell": "back_left",
+          "motif": "red_disc"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:block_print_sheet",
+            "fields": {
+              "back_left": "red_disc",
+              "ink": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "back_left",
+          "found": "red_disc",
+          "wanted": {
+            "not": "red_disc"
+          }
+        },
+        "fix": {
+          "form": "print",
+          "args": {
+            "cell": "back_left",
+            "motif": "blue_disc"
+          }
+        },
+        "says": "same_motif"
+      }
+    },
+    {
+      "name": "print_holding_something",
+      "act": {
+        "this": "s1",
+        "form": "print",
+        "args": {
+          "cell": "back_left",
+          "motif": "red_disc"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:block_print_sheet"
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "print_a_cell_not_in_the_list",
+      "act": {
+        "this": "s1",
+        "form": "print",
+        "args": {
+          "cell": "ink",
+          "motif": "red_disc"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:block_print_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "bad_input"
+      }
+    },
+    {
+      "name": "block_print_sheet_take_every_need_met",
+      "act": {
+        "this": "s1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:block_print_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "block_print_sheet_take_both_hands_full",
+      "act": {
+        "this": "s1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:block_print_sheet"
+          },
+          "h1": {
+            "kind": "eden:block_print_sheet"
+          },
+          "h2": {
+            "kind": "eden:block_print_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

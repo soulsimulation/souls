@@ -1,0 +1,685 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "The floor lamp (core/floor-lamp@1 in Eden, 467 placed; @2 switches, PR #2953). Its light is a level, 0 off to 3 full, so \"dim the lights a bit\" (Eden asks 11, 297) is a step down: switching on lights it full, dimming lowers a step to the lowest lit step, brightening raises a step, switching off puts it out from any step. The switch is a knob on the stem.",
+ "cases": [
+  {
+   "name": "floor_lamp_switch_on_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 0
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "floor_lamp_switch_on_when_lit_names_switch_off",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 2
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "level",
+     "found": 2,
+     "wanted": {
+      "at_most": 0
+     }
+    },
+    "fix": {
+     "form": "switch_off"
+    }
+   }
+  },
+  {
+   "name": "floor_lamp_switch_on_out_of_reach",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 0
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  },
+  {
+   "name": "floor_lamp_switch_off_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "floor_lamp_switch_off_when_dark_names_switch_on",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 0
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "level",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  },
+  {
+   "name": "floor_lamp_switch_off_out_of_reach",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 3
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  },
+  {
+   "name": "floor_lamp_dim_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "dim"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 3
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "floor_lamp_dim_at_the_lowest_step",
+   "act": {
+    "this": "l1",
+    "form": "dim"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "level",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    }
+   }
+  },
+  {
+   "name": "floor_lamp_dim_out_of_reach",
+   "act": {
+    "this": "l1",
+    "form": "dim"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 3
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  },
+  {
+   "name": "floor_lamp_brighten_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "brighten"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "floor_lamp_brighten_when_dark_names_switch_on",
+   "act": {
+    "this": "l1",
+    "form": "brighten"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 0
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "level",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  },
+  {
+   "name": "floor_lamp_brighten_at_full",
+   "act": {
+    "this": "l1",
+    "form": "brighten"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 3
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "level",
+     "found": 3,
+     "wanted": {
+      "at_most": 2
+     }
+    }
+   }
+  },
+  {
+   "name": "floor_lamp_brighten_out_of_reach",
+   "act": {
+    "this": "l1",
+    "form": "brighten"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:floor_lamp",
+      "fields": {
+       "level": 2
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  }
+ ]
+}

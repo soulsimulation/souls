@@ -1,0 +1,25 @@
+{
+  "format": "souls-entry/1",
+  "kind": "looks:candle",
+  "owner": "thing",
+  "state": {
+    "burn": { "n": 1, "type": "int", "unit": "permille", "default": 0, "min": 0, "max": 1000, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [120, 250, 120] },
+  "looks": {
+    "model": "look:looks_candle",
+    "shape": {
+      "make": { "kind": "gen", "gen": "kit/2", "args": { "shapes": [
+        { "kind": "cyl", "at": [0, 0.08, 0], "r": 0.06, "h": 0.16, "segments": 10, "tint": "wax" },
+        { "kind": "cone", "at": [0, 0.2, 0], "r": 0.03, "h": 0.08, "segments": 6, "tint": "flame", "glow": 1, "role": "flame", "pivot": [0, 0.17, 0] }
+      ] } },
+      "palette": { "wax": "#f1e6c8", "flame": "#ffb43a" },
+      "tags": ["candle"]
+    },
+    "table": [
+      { "part": "flame", "field": "burn", "do": "flame", "range": [0, 1000], "to": [0, 1000] }
+    ]
+  },
+  "text": { "card": "A candle whose flame grows with how strongly it burns." },
+  "card": { "text": "card" }
+}
