@@ -1,0 +1,2 @@
+# A cancel (rule 8): ends the actor's own intent 10, the held stance.
+{1: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 2: "souls:cancel", 5: 12, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0], 1, 42], 7: 63000000, 10: 10}

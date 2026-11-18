@@ -44,7 +44,7 @@ export const RECORD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration']);
 export const LIST_MOST = 100;
 export const RECORD_FIELDS_MOST = 8;
 /** Whole-number units for an `int` field; a rate is `<unit>/s`. Durations are their own type, in microseconds. */
-export const UNITS = Object.freeze(['count', 'mm', 'g', 'mC', 'permille']);
+export const UNITS = Object.freeze(['count', 'mm', 'g', 'mg', 'mC', 'permille']);
 /** The audience rules a field may declare: the one closed list (SA-F8, #2849). A rule names a link type, never a Soul;
  *  each resolves to a set of principals when a value is written (contract T8, #2662). `everyone`; `owner` (the
  *  thing's owner); `linked` (whoever is linked to this thing by the named link of this kind: its members, the Soul
