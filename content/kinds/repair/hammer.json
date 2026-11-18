@@ -1,0 +1,21 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hammer",
+  "owner": "thing",
+  "points": {
+    "grip": { "role": "grip", "at_mm": [-100, 70, 0] }
+  },
+  "geometry": { "bounds_mm": [300, 100, 30] },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:hammer",
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[-10,70,0],"size":[280,24,18],"round":4,"tint":"wood"},{"kind":"box","at":[130,50,0],"size":[30,100,30],"round":4,"tint":"iron"}],"palette":{"wood":"#a47a4c","iron":"#4a4f52"},"tags":["tool","item","hammer"]}
+  },
+  "text": {
+    "card": "A claw hammer, carried in one hand; it repairs what a hammer repairs.",
+    "tool": "tool",
+    "repair": "repair"
+  },
+  "card": { "text": "card", "category": "tool", "synonyms": ["repair"] }
+}
