@@ -18,15 +18,25 @@ export const FORMAT = 'souls-entry/1';
 // Section 10 is reserved for Engine v2 T3's hashed table of referenced kinds (T3, #2640, rule 14); it is not implemented
 // here. Section 11 is `children`, the kinds a thing admits as children: a check at commit by plain kind name, never a
 // hashed reference, so `kindRefs` does not follow it. Section 12 is `reactions` (SA-F15), numbered when that task lands.
-export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11,
+export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14,
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
-export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10', stock: 'SA-F12', areas: 'SA-D6', schedule: 'SA-F16', hatch: 'SA-F9'});
+export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10', stock: 'SA-F12', areas: 'SA-D6', hatch: 'SA-F9'});
 
 /** What a kind is the kind of: a thing, a body's family, or a kind of ground or place (Engine v2 E21, #2791). */
 export const OWNERS = Object.freeze(['thing', 'family', 'place']);
-export const FIELD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration', 'text', 'list']);
+export const FIELD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration', 'text', 'list', 'schedule']);
+/** A schedule is data a kind publishes (SA-F16, #2854): a bounded list of times a client reads and plans from. The world
+ *  never waits for one and never reminds a mind of one. A `once` entry runs between two world times; a `weekly` entry
+ *  repeats on named days between two local times of day (the clock of the place the thing stands in). */
+export const SCHEDULE_REPEATS = Object.freeze(['once', 'weekly']);
+export const WEEKDAYS = Object.freeze(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+export const DAY_US = 86_400_000_000;
+/** What a form never carries: a start time or a wait for a condition. When to act is the agent's client's business. */
+const WHEN_KEY = /^(?:at|at_us|time|date|day|days|weekday|start|start_us|starts_at|from_us|to_us|until|until_us|deadline|not_before|schedule|repeat|when|while|unless|if|condition|wait_for|wait_until)$/;
+const WHEN_NAME = /^(?:time|clock|date|weekday|after|before|until|schedule|at_time|open_now|wait_until|wait_for|wait_for_time|wait_for_condition)$/;
+const WHEN_REASON = 'a form carries no start time and waits for no condition; when to act is the agent\'s own business, so the kind publishes a schedule field and the client reads it';
 /** A list's record holds small values only: no text and no id, so a Soul cannot be inside one (SA-F6a, #2846). */
 export const RECORD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration']);
 /** The largest bound a list may declare: it is set whole on every change, so it stays in tens (Engine v2 F11, #2774). */
@@ -63,6 +73,14 @@ export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_
 export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait']);
 export const CHANGES = Object.freeze(['set', 'reparent', 'link', 'unlink', 'create', 'remove', 'timer']);
 export const SUBJECTS = Object.freeze(['actor', 'this']);
+/** A vehicle (SA-F14, #2884) declares what Engine v2 needs to let a Soul drive it, never how it moves: a drive seat, a speed,
+ *  its size (the bounds) and the kind of ground it may cross. Ground is whole kinds: `level` (no doors, stairs or ladders)
+ *  or `deep_water` (deep enough to swim in). A ride is a set trip between stops that nobody steers (a sail). */
+export const VEHICLE_GROUNDS = Object.freeze(['level', 'deep_water']);
+/** Where a rider may step off: ground to stand on, water to swim in, or somewhere neither holds. */
+export const SPOTS = Object.freeze(['level', 'shallow', 'deep_water', 'door', 'stairs', 'ladder', 'blocked']);
+export const SPOTS_STAND = Object.freeze(['level', 'shallow']);
+export const SPOTS_SWIM = Object.freeze(['deep_water']);
 
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const KIND = /^[a-z][a-z0-9-]*:[a-z][a-z0-9_]*$/;
@@ -110,6 +128,9 @@ export function validateEntry(entry) {
   for (const [name, f] of Object.entries(state)) field(f, `state.${name}`, links, err, closedNames.includes(name));
   if (entry.closed !== undefined) closed(entry.closed, state, links, err);
   children(section(entry, 'children', err), err);
+  if (entry.vehicle !== undefined) vehicle(entry, err);
+  if (entry.ride !== undefined) ride(entry, err);
+  if (entry.vehicle !== undefined && entry.ride !== undefined) err('ride', 'a kind is a vehicle (steered) or a ride (a set trip), not both');
   for (const [name, l] of Object.entries(links)) {
     const p = `links.${name}`;
     if (!isObj(l)) { err(p, 'a link type is an object'); continue; }
@@ -154,10 +175,7 @@ export function validateEntry(entry) {
   }
   for (const [key, v] of Object.entries(text)) if (typeof v !== 'string' || !IDENT.test(key)) err(`text.${key}`, 'text is a table of name to words');
   if (entry.looks !== undefined && !isObj(entry.looks)) err('looks', 'an object (its table is SA-D1a\'s)');
-  if (entry.card !== undefined) {
-    if (!isObj(entry.card) || !(entry.card.text in text)) err('card.text', 'names an entry of the text table');
-    else only(entry.card, ['text'], 'card', err);
-  }
+  if (entry.card !== undefined) card(entry.card, text, err);
   for (const [name, h] of Object.entries(section(entry, 'howtos', err))) {
     const p = `howtos.${name}`;
     if (!isObj(h)) { err(p, 'a how-to is an object'); continue; }
@@ -192,8 +210,24 @@ function section(entry, key, err) {
   return v;
 }
 
+// A card is the line a search ranks a kind on: its purpose (its length is the check's rule), one category word and
+// synonyms. All are words, so all are named by reference to the text table.
+function card(c, text, err) {
+  if (!isObj(c)) { err('card', 'an object'); return; }
+  only(c, ['text', 'category', 'synonyms'], 'card', err);
+  if (!(typeof c.text === 'string' && c.text in text)) err('card.text', 'names an entry of the text table');
+  if (c.category !== undefined) {
+    if (!(typeof c.category === 'string' && c.category in text)) err('card.category', 'names an entry of the text table (one word)');
+    else if (/\s/.test(text[c.category].trim())) err('card.category', 'one word: its text entry has more than one');
+  }
+  if (c.synonyms !== undefined) {
+    if (!Array.isArray(c.synonyms) || c.synonyms.length === 0) err('card.synonyms', 'a list of names of the text table');
+    else c.synonyms.forEach((k, i) => { if (!(typeof k === 'string' && k in text)) err(`card.synonyms.${i}`, 'names an entry of the text table (the words themselves are not written here)'); });
+  }
+}
+
 function only(obj, keys, path, err) {
-  for (const k of Object.keys(obj)) if (!keys.includes(k)) err(`${path}.${k}`, `unknown key; expected ${keys.join(', ')}`);
+  for (const k of Object.keys(obj)) if (!keys.includes(k)) err(`${path}.${k}`, path.startsWith('forms.') && WHEN_KEY.test(k) ? `${WHEN_REASON} (unknown key "${k}")` : `unknown key; expected ${keys.join(', ')}`);
 }
 
 function numbered(table, key, err) {
@@ -245,6 +279,56 @@ function children(table, err) {
     if (!(typeof c.kind === 'string' && KIND.test(c.kind))) err(`${p}.kind`, 'a kind, "namespace:name"');
     if (!(isInt(c.most) && c.most > 0)) err(`${p}.most`, 'how many children at most, a whole number above zero');
   }
+}
+
+function speed(v, path, err) {
+  if (!(isInt(v.speed_mm_s) && v.speed_mm_s > 0)) err(`${path}.speed_mm_s`, 'its speed in whole millimetres per second, above zero');
+  if (!VEHICLE_GROUNDS.includes(v.ground)) err(`${path}.ground`, `the ground it may cross, one of ${VEHICLE_GROUNDS.join(', ')}`);
+}
+
+/** A vehicle: a thing a Soul sits in or on and steers. Whoever holds the drive seat steers; the engine owns the motion. */
+function vehicle(entry, err) {
+  const v = entry.vehicle, slots = isObj(entry.slots) ? entry.slots : {}, forms = isObj(entry.forms) ? entry.forms : {};
+  if (!isObj(v)) { err('vehicle', 'an object: {"drive", "steer", "speed_mm_s", "ground"}'); return; }
+  only(v, ['drive', 'steer', 'speed_mm_s', 'ground'], 'vehicle', err);
+  if (entry.owner !== 'thing') err('owner', 'a vehicle is a thing');
+  if (!Array.isArray(entry.geometry?.bounds_mm)) err('geometry.bounds_mm', 'a vehicle says its size: the bounds');
+  speed(v, 'vehicle', err);
+  const d = slots[v.drive];
+  if (!(typeof v.drive === 'string' && isObj(d) && d.admits === 'body' && d.posture === 'sit' && d.most === 1)) err('vehicle.drive', 'names a slot of this kind that admits one body, sitting: the drive seat');
+  const f = forms[v.steer];
+  if (!(typeof v.steer === 'string' && isObj(f))) err('vehicle.steer', 'names the form of this kind that steers it');
+  else {
+    if (f.who !== 'holder') err('vehicle.steer', 'the steering form is for the holder of the drive seat: who is "holder"');
+    if (!(Array.isArray(f.steps) && f.steps.some(s => s?.step === 'move'))) err('vehicle.steer', 'the steering form has a move step (its motion is the engine\'s)');
+  }
+}
+
+/** A ride: a set trip between stops, as a ride on a track (Engine v2 N12). Nobody steers; it may go across and back. */
+function ride(entry, err) {
+  const r = entry.ride, slots = isObj(entry.slots) ? entry.slots : {}, points = isObj(entry.points) ? entry.points : {}, forms = isObj(entry.forms) ? entry.forms : {};
+  if (!isObj(r)) { err('ride', 'an object: {"seats", "stops", "returns", "start", "speed_mm_s", "ground"}'); return; }
+  only(r, ['seats', 'stops', 'returns', 'start', 'speed_mm_s', 'ground'], 'ride', err);
+  if (entry.owner !== 'thing') err('owner', 'a ride is a thing');
+  if (!Array.isArray(entry.geometry?.bounds_mm)) err('geometry.bounds_mm', 'a ride says its size: the bounds');
+  speed(r, 'ride', err);
+  if (!Array.isArray(r.seats) || !r.seats.length) err('ride.seats', 'a list of slots that admit a body');
+  else r.seats.forEach((n, i) => { if (!(slots[n]?.admits === 'body')) err(`ride.seats.${i}`, 'names a slot of this kind that admits a body'); });
+  if (!Array.isArray(r.stops) || r.stops.length < 2) err('ride.stops', 'two or more stand points, in the order of the trip');
+  else r.stops.forEach((n, i) => { if (points[n]?.role !== 'stand') err(`ride.stops.${i}`, 'names a point of this kind whose role is stand'); });
+  if (typeof r.returns !== 'boolean') err('ride.returns', 'true if the trip goes back the way it came, false if it ends at the last stop');
+  const f = forms[r.start];
+  if (!(typeof r.start === 'string' && isObj(f) && f.starts === 'act')) err('ride.start', 'names the form of this kind that an actor starts the trip with');
+}
+
+/** A rider stepping off a vehicle or a ride at `spot` (one of SPOTS), `moving` or not. Getting on and off is only while it
+ *  stands still, and only where the rider could stand or swim. Refused with a code, `moving` or `no_footing`, and a reason naming the spot. */
+export function dismount(entry, {moving, spot}) {
+  if (!isObj(entry?.vehicle) && !isObj(entry?.ride)) return {ok: false, code: 'not_a_vehicle', reason: `${entry?.kind} is neither a vehicle nor a ride`};
+  if (!SPOTS.includes(spot)) return {ok: false, code: 'unknown_spot', reason: `"${spot}" is not one of ${SPOTS.join(', ')}`};
+  if (moving) return {ok: false, code: 'moving', reason: `${entry.kind} is moving; getting off is only while it stands still`};
+  if (!SPOTS_STAND.includes(spot) && !SPOTS_SWIM.includes(spot)) return {ok: false, code: 'no_footing', reason: `a rider could not stand or swim at ${spot}`};
+  return {ok: true};
 }
 
 /** A row of places: the slots that name one `row` are ordered by `place`; a row of two or more names its ends. */
@@ -328,12 +412,33 @@ function listField(f, path, err) {
   if (f.key !== undefined && !(typeof f.key === 'string' && f.key in of)) err(`${path}.key`, 'names a field of the record; items are added, removed and set by it');
 }
 
+/** A schedule field: a declared bound and a default list of entries (the hours a copy starts with). Set whole by its owner. */
+function scheduleField(f, path, err) {
+  only(f, ['n', 'type', 'default', 'audience', 'most'], path, err);
+  if (!(isInt(f.most) && f.most > 0 && f.most <= LIST_MOST)) err(`${path}.most`, `the most entries it ever holds, a whole number from 1 to ${LIST_MOST}`);
+  if (!Array.isArray(f.default)) { err(`${path}.default`, 'a list of entries (empty if none)'); return; }
+  if (isInt(f.most) && f.default.length > f.most) err(`${path}.default`, `${f.default.length} entries; the most is ${f.most}`);
+  f.default.forEach((e, i) => scheduleEntry(e, `${path}.default.${i}`, err));
+}
+
+function scheduleEntry(e, path, err) {
+  if (!isObj(e)) { err(path, 'an entry is an object'); return; }
+  if (!SCHEDULE_REPEATS.includes(e.repeat)) { err(`${path}.repeat`, `must be one of ${SCHEDULE_REPEATS.join(', ')}`); return; }
+  const weekly = e.repeat === 'weekly';
+  only(e, weekly ? ['repeat', 'days', 'from_us', 'to_us'] : ['repeat', 'from_us', 'to_us'], path, err);
+  const top = weekly ? DAY_US : Number.MAX_SAFE_INTEGER;
+  if (!(isInt(e.from_us) && e.from_us >= 0 && e.from_us < top)) err(`${path}.from_us`, weekly ? 'local time of day in whole microseconds, from 0 up to a day' : 'a world time in whole microseconds');
+  else if (!(isInt(e.to_us) && e.to_us > e.from_us && e.to_us <= top)) err(`${path}.to_us`, weekly ? 'local time of day in whole microseconds, after from_us and at most a day (an evening that runs past midnight is two entries)' : 'a world time in whole microseconds, after from_us');
+  if (weekly && !(Array.isArray(e.days) && e.days.length > 0 && e.days.every(d => WEEKDAYS.includes(d)) && new Set(e.days).size === e.days.length)) err(`${path}.days`, `one to seven different days of ${WEEKDAYS.join(', ')}`);
+}
+
 /** What a kind's state costs at its declared bounds: whole values counted with every list at its maximum. The check
  *  gate measures a kind here, never at the empty default (SA-F6a, #2846). */
 export function stateAtMax(entry) {
   let values = 0, listValues = 0;
   for (const f of Object.values(entry.state ?? {})) {
     if (f.type === 'list') { const n = f.most * Object.keys(f.of ?? {}).length; values += n; listValues += n; }
+    else if (f.type === 'schedule') { values += f.most * 3; listValues += f.most * 3; }
     else values += 1;
   }
   return {values, listValues, children: Object.values(entry.children ?? {}).reduce((a, c) => a + c.most, 0)};
@@ -345,12 +450,13 @@ function vec(v, path, err, positive = false) {
 
 function field(f, path, links, err, taken = false) {
   if (!isObj(f)) { err(path, 'a field is an object'); return; }
-  if (f.type !== 'list') only(f, ['n', 'type', 'default', 'audience', 'values', 'unit', 'min', 'max'], path, err);
+  if (f.type !== 'list' && f.type !== 'schedule') only(f, ['n', 'type', 'default', 'audience', 'values', 'unit', 'min', 'max'], path, err);
   if (taken) { if (f.audience !== undefined) err(`${path}.audience`, 'this field takes the container\'s audience (closed); it declares none of its own'); }
   else audience(f, path, links, err);
   if (ID_TYPES.has(f.type)) { err(`${path}.type`, `"${f.type}" would put an id inside a field; a relation is a link (links section)`); return; }
   if (!FIELD_TYPES.includes(f.type)) { err(`${path}.type`, `must be one of ${FIELD_TYPES.join(', ')}`); return; }
   if (f.type === 'list') { listField(f, path, err); return; }
+  if (f.type === 'schedule') { scheduleField(f, path, err); return; }
   if (!('default' in f)) err(`${path}.default`, 'every field has a default');
   const d = f.default;
   if (f.type === 'bool' && typeof d !== 'boolean') err(`${path}.default`, 'true or false');
@@ -396,6 +502,7 @@ function form(f, path, ctx, err) {
   const linkName = (v, p) => { if (!(typeof v === 'string' && v in ctx.links)) err(p, 'names a link type of this kind'); };
   const value = (fname, v, p) => {
     const fd = ctx.state[fname];
+    if (fd?.type === 'schedule') { err(p, 'a schedule is set whole by its owner and read by clients; a form does not write one'); return; }
     if (isArg(v)) {
       arg(v, p);
       const at = takes[v.arg]?.type;
@@ -480,7 +587,7 @@ function list(arr, path, tag, kinds, err, each) {
   arr.forEach((x, i) => {
     const p = `${path}.${i}`;
     if (!isObj(x)) err(p, 'an object');
-    else if (!kinds.includes(x[tag])) err(`${p}.${tag}`, `"${x[tag]}" is not in the closed list (${kinds.join(', ')}); the task that needs a new one adds it`);
+    else if (!kinds.includes(x[tag])) err(`${p}.${tag}`, path.startsWith('forms.') && WHEN_NAME.test(x[tag]) ? `${WHEN_REASON} ("${x[tag]}" is not a ${tag})` : `"${x[tag]}" is not in the closed list (${kinds.join(', ')}); the task that needs a new one adds it`);
     else each(x, p);
   });
 }

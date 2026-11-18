@@ -29,7 +29,9 @@
   },
   "looks": { "model": "look:bench" },
   "text": {
-    "card": "A wooden bench with room for two to sit side by side."
+    "card": "A wooden bench with room for two to sit side by side.",
+    "seating": "seating",
+    "rest": "rest"
   },
-  "card": { "text": "card" }
+  "card": { "text": "card", "category": "seating", "synonyms": ["rest"] }
 }

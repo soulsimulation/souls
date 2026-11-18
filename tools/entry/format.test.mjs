@@ -94,6 +94,9 @@ const ENGINE_V2_WORDS = {
   lie: 'E3 (#2777): where a body can sit, lie, stand or lean', stand: 'E3 (#2777); F1 (#2766): the thing\'s stand point',
   point: 'K3 (#2667): points, named places', schedule: 'E7 (#2756) and SA-F16: schedules are data',
   form: 'K3 (#2667) and F1 (#2766): a form, what can be done with a kind', body: 'T9 on #2635: bodies and behaviour',
+  category: 'SA-C1 (#2865): a card names the category a search ranks a kind on',
+  synonyms: 'SA-C1 (#2865): a card lists the other words a search finds a kind by',
+  stairs: 'E12 (#2783) and SA-F14 (#2884): a spot a rider may not step onto is stairs, a door or a ladder',
 };
 
 test('A4: no part of the format names a verb, file or field of today\'s engine', () => {

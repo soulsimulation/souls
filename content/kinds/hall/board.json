@@ -1,0 +1,77 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hall_board",
+  "owner": "thing",
+  "state": {
+    "page": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "presenter": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "beside_the_board": { "role": "stand", "at_mm": [-1300, 0, 500], "yaw_mdeg": 90000 }
+  },
+  "geometry": { "bounds_mm": [1900, 2100, 700] },
+  "forms": {
+    "present": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "unlinked", "link": "presenter" }],
+      "steps": [{ "step": "walk_to", "point": "beside_the_board" }],
+      "effects": [{ "change": "link", "link": "presenter", "from": "actor", "event": "began_presenting" }]
+    },
+    "show_page": {
+      "who": { "link": "presenter" },
+      "starts": "act",
+      "takes": { "page": { "type": "text" } },
+      "needs": [],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "page", "to": { "arg": "page" }, "event": "page_shown" }]
+    },
+    "clear": {
+      "who": { "link": "presenter" },
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "page", "not": null }],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "page", "to": null, "event": "board_cleared" }]
+    },
+    "stop_presenting": {
+      "who": { "link": "presenter" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": [
+        { "change": "unlink", "link": "presenter", "from": "actor", "event": "stopped_presenting" },
+        { "change": "set", "field": "page", "to": null, "event": "board_cleared" }
+      ]
+    }
+  },
+  "looks": {
+    "shape": {
+      "round": 6,
+      "shapes": [
+        { "kind": "box", "at": [-650, 700, -150], "size": [60, 1400, 60], "round": 10, "pitch": 6000, "tint": "wood" },
+        { "kind": "box", "at": [650, 700, -150], "size": [60, 1400, 60], "round": 10, "pitch": 6000, "tint": "wood" },
+        { "kind": "box", "at": [0, 650, -300], "size": [50, 1300, 50], "round": 10, "pitch": -14000, "tint": "wood" },
+        { "kind": "box", "at": [0, 780, -110], "size": [1500, 50, 120], "round": 8, "tint": "wood" },
+        { "kind": "box", "at": [0, 1400, -170], "size": [1700, 1200, 40], "round": 10, "pitch": 6000, "tint": "frame" },
+        { "kind": "box", "at": [0, 1400, -145], "size": [1560, 1060, 20], "round": 4, "pitch": 6000, "tint": "page" },
+        { "kind": "box", "at": [0, 1700, -130], "size": [1100, 60, 10], "round": 2, "pitch": 6000, "tint": "ink" },
+        { "kind": "box", "at": [-160, 1500, -130], "size": [780, 40, 10], "round": 2, "pitch": 6000, "tint": "ink" },
+        { "kind": "box", "at": [-160, 1400, -130], "size": [780, 40, 10], "round": 2, "pitch": 6000, "tint": "ink" },
+        { "kind": "box", "at": [-160, 1300, -130], "size": [780, 40, 10], "round": 2, "pitch": 6000, "tint": "ink" },
+        { "kind": "box", "at": [450, 1360, -130], "size": [420, 340, 10], "round": 2, "pitch": 6000, "tint": "picture" }
+      ],
+      "palette": { "wood": "#8a5f3a", "frame": "#3d3a36", "page": "#f2efe6", "ink": "#3a4a66", "picture": "#c9874e" },
+      "tags": ["hall", "board", "presentation"]
+    }
+  },
+  "text": {
+    "card": "A board beside the lectern: the speaker shows their pages on it, one at a time.",
+    "howto_present": "Stand by the board, show your pages one after another, then stop presenting: that clears it."
+  },
+  "card": { "text": "card" },
+  "howtos": {
+    "present": { "text": "howto_present", "steps": [{ "form": "present" }, { "form": "show_page" }, { "form": "stop_presenting" }] }
+  }
+}

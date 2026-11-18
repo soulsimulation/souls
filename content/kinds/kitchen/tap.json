@@ -11,7 +11,10 @@
   "forms": {},
   "looks": { "model": "look:tap" },
   "text": {
-    "card": "A tap: it gives cold water to anything held under its outlet."
+    "card": "A tap: it gives cold water to anything held under its outlet.",
+    "water": "water",
+    "fountain": "fountain",
+    "refill": "refill"
   },
-  "card": { "text": "card" }
+  "card": { "text": "card", "category": "water", "synonyms": ["fountain", "refill"] }
 }

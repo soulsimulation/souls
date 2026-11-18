@@ -83,3 +83,32 @@ export function roomBrief(ix, { me, live, plan, snap, changed, bytes = ROOM_BRIE
   while (size(out) > bytes && cards > 0) out = build(--cards, purposes);
   return out;
 }
+
+/** SA-C9: the nearest building (or house) a place is in, or the place itself: what "this house" means from this copy. */
+const houseOf = (ix, id) => { for (let p = ix.place(id ?? ""), n = 0; p && n < 12; p = p.parent ? ix.places.get(p.parent) : null, n++) if (p.kind === "building" || p.kind === "house") return p.id; return id; };
+
+/** The things of a kind in this room or house, from the copy: nearest first, at most `max`, with how many were left out. */
+export function eachOf(ix, me, { each, in: where = "room", max }) {
+  if (!me?.place) return { error: "this copy does not say where I am: no room to list from" };
+  const scope = ix.within(where === "house" ? houseOf(ix, me.place) : me.place), name = (k) => String(k).split(":").pop();
+  const all = ix.cat.things.filter((t) => scope.has(t.place) && (t.kind === each || name(t.kind) === each)).map((t) => ({ t, d: dist(me.at, t.at) ?? 1e9 }))
+    .sort((a, b) => a.d - b.d || (a.t.id < b.t.id ? -1 : 1)).map((x) => x.t);
+  return { things: all.slice(0, max), more: Math.max(0, all.length - max) };
+}
+
+/** Plan steps with each repeated step replaced by one step per thing it finds (`each` on a step says which). Nothing is sent. */
+export function expandEach(ix, me, steps, limit = 24) {
+  const out = [], note = [];
+  for (const s of steps) {
+    if (!s.each) { out.push(s); continue; }
+    const r = eachOf(ix, me, s);
+    if (r.error) return r;
+    if (!r.things.length) return { error: `this copy lists no ${s.each} in this ${s.in}: nothing was sent` };
+    const entry = ix.cat.entries?.[r.things[0].kind];
+    if (entry && !entry.forms?.[s.form]) return { error: `${s.each} has no form "${s.form}": its forms are ${Object.keys(entry.forms ?? {}).join(", ") || "none"}` };
+    r.things.forEach((t, i) => out.push({ id: `object:${t.id}:${s.form}`, ...(s.params ? { params: s.params } : {}), each: { kind: s.each, n: i + 1, of: r.things.length } }));
+    note.push({ kind: s.each, in: s.in, steps: r.things.length, ...(r.more ? { left_out: r.more, why: `max ${s.max}` } : {}) });
+  }
+  if (out.length > limit) return { error: `that makes ${out.length} steps; a plan has at most ${limit}` };
+  return { steps: out, each: note };
+}
