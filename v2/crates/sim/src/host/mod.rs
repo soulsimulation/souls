@@ -372,7 +372,16 @@ pub fn lend<T>(
 /// inputs go on (B1 #2680). An input whose driver does not hold the body's locomotion is refused by the controller and
 /// changes nothing; the refusals are returned with their bodies.
 pub fn hand_on(staged: &Staged, controller: &mut Controller) -> Vec<(Id, Refusal)> {
-    controller.set_velocities(&staged.controls)
+    hand_on_threads(staged, controller, 1)
+}
+
+/// [`hand_on`] on `threads` threads (N17b): the same refusals, in the same order.
+pub fn hand_on_threads(
+    staged: &Staged,
+    controller: &mut Controller,
+    threads: usize,
+) -> Vec<(Id, Refusal)> {
+    controller.set_velocities_on(&staged.controls, threads)
 }
 
 /// Hands a tick's staged crossings on: for each, the world's [`Links`] gives the track (or opens a shut door, and the
@@ -716,29 +725,28 @@ impl Runner {
     /// tables' write) does not stop the tick either: the tick goes on to its end and returns it.
     pub fn tick(&mut self, town: &mut Town) -> Result<(), Refusal> {
         let at = self.now + self.tick;
-        let marks: Vec<Mark> = self
-            .controller
-            .bodies()
-            .map(|b| Mark {
-                who: b.id,
-                node: node_of(b),
-                at: b.pose.position,
-                waiting: waiting(self.fields.get(&b.id)),
-                crossing: self.controller.carrying(b.id),
-                staying: self.staying.contains(&b.id),
-                // An ask stands while its order lasts and the body is not held (walked out by the world).
-                spot: self
-                    .asks
-                    .get(&b.id)
-                    .filter(|_| {
-                        !self
-                            .fields
-                            .get(&b.id)
-                            .is_some_and(|f| f.contains_key(&F_HELD))
-                    })
-                    .copied(),
-            })
-            .collect();
+        // Read on the runner's threads (N17b): each mark reads one body alone.
+        let bodies: Vec<&Moved> = self.controller.bodies().collect();
+        let marks: Vec<Mark> = crate::par::map(&bodies, self.threads, CHUNK * 4, |b| Mark {
+            who: b.id,
+            node: node_of(b),
+            at: b.pose.position,
+            waiting: waiting(self.fields.get(&b.id)),
+            crossing: self.controller.carrying(b.id),
+            staying: self.staying.contains(&b.id),
+            // An ask stands while its order lasts and the body is not held (walked out by the world).
+            spot: self
+                .asks
+                .get(&b.id)
+                .filter(|_| {
+                    !self
+                        .fields
+                        .get(&b.id)
+                        .is_some_and(|f| f.contains_key(&F_HELD))
+                })
+                .copied(),
+        });
+        drop(bodies);
         // The world's own refusals: the tick goes on, and the first is returned at its end.
         let world = town.turns(&marks, at).err();
         let world = world.or(town.spots(&marks, at).err());
@@ -787,7 +795,7 @@ impl Runner {
             &mut self.runs,
             self.chunk,
         );
-        refused.extend(hand_on(&staged, &mut self.controller));
+        refused.extend(hand_on_threads(&staged, &mut self.controller, self.threads));
         refused.extend(carry(&staged, &mut self.controller, town, at));
         // The tick's end: each skill's own entries set its body's fields.
         for e in &staged.emits {
@@ -809,7 +817,9 @@ impl Runner {
             }
             self.ended.insert(*who, (self.now, p.clone()));
         }
-        let stepped = self.controller.step(&town.surfaces, self.tick, at);
+        let stepped = self
+            .controller
+            .step_on(&town.surfaces, self.tick, at, self.threads);
         refused.extend(stepped.refused);
         // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
         for (who, r) in &refused {

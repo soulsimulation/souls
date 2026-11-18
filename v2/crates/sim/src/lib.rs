@@ -17,6 +17,7 @@ pub mod links;
 pub mod log;
 pub mod mover;
 pub mod moves;
+pub mod par;
 pub mod routes;
 pub mod slots;
 pub mod speech;

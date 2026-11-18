@@ -804,6 +804,16 @@ impl Controller {
         &mut self,
         controls: &[(Id, Driver, ControllerInput)],
     ) -> Vec<(Id, Refusal)> {
+        self.set_velocities_on(controls, 1)
+    }
+
+    /// [`Controller::set_velocities`] on `threads` threads (N17b, #3255): controls in body id order are cut into runs
+    /// that never split one body's, each run matched along its own bodies, and the refusals joined in order.
+    pub fn set_velocities_on(
+        &mut self,
+        controls: &[(Id, Driver, ControllerInput)],
+        threads: usize,
+    ) -> Vec<(Id, Refusal)> {
         let mut refused = Vec::new();
         if !controls.is_sorted_by_key(|c| c.0) {
             for &(body, driver, input) in controls {
@@ -813,20 +823,52 @@ impl Controller {
             }
             return refused;
         }
-        let mut slots = self.bodies.iter_mut().peekable();
-        for &(body, driver, input) in controls {
-            while slots.next_if(|(id, _)| **id < body).is_some() {}
-            let set = match slots.peek_mut() {
-                Some((id, s)) if **id == body => s.steers(driver).map(|()| {
-                    s.input.velocity = input.velocity;
-                    s.input.mode = input.mode;
-                    s.touched = true;
-                }),
-                _ => refuse("body-unknown", replica::world_model::show(body)),
-            };
-            if let Err(r) = set {
-                refused.push((body, r));
+        let mut slots: Vec<(Id, &mut Slot)> =
+            self.bodies.iter_mut().map(|(&id, s)| (id, s)).collect();
+        // Runs of controls, each starting at a new body, and the bodies from its first on.
+        let mut cuts = vec![0];
+        let mut i = BODIES;
+        while i < controls.len() {
+            while i < controls.len() && controls[i].0 == controls[i - 1].0 {
+                i += 1;
             }
+            if i < controls.len() {
+                cuts.push(i);
+            }
+            i += BODIES;
+        }
+        let mut runs = Vec::with_capacity(cuts.len());
+        let mut rest: &mut [(Id, &mut Slot)] = &mut slots;
+        for (k, &c) in cuts.iter().enumerate() {
+            let end = cuts.get(k + 1).copied().unwrap_or(controls.len());
+            // This run's bodies: those before the next run's first.
+            let n = cuts.get(k + 1).map_or(rest.len(), |&n| {
+                rest.partition_point(|(id, _)| *id < controls[n].0)
+            });
+            let (mine, more) = std::mem::take(&mut rest).split_at_mut(n);
+            rest = more;
+            runs.push((&controls[c..end], mine));
+        }
+        for r in crate::par::map_mut(&mut runs, threads, 1, |(controls, slots)| {
+            let mut refused = Vec::new();
+            let mut slots = slots.iter_mut().peekable();
+            for &(body, driver, input) in controls.iter() {
+                while slots.next_if(|(id, _)| *id < body).is_some() {}
+                let set = match slots.peek_mut() {
+                    Some((id, s)) if *id == body => s.steers(driver).map(|()| {
+                        s.input.velocity = input.velocity;
+                        s.input.mode = input.mode;
+                        s.touched = true;
+                    }),
+                    _ => refuse("body-unknown", replica::world_model::show(body)),
+                };
+                if let Err(r) = set {
+                    refused.push((body, r));
+                }
+            }
+            refused
+        }) {
+            refused.extend(r);
         }
         refused
     }
@@ -855,6 +897,19 @@ impl Controller {
     /// stepped by the mover of the surface it stands on. A body in a slot is visited only when its input changed, to
     /// log it. A body refused here is listed and stays where it was; the others go on.
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {
+        self.step_on(surfaces, dt, at, 1)
+    }
+
+    /// [`Controller::step`] with the bodies on surfaces stepped on `threads` threads (N17b, #3255): each body's step
+    /// reads only itself and the surfaces, and what each gives (its log record, its sample, its refusal, its new place
+    /// in "who is near") is joined in body order, so the tick is the same at any thread count.
+    pub fn step_on(
+        &mut self,
+        surfaces: &BTreeMap<Id, Surface>,
+        dt: Micros,
+        at: Micros,
+        threads: usize,
+    ) -> Stepped {
         let mut out = Stepped::default();
         for id in std::mem::take(&mut self.woken) {
             if let Some(s) = self.rested.get_mut(&id) {
@@ -866,68 +921,116 @@ impl Controller {
                 s.log(id, at, &mut self.log);
             }
         }
-        for (&id, s) in self.bodies.iter_mut() {
-            s.speak(id, at, &mut out.said);
-            s.log(id, at, &mut self.log);
-            s.moved.pose.orientation = s.input.facing;
-            if let Some(t) = s.track.as_mut() {
-                match t.advance(&mut s.moved, surfaces, dt) {
-                    Ok(true) => {
-                        s.track = None;
-                        s.input.velocity = Vec3::ZERO;
-                        // A changed input: logged at the next step (B2's `touched`).
-                        s.touched = true;
-                    }
-                    Ok(false) => {}
-                    Err(r) => {
-                        s.track = None;
-                        out.refused.push((id, r));
-                    }
-                }
-                if s.track.as_ref().is_none_or(|t| t.link.is_none()) {
-                    self.near.put_moved(&s.moved);
-                }
-                continue;
+        let mut slots: Vec<(Id, &mut Slot)> =
+            self.bodies.iter_mut().map(|(&id, s)| (id, s)).collect();
+        let step_run = |run: &mut [(Id, &mut Slot)]| {
+            let mut o = Gave::default();
+            for (id, s) in run.iter_mut() {
+                let put = s.step_one(*id, surfaces, dt, at, &mut o);
+                o.put.push(put);
             }
-            // Standing still with no velocity asked: the mover would leave it as it is.
-            if s.input.velocity == Vec3::ZERO && s.moved.linear == Vec3::ZERO {
-                continue;
+            o
+        };
+        let mut runs: Vec<&mut [(Id, &mut Slot)]> = slots.chunks_mut(BODIES).collect();
+        let gave = crate::par::map_mut(&mut runs, threads, 1, |run| step_run(run));
+        drop(runs);
+        drop(slots);
+        let mut put = Vec::with_capacity(self.bodies.len());
+        for g in gave {
+            out.said.extend(g.said);
+            self.log.extend(g.log);
+            out.samples.extend(g.samples);
+            out.refused.extend(g.refused);
+            put.extend(g.put);
+        }
+        for (s, put) in self.bodies.values().zip(put) {
+            if put {
+                self.near.put_moved(&s.moved);
             }
-            let Support::Surface { surface, .. } = s.moved.pose.support else {
-                out.refused.push((
-                    id,
-                    Refusal {
-                        name: "support-not-surface",
-                        detail: replica::world_model::show(id),
-                    },
-                ));
-                continue;
-            };
-            let Some(on) = surfaces.get(&surface) else {
-                out.refused.push((
-                    id,
-                    Refusal {
-                        name: "no-surface",
-                        detail: replica::world_model::show(surface),
-                    },
-                ));
-                continue;
-            };
-            let input = ControllerInput {
-                velocity: s.input.velocity,
-                mode: s.input.mode,
-            };
-            match on.step(&mut s.moved, input, dt, at) {
-                Ok(Some(h)) => out.samples.push(h),
-                Ok(None) => {}
-                Err(r) => out.refused.push((id, r)),
-            }
-            self.near.put_moved(&s.moved);
         }
         out
     }
 }
 
+/// The most bodies one thread steps at a time in [`Controller::step_on`].
+const BODIES: usize = 256;
+
+/// What stepping a run of bodies gave, in body order, and whether each takes its new place in "who is near".
+#[derive(Default)]
+struct Gave {
+    said: Vec<(Id, Line, Micros)>,
+    log: Vec<Logged>,
+    samples: Vec<HandOff>,
+    refused: Vec<(Id, Refusal)>,
+    put: Vec<bool>,
+}
+
+impl Slot {
+    /// One body's step on its surface, as [`Controller::step`] gives it; whether it takes its new place in "who is
+    /// near".
+    fn step_one(
+        &mut self,
+        id: Id,
+        surfaces: &BTreeMap<Id, Surface>,
+        dt: Micros,
+        at: Micros,
+        o: &mut Gave,
+    ) -> bool {
+        self.speak(id, at, &mut o.said);
+        self.log(id, at, &mut o.log);
+        self.moved.pose.orientation = self.input.facing;
+        if let Some(t) = self.track.as_mut() {
+            match t.advance(&mut self.moved, surfaces, dt) {
+                Ok(true) => {
+                    self.track = None;
+                    self.input.velocity = Vec3::ZERO;
+                    // A changed input: logged at the next step (B2's `touched`).
+                    self.touched = true;
+                }
+                Ok(false) => {}
+                Err(r) => {
+                    self.track = None;
+                    o.refused.push((id, r));
+                }
+            }
+            return self.track.as_ref().is_none_or(|t| t.link.is_none());
+        }
+        // Standing still with no velocity asked: the mover would leave it as it is.
+        if self.input.velocity == Vec3::ZERO && self.moved.linear == Vec3::ZERO {
+            return false;
+        }
+        let Support::Surface { surface, .. } = self.moved.pose.support else {
+            o.refused.push((
+                id,
+                Refusal {
+                    name: "support-not-surface",
+                    detail: replica::world_model::show(id),
+                },
+            ));
+            return false;
+        };
+        let Some(on) = surfaces.get(&surface) else {
+            o.refused.push((
+                id,
+                Refusal {
+                    name: "no-surface",
+                    detail: replica::world_model::show(surface),
+                },
+            ));
+            return false;
+        };
+        let input = ControllerInput {
+            velocity: self.input.velocity,
+            mode: self.input.mode,
+        };
+        match on.step(&mut self.moved, input, dt, at) {
+            Ok(Some(h)) => o.samples.push(h),
+            Ok(None) => {}
+            Err(r) => o.refused.push((id, r)),
+        }
+        true
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

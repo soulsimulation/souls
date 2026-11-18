@@ -347,22 +347,28 @@ impl Ladder {
             .collect();
         let mut asked: BTreeSet<(Id, Id)> = BTreeSet::new();
         let ids: Vec<Id> = self.walkers.keys().copied().collect();
-        for who in ids {
-            let Some(body) = runner.controller.body(who).copied() else {
+        // Each walker's own reads, on the runner's threads (N17b): nothing below changes another walker's.
+        let reads = crate::par::map(&ids, runner.threads, 256, |&who| {
+            runner.controller.body(who).copied().map(|b| {
+                (
+                    b,
+                    runner.controller.carrying(who).is_some(),
+                    running.contains(&who),
+                    waiting(runner.fields.get(&who)),
+                )
+            })
+        });
+        for (who, read) in ids.into_iter().zip(reads) {
+            let Some((body, carried, runs, waits)) = read else {
                 continue;
             };
-            // A leg ends when the controller has carried the body across its link.
-            let carried = runner.controller.carrying(who).is_some();
+            // A leg ends when the controller has carried the body across its link (`carried`).
             let w = self.walkers.get_mut(&who).expect("a walker");
             if w.carried && !carried {
                 w.leg += 1;
             }
             w.carried = carried;
-            if !running.contains(&who)
-                || self.outs.contains(&who)
-                || runner.staying.contains(&who)
-                || carried
-            {
+            if !runs || self.outs.contains(&who) || runner.staying.contains(&who) || carried {
                 self.clocks.remove(&who);
                 continue;
             }
@@ -372,7 +378,6 @@ impl Ladder {
             };
             let (order, speed, wleg) = (w.order, w.speed, w.leg);
             let gap = len(body.pose.position, leg.to);
-            let waits = waiting(runner.fields.get(&who));
             let fresh = Clock {
                 leg: wleg,
                 best: gap,
