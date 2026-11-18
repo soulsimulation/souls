@@ -30,7 +30,7 @@ use replica::time::Micros;
 use super::{Here, Run, Staged, WorldHost, body_kind, named};
 use crate::controller::{Controller, Driver};
 use crate::routes::Scratch;
-use crate::walk::town::{Line, Shared, Spent, Split};
+use crate::walk::town::{Line, Lines, Shared, Spent, Split};
 
 /// The most consecutive side-by-side runs one thread takes at a time.
 pub const CHUNK: usize = 64;
@@ -51,7 +51,7 @@ pub(super) struct Reads<'a> {
 /// A chunk's runs: index in the sorted runs, body, driver and skill.
 type Chunk<'r, S> = Vec<(usize, Id, Driver, &'r mut S)>;
 /// A chunk to step: its place in the chunk order, its runs, and its walkers' lines.
-type Job<'r, S> = (usize, Chunk<'r, S>, BTreeMap<Id, Line>);
+type Job<'r, S> = (usize, Chunk<'r, S>, &'r mut [(Id, Line)]);
 
 /// What stepping one chunk gave.
 struct Out {
@@ -59,7 +59,8 @@ struct Out {
     refused: Vec<(Id, Refusal)>,
     /// Indices of the runs that ended.
     ended: Vec<usize>,
-    lines: BTreeMap<Id, Line>,
+    /// Lines found for walkers that had none, in walker order.
+    lines: Vec<(Id, Line)>,
     spent: Spent,
 }
 
@@ -95,17 +96,20 @@ pub(super) fn step(
             starts.push((i, b));
         }
     }
-    // Each chunk takes the lines of the walkers from its first body up to the next chunk's.
-    let mut rest = std::mem::take(town_lines);
-    let mut parts: Vec<BTreeMap<Id, Line>> = Vec::with_capacity(starts.len() + 1);
-    for &(f, _) in starts.iter().skip(1).rev() {
-        parts.push(rest.split_off(&runs[f].body));
-    }
-    parts.push(rest);
-    parts.reverse();
     if starts.is_empty() {
-        *town_lines = parts.into_iter().flatten().collect();
         return (Staged::default(), Vec::new());
+    }
+    // Each chunk takes the lines of the walkers from its first body up to the next chunk's.
+    let firsts: Vec<Id> = starts.iter().map(|&(f, _)| runs[f].body).collect();
+    let mut rest: &mut [(Id, Line)] = town_lines;
+    let mut parts = Vec::with_capacity(starts.len());
+    for k in 0..starts.len() {
+        let n = firsts
+            .get(k + 1)
+            .map_or(rest.len(), |b| rest.partition_point(|e| e.0 < *b));
+        let (mine, more) = std::mem::take(&mut rest).split_at_mut(n);
+        rest = more;
+        parts.push(mine);
     }
     let mut parts = parts.into_iter();
     let mut besides: Vec<Job<'_, dyn Skill + Send>> = Vec::new();
@@ -195,7 +199,7 @@ pub(super) fn step(
     let mut refused = Vec::new();
     let mut gone = BTreeSet::new();
     let mut spent = town_spent.get();
-    let mut lines = Vec::with_capacity(outs.len());
+    let mut new: Vec<(Id, Line)> = Vec::new();
     for out in outs.into_iter().flatten() {
         let s = out.staged;
         for c in s.controls {
@@ -214,11 +218,24 @@ pub(super) fn step(
         refused.extend(out.refused);
         gone.extend(out.ended);
         spent.add(&out.spent);
-        lines.push(out.lines);
+        new.extend(out.lines);
     }
     staged.draws = draws;
     town_spent.set(spent);
-    *town_lines = lines.into_iter().flatten().collect();
+    if !new.is_empty() {
+        // The new lines join the rest in walker order: one pass.
+        new.sort_by_key(|e| e.0);
+        let old = std::mem::take(town_lines);
+        let mut joined = Vec::with_capacity(old.len() + new.len());
+        let (mut a, mut b) = (old.into_iter().peekable(), new.into_iter().peekable());
+        while let (Some(x), Some(y)) = (a.peek(), b.peek()) {
+            let next = if x.0 < y.0 { a.next() } else { b.next() };
+            joined.extend(next);
+        }
+        joined.extend(a);
+        joined.extend(b);
+        *town_lines = joined;
+    }
     let mut i = 0;
     runs.retain(|_| {
         i += 1;
@@ -238,8 +255,9 @@ fn run<S: Skill + ?Sized>(
     mut minter: Option<&mut Minter>,
     draws: u64,
     runs: &mut Chunk<'_, S>,
-    mut lines: BTreeMap<Id, Line>,
+    kept: &mut [(Id, Line)],
 ) -> Out {
+    let mut lines = Vec::new();
     let spent = Cell::new(Spent::default());
     let mut staged = Staged {
         draws,
@@ -249,7 +267,7 @@ fn run<S: Skill + ?Sized>(
     let mut ended = Vec::new();
     {
         let here = Here {
-            town: shared.view(scratch, &mut lines, &spent),
+            town: shared.view(scratch, Lines::Part(kept, &mut lines), &spent),
             controller: reads.controller,
             fields: reads.fields,
             settled: reads.settled,

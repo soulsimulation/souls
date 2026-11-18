@@ -133,7 +133,7 @@ pub struct Town {
     /// What the next corners cost so far.
     pub spent: Cell<Spent>,
     /// Each walker's line of corners (#3167), kept from the search that found it.
-    lines: BTreeMap<Id, Line>,
+    lines: Vec<(Id, Line)>,
     /// One route search scratch per thread asking (N17b, #3255): the first is [`Town::view`]'s.
     scratches: Vec<Scratch>,
     crossings: BTreeMap<Id, Crossing>,
@@ -241,7 +241,7 @@ impl Town {
             spots: Spots::new(),
             meter: None,
             spent: Cell::new(Spent::default()),
-            lines: BTreeMap::new(),
+            lines: Vec::new(),
             scratches: vec![Scratch::default()],
             crossings: BTreeMap::new(),
         })
@@ -267,9 +267,11 @@ impl Town {
     /// (what it finds is cached), the rest shared.
     pub fn view(&mut self) -> View<'_> {
         let split = self.split(1);
-        split
-            .shared
-            .view(&mut split.scratches[0], split.lines, split.spent)
+        split.shared.view(
+            &mut split.scratches[0],
+            Lines::All(split.lines),
+            split.spent,
+        )
     }
 
     /// The town split for `workers` threads asking its questions side by side (N17b, #3255): the parts every thread
@@ -306,7 +308,7 @@ pub struct Split<'a> {
     pub shared: Shared<'a>,
     pub scratches: &'a mut [Scratch],
     /// Each walker's line of corners, by walker: a thread's view needs those of the walkers it steps.
-    pub lines: &'a mut BTreeMap<Id, Line>,
+    pub lines: &'a mut Vec<(Id, Line)>,
     pub spent: &'a Cell<Spent>,
 }
 
@@ -329,7 +331,7 @@ impl<'a> Shared<'a> {
     pub fn view<'b>(
         &self,
         scratch: &'b mut Scratch,
-        lines: &'b mut BTreeMap<Id, Line>,
+        lines: Lines<'b>,
         spent: &'b Cell<Spent>,
     ) -> View<'b>
     where
@@ -351,6 +353,44 @@ impl<'a> Shared<'a> {
     }
 }
 
+/// Walkers' lines of corners as one view holds them, in walker order (N17b): all of them, or a thread's run of them
+/// and the lines it found for walkers that had none (joined to the rest after the tick's skills).
+pub enum Lines<'a> {
+    All(&'a mut Vec<(Id, Line)>),
+    Part(&'a mut [(Id, Line)], &'a mut Vec<(Id, Line)>),
+}
+
+impl Lines<'_> {
+    fn get_mut(&mut self, id: Id) -> Option<&mut Line> {
+        match self {
+            Lines::All(v) => match v.binary_search_by_key(&id, |e| e.0) {
+                Ok(i) => Some(&mut v[i].1),
+                Err(_) => None,
+            },
+            Lines::Part(kept, new) => match kept.binary_search_by_key(&id, |e| e.0) {
+                Ok(i) => Some(&mut kept[i].1),
+                Err(_) => new.iter_mut().find(|e| e.0 == id).map(|e| &mut e.1),
+            },
+        }
+    }
+
+    fn insert(&mut self, id: Id, l: Line) {
+        match self {
+            Lines::All(v) => match v.binary_search_by_key(&id, |e| e.0) {
+                Ok(i) => v[i].1 = l,
+                Err(i) => v.insert(i, (id, l)),
+            },
+            Lines::Part(kept, new) => match kept.binary_search_by_key(&id, |e| e.0) {
+                Ok(i) => kept[i].1 = l,
+                Err(_) => match new.iter_mut().find(|e| e.0 == id) {
+                    Some(e) => e.1 = l,
+                    None => new.push((id, l)),
+                },
+            },
+        }
+    }
+}
+
 /// The town as the walk skill's questions read it ([`Town::view`], [`Shared::view`]).
 pub struct View<'a> {
     pub tree: &'a Tree,
@@ -362,7 +402,7 @@ pub struct View<'a> {
     turns: Option<&'a Turns>,
     meter: Option<fn() -> u64>,
     spent: &'a Cell<Spent>,
-    lines: RefCell<&'a mut BTreeMap<Id, Line>>,
+    lines: RefCell<Lines<'a>>,
     ground: Id,
 }
 
@@ -727,7 +767,7 @@ impl View<'_> {
         let node = node_of(body);
         let p = [body.pose.position.x, body.pose.position.z];
         let mut lines = self.lines.borrow_mut();
-        let why = match lines.get_mut(&body.id) {
+        let why = match lines.get_mut(body.id) {
             Some(l) if l.node == node && l.to == to => match l.follow(p) {
                 Some(why) => why,
                 None => {
