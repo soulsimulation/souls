@@ -32,6 +32,7 @@ mkdirSync(out, { recursive: true });
 const filter = (flag('filter', '') ?? '').toLowerCase();
 const cols = Number(flag('cols', 8));
 if (!Number.isInteger(cols) || cols < 1 || cols > 16) throw new Error('--cols must be 1–16');
+const cw = Number(flag('cw', 220)), ch = Number(flag('ch', 180)); // cell size in px (SA-P5: body sheets use larger cells)
 let base = (argv.find((a) => /^https?:/.test(a)) ?? '').replace(/\/$/, '').replace(/\?.*$/, '');
 let served = null;
 if (flag('serve')) {
@@ -121,7 +122,7 @@ let release = await chromeLease('L4-gallery');
 let browser;
 try {
 browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--allow-file-access-from-files', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--no-first-run'] });
-const page = await browser.newPage({ viewport: { width: cols * 220, height: 800 } }); page.setDefaultTimeout(600000);
+const page = await browser.newPage({ viewport: { width: cols * cw, height: 800 } }); page.setDefaultTimeout(600000);
 await page.route(/^https?:/, (route) => { const u = new URL(route.request().url()); return u.hostname === '127.0.0.1' && u.port && Number(u.port) > 0 && !((Number(u.port) >= 4930) && (Number(u.port) <= 4970)) ? route.continue() : route.abort(); });
 const errors = []; page.on('pageerror', (e) => errors.push(String(e).slice(0, 300))); page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 300)); });
 await page.goto(pathToFileURL(resolve(out, 'studio.html')).href);
@@ -145,13 +146,13 @@ for (let offset = 0; offset < defs.length;) {
     if (frames && d.tags.includes('creature')) for (let k = 0; k < frames; k++) metadata.push({ name: d.name, phase: `stride-${k}` });
     else if (has('walk') && d.tags.includes('creature')) metadata.push({ name: d.name, phase: 'stride' });
   }
-  const batch = await page.evaluate(async ([d, c, w, f, meta, st]) => {
-    const result = await window.studio.render(d, { cols: c, walk: w, frames: f, states: st });
-    const root = document.getElementById('sheet'), source = root.querySelector('canvas'), crop = document.createElement('canvas'); crop.width = 220; crop.height = 180;
+  const batch = await page.evaluate(async ([d, c, w, f, meta, st, cw, ch]) => {
+    const result = await window.studio.render(d, { cols: c, walk: w, frames: f, states: st, cw, ch });
+    const root = document.getElementById('sheet'), source = root.querySelector('canvas'), crop = document.createElement('canvas'); crop.width = cw; crop.height = ch;
     const ctx = crop.getContext('2d', { willReadFrequently: true });
     const pixels = meta.map((cell, i) => {
-      ctx.clearRect(0, 0, 220, 180); ctx.drawImage(source, (i % c) * 220, Math.floor(i / c) * 210, 220, 180, 0, 0, 220, 180);
-      const bytes = ctx.getImageData(0, 0, 220, 180).data;
+      ctx.clearRect(0, 0, cw, ch); ctx.drawImage(source, (i % c) * cw, Math.floor(i / c) * (ch + 30), cw, ch, 0, 0, cw, ch);
+      const bytes = ctx.getImageData(0, 0, cw, ch).data;
       let binary = ''; for (let j = 0; j < bytes.length; j += 8192) binary += String.fromCharCode(...bytes.subarray(j, j + 8192));
       return btoa(binary);
     });
@@ -162,7 +163,7 @@ for (let offset = 0; offset < defs.length;) {
     const next = document.createElement('div'); next.id = 'sheet'; document.body.appendChild(next);
     await image.decode();
     return { ...result, pixels };
-  }, [chunk, cols, has('walk'), frames, metadata, states]);
+  }, [chunk, cols, has('walk'), frames, metadata, states, cw, ch]);
   cellDefs.push(...metadata); pixels.push(...batch.pixels); res.cells += batch.cells; res.tris.push(...batch.tris); res.errors.push(...batch.errors);
   offset = end;
 }
@@ -172,7 +173,7 @@ mkdirSync(resolve(out, 'pixels'), { recursive: true });
 if (res.tris.length !== cellDefs.length) res.errors.push(`triangle capture count ${res.tris.length} != cells ${cellDefs.length}`);
 const captures = cellDefs.map((cell, i) => {
   const file = `pixels/${String(i).padStart(4, '0')}.rgba`; writeFileSync(resolve(out, file), Buffer.from(pixels[i], 'base64'));
-  return { ...cell, file, width: 220, height: 180, tris: res.tris[i] ?? null };
+  return { ...cell, file, width: cw, height: ch, tris: res.tris[i] ?? null };
 });
 writeFileSync(resolve(out, 'gallery.json'), JSON.stringify({ schema: 'kit-gallery/1', base: base || 'local', count: defs.length, defs: defs.map((d) => ({ name: d.name, tags: d.tags, box: d.size.box, family: family(d), description: d.description })), captures, tris: res.tris, errors: [...res.errors, ...errors] }, null, 1));
 if (flag('compare')) {
