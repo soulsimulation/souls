@@ -1,6 +1,6 @@
 {
  "format": "souls-form-cases/1",
- "about": "eden:planter grows by itself. Its water is a timed value in mg falling 5 mg a second (18 g an hour; a 4 L soak stays at or above the dry line, 1 360 000 mg, for 528 000.2 s, about six days). Sown, it arms a timer one world day ahead for the next stage; a stage comes only while the soil is moist. Every number is worked from the value, rate and time; nothing is written between events.",
+ "about": "eden:planter. Its water is a timed value in mg falling 5 mg a second (a 4 L soak stays at or above the dry line, 1 360 000 mg, for 528 000.2 s, about six days); ripening is a timed count of whole seconds since its stage began. A stage is a timer form that needs the soil moist, the stage before it, and a world day in that stage. Watering soaks the soil full and arms every stage's timer; picking moves the planter's fruit, a count, into a basket and puts it back to flowering. Every number is worked from the value, rate and time.",
  "cases": [
   {
    "name": "sow_every_need_met",
@@ -12,17 +12,6 @@
     "actor": "b1",
     "now_us": 0,
     "nodes": {
-     "p1": {
-      "kind": "eden:planter",
-      "fields": {
-       "stage": "bare",
-       "water": {
-        "value": 4000000,
-        "per_s": -5,
-        "set_us": 0
-       }
-      }
-     },
      "b1": {
       "hands": {
        "left": null,
@@ -33,6 +22,17 @@
        400,
        300
       ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
      }
     },
     "moves": {
@@ -76,17 +76,6 @@
     "actor": "b1",
     "now_us": 0,
     "nodes": {
-     "p1": {
-      "kind": "eden:planter",
-      "fields": {
-       "stage": "seed",
-       "water": {
-        "value": 4000000,
-        "per_s": -5,
-        "set_us": 0
-       }
-      }
-     },
      "b1": {
       "hands": {
        "left": null,
@@ -97,6 +86,17 @@
        400,
        300
       ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
      }
     },
     "moves": {
@@ -131,17 +131,6 @@
     "actor": "b1",
     "now_us": 0,
     "nodes": {
-     "p1": {
-      "kind": "eden:planter",
-      "fields": {
-       "stage": "bare",
-       "water": {
-        "value": 4000000,
-        "per_s": -5,
-        "set_us": 0
-       }
-      }
-     },
      "b1": {
       "hands": {
        "left": null,
@@ -152,6 +141,17 @@
        400,
        2000
       ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
      }
     },
     "moves": {
@@ -187,6 +187,9 @@
     "actor": "b1",
     "now_us": 86400000000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -195,11 +198,13 @@
         "value": 4000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -212,6 +217,14 @@
      [
       "p1/field/1",
       3568000
+     ],
+     [
+      "p1/field/2",
+      "seed"
+     ],
+     [
+      "p1/field/3",
+      86400
      ]
     ]
    }
@@ -226,6 +239,9 @@
     "actor": "b1",
     "now_us": 172800000000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -234,11 +250,13 @@
         "value": 4000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 86400000000
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -251,6 +269,14 @@
      [
       "p1/field/1",
       3136000
+     ],
+     [
+      "p1/field/2",
+      "sprout"
+     ],
+     [
+      "p1/field/3",
+      86400
      ]
     ]
    }
@@ -265,6 +291,9 @@
     "actor": "b1",
     "now_us": 259200000000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -273,11 +302,13 @@
         "value": 4000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 172800000000
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -290,6 +321,14 @@
      [
       "p1/field/1",
       2704000
+     ],
+     [
+      "p1/field/2",
+      "leafy"
+     ],
+     [
+      "p1/field/3",
+      86400
      ]
     ]
    }
@@ -304,6 +343,9 @@
     "actor": "b1",
     "now_us": 345600000000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -312,11 +354,13 @@
         "value": 4000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 259200000000
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -329,6 +373,14 @@
      [
       "p1/field/1",
       2272000
+     ],
+     [
+      "p1/field/2",
+      "flowering"
+     ],
+     [
+      "p1/field/3",
+      86400
      ]
     ]
    }
@@ -343,6 +395,9 @@
     "actor": "b1",
     "now_us": 86400000000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -351,11 +406,13 @@
         "value": 1000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -385,6 +442,9 @@
     "actor": "b1",
     "now_us": 864000000000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -393,11 +453,13 @@
         "value": 1000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -427,6 +489,9 @@
     "actor": "b1",
     "now_us": 604800000000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -435,11 +500,13 @@
         "value": 4000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -469,6 +536,9 @@
     "actor": "b1",
     "now_us": 604800000000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -477,11 +547,13 @@
         "value": 4000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -511,6 +583,9 @@
     "actor": "b1",
     "now_us": 528000199999,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -519,11 +594,13 @@
         "value": 4000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -536,6 +613,14 @@
      [
       "p1/field/1",
       1360000
+     ],
+     [
+      "p1/field/2",
+      "flowering"
+     ],
+     [
+      "p1/field/3",
+      528000
      ]
     ]
    }
@@ -550,6 +635,9 @@
     "actor": "b1",
     "now_us": 528000200000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -558,11 +646,13 @@
         "value": 4000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -592,6 +682,9 @@
     "actor": "b1",
     "now_us": 864000000000,
     "nodes": {
+     "b1": {
+      "hands": {}
+     },
      "p1": {
       "kind": "eden:planter",
       "fields": {
@@ -600,11 +693,13 @@
         "value": 4000000,
         "per_s": -5,
         "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
        }
       }
-     },
-     "b1": {
-      "hands": {}
      }
     }
    },
@@ -622,6 +717,676 @@
       "at_least": 1360000
      }
     }
+   }
+  },
+  {
+   "name": "sprout_at_another_stage",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 86400000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "stage",
+     "found": "sprout",
+     "wanted": {
+      "is": "seed"
+     }
+    }
+   }
+  },
+  {
+   "name": "leaf_at_another_stage",
+   "act": {
+    "this": "p1",
+    "form": "leaf"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 172800000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 86400000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "stage",
+     "found": "seed",
+     "wanted": {
+      "is": "sprout"
+     }
+    }
+   }
+  },
+  {
+   "name": "flower_at_another_stage",
+   "act": {
+    "this": "p1",
+    "form": "flower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 259200000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 172800000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "stage",
+     "found": "seed",
+     "wanted": {
+      "is": "leafy"
+     }
+    }
+   }
+  },
+  {
+   "name": "fruit_at_another_stage",
+   "act": {
+    "this": "p1",
+    "form": "fruit"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 345600000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 259200000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "stage",
+     "found": "seed",
+     "wanted": {
+      "is": "flowering"
+     }
+    }
+   }
+  },
+  {
+   "name": "sprout_half_a_day_into_the_stage",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 86400000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 43200000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 2,
+    "detail": {
+     "field": "ripening",
+     "found": 43200,
+     "wanted": {
+      "at_least": 86400
+     }
+    }
+   }
+  },
+  {
+   "name": "leaf_half_a_day_into_the_stage",
+   "act": {
+    "this": "p1",
+    "form": "leaf"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 172800000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 129600000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 2,
+    "detail": {
+     "field": "ripening",
+     "found": 43200,
+     "wanted": {
+      "at_least": 86400
+     }
+    }
+   }
+  },
+  {
+   "name": "flower_half_a_day_into_the_stage",
+   "act": {
+    "this": "p1",
+    "form": "flower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 259200000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 216000000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 2,
+    "detail": {
+     "field": "ripening",
+     "found": 43200,
+     "wanted": {
+      "at_least": 86400
+     }
+    }
+   }
+  },
+  {
+   "name": "fruit_half_a_day_into_the_stage",
+   "act": {
+    "this": "p1",
+    "form": "fruit"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 345600000000,
+    "nodes": {
+     "b1": {
+      "hands": {}
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "flowering",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 302400000000
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 2,
+    "detail": {
+     "field": "ripening",
+     "found": 43200,
+     "wanted": {
+      "at_least": 86400
+     }
+    }
+   }
+  },
+  {
+   "name": "water_holding_a_can",
+   "act": {
+    "this": "p1",
+    "form": "water"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": "c1"
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "c1": {
+      "kind": "eden:watering_can"
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "water_with_no_can",
+   "act": {
+    "this": "p1",
+    "form": "water"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_holding_kind",
+    "need": 0,
+    "detail": {
+     "kind": "eden:watering_can"
+    },
+    "fix": {
+     "step": "take",
+     "kind": "eden:watering_can"
+    }
+   }
+  },
+  {
+   "name": "pick_into_an_empty_basket",
+   "act": {
+    "this": "p1",
+    "form": "pick",
+    "args": {
+     "basket": "bk1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "bk1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "fruiting",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       },
+       "fruit": 3
+      }
+     },
+     "bk1": {
+      "kind": "eden:basket",
+      "fields": {
+       "fruit": 0
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/2",
+      "fruiting"
+     ],
+     [
+      "p1/field/4",
+      3
+     ],
+     [
+      "bk1/field/1",
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pick_not_yet_fruiting",
+   "act": {
+    "this": "p1",
+    "form": "pick",
+    "args": {
+     "basket": "bk1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "bk1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "flowering",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       },
+       "fruit": 0
+      }
+     },
+     "bk1": {
+      "kind": "eden:basket",
+      "fields": {
+       "fruit": 0
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "stage",
+     "found": "flowering",
+     "wanted": {
+      "is": "fruiting"
+     }
+    }
+   }
+  },
+  {
+   "name": "pick_into_a_basket_with_room_for_two",
+   "act": {
+    "this": "p1",
+    "form": "pick",
+    "args": {
+     "basket": "bk1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "bk1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "fruiting",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       },
+       "fruit": 3
+      }
+     },
+     "bk1": {
+      "kind": "eden:basket",
+      "fields": {
+       "fruit": 4
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 1,
+    "detail": {
+     "node": "bk1",
+     "field": "fruit",
+     "room": 2,
+     "amount": 3
+    },
+    "fix": null
    }
   }
  ]
