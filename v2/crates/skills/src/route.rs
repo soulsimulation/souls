@@ -17,7 +17,8 @@
 //!   through the host the skill sees each result a tick later, T1).
 //! - **N10's ladder** (T9c #3127) reaches the walk by fields the world sets on its body: [`F_SHOULDER`] (no body
 //!   pushes it), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
-//!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended.
+//!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended. A route taken,
+//!   the walk leaves its count alone in [`F_ROUTE`] (`[count, []]`), so a read of the body copies no legs.
 //! - **Sent to a point** (N9, [`Route::sent`]). The world's spot tables grant the walker a standing spot near the
 //!   point and the world gives the route there as [`F_ROUTE`]; until then it stands. It arrives within [`AT_SPOT`] of
 //!   its spot, no body pushes it within [`CALM`] of it, and those standing on their own spots ([`F_SETTLED`]) do not
