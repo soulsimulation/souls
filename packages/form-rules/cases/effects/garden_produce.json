@@ -1,0 +1,449 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Garden produce (from #1729): a Soul with empty hands prepares a tomato from a basket of two (fruit 2 to 1, one tomato made on the board in the same batch, its id from the receipt), takes it, bites it twice and the third bite is refused. A second tomato is prepared, taken in the other hand and eaten at once. With the board cleared and no fruit left, a third prepare is refused and nothing is made.",
+  "cases": [
+    {
+      "name": "prepare_take_bite_eat",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "hb1"
+            ]
+          },
+          "hb1": {
+            "kind": "eden:harvest_basket",
+            "fields": {
+              "fruit": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "hb1",
+            "form": "prepare"
+          },
+          "receipt": "rh1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "hb1",
+                "field": "fruit",
+                "n": 1,
+                "to": 1
+              },
+              {
+                "change": "create",
+                "node": "rh1.0",
+                "kind": "eden:tomato",
+                "to": {
+                  "node": "hb1",
+                  "slot": "out"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:fruit_used",
+                "node": "hb1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:prepared",
+                "node": "hb1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "rh1.0",
+            "form": "take"
+          },
+          "receipt": "rh2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "rh1.0",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "rh1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "rh1.0",
+            "form": "bite"
+          },
+          "receipt": "rh3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "rh1.0",
+                "field": "bites_left",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bitten",
+                "node": "rh1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "rh1.0",
+            "form": "bite"
+          },
+          "receipt": "rh4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "rh1.0",
+                "field": "bites_left",
+                "n": 1,
+                "to": 0
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "rh1.0",
+            "form": "bite"
+          },
+          "receipt": "rh5",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "hb1",
+            "form": "prepare"
+          },
+          "receipt": "rh6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "hb1",
+                "field": "fruit",
+                "n": 1,
+                "to": 0
+              },
+              {
+                "change": "create",
+                "node": "rh6.0",
+                "kind": "eden:tomato",
+                "to": {
+                  "node": "hb1",
+                  "slot": "out"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "rh6.0",
+            "form": "take"
+          },
+          "receipt": "rh7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "rh6.0",
+                "to": {
+                  "node": "b1",
+                  "hand": "right"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "rh6.0",
+            "form": "eat"
+          },
+          "receipt": "rh8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "rh6.0",
+                "field": "bites_left",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:eaten",
+                "node": "rh6.0",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "hb1",
+            "form": "prepare"
+          },
+          "receipt": "rh9",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        }
+      ],
+      "after": {
+        "hb1": {
+          "kind": "eden:harvest_basket",
+          "fields": {
+            "fruit": 0
+          },
+          "slots": {
+            "out": []
+          }
+        },
+        "rh1.0": {
+          "kind": "eden:tomato",
+          "fields": {
+            "bites_left": 0
+          }
+        },
+        "rh6.0": {
+          "kind": "eden:tomato",
+          "fields": {
+            "bites_left": 0
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "rh1.0",
+            "right": "rh6.0"
+          }
+        }
+      }
+    },
+    {
+      "name": "a_tomato_on_the_board_taken_bitten_eaten",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "hb1"
+            ]
+          },
+          "hb1": {
+            "kind": "eden:harvest_basket",
+            "slots": {
+              "out": [
+                "t1"
+              ]
+            }
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "bite"
+          },
+          "receipt": "rt1",
+          "expect": {
+            "verdict": "no",
+            "reason": "not_held",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "take"
+          },
+          "receipt": "rt2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "t1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "bite"
+          },
+          "receipt": "rt3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "bites_left",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bitten",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "eat"
+          },
+          "receipt": "rt4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "bites_left",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:eaten",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "eat"
+          },
+          "receipt": "rt5",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        }
+      ],
+      "after": {
+        "hb1": {
+          "kind": "eden:harvest_basket",
+          "slots": {
+            "out": []
+          }
+        },
+        "t1": {
+          "kind": "eden:tomato",
+          "fields": {
+            "bites_left": 0
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "t1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}
