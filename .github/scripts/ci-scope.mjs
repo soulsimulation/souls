@@ -5,10 +5,12 @@
 //
 // A push to main (ci.yml only takes pushes to main) and a manual run check everything, whatever changed: each merge then
 // leaves a full-scope run on main, which the merge train reads as proof that main is green (mainCiState in
-// merge-train.mjs). Pull request runs stay scoped to their paths.
-// Paths no rule names (root files, the lockfile, mars/, worlds/, vendor/, .github/ ...) run every job; docs and
-// tools-only changes run none (ci-ok still reports). Writes `matrix`, `any`, `scope` and `smoke` to $GITHUB_OUTPUT when set.
-// `smoke` (the browser local smoke, e2e/local-smoke.mjs) runs when apps/web, apps/server or e2e change, or with no base.
+// merge-train.mjs). Pull request and merge_group runs stay scoped to their paths (a merge group's diff is every PR in it).
+// A diff confined to the low-risk paths (LOW_RISK: entry, content, form-rules, docs, changelog fragments) runs only
+// their own tests; any other diff goes through the path map, where paths no rule names (root files, the lockfile, mars/,
+// worlds/, vendor/, .github/, changes/ ...) run every job; docs and tools-only changes run none (ci-ok still reports).
+// No diff, an unreadable one or an empty one runs every job. Writes `matrix`, `any`, `scope` and `smoke` to $GITHUB_OUTPUT.
+// `smoke` (the browser local smoke, e2e/local-smoke.mjs) runs when apps/web, apps/server or e2e change, or with no diff.
 //
 // The CI window (docs/testing.md#ci-window): a pull request run does its heavy jobs (the qualify matrix and the smoke)
 // only when the PR is not a draft and carries merge:ready or ci:run (--draft, --labels from the event), or when CI was
@@ -66,15 +68,38 @@ export const GOD_SKILL_TESTS = 'tools/god-skill/*.test.mjs tools/god-skill/lib/*
 
 const relevant = (job, steps) => job.steps.some(s => steps.some(step => s.endsWith('-') ? step.startsWith(s) : step === s));
 
-export function jobsFor(files) {
+const strip = ({ steps, paths, ...job }) => job;
+
+/** The low-risk paths: a change confined to them (every file) needs no server, browser smoke, walk or bundle job. Exact
+ * prefixes, plus Markdown at the root other than the agent rules. Nothing in apps/server, the packages the walk audits or
+ * the e2e reads them; the readers outside them are the entry and form-rules tests and card-search.test.mjs, which the
+ * soul-tools job runs (ci.yml), and apps/web, which imports packages/form-rules/src (LOW_RISK_WEB). */
+export const LOW_RISK = /^(?:tools\/entry|content\/(?:kinds|asks|moves)|packages\/form-rules|docs|changes)\//;
+const LOW_RISK_ROOT = file => /^[^/]+\.md$/.test(file) && !['AGENTS.md', 'CLAUDE.md'].includes(file);
+export const lowRisk = files => Array.isArray(files) && files.length > 0 && files.every(f => LOW_RISK.test(f) || LOW_RISK_ROOT(f));
+/** apps/web/src/gen-mesh/vocab-look.ts imports packages/form-rules/src/looks.ts: a change there keeps the web
+ * typecheck, build and bundle comparison (types-web) and the web unit suite. */
+export const LOW_RISK_WEB = /^packages\/form-rules\/src\//;
+
+/** The jobs a diff needs. No diff (null: no usable base, or an unreadable one) and an empty diff run every job. A diff
+ * confined to the low-risk paths runs only the jobs their own `paths` pick (soul-tools, docs-reference) and, for
+ * form-rules source, the web jobs; any other diff is picked by the release gate's path map, where an unmapped path (the
+ * lockfile, .github, changes/ beside other files ...) runs every job. */
+export function jobsFor(files, reason = files === null ? 'no usable base' : 'an empty diff') {
+  if (!files?.length) return { scope: 'full', steps: [...REQUIRED_STEPS], include: JOBS.map(strip), diff: { reason } };
+  if (lowRisk(files)) {
+    const web = files.some(f => LOW_RISK_WEB.test(f)) ? ['types-web', 'web'] : [];
+    const include = JOBS.filter(job => web.includes(job.name) || files.some(f => job.paths?.test(f))).map(strip);
+    return { scope: include.length ? 'low-risk' : 'none', steps: [], include, diff: { files: files.length, lowRisk: true } };
+  }
   const scope = scopeFor(files);
   const include = scope.resolved === 'full' ? JOBS : JOBS.filter(job => relevant(job, scope.steps) || files?.some(f => job.paths?.test(f)));
-  return { scope: scope.resolved, steps: scope.steps, include: include.map(({ steps, paths, ...job }) => job), diff: scope.diff };
+  return { scope: scope.resolved, steps: scope.steps, include: include.map(strip), diff: scope.diff };
 }
 
-/** The local smoke job: changes under apps/web, apps/server or e2e; null (no usable base) runs it too. */
+/** The local smoke job: changes under apps/web, apps/server or e2e; no diff or an empty one runs it too. */
 export const SMOKE_PATHS = /^(apps\/web|apps\/server|e2e)\//;
-export const smokeFor = files => files === null || files.some(f => SMOKE_PATHS.test(f));
+export const smokeFor = files => !files?.length || files.some(f => SMOKE_PATHS.test(f));
 
 /** Events whose runs check everything regardless of the changed paths. */
 export const FULL_EVENTS = ['push', 'workflow_dispatch'];
@@ -121,7 +146,7 @@ function main(argv) {
   const event = opt('--event');
   const files = FULL_EVENTS.includes(event) ? null
     : opt('--files') !== undefined ? opt('--files').split(',').filter(Boolean) : changedFiles(opt('--base'), opt('--head'));
-  const full = files ? jobsFor(files) : { scope: 'full', steps: REQUIRED_STEPS, include: JOBS.map(({ steps, ...job }) => job), diff: { reason: FULL_EVENTS.includes(event) ? `${event} runs check everything` : 'no usable base' } };
+  const full = FULL_EVENTS.includes(event) ? jobsFor(null, `${event} runs check everything`) : jobsFor(files);
   let labels = [];
   try { const l = JSON.parse(opt('--labels') || '[]'); if (Array.isArray(l)) labels = l; } catch { /* unreadable labels: none */ }
   const win = windowFor({ event, draft: opt('--draft') === 'true', labels });
