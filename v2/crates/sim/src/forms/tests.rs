@@ -7,6 +7,7 @@ use std::path::Path;
 
 use replica::bodies::{Class, Family};
 use replica::effects::fixture_bytes;
+use replica::effects::{Actor, Body, Cause, Change, Effect};
 use replica::encode::{Name, Value, decode};
 use replica::host::{Answer, Ask, Seen};
 use replica::ids::{Id, Minter, Scope};
@@ -16,9 +17,9 @@ use replica::rules::json::{self, parse};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{parse_kinds, parse_world};
-use skills::form_runner::{Limits, bind};
+use skills::form_runner::{Limits, bind, bind_effects};
 
-use super::{Forms, World};
+use super::{Asked, Forms, Intent, Receipt, World};
 use crate::controller::Controller;
 use crate::ground::Piece;
 use crate::host::Geometry;
@@ -235,17 +236,36 @@ impl Bench {
     }
 
     fn start(&mut self, body: Id, node: Id, entry: &json::Value, form: &str, limits: Limits) {
+        let intent = intent(body, 0);
+        self.ask(body, node, entry, form, limits, intent)
+            .expect("started");
+    }
+
+    /// Starts or resends `intent`: the form's effects bound when they bind (the rest are F4's), else none.
+    fn ask(
+        &mut self,
+        body: Id,
+        node: Id,
+        entry: &json::Value,
+        form: &str,
+        limits: Limits,
+        intent: Intent,
+    ) -> Result<Asked, replica::effects::Refusal> {
         let steps = bind(entry, form).expect("binds");
+        let effects = bind_effects(entry, form).unwrap_or_default();
         self.look();
         let now = self.now;
         let (mut w, forms) = self.world();
-        forms
-            .start(&mut w, body, node, steps, limits, now)
-            .expect("started");
+        forms.start(&mut w, body, node, intent, steps, effects, limits, now)
     }
 
     /// One tick: the skills' phase (the walks), the controller's step, then every timer due before the next tick.
     fn tick(&mut self) {
+        self.tick_with(&mut || false);
+    }
+
+    /// [`Bench::tick`], with each timer fired a second time when `double` says so.
+    fn tick_with(&mut self, double: &mut dyn FnMut() -> bool) {
         let now = self.now;
         let at = now + TICK;
         self.look();
@@ -262,6 +282,9 @@ impl Bench {
                 forms.fire(&mut w, &t),
                 "every timer is a form's or a move's"
             );
+            if double() {
+                forms.fire(&mut w, &t);
+            }
         }
         self.now = at;
     }
@@ -354,10 +377,278 @@ fn a3_every_run_reaches_a_named_end() {
     let mut b = Bench::new();
     let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
     b.start(body, node, &entry, &form, Limits::default());
-    let steps = bind(&entry, &form).expect("binds");
-    let (mut w, forms) = b.world();
-    let r = forms
-        .start(&mut w, body, node, steps, Limits::default(), 0)
+    let r = b
+        .ask(
+            body,
+            node,
+            &entry,
+            &form,
+            Limits::default(),
+            intent(body, 1),
+        )
         .expect_err("refused");
     assert_eq!(r.name, "form-running");
+}
+
+// --- F2: the effect, once (#2767) ---------------------------------------------------------------------------------
+
+/// The `n`th intent of `body`, expiring at ten minutes, its digest its number.
+fn intent(body: Id, n: u64) -> Intent {
+    let mut digest = [0; 32];
+    digest[..8].copy_from_slice(&n.to_le_bytes());
+    Intent {
+        id: Id::new(Scope([0xf2; 16]), body.counter() * 1_000_000 + n).expect("an id"),
+        expiry: 600_000_000,
+        actor: Actor::Soul(body),
+        digest,
+    }
+}
+
+/// The first kind in the folder whose first form has effects this task binds, with that form.
+fn effecting() -> (json::Value, String) {
+    entries()
+        .into_iter()
+        .find(|(e, f)| bind_effects(e, f).is_ok_and(|x| !x.is_empty()))
+        .expect("a kind whose effects bind")
+}
+
+/// `entry` with every `move` step taken out of its forms: a form with no hand step.
+fn without_moves(v: &json::Value) -> json::Value {
+    match v {
+        json::Value::Obj(o) => json::Value::Obj(
+            o.iter()
+                .map(|(k, x)| match (k.as_str(), x) {
+                    ("steps", json::Value::Arr(s)) => (
+                        k.clone(),
+                        json::Value::Arr(
+                            s.iter()
+                                .filter(|st| {
+                                    st.get("step").and_then(json::Value::str) != Some("move")
+                                })
+                                .cloned()
+                                .collect(),
+                        ),
+                    ),
+                    _ => (k.clone(), without_moves(x)),
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+impl Bench {
+    /// The commit point: the tick's effects are numbered, appended to `log` and handed back as logged.
+    fn flush(&mut self, log: &mut Vec<Effect>) {
+        for mut e in std::mem::take(&mut self.forms.out) {
+            e.envelope.sequence = log.len() as u64 + 1;
+            self.forms.logged(&e);
+            log.push(e);
+        }
+    }
+}
+
+/// The log's entries caused by `intent`.
+fn caused(log: &[Effect], intent: &Intent) -> Vec<u64> {
+    log.iter()
+        .filter(|e| e.envelope.cause == Cause::Intent(intent.id))
+        .map(|e| e.envelope.sequence)
+        .collect()
+}
+
+#[test]
+fn f2_a1_the_effect_lands_at_contact_or_when_the_last_step_ends() {
+    let (entry, form) = effecting();
+    let pause = 2_000_000;
+    for (case, entry, before_end) in [
+        // The press's recovery (300 ms) and the pause come after contact.
+        ("at the hand step's contact", entry.clone(), 300_000 + pause),
+        ("at the last step's end", without_moves(&entry), 0),
+    ] {
+        let mut b = Bench::new();
+        let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+        b.start(body, node, &entry, &form, Limits::default());
+        let mut log = Vec::new();
+        while !b.forms.is_empty() {
+            b.tick();
+            b.flush(&mut log);
+        }
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        assert_eq!(e.how.as_str(), "done");
+        let [effect] = log.as_slice() else {
+            panic!("one effect: {log:?}")
+        };
+        let Body::Changes(c) = &effect.body else {
+            panic!("changes")
+        };
+        assert!(matches!(c[0].change, Change::Set { node: n, .. } if n == node));
+        println!(
+            "{case}: effect at {} µs, run ended at {} µs",
+            effect.envelope.at, e.at
+        );
+        assert_eq!(effect.envelope.at, e.at - before_end, "{case}");
+        b.clean();
+    }
+}
+
+#[test]
+fn f2_a3_a_resend_across_a_restart_gets_the_first_receipt() {
+    let (entry, form) = effecting();
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    let it = intent(body, 7);
+    let limits = Limits::default();
+    assert!(matches!(
+        b.ask(body, node, &entry, &form, limits, it),
+        Ok(Asked::Started(_))
+    ));
+    let mut log = Vec::new();
+    while !b.forms.is_empty() {
+        b.tick();
+        b.flush(&mut log);
+    }
+    let first = Receipt {
+        intent: it.id,
+        entries: caused(&log, &it),
+    };
+    let before = b.ask(body, node, &entry, &form, limits, it);
+    assert_eq!(before, Ok(Asked::Applied(first.clone())));
+
+    // The world restarts: its keys are read back from the log, and no form runs again.
+    let now = b.now;
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    b.forms = Forms::recover(&log);
+    b.now = now;
+    let after = b.ask(body, node, &entry, &form, limits, it);
+    println!("a resend before the restart: {before:?}; after it: {after:?}");
+    assert_eq!(after, Ok(Asked::Applied(first)));
+    assert!(b.forms.is_empty() && b.forms.out.is_empty());
+
+    // The same key with other contents is refused, not applied; past its expiry, a resend is refused.
+    let other = Intent {
+        digest: [9; 32],
+        ..it
+    };
+    let r = b.ask(body, node, &entry, &form, limits, other);
+    assert_eq!(r.map_err(|r| r.name), Err("intent-key-reused"));
+    b.now = it.expiry + 1;
+    b.forms.forget(b.now);
+    let r = b.ask(body, node, &entry, &form, limits, it);
+    assert_eq!(r.map_err(|r| r.name), Err("intent-expired"));
+    assert_eq!(log.len(), 1);
+}
+
+fn splitmix(x: &mut u64) -> u64 {
+    *x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let mut z = *x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+#[test]
+fn f2_a2_a3_ten_thousand_runs_with_resends_doubled_timers_and_kills_apply_each_effect_once() {
+    const RUNS: u64 = 10_000;
+    let (entry, form) = effecting();
+    let effects = bind_effects(&entry, &form).expect("binds").len() as u64;
+    let limits = Limits::default();
+    let start = Vec3::new(0, 0, 1_500_000);
+    let (mut resends, mut across, mut doubled, mut kills, mut lost) =
+        (0u64, 0u64, 0u64, 0u64, 0u64);
+    let mut in_log = 0u64;
+    for seed in 0..RUNS {
+        let mut rng = seed;
+        let mut b = Bench::new();
+        let (body, node) = b.add(&entry, start, Vec3::ZERO);
+        let it = intent(body, seed);
+        let mut log: Vec<Effect> = Vec::new();
+        let mut receipts: Vec<Receipt> = Vec::new();
+        assert!(matches!(
+            b.ask(body, node, &entry, &form, limits, it),
+            Ok(Asked::Started(_))
+        ));
+        let (mut restarted, mut killed) = (false, 0);
+        for _ in 0..10_000 {
+            let mut coin = splitmix(&mut rng);
+            b.tick_with(&mut || {
+                coin = splitmix(&mut coin);
+                let twice = coin.is_multiple_of(4);
+                doubled += u64::from(twice);
+                twice
+            });
+            let r = splitmix(&mut rng) % 100;
+            // At most three kills a run. One before the tick's effects reach the log loses them; one after keeps them.
+            let kill = killed < 3 && r < 4;
+            if kill && r < 2 {
+                lost += b.forms.out.len() as u64;
+            } else {
+                b.flush(&mut log);
+            }
+            if kill {
+                killed += 1;
+                let now = b.now;
+                b = Bench::new();
+                b.add(&entry, start, Vec3::ZERO);
+                b.forms = Forms::recover(&log);
+                b.now = now;
+                restarted = true;
+            }
+            // The agent resends after a kill (its answer was lost), and at random.
+            if kill || r.is_multiple_of(10) {
+                resends += 1;
+                match b
+                    .ask(body, node, &entry, &form, limits, it)
+                    .expect("answered")
+                {
+                    Asked::Applied(rc) => {
+                        across += u64::from(restarted);
+                        receipts.push(rc);
+                    }
+                    Asked::Running(_) => assert!(!kill, "seed {seed}: a killed world has no run"),
+                    Asked::Started(_) => assert!(kill, "seed {seed}: a run started twice"),
+                }
+            }
+            if b.forms.is_empty() {
+                break;
+            }
+        }
+        kills += killed;
+        assert!(b.forms.is_empty(), "seed {seed}: the run never ended");
+        let last = b.ask(body, node, &entry, &form, limits, it);
+        // Each effect is in the log exactly once, and every receipt is the first.
+        for n in 0..effects {
+            let once = log
+                .iter()
+                .filter(|e| {
+                    e.envelope.cause == Cause::Intent(it.id)
+                        && e.events.as_ref().is_some_and(|v| {
+                            v.iter().any(|x| x.fields.get(&1) == Some(&Value::Uint(n)))
+                        })
+                })
+                .count();
+            assert_eq!(
+                once, 1,
+                "seed {seed}: effect {n} is in the log {once} times"
+            );
+        }
+        let first = Receipt {
+            intent: it.id,
+            entries: caused(&log, &it),
+        };
+        assert_eq!(last, Ok(Asked::Applied(first.clone())), "seed {seed}");
+        for r in &receipts {
+            assert_eq!(*r, first, "seed {seed}: a resend got another receipt");
+        }
+        in_log += log.len() as u64;
+    }
+    println!(
+        "{RUNS} runs: {in_log} effects in the logs, each once; {resends} resends, every receipt the first \
+         ({across} answered after a restart); {doubled} timers fired twice; {kills} kills ({lost} effects lost \
+         before the log, then written once)"
+    );
+    assert_eq!(in_log, RUNS * effects);
+    assert!(across > 0 && doubled > 0 && kills > 0 && lost > 0);
 }

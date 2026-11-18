@@ -18,10 +18,16 @@
 //! - **The runner owns ending.** Every run ends with a name ([`Next::End`]): `done`, `deadline-passed`, or the name the
 //!   walk or the move ended with (`out-of-reach`, `claim-taken`, ...). A form writes no exit.
 //!
-//! Not here: effects (F2), reserving and stopping (F3), who may (F6), stages of long forms (F11).
+//! - **The effect's instant** (F2, #2767). The effect lands once, at the contact instant of the form's hand step (its
+//!   first `move` step: the world wakes the runner with [`Woke::Contact`] when that move's start-up ends), or, in a
+//!   form with no hand step, when the last step ends. The runner only says when ([`Runner::take_effect`]); the world
+//!   writes the effect, keyed by intent, and never twice (`sim::forms`). Stopped before that instant, a run has no
+//!   effect; stopped after, its effect stays. [`bind_effects`] binds a form's effects as generic sets, one field each.
+//!
+//! Not here: amounts, making and removing (F4), reserving and stopping (F3), who may (F6), stages of long forms (F11).
 
 use replica::effects::Refusal;
-use replica::encode::Name;
+use replica::encode::{self, Name};
 use replica::host::{Host, Progress, Skill};
 use replica::ids::Id;
 use replica::pose::Vec3;
@@ -152,6 +158,55 @@ pub fn bind(entry: &Value, form: &str) -> Result<Vec<Step>, Refusal> {
         .collect()
 }
 
+/// One effect of a form, bound: field `field` (its number in the kind's `state`) of the node the form is done at is set
+/// to `to`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Effect {
+    pub field: u64,
+    pub to: encode::Value,
+}
+
+/// Binds form `form`'s effects into generic sets, one field each, all or none: `effect-not-built` for a change other
+/// than `set ... to` (amounts, making and removing are F4's), `field-unknown`, `effect-malformed` for a value that is
+/// not a whole number or a flag (a flag is 0 or 1).
+pub fn bind_effects(entry: &Value, form: &str) -> Result<Vec<Effect>, Refusal> {
+    let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
+        return refuse("form-unknown", form);
+    };
+    let effects = f.get("effects").and_then(Value::arr).unwrap_or(&[]);
+    effects
+        .iter()
+        .map(|e| {
+            let change = text(e.get("change"), "effect.change")?;
+            let Some(to) = e.get("to").filter(|_| change == "set") else {
+                return refuse("effect-not-built", change);
+            };
+            let field = text(e.get("field"), "effect.field")?;
+            let n = match entry
+                .get("state")
+                .and_then(|s| s.get(field))
+                .and_then(|d| d.get("n"))
+            {
+                Some(Value::Int(n)) => u64::try_from(*n).ok(),
+                _ => None,
+            };
+            let Some(field) = n else {
+                return refuse("field-unknown", field);
+            };
+            let to = match to {
+                Value::Bool(b) => encode::Value::Uint(u64::from(*b)),
+                Value::Int(n) => match (u64::try_from(*n), i64::try_from(*n)) {
+                    (Ok(u), _) => encode::Value::Uint(u),
+                    (_, Ok(i)) => encode::Value::Nint(i.unsigned_abs() - 1),
+                    _ => return refuse("effect-malformed", "set.to: out of range"),
+                },
+                _ => return refuse("effect-malformed", "set.to: a whole number or a flag"),
+            };
+            Ok(Effect { field, to })
+        })
+        .collect()
+}
+
 /// The deadlines of the steps that wait on the world, µs from the step's start. A pause's deadline is its own end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -184,6 +239,8 @@ pub enum Woke {
     Walked(Progress),
     /// The move the runner asked for ended, with how (`done` when it ran to its end).
     Moved(Name),
+    /// The move the runner asked for reached its contact instant (B2: the end of its first phase).
+    Contact,
 }
 
 /// What the runner asks of the world after a wake.
@@ -209,10 +266,16 @@ pub struct Runner {
     /// The runner's timer: the step's deadline, or a pause's end.
     timer: Option<Id>,
     ended: bool,
+    /// The hand step: the first `move` step, whose contact is the effect's instant.
+    hand: Option<usize>,
+    /// The effect's instant came and the world has not taken it; `effected` once it came.
+    effect: bool,
+    effected: bool,
 }
 
 impl Runner {
     pub fn new(steps: Vec<Step>, node: Id, limits: Limits) -> Runner {
+        let hand = steps.iter().position(|s| matches!(s, Step::Move { .. }));
         Runner {
             steps,
             node,
@@ -220,6 +283,21 @@ impl Runner {
             at: 0,
             timer: None,
             ended: false,
+            hand,
+            effect: false,
+            effected: false,
+        }
+    }
+
+    /// Whether the effect's instant came at the last wake: true once per run, at most, and only then.
+    pub fn take_effect(&mut self) -> bool {
+        std::mem::take(&mut self.effect)
+    }
+
+    fn effect_now(&mut self) {
+        if !self.effected {
+            self.effected = true;
+            self.effect = true;
         }
     }
 
@@ -246,6 +324,9 @@ impl Runner {
             host.clear_timer(t);
         }
         let Some(step) = self.steps.get(self.at).cloned() else {
+            if self.hand.is_none() {
+                self.effect_now();
+            }
             return self.end(host, name("done"));
         };
         match step {
@@ -308,6 +389,10 @@ impl Runner {
                 Progress::Failed(n) => self.end(host, n),
                 Progress::Going => Next::Sleep,
             },
+            (Woke::Contact, Some(Step::Move { .. })) if self.hand == Some(self.at) => {
+                self.effect_now();
+                Next::Sleep
+            }
             (Woke::Moved(how), Some(Step::Move { .. })) => {
                 if how.as_str() == "done" {
                     self.advance(host)
