@@ -1,0 +1,50 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:provision_rack",
+  "owner": "thing",
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 650], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "bay_left": { "admits": "thing", "most": 1, "at_mm": [-380, 1000, 0], "fits_mm": [300, 250, 300] },
+    "bay_middle": { "admits": "thing", "most": 1, "at_mm": [0, 1000, 0], "fits_mm": [300, 250, 300] },
+    "bay_right": { "admits": "thing", "most": 1, "at_mm": [380, 1000, 0], "fits_mm": [300, 250, 300] }
+  },
+  "geometry": { "bounds_mm": [1200, 1100, 420] },
+  "forms": {
+    "stow": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": { "type": "thing" },
+        "bay": { "type": "slot", "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "held_by_actor", "thing": { "arg": "thing" } },
+        { "need": "slot_free", "slot": { "arg": "bay" } }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "put", "slot": { "arg": "bay" } }
+      ],
+      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": { "arg": "bay" }, "event": "stowed" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:provision_rack",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-520,450,-150],"size":[60,900,60],"tint":"timber"},{"kind":"box","at":[-520,450,150],"size":[60,900,60],"tint":"timber"},{"kind":"box","at":[520,450,-150],"size":[60,900,60],"tint":"timber"},{"kind":"box","at":[520,450,150],"size":[60,900,60],"tint":"timber"},{"kind":"box","at":[0,930,0],"size":[1200,40,420],"tint":"tray"},{"kind":"box","at":[0,1060,195],"size":[1200,60,30],"tint":"tray"},{"kind":"box","at":[0,990,-195],"size":[1200,80,30],"tint":"tray"},{"kind":"box","at":[-190,990,0],"size":[20,80,360],"tint":"tray"},{"kind":"box","at":[190,990,0],"size":[20,80,360],"tint":"tray"}],"palette":{"timber":"#8a6440","tray":"#5f7f4a"},"tags":["camp","storage","furniture"]}
+  },
+  "text": {
+    "card": "A camp provision rack: a green tray on trestles with three bays to stow things.",
+    "camp": "camp",
+    "storage": "storage",
+    "pantry": "pantry",
+    "howto_stow": "Hold the thing, then stow it in a free bay; pick it up again to take it out."
+  },
+  "card": { "text": "card", "category": "storage", "synonyms": ["camp", "pantry"] },
+  "howtos": {
+    "stow": { "text": "howto_stow", "steps": [{ "form": "stow" }] }
+  }
+}
