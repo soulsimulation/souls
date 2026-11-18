@@ -73,10 +73,29 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 9. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
    and prints the exact rollback commands. Code is rolled back; data never is.
 
+## Shipping a pinned sha
+
+`release.yml -f sha=<full sha>` ships that exact commit while main keeps merging, so no freeze is needed. Preflight
+(`tools/world-launcher/deploy/ship/release-pin.mjs check`) refuses a sha that is not the full 40-hex commit, not an
+ancestor of `origin/main`, or not newer than the last release tag on main (`v0.*`, so nothing ships backwards), then
+checks it out: the changelog check, the client stamp, the receipts, ship, eyes and publish all use it, never main's
+HEAD. `RELEASE_FREEZE` is not consulted. The run's title names the sha (`release <version> at <sha>`), which is how
+[eyes](#the-eyes) matches a run at main's head to the commit it ships. Gate the sha, then dry-run and ship it:
+
+```sh
+gh workflow run gate.yml -f sha=<sha>                                                  # baseline: the last release before it
+gh workflow run release.yml --ref main -f version=0.131 -f sha=<sha>                   # dry run
+gh workflow run release.yml --ref main -f version=0.131 -f sha=<sha> -f dry_run=false  # the release
+```
+
+Publish tags the sha and opens the changelog pull request against main with the fragments as of the sha that are still
+on main; fragments merged after it wait for the next release. The sha must contain this change (the eyes it runs come
+from its own tree). Without `sha`, a release ships main's HEAD under the freeze below, as before.
+
 ## Release freeze
 
-`release.yml` ships main's HEAD, and its receipt must be for exactly that commit, so nothing may merge between the pin
-and the real ship's dispatch (#1838). The freeze is the repository variable `RELEASE_FREEZE`, holding the pinned sha
+Without `sha`, `release.yml` ships main's HEAD, and its receipt must be for exactly that commit, so nothing may merge
+between the pin and the real ship's dispatch (#1838). The freeze is the repository variable `RELEASE_FREEZE`, holding the pinned sha
 (optionally followed by a note). The release owner sets it at the pin and clears it once the real ship has started:
 
 ```sh
@@ -103,6 +122,7 @@ started by manual dispatch on `main`. A `release` concurrency group lets only on
 | Input | Default | Meaning |
 |---|---|---|
 | `version` | required | Release version for the changelog and tag, such as `0.123`; also ship.sh's `--label` |
+| `sha` | none (main's HEAD) | [A pinned release head](#shipping-a-pinned-sha): a full sha on `origin/main`, newer than the last release tag. Every job uses it; no freeze is needed. Not with `feed_only` or `eyes_only` |
 | `dry_run` | **true** | `ship.sh --no-switch`: every step for real except the backup and the activation, checked against the build that stays live. Stage skips `install.sh`, so the host's unit files and timers stay as they are. No receipt is needed and publish does not run. The label is `<version>-rehearsal`. The staged release directory and its dependencies stay on the host; a later real ship of the same build reuses them. It deletes nothing on the host except the rehearsal's own scratch directory, which it created |
 | `date` | today (UTC) | The release date compiled into the changelog page and `CHANGELOG.md`. The page is part of the web build, so a real ship on a later day than its dry run of the same head must pass the dry run's date, or the staged build differs and stage refuses to overwrite it |
 | `accept_host_codes` | none | ship.sh's `--accept-host-codes`, such as `halted` for a release that fixes a halted world |
@@ -127,7 +147,8 @@ node tools/world-launcher/deploy/ship/eyes.mjs --sha <head, 40 hex> --run <run i
 Its jobs:
 
 1. **preflight**: the required secrets and variables exist (it names any that are missing), the head is `main`, the
-   tag does not exist yet, the inputs are sane. Then the client stamp (`tools/world-launcher/deploy/ship/release-client.mjs
+   tag does not exist yet, the inputs are sane. With `sha`, that commit passes `release-pin.mjs check` and is checked
+   out; it is the job's `sha` output, which every later job reads. Then the client stamp (`tools/world-launcher/deploy/ship/release-client.mjs
    stamp`): a dry run that has to stamp opens the stamp pull request and skips the other jobs; a real ship
    that would have to stamp stops; `stamp.mjs --check` must pass either way.
 2. **ship**: in the `production` environment (limited to `main`). It installs, pulls media, installs Chromium at a
@@ -226,7 +247,8 @@ activation, the job records it, retries once and goes on; it never reports that 
 details are reduced to `[A-Za-z0-9 ()=.,:_-]`, so no path or stack trace reaches GitHub; a failed probe names the bar
 items it missed, such as `probe(noBuild=2)`.
 
-Eyes refuses a run whose head is not `--sha`, or that is not `release.yml`. It skips an earlier run's or attempt's
+Eyes refuses a run whose head is not `--sha` (for a pinned-sha release, whose title does not name it), or that is not
+`release.yml`. It skips an earlier run's or attempt's
 waiting status and keeps looking. A failure, an interrupt or a crash posts
 `fail`, never `pass`, and lets the probe stop and remove its edits first. A ship that stops before the release fails eyes without walks. Outputs, `probe/report.json`
 included, go to `.local/ship/<label>-eyes/` (on the runner, the job's per-run directory), with the bar alone in `probe-bar.json`. With `eyes=runner`, the run's
