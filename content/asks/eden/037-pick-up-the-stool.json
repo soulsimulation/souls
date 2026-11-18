@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":37,"group":"object","words":"pick up the stool","obvious":2,"things":{"stool":"eden:stool"},"chain":[{"this":"me","form":"pick_up","carry":"stool","args":{"thing":"stool"}}]}

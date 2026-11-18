@@ -1,0 +1,2 @@
+{1: 0, 2: "a", 24: -1} # the map worked by hand in Step 0: keys 1, 2 and 24
+a30100026161181820

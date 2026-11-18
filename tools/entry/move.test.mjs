@@ -15,9 +15,9 @@ const moves = Object.fromEntries(loaded.map(r => [r.move.move, r.move]));
 const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
 
 test('A1: press and slide validate as moves; a move with a duration in ticks is refused', () => {
-  assert.deepEqual(loaded.map(r => r.file), ['consume.json', 'pour.json', 'press.json', 'slide.json']);
-  for (const r of loaded) { assert.deepEqual(r.errors, [], r.file); assert.match(r.ref, /^[a-z]+@prov-1220[0-9a-f]{64}$/); }
-  assert.notEqual(loaded[1].ref, loaded[2].ref);
+  assert.ok(['consume.json', 'pour.json', 'press.json', 'pump.json', 'slide.json', 'strike.json'].every(f => loaded.some(r => r.file === f)));
+  for (const r of loaded) { assert.deepEqual(r.errors, [], r.file); assert.match(r.ref, /^[a-z_]+@prov-1220[0-9a-f]{64}$/); }
+  assert.notEqual(loaded.find(r => r.move.move === 'press').ref, loaded.find(r => r.move.move === 'slide').ref);
   for (const c of cases.refused) {
     const errors = c.raw !== undefined
       ? [...F.parseEntry(c.raw).errors, ...validateMove(F.parseEntry(c.raw).entry)]
@@ -48,7 +48,24 @@ test('A3: the same record and time give the same position in Node and in a brows
       assert.deepEqual(Array.from(bare.handAt(moves[c.move], c.record, t)), want, `${c.why} at ${t} (bare context)`);
     }
   }
-  assert.equal(refOf(moves.press), loaded.find(r => r.file === 'press.json').ref);
+  assert.equal(refOf(moves.press), loaded.find(r => r.move.move === 'press').ref);
+});
+
+test('SA-D4b A1: swing, stroke, tug, knock and lock validate, differ, and each has a case with the hand on its contact point at contact', () => {
+  const names = ['swing', 'stroke', 'tug', 'knock', 'lock'];
+  const refs = new Set(loaded.filter(r => names.includes(r.move?.move)).map(r => r.ref));
+  assert.equal(refs.size, names.length, 'five distinct valid references');
+  for (const n of names) {
+    const own = cases.pose.filter(c => c.move === n);
+    assert.equal(own.length, 1, `${n}: one position case`);
+    const [c] = own;
+    const {contact_us} = P.timesOf(moves[n]);
+    const at = c.at_us.find(([t]) => t === c.record.start_us + contact_us);
+    assert.ok(at, `${n}: the case names the contact instant`);
+    assert.deepEqual(at[1], c.record.contact_mm, `${n}: the hand is on its contact point at contact`);
+    assert.deepEqual(P.handAt(moves[n], c.record, c.record.start_us + contact_us), c.record.contact_mm);
+    assert.equal(!!moves[n].phases.slide_us, !!c.record.to_mm, `${n}: a second point exactly when the move has a middle phase`);
+  }
 });
 
 test('SA-D5a A1: pour validates; its spout is within 2 cm of the rim for the whole contact window (kettle to cup, can to planter)', () => {
@@ -91,3 +108,24 @@ test('SA-D5c A1/A2: consume validates; the rim or bitten edge is at the mouth fo
     assert.deepEqual(P.handAt(m, r, s + end_us), r.from_mm, 'the hand ends at rest');
   }
 });
+
+for (const [name, key, kind] of [['strike', 'strike_us', 'a hammer'], ['pump', 'pump_us', 'a pump']]) {
+  test(`SA-D5b A1: ${name} validates; the head of ${kind} is at the contact point for the whole window and the hand ends at rest`, () => {
+    const m = moves[name];
+    assert.deepEqual(loaded.find(r => r.file === `${name}.json`).errors, []);
+    assert.equal(m.effector, 'held_point');
+    assert.ok(validateMove({...structuredClone(m), effector: 'hand'}).some(e => e.path === 'effector'));
+    assert.ok(validateMove({...structuredClone(m), phases: {...m.phases, pour_us: 1000}}).some(e => e.path === 'phases' && e.reason.includes('not more than one')));
+    for (const c of cases[name]) {
+      const r = {...c.record, effector_mm: c.effector_mm};
+      const at = r.contact_mm, s = r.start_us;
+      const {contact_us, slide_end_us, end_us} = P.timesOf(m, r.count);
+      assert.equal(slide_end_us - contact_us, m.phases[key] * (r.count ?? 1), c.why);
+      for (let t = contact_us; t < slide_end_us; t += 50000) assert.deepEqual(P.effectorAt(m, r, s + t), at, `${c.why} at ${t}`);
+      assert.ok(dist(P.effectorAt(m, r, s + contact_us / 2), at) > 20, 'before contact it is on its way');
+      assert.ok(dist(P.effectorAt(m, r, s + slide_end_us + m.phases.recovery_us / 2), at) > 20, 'after the window it leaves');
+      assert.deepEqual(P.handAt(m, r, s + end_us), r.from_mm, 'the hand ends at rest');
+      assert.equal(P.handAt(m, r, s + end_us - 1).every(Number.isInteger), true, 'whole millimetres');
+    }
+  });
+}

@@ -61,6 +61,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "text": {
     "card": "A lecture: one Soul speaks from the lectern while others sit and listen.",
     "gathering": "gathering",

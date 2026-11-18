@@ -1,0 +1,2 @@
+-65537 # the first negative four-byte argument
+3a00010000
