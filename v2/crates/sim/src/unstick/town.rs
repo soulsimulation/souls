@@ -3,13 +3,10 @@
 use super::Unstick;
 use crate::ground::exits;
 use crate::links::turns::Turn;
-use crate::mover::Body;
 use crate::walk::town::Town;
-use replica::effects::Refusal;
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::time::Micros;
-use replica::world_model::show;
 
 fn dist2(a: Vec3, b: Vec3) -> i128 {
     let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
@@ -36,14 +33,5 @@ impl Unstick for Town {
     fn nearest(&self, node: Id, at: Vec3) -> Option<Vec3> {
         let s = self.surfaces.get(&node)?;
         exits::nearest(s.pieces(), at).map(|(_, p)| p)
-    }
-
-    fn place(&self, body: &Body, at: Vec3) -> Result<Body, Refusal> {
-        let node = crate::walk::node_of(body);
-        let s = self.surfaces.get(&node).ok_or_else(|| Refusal {
-            name: "no-surface",
-            detail: show(node),
-        })?;
-        s.place(body.id, body.pose.frame, at, body.pose.orientation)
     }
 }
