@@ -40,6 +40,13 @@
                 "field": "open",
                 "n": 1,
                 "to": 1
+              },
+              {
+                "change": "link",
+                "node": "x1",
+                "link": "opener",
+                "n": 1,
+                "end": "b1"
               }
             ],
             "events": [
@@ -48,6 +55,13 @@
                 "node": "x1",
                 "changes": [
                   0
+                ]
+              },
+              {
+                "event": "eden:looked_inside",
+                "node": "x1",
+                "changes": [
+                  1
                 ]
               }
             ]
@@ -69,7 +83,16 @@
                 "to": {
                   "node": "b1",
                   "hand": "left"
-                }
+                },
+                "stock": "garments"
+              },
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "garments",
+                "n": 2,
+                "to": 5,
+                "by": -1
               }
             ],
             "events": [
@@ -77,7 +100,8 @@
                 "event": "eden:taken",
                 "node": "x1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               }
             ]
@@ -98,6 +122,13 @@
                 "field": "open",
                 "n": 1,
                 "to": 0
+              },
+              {
+                "change": "unlink",
+                "node": "x1",
+                "link": "opener",
+                "n": 1,
+                "end": "b1"
               }
             ],
             "events": [
@@ -106,6 +137,13 @@
                 "node": "x1",
                 "changes": [
                   0
+                ]
+              },
+              {
+                "event": "eden:stopped_looking",
+                "node": "x1",
+                "changes": [
+                  1
                 ]
               }
             ]
@@ -116,7 +154,11 @@
         "x1": {
           "kind": "eden:wardrobe",
           "fields": {
-            "open": 0
+            "open": 0,
+            "garments": 5
+          },
+          "links": {
+            "opener": []
           }
         },
         "rw2.0": {
@@ -171,6 +213,13 @@
                 "field": "open",
                 "n": 1,
                 "to": "top"
+              },
+              {
+                "change": "link",
+                "node": "x1",
+                "link": "opener",
+                "n": 1,
+                "end": "b1"
               }
             ],
             "events": [
@@ -179,6 +228,13 @@
                 "node": "x1",
                 "changes": [
                   0
+                ]
+              },
+              {
+                "event": "eden:looked_inside",
+                "node": "x1",
+                "changes": [
+                  1
                 ]
               }
             ]
@@ -200,7 +256,16 @@
                 "to": {
                   "node": "b1",
                   "hand": "left"
-                }
+                },
+                "stock": "garments"
+              },
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "garments",
+                "n": 2,
+                "to": 8,
+                "by": -1
               }
             ],
             "events": [
@@ -208,7 +273,8 @@
                 "event": "eden:taken",
                 "node": "x1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               }
             ]
@@ -229,6 +295,13 @@
                 "field": "open",
                 "n": 1,
                 "to": "shut"
+              },
+              {
+                "change": "unlink",
+                "node": "x1",
+                "link": "opener",
+                "n": 1,
+                "end": "b1"
               }
             ],
             "events": [
@@ -237,6 +310,13 @@
                 "node": "x1",
                 "changes": [
                   0
+                ]
+              },
+              {
+                "event": "eden:stopped_looking",
+                "node": "x1",
+                "changes": [
+                  1
                 ]
               }
             ]
@@ -247,7 +327,11 @@
         "x1": {
           "kind": "eden:dresser",
           "fields": {
-            "open": "shut"
+            "open": "shut",
+            "garments": 8
+          },
+          "links": {
+            "opener": []
           }
         },
         "rd2.0": {
@@ -300,7 +384,20 @@
                 "to": {
                   "node": "b1",
                   "hand": "left"
-                }
+                },
+                "stock": "books",
+                "carries": [
+                  "title",
+                  "first_page"
+                ]
+              },
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "books",
+                "n": 1,
+                "to": 39,
+                "by": -1
               },
               {
                 "change": "set",
@@ -315,14 +412,15 @@
                 "event": "eden:taken",
                 "node": "x1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               },
               {
                 "event": "eden:left_untidy",
                 "node": "x1",
                 "changes": [
-                  1
+                  2
                 ]
               }
             ]
@@ -373,6 +471,7 @@
         "x1": {
           "kind": "eden:bookshelf",
           "fields": {
+            "books": 39,
             "neat": 1
           }
         },
@@ -426,7 +525,20 @@
                 "to": {
                   "node": "b1",
                   "hand": "left"
-                }
+                },
+                "stock": "books",
+                "carries": [
+                  "title",
+                  "first_page"
+                ]
+              },
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "books",
+                "n": 1,
+                "to": 99,
+                "by": -1
               },
               {
                 "change": "set",
@@ -441,14 +553,15 @@
                 "event": "eden:taken",
                 "node": "x1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               },
               {
                 "event": "eden:left_untidy",
                 "node": "x1",
                 "changes": [
-                  1
+                  2
                 ]
               }
             ]
@@ -499,6 +612,7 @@
         "x1": {
           "kind": "eden:bookcase",
           "fields": {
+            "books": 99,
             "neat": 1
           }
         },
@@ -1046,7 +1160,16 @@
                 "to": {
                   "node": "b1",
                   "hand": "left"
-                }
+                },
+                "stock": "apples"
+              },
+              {
+                "change": "set",
+                "node": "x1",
+                "field": "apples",
+                "n": 1,
+                "to": 5,
+                "by": -1
               }
             ],
             "events": [
@@ -1054,7 +1177,8 @@
                 "event": "eden:taken",
                 "node": "x1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               }
             ]

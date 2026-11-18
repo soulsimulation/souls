@@ -90,6 +90,12 @@
           "field": "open",
           "to": true,
           "event": "opened"
+        },
+        {
+          "change": "link",
+          "link": "opener",
+          "from": "actor",
+          "event": "looked_inside"
         }
       ]
     },
@@ -120,6 +126,12 @@
           "field": "open",
           "to": false,
           "event": "shut"
+        },
+        {
+          "change": "unlink",
+          "link": "opener",
+          "from": "actor",
+          "event": "stopped_looking"
         }
       ]
     },
@@ -163,9 +175,13 @@
       ]
     }
   },
+  "links": {
+    "opener": { "n": 1, "from": "soul", "most": 1, "audience": { "rule": "everyone" } }
+  },
   "closed": {
     "audience": {
-      "rule": "owner"
+      "rule": "linked",
+      "link": "opener"
     },
     "fields": [
       "garments"
