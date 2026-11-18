@@ -61,6 +61,8 @@ pub const F_TILE_SIZE: u64 = 24; // the open ground: a terrain tile's side, mm (
 // tx × side to (tx + 1) × side, z likewise. Heights are (n + 1)² little-endian i32 mm, a row of x for each z, at
 // side / n spacing; classes are n² bytes, one per cell, in the same order (today's media codes, `packages/ground`).
 pub const F_TILES: u64 = 25;
+pub const F_ASSET: u64 = 26; // X6: [SHA-256 …] of the world's uploads the thing names (a mesh's, a picture's)
+pub const F_ENTRY: u64 = 27; // X6: the Soul Actions entry of the thing's kind (SA-E11's map), when it has one
 
 pub const WORLD: &str = "eden:world";
 pub const GROUND: &str = "eden:ground";
@@ -87,6 +89,8 @@ pub struct Import {
     pub notes: Vec<String>,
     /// Today's def ref to its form: point, path or area.
     pub forms: BTreeMap<String, String>,
+    /// Every entry the import committed, in order: what a stream of the world starts from (V5, #2714).
+    pub effects: Vec<Effect>,
 }
 
 type R<T> = Result<T, String>;
@@ -368,6 +372,16 @@ pub fn load(text: &str) -> R<Import> {
     let mut links: Vec<(Id, &str, [Id; 2])> = Vec::new();
     let mut doorway_fields: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
     let mut stair_fields: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
+    // A slot's point in its thing's frame: today's pose of a thing in a slot is from its parent's origin, and K2's is
+    // from the slot's point (T4's carry adds the point), so the point is taken off once here.
+    let mut slot_at: HashMap<(&str, i64), [i64; 3]> = HashMap::new();
+    for t in things {
+        for sl in need(t, "slots").map(Json::arr).unwrap_or(&[]) {
+            let at = need(sl, "at")?.arr();
+            let n = |k: usize| at.get(k).and_then(Json::int).ok_or("a slot's at");
+            slot_at.insert((s(t, "id")?, int(sl, "n")?), [n(0)?, n(1)?, n(2)?]);
+        }
+    }
     for t in things {
         let id = s(t, "id")?;
         let r = s(t, "ref")?;
@@ -411,6 +425,16 @@ pub fn load(text: &str) -> R<Import> {
         let sc = int(t, "scale_ppm")?;
         if sc != 1_000_000 {
             fields.insert(F_SCALE, i(sc));
+        }
+        if let Some(a) = t.get("asset") {
+            let hs = a.arr().iter().map(|x| {
+                let h = x.str().ok_or_else(|| "an upload's hash".to_owned())?;
+                hex(h).map(Value::Bytes)
+            });
+            fields.insert(F_ASSET, Value::Array(hs.collect::<R<_>>()?));
+        }
+        if let Some(e) = t.get("entry").and_then(Json::str) {
+            fields.insert(F_ENTRY, Value::Text(name(e)?));
         }
         if let Some(d) = t.get("door") {
             fields.insert(
@@ -457,7 +481,13 @@ pub fn load(text: &str) -> R<Import> {
                 .collect::<R<_>>()?;
             fields.insert(F_SLOTS, Value::Array(rows));
         }
-        let node = b.add(id, parent, slot, &kind, pose4(need(t, "pose")?)?, fields)?;
+        let mut pose = pose4(need(t, "pose")?)?;
+        if let (Some(n), Some(p)) = (slot, t.get("parent").and_then(Json::str))
+            && let Some(at) = slot_at.get(&(p, n as i64))
+        {
+            (0..3).for_each(|k| pose[k] -= at[k]);
+        }
+        let node = b.add(id, parent, slot, &kind, pose, fields)?;
 
         // Floors: one node per level its rooms, floors or stairs name, at the thing's origin.
         let mut levels: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
@@ -741,7 +771,6 @@ pub fn load(text: &str) -> R<Import> {
         .map_err(|e| e.to_string())?,
     )
     .map_err(|e| format!("{}: {}", e.name, e.detail))?;
-    drop(effects);
     tree.commit(&header, &part, &rules)
         .map_err(|e| format!("commit refused: {}: {}", e.name, e.detail))?;
 
@@ -767,6 +796,7 @@ pub fn load(text: &str) -> R<Import> {
         by_ref,
         notes: b.notes,
         forms,
+        effects,
     })
 }
 
@@ -974,22 +1004,48 @@ pub fn count(im: &Import) -> (Vec<Row>, BTreeMap<String, i64>, BTreeMap<String, 
 }
 
 /// A node's position in the world frame, in micrometres: its pose composed up the tree with T4's quaternions, from
-/// the root down. `None` for an id that is no node here.
+/// the root down, a node in a slot at the slot's point plus its pose (T4's carry). `None` for an id that is no node
+/// here.
 pub fn world_of(im: &Import, id: Id) -> Option<Vec3> {
     let t = &im.tree;
     let mut chain = Vec::new();
     let mut at = Some(t.handle(id)?);
     while let Some(h) = at {
         let n = t.node(h)?;
+        let parent = n.parent().and_then(|p| t.handle(p));
         if let Some(p) = n.place() {
-            chain.push(p);
+            let point = match (n.slot(), parent) {
+                (Some(s), Some(ph)) => slot_point(t.node(ph)?.fields(), s)?,
+                _ => Vec3::ZERO,
+            };
+            chain.push((point.plus(p.position).ok()?, p.orientation));
         }
-        at = n.parent().and_then(|p| t.handle(p));
+        at = parent;
     }
     let (mut pos, mut rot) = (Vec3::ZERO, Quat::IDENTITY);
-    for p in chain.iter().rev() {
-        pos = pos.plus(rot.rotate(p.position).ok()?).ok()?;
-        rot = rot.then(p.orientation).ok()?;
+    for (position, orientation) in chain.iter().rev() {
+        pos = pos.plus(rot.rotate(*position).ok()?).ok()?;
+        rot = rot.then(*orientation).ok()?;
     }
     Some(pos)
+}
+
+/// Slot `n`'s point (field 13's `[n, x, y, z, …]` mm) in micrometres.
+fn slot_point(fields: &BTreeMap<u64, Value>, n: u64) -> Option<Vec3> {
+    let num = |v: &Value| match v {
+        Value::Uint(u) => i64::try_from(*u).ok(),
+        Value::Nint(u) => i64::try_from(*u).ok().map(|u| -u - 1),
+        _ => None,
+    };
+    let Value::Array(rows) = fields.get(&F_SLOTS)? else {
+        return None;
+    };
+    rows.iter().find_map(|r| match r {
+        Value::Array(r) if r.first().and_then(num) == i64::try_from(n).ok() => Some(Vec3::new(
+            num(r.get(1)?)? * 1000,
+            num(r.get(2)?)? * 1000,
+            num(r.get(3)?)? * 1000,
+        )),
+        _ => None,
+    })
 }

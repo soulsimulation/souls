@@ -787,7 +787,8 @@ pub struct Effect {
 }
 
 impl Effect {
-    fn read(v: Value) -> R<Effect> {
+    /// One entry from its value (a history bundle's records are entries, V4).
+    pub(crate) fn read(v: Value) -> R<Effect> {
         let mut r = Rec::of(v, "an effect")?;
         let envelope = Envelope {
             sequence: read_uint(&r.take(1, "an effect")?, "a sequence")?,
