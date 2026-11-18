@@ -45,8 +45,8 @@ export function loadCases(dir: string = CASES, format: string = 'souls-form-case
   return out;
 }
 
-export type EffectStep = { act: Input["act"]; actor?: string; receipt: string; draw?: number[]; expect?: Record<string, unknown> };
-export type EffectCase = { name: string; state: Input['state']; do: EffectStep[]; after?: Record<string, unknown> };
+export type EffectStep = { act: Input['act']; actor?: string; receipt: string; draw?: number[]; expect?: Record<string, unknown> };
+export type EffectCase = { name: string; state: Input['state']; do: EffectStep[]; after?: Record<string, unknown>; lists?: { node: string; actor?: string; expect: unknown }[] };
 
 /** Every effect case in `dir` (souls-effect-cases/1), as [file, case]. */
 export function loadEffectCases(dir: string = join(CASES, 'effects')): [string, EffectCase][] {

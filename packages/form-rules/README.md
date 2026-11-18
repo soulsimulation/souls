@@ -36,7 +36,7 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 
 `NEEDS` is one closed list, shared with R2: `state` (a field `is` or is `not` a value, or lies within `at_least` and
 `at_most`, whole numbers), `slot_free`, `within_reach` (of a point, by the reach of the move the form's step makes
-there, compared as squares in big integers), `hand` (`free: true` or `holds: <kind>`), `held_by_actor`, and `linked`
+there, compared as squares in big integers; `"of": {"arg": "tap"}` names the point of another thing given as a form argument, placed by that node's `at_mm` in the input, with no rotation, an unknown pose being `unknown` and the fix a `walk_to` its `stand` point, SA-F2), `hand` (`free: true` or `holds: <kind>`), `held_by_actor`, and `linked`
 / `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
 overflows). A need on a `timed` field reads its value at the state's `now_us` (below). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
@@ -104,6 +104,14 @@ to zero; `reparent` moves the actor or the thing into a slot or the actor's firs
 on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.<n>`; `link` / `unlink` join the
 actor to the thing. Effects are worked out in order on a copy, so a later one sees an earlier one; one that cannot be
 done refuses the whole form with `{verdict: "no", reason, effect, detail}`.
+
+A stock's take (an entry's `stock` section names the form, [#2851](https://github.com/soulsimulation/souls/issues/2851))
+is one event: its `create` into `actor_hand`, marked `stock: <name>` (and `carries`, the text fields the thing
+carries by reference), and a `set` of the count with `by: -1`. The make is the other side of that `by`, so `apply`
+counts it and the event balances. A take from an empty stock is refused `empty`, and from a container whose `closed`
+audience does not include the actor (not linked by the link it names) `closed`, each as `{verdict: "no", reason,
+effect, detail}` before the rules are asked. `stockList(kinds, state, node)` answers what a container is known to
+hold, or `null` while it is closed to the actor; a case may name such reads in `lists`.
 
 `apply(state, result)` applies a result to plain state, all of it or none: a refusal changes nothing; a receipt
 already in `state.applied` changes nothing and says `again: true`; an event whose `by`s do not sum to zero, or a
@@ -235,6 +243,51 @@ state, the `activity` node, and the Souls who `enter` in order: each with its `a
 `enter` should return (`expect`). The test checks that every body is where the rules placed it and that no place is
 given twice. Then it compares the nodes `after`. The examples are a lecture in three rooms and a supper whose host
 must be its owner. Both are test kinds, because `roles` is not in the entry format yet.
+
+### Leaving, the "now" line and the end
+
+`leave(input)` takes a rule case's input whose act is a leaving form: the form that unlinks one role from the actor.
+It asks who may, works out the form's effects, then applies the role's rule for leaving. A `required` role leaving,
+or the last member leaving, ends the activity: the rules add a `released` event (every remaining member unlinked, and
+a body in the activity's own slots moved out to its place) and an `ended` event (the activity removed). Their names
+carry the kind's namespace. It returns the effects with `role` and `ended` (1 or 0).
+
+`nowLine({kinds, state, node, asker})` reads the kind's `now` section: `{floor, stage, ends_us}`. `ends_us` is the
+first microsecond the `ends` timed field reaches 0 (SA-F5a's `crossing`). A part outside the asker's audience is left
+out and named in `unseen`. An activity nobody entered is removed by its own world form at that time; the engine's
+timer runs it with `effects`.
+
+A file in `cases/activity/leave/` is `{"format": "souls-activity-steps/1", "about": ..., "cases": [...]}`. Each case
+has a state, the `activity` node and `steps` in order. A step does `enter`, `leave`, `now` (the now line) or `world`
+(the world's form at `now_us`), with what it should return (`expect`). The test checks that no step removes a body.
+Then it compares the nodes `after` and checks that the nodes in `gone` are removed. The example is a one-off talk
+(`test:talk`).
+
+### A standing activity
+
+A kind with a `standing` section (see the format page) outlasts a sitting. `join(input)` runs a form that links the
+actor as a member, with no place. `enter` and `leave` then also keep the stage: once `enough` are present as one
+arrives, a `sitting_began` event sets the stage to `sitting`; when the last one present rises, `sitting_ended` returns
+it to `idle`; a member who is present cannot part (`still_present`); and a standing activity is not ended by its last
+member parting. `lapse(input)` is the end date: it runs the world form (the engine's timer, at the time its needs
+state) and puts a `released` event first, unlinking every member; a body standing in the activity's own slots is moved
+out to its place, so removing the activity removes no body. Cases are in `cases/activity/standing/`
+(the same step format, with `join` and `world` running `lapse`); the example is a weekly class (`test:class`).
+
+### Between two Souls
+
+A pair (SA-G4, [#2876](https://github.com/soulsimulation/souls/issues/2876)) is an activity of two required roles with
+a `pair` section (see the format page): give, hug, handshake, high five, dance and push the swing. `pairOf(entry,
+moves)` answers whether a kind is one, or `{bad, detail}` naming the first thing wrong: the accepting form is allowed
+only to the invited Soul and needs the asker's role linked and the countdown above 0; the asker offers by a form
+allowed to one link; each role has a leaving form; the expiry is a world timer form at the countdown's end that needs
+the other role unlinked and removes the offer; no form moves anything by a link except a give's thing into the
+accepter's hand; contact points name a move from `content/moves/`. `accept(input)` asks who may, then, for a give,
+that the asker still holds the thing in a hand (`not_held`), then `enter`s. An effect's `what` may be `{"link":
+<type>}`, the one thing at the end of that link of this node, never a body. Cases are in `cases/activity/pairs/` (the
+same step format, with `offer`, `accept`, `leave`, `world` running `lapse` and `now`); the test checks that no change
+names a body that is neither the actor nor a member.
+
 ## Looks
 
 `looks(input)` in `src/looks.ts` (SA-D1a, [#2885](https://github.com/soulsimulation/souls/issues/2885)) turns a kind's

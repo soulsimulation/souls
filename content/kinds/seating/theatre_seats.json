@@ -33,9 +33,11 @@
       "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": { "model": "look:theatre_seats" },
   "text": {
-    "card": "Two rows of three theatre seats, each row with a first and last seat."
+    "card": "Two rows of three theatre seats, each with a first and a last seat."
   },
   "card": { "text": "card" }
 }
