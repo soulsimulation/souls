@@ -608,7 +608,7 @@ impl<'a> Rules<'a> {
         for name in sorted(forms) {
             let Some(f) = has(forms, name) else { continue };
             if name == current
-                || f.get("who").and_then(Value::str) != Some("anyone")
+                || !matches!(f.get("who").and_then(Value::str), Some("anyone" | "holder"))
                 || f.get("starts").and_then(Value::str) != Some("act")
                 || !ready(f)
             {
@@ -692,10 +692,25 @@ impl<'a> Rules<'a> {
         let fix = self.form_fix(
             entry,
             |e| {
-                e.get("change").and_then(Value::str) == Some("set")
-                    && e.get("field").and_then(Value::str) == Some(field)
+                let change = e.get("change").and_then(Value::str);
+                let this_field = e.get("field").and_then(Value::str) == Some(field);
+                let is_this = |k| e.get(k).and_then(Value::str) == Some("this");
+                // A transfer in fills toward the field's max and one out empties toward its min (SA #3021): it meets
+                // the need if that end does.
+                let min = match def.get("min") {
+                    None | Some(Value::Null) => Value::Int(0),
+                    Some(m) => m.clone(),
+                };
+                (change == Some("set")
+                    && this_field
                     && !matches!(e.get("to"), Some(Value::Arr(_) | Value::Obj(_)))
-                    && holds(n, e.get("to"))
+                    && holds(n, e.get("to")))
+                    || (change == Some("transfer")
+                        && this_field
+                        && ((is_this("into")
+                            && whole(def.get("max")).is_some()
+                            && holds(n, def.get("max")))
+                            || (is_this("from") && holds(n, Some(&min)))))
             },
             |f| {
                 f.get("needs")

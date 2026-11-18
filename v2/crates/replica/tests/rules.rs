@@ -1,9 +1,14 @@
 //! Form rules (Engine v2 R2, #2685), native build. Each `aN_` test is one acceptance box.
 //!
-//! The cases are data, read from disk at run time: this crate's `cases/` (its kinds in `cases/kinds/`) and the Soul
-//! Actions folder `packages/form-rules/cases` with the kinds in `content/kinds/` and that folder's `kinds/`. Adding a
-//! case file to either changes no code. `FORM_RULES_ROOT` names another checkout's root to read the Soul Actions
-//! cases from; a tree without them says so and runs the rest.
+//! The cases are data, read from disk at run time: this crate's `cases/` (its kinds in `cases/kinds/`) and a pinned
+//! snapshot of the Soul Actions cases, `cases/form-rules-snapshot/` (`packages/form-rules/cases` with the
+//! `content/kinds` they read, at the commit its `SOURCE` names). Adding a case file to either changes no code.
+//!
+//! The TypeScript rules are the truth this library tracks. So that a Soul Actions change does not fail every v2 run,
+//! the required tests read the snapshot; `drift_against_the_live_form_rules_cases` (ignored here, run by
+//! `v2/tools/ci.sh` in the daily full run) runs the same comparison on the live `packages/form-rules/cases`, or those
+//! under `FORM_RULES_ROOT`, and prints each disagreement without failing. Refresh the snapshot by copying both folders
+//! again and naming the commit in `SOURCE`.
 //!
 //! The 10,000 generated cases are built from this crate's kinds by construction: each need is made met or unmet on
 //! purpose, so the expected verdict is known without running the rules. The test writes every case it ran and the
@@ -27,9 +32,28 @@ fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// The repository root the Soul Actions cases are read from.
-fn sa_root() -> PathBuf {
+/// The pinned Soul Actions cases, laid out as the repository root is.
+fn snapshot_root() -> PathBuf {
+    crate_dir().join("cases/form-rules-snapshot")
+}
+
+/// The live Soul Actions cases: this checkout's, or another's under `FORM_RULES_ROOT`.
+fn live_root() -> PathBuf {
     std::env::var_os("FORM_RULES_ROOT").map_or_else(|| crate_dir().join("../../.."), PathBuf::from)
+}
+
+/// The Soul Actions kinds and cases under a root, or `None` when it has none.
+/// Kinds by name, and cases.
+type SaWorld = (Vec<(String, Value)>, Vec<Case>);
+
+fn sa_world(root: &Path, label: &str) -> Option<SaWorld> {
+    let sa = root.join("packages/form-rules/cases");
+    if !sa.is_dir() {
+        return None;
+    }
+    let mut kinds = Vec::new();
+    load_kinds(&[root.join("content/kinds"), sa.join("kinds")], &mut kinds);
+    Some((kinds, load_cases(&sa, label)))
 }
 
 fn json_files(dir: &Path, deep: bool) -> Vec<PathBuf> {
@@ -101,19 +125,14 @@ fn world() -> World {
     load_kinds(&[own_dir.join("kinds")], &mut own_kinds);
     let mut all = own_kinds.clone();
     let mut hand = load_cases(&own_dir, "replica/cases");
-    let sa = sa_root().join("packages/form-rules/cases");
-    let mut sa_cases = 0;
-    if sa.is_dir() {
-        load_kinds(
-            &[sa_root().join("content/kinds"), sa.join("kinds")],
-            &mut all,
-        );
-        let cases = load_cases(&sa, "form-rules/cases");
-        sa_cases = cases.len();
-        hand.extend(cases);
-    } else {
-        println!("NOTE: packages/form-rules/cases is not in this tree: 0 Soul Actions cases read");
+    let (sa_kinds, cases) = sa_world(&snapshot_root(), "form-rules-snapshot")
+        .expect("the pinned snapshot cases/form-rules-snapshot");
+    for (k, e) in sa_kinds {
+        assert!(all.iter().all(|(x, _)| *x != k), "kind {k} defined twice");
+        all.push((k, e));
     }
+    let sa_cases = cases.len();
+    hand.extend(cases);
     World {
         kinds: Value::Obj(all),
         own_kinds,
@@ -662,7 +681,7 @@ fn a1_a3_a4_every_case_gives_its_expected_verdict_and_carries_its_read_set() {
         cases.len(),
         wrong.join("\n")
     );
-    assert!(cases.len() >= 10_000);
+    assert!(cases.len() >= 10_000 && w.sa_cases > 0);
 
     // The run the WASM build repeats in Node (v2/tools/ci.sh): every case under its file's name, and the answers.
     let doc_cases = cases
@@ -842,4 +861,35 @@ fn never_panics_and_refuses_what_it_cannot_read() {
     // Nested deeper than the parser reads is refused, not a stack overflow.
     let deep = "[".repeat(100_000);
     assert!(replica::rules::rules_decide(&deep).contains("bad_input"));
+}
+
+/// The drift report: the snapshot's comparison, run on the live Soul Actions cases. It prints every disagreement and
+/// never fails, so a Soul Actions change shows up in the daily full run (`v2/tools/ci.sh`) without failing v2.
+#[test]
+#[ignore = "a report, not a check: v2/tools/ci.sh runs it in the daily full run"]
+fn drift_against_the_live_form_rules_cases() {
+    let Some((mut kinds, cases)) = sa_world(&live_root(), "live form-rules/cases") else {
+        println!("drift: packages/form-rules/cases is not in this tree; nothing to compare");
+        return;
+    };
+    load_kinds(&[crate_dir().join("cases/kinds")], &mut kinds);
+    let kinds = Value::Obj(kinds);
+    let mut drift = 0;
+    for Case { file, case } in &cases {
+        let v = verdict_of(&kinds, case);
+        let miss = mismatches(case.get("expect").unwrap(), &v);
+        if !miss.is_empty() {
+            drift += 1;
+            println!(
+                "drift: {file} {}: {miss:?} expected {} got {}",
+                case.get("name").unwrap().to_json(),
+                case.get("expect").unwrap().to_json(),
+                v.to_json()
+            );
+        }
+    }
+    println!(
+        "drift: {drift} of {} live Soul Actions cases disagree with this library (the snapshot's commit is in cases/form-rules-snapshot/SOURCE)",
+        cases.len()
+    );
 }
