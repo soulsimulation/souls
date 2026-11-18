@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":288,"group":"open-ended","words":"do whatever you want","obvious":3,"things":{"bench":"eden:bench","piano":"eden:piano"},"chain":[{"any":[[{"this":"me","form":"dance"}],[{"this":"bench","form":"sit","args":{"seat":"left"}}],[{"this":"piano","form":"play"}]]}]}

@@ -1,0 +1,110 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:dance",
+  "owner": "thing",
+  "state": {
+    "phase": {"n": 1, "type": "enum", "values": ["offered", "joined"], "default": "offered", "audience": {"rule": "everyone"}},
+    "left_us": {
+      "n": 2,
+      "type": "timed",
+      "unit": "us",
+      "default": {"value": 60000000, "per_s": -1000000, "set_us": 0},
+      "min": 0,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "links": {
+    "invited": {"n": 1, "from": "body", "most": 1, "audience": {"rule": "everyone"}},
+    "proposer": {"n": 2, "from": "body", "most": 1, "audience": {"rule": "everyone"}},
+    "lead": {"n": 3, "from": "body", "most": 1, "audience": {"rule": "everyone"}},
+    "partner": {"n": 4, "from": "body", "most": 1, "audience": {"rule": "everyone"}}
+  },
+  "slots": {
+    "lead": {"admits": "body", "most": 1, "at_mm": [-300, 0, 0]},
+    "partner": {"admits": "body", "most": 1, "at_mm": [300, 0, 0]}
+  },
+  "roles": {
+    "lead": {"need": "required", "places": {"in": "this", "slots": ["lead"]}},
+    "partner": {"need": "required", "places": {"in": "this", "slots": ["partner"]}}
+  },
+  "now": {"stage": "phase", "ends": "left_us"},
+  "pair": {
+    "invited": "invited",
+    "accept": "accept",
+    "expires": "lapse",
+    "beat_us": 600000,
+    "contact": [
+      {"role": "lead", "move": "press", "contact_mm": [-10, 1100, 0], "beat": 1},
+      {"role": "partner", "move": "press", "contact_mm": [10, 1100, 0], "beat": 1},
+      {"role": "lead", "move": "press", "contact_mm": [-10, 1100, 0], "beat": 3},
+      {"role": "partner", "move": "press", "contact_mm": [10, 1100, 0], "beat": 3},
+      {"role": "lead", "move": "press", "contact_mm": [-10, 1100, 0], "beat": 5},
+      {"role": "partner", "move": "press", "contact_mm": [10, 1100, 0], "beat": 5},
+      {"role": "lead", "move": "press", "contact_mm": [-10, 1100, 0], "beat": 7},
+      {"role": "partner", "move": "press", "contact_mm": [10, 1100, 0], "beat": 7}
+    ]
+  },
+  "forms": {
+    "offer": {
+      "who": {"link": "proposer"},
+      "starts": "act",
+      "takes": {"place": {"type": "slot"}},
+      "needs": [
+        {"need": "unlinked", "link": "lead"},
+        {"need": "state", "field": "left_us", "at_least": 1},
+        {"need": "slot_free", "slot": {"arg": "place"}}
+      ],
+      "steps": [{"step": "walk_to", "point": {"arg": "place"}}],
+      "effects": [
+        {"change": "link", "link": "lead", "from": "actor", "event": "test:joined"},
+        {"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "test:took_place"}
+      ]
+    },
+    "accept": {
+      "who": {"link": "invited"},
+      "starts": "act",
+      "takes": {"place": {"type": "slot"}},
+      "needs": [
+        {"need": "linked", "link": "lead"},
+        {"need": "unlinked", "link": "partner"},
+        {"need": "state", "field": "left_us", "at_least": 1},
+        {"need": "slot_free", "slot": {"arg": "place"}}
+      ],
+      "steps": [{"step": "walk_to", "point": {"arg": "place"}}],
+      "effects": [
+        {"change": "link", "link": "partner", "from": "actor", "event": "test:joined"},
+        {"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "test:took_place"},
+        {"change": "set", "field": "phase", "to": "joined", "event": "test:began"}
+      ]
+    },
+    "let_go": {
+      "who": {"link": "lead"},
+      "starts": "act",
+      "steps": [],
+      "effects": [
+        {"change": "unlink", "link": "lead", "from": "actor", "event": "test:let_go"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "test:stepped_back"}
+      ]
+    },
+    "step_away": {
+      "who": {"link": "partner"},
+      "starts": "act",
+      "steps": [],
+      "effects": [
+        {"change": "unlink", "link": "partner", "from": "actor", "event": "test:let_go"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "test:stepped_back"}
+      ]
+    },
+    "lapse": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{"need": "state", "field": "left_us", "at_most": 0}, {"need": "unlinked", "link": "partner"}],
+      "steps": [],
+      "effects": [{"change": "remove", "what": "this", "event": "test:offer_lapsed"}]
+    }
+  },
+  "text": {
+    "card": "A dance together: one asks, the other accepts in time; their palms meet on every other beat of an eight-beat step."
+  },
+  "card": {"text": "card"}
+}

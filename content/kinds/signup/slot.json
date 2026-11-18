@@ -8,6 +8,8 @@
   "links": {
     "signed": { "n": 1, "from": "soul", "most": 1, "most_per": 3, "audience": { "rule": "everyone" } }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "points": {
     "line": { "role": "contact", "at_mm": [0, 4, 0] }
   },

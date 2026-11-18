@@ -107,6 +107,8 @@
       "effects": []
     }
   },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
   "text": {
     "card": "A rowing boat: sit at the oars and row across water deep enough to swim in.",
     "getting_around": "transport",

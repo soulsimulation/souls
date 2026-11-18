@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":184,"group":"getting-around","words":"wander round the gardens","obvious":3,"things":{"garden":"eden:flower_garden"},"chain":[{"this":"me","form":"go_to","args":{"place":"garden"}},{"this":"me","form":"look_around"}]}

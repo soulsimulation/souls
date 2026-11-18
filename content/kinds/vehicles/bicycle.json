@@ -96,6 +96,8 @@
       "effects": []
     }
   },
+  "motion": { "how": "wheeled" },
+  "loose": { "ever": true },
   "text": {
     "card": "A bicycle: sit on the saddle and steer it along level ground.",
     "getting_around": "transport",

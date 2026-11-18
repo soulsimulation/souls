@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":155,"group":"two-things","words":"put the sleeping mat by the campfire","obvious":2,"things":{"mat":"eden:sleeping_mat","campfire":"eden:campfire"},"chain":[{"this":"me","form":"pick_up","carry":"mat","args":{"thing":"mat"}},{"this":"me","form":"put","place":{"at":"next_to","thing":"mat","anchor":"campfire"},"args":{"thing":"mat"}}]}

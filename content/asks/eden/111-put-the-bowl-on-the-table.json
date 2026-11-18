@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":111,"group":"two-things","words":"put the bowl on the table","obvious":3,"things":{"bowl":"eden:bowl","table":"eden:table"},"chain":[{"this":"me","form":"pick_up","carry":"bowl","args":{"thing":"bowl"}},{"this":"me","form":"put","place":{"at":"on","thing":"bowl","anchor":"table"},"args":{"thing":"bowl"}}]}

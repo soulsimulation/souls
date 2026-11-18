@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":316,"group":"looking","words":"how many boats are in the harbour","obvious":3,"things":{"pier":"eden:pier"},"chain":[{"this":"me","form":"go_to","args":{"place":"pier"}},{"this":"me","form":"look_around"}]}
