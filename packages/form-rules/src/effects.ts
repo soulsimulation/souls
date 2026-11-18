@@ -6,7 +6,9 @@
 // made. `apply` applies such a result to plain state: all of it or none, and once per receipt.
 //
 // - An amount moved between two things is two `set` changes on one field, each carrying its signed `by`
-//   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not.
+//   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not. An amount
+//   moved between two fields of one thing (`into_field`: a stock into a well) is two sets on that thing, and balances
+//   the same way.
 // - Holding is a parent: take and put are `reparent` into or out of a hand, a slot or the actor's place (`here`).
 //   What is moved is the actor, this thing, a thing argument of the form, or the one thing at the end of a link.
 // - A made thing appears where its form names: a slot, the actor's hand, or `here`, loose in the actor's
@@ -194,30 +196,33 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     } else {
     if (!e || typeof e.event !== 'string') return refuse(i, 'bad_input', { what: 'no_event' });
     if (e.change === 'set') {
-      const def = has(entry.state, e.field ?? '') ? entry.state![e.field!] : undefined;
-      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: e.field ?? null });
+      // A field argument names one of the form's own fields (the rules refused any other choice); the change names the field.
+      const named = arg(e.field, args);
+      const field = typeof named === 'string' ? named : '';
+      const def = has(entry.state, field) ? entry.state![field] : undefined;
+      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: (named ?? null) as unknown });
       if (def.type === 'timed') {
         // a timed value is settled at the act's time and given its new rate: the three stored numbers are rewritten
-        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
         const now = valueAt(def, held, state.now_us);
-        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: e.field! });
-        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: { value: now, per_s: e.rate!, set_us: state.now_us! } });
+        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to: { value: now, per_s: e.rate!, set_us: state.now_us! } });
       } else if (has(e, 'by')) {
         // a count or an amount used up (a sip): the field's value plus `by`, within its bounds; nothing balances it
-        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
         const to = Number.isSafeInteger(held) && Number.isSafeInteger(e.by) ? (held as number) + e.by! : null;
-        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: e.field! });
-        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to });
+        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to });
       } else {
       const to = stored(def, arg(e.to, args));
-      out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });
+      out.push({ change: 'set', node: self, field: field, n: def.n, ...(to === undefined ? {} : { to }) });
       }
     } else if (e.change === 'transfer') {
       const m = measure(kinds, work, self, args, e);
       if ('bad' in m) return refuse(i, 'bad_input', { what: m.bad, ...m.detail });
-      if (m.room !== null && m.moved > m.room) return refuse(i, 'no_room', { node: m.into, field: m.field, room: m.room, amount: m.moved });
-      out.push({ change: 'set', node: m.from, field: m.field, n: m.fromDef.n, to: m.there - m.moved, by: -m.moved });
-      out.push({ change: 'set', node: m.into, field: m.field, n: m.intoDef.n, to: m.has + m.moved, by: m.moved });
+      if (m.room !== null && m.moved > m.room) return refuse(i, 'no_room', { node: m.into, field: m.intoField, room: m.room, amount: m.moved });
+      out.push({ change: 'set', node: m.from, field: m.field, n: m.fromDef.n, to: m.there - m.moved, by: 0 - m.moved });
+      out.push({ change: 'set', node: m.into, field: m.intoField, n: m.intoDef.n, to: m.has + m.moved, by: m.moved });
     } else if (e.change === 'link' || e.change === 'unlink') {
       const def = has(entry.links, e.link ?? '') ? entry.links![e.link!] : undefined;
       if (!def) return refuse(i, 'bad_input', { what: 'no_such_link', link: e.link ?? null });

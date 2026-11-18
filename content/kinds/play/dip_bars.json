@@ -1,0 +1,38 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:dip_bars",
+  "owner": "thing",
+  "points": {
+    "between": { "role": "stand", "at_mm": [0, 0, 0], "yaw_mdeg": 0 },
+    "left_bar": { "role": "grip", "at_mm": [-300, 1200, 0] },
+    "right_bar": { "role": "grip", "at_mm": [300, 1200, 0] }
+  },
+  "geometry": { "bounds_mm": [700, 1250, 1200] },
+  "forms": {
+    "dip": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "between" },
+        { "step": "move", "move": "press", "at": "left_bar" },
+        { "step": "wait", "us": 20000000 }
+      ],
+      "effects": []
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:dip_bars",
+    "shape": {"shapes":[{"kind":"box","at":[-300,1200,0],"size":[50,50,1200],"color":"#5d646b","collide":false},{"kind":"box","at":[300,1200,0],"size":[50,50,1200],"color":"#5d646b","collide":false},{"kind":"cyl","at":[-300,600,-550],"r":40,"h":1200,"color":"#5d646b"},{"kind":"cyl","at":[300,600,-550],"r":40,"h":1200,"color":"#5d646b"},{"kind":"cyl","at":[-300,600,550],"r":40,"h":1200,"color":"#5d646b"},{"kind":"cyl","at":[300,600,550],"r":40,"h":1200,"color":"#5d646b"}],"tags":["eden","gym","sport","dip-bars"]}
+  },
+  "text": {
+    "card": "Parallel dip bars at 1.2 m: grip both and lower yourself between them.",
+    "gym": "gym",
+    "parallel_bars": "parallel bars",
+    "exercise": "exercise",
+    "workout": "workout"
+  },
+  "card": { "text": "card", "category": "gym", "synonyms": ["parallel_bars", "exercise", "workout"] }
+}

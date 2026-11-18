@@ -1,0 +1,118 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:sleeping_mat (SA-X24): lie or sleep on it and get up; roll it up when nobody is on it, and unroll it to use it again.",
+  "cases": [
+    {
+      "name": "sleeping_mat_sleep_get_up_lie",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": false } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sleep", "args": { "place": "mat" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "mat" } },
+              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" }
+            ],
+            "events": [
+              { "event": "eden:fell_asleep", "node": "t1", "changes": [0] },
+              { "event": "eden:lying_in", "node": "t1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sleep", "args": { "place": "mat" } },
+          "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "slot_taken", "need": 1, "fix": null }
+        },
+        {
+          "act": { "this": "t1", "form": "get_up" },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "unlink", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" },
+              { "change": "reparent", "node": "b1", "to": { "node": "room" } }
+            ],
+            "events": [
+              { "event": "eden:got_up", "node": "t1", "changes": [0] },
+              { "event": "eden:stood_by", "node": "t1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "lie", "args": { "place": "mat" } },
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "mat" } },
+              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" }
+            ],
+            "events": [
+              { "event": "eden:lay_down", "node": "t1", "changes": [0] },
+              { "event": "eden:lying_in", "node": "t1", "changes": [1] }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:sleeping_mat",
+          "fields": { "rolled": false },
+          "slots": { "mat": ["b1"] },
+          "links": { "sleeper": ["b1"] }
+        }
+      }
+    },
+    {
+      "name": "sleeping_mat_roll_up_unroll",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "t1"] },
+          "t1": { "kind": "eden:sleeping_mat" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "roll_up" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "rolled", "n": 1, "to": 1 }],
+            "events": [{ "event": "eden:rolled_up", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "sleep", "args": { "place": "mat" } },
+          "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "field_differs", "need": 0 }
+        },
+        {
+          "act": { "this": "t1", "form": "unroll" },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "rolled", "n": 1, "to": 0 }],
+            "events": [{ "event": "eden:unrolled", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:sleeping_mat", "fields": { "rolled": 0 } } }
+    }
+  ]
+}

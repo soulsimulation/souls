@@ -1,0 +1,87 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:stool (SA-X24): sit on its one seat; spin it, and it stops by itself three seconds later.",
+  "cases": [
+    {
+      "name": "stool_sit_free",
+      "act": { "this": "t1", "form": "sit", "args": { "seat": "seat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:stool", "slots": { "seat": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "stool_sit_when_full",
+      "act": { "this": "t1", "form": "sit", "args": { "seat": "seat" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:stool", "slots": { "seat": ["o0"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "detail": { "node": "t1", "slot": "seat" }, "fix": null }
+    },
+    {
+      "name": "stool_spin_still",
+      "act": { "this": "t1", "form": "spin" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:stool" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "stool_spin_while_spinning",
+      "act": { "this": "t1", "form": "spin" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:stool", "fields": { "spinning": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": { "field": "spinning", "found": true, "wanted": { "is": false } },
+        "fix": null
+      }
+    },
+    {
+      "name": "stool_stop_by_its_timer",
+      "act": { "this": "t1", "form": "stop" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:stool", "fields": { "spinning": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    }
+  ]
+}
