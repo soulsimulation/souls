@@ -25,9 +25,10 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REQUIRED_STEPS, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 import { SERVER_SHARDS } from './server-test-files.mjs';
+import { LAUNCHER_PIECES } from './launcher-test-files.mjs';
 
 // The qualify matrix. `steps` are the gate steps that make a job relevant, and the job runs the same command as that
-// step in tools/test-harness/one-validation.sh (web: V4-web, launcher: V3-launcher-unit, client-cli: V3-client-cli);
+// step in tools/test-harness/one-validation.sh (web: V4-web, launcher-*: V3-launcher-unit, client-cli: V3-client-cli);
 // `assets` says whether the job pulls media first. Keep this list and the case block in ci.yml in step;
 // ci-scope.test.mjs checks that every step the scope map can select has a job.
 // `heavy: true` sends the job to the self-hosted pool CI_HEAVY_RUNNER when that variable is set (runnerFor, ci.yml's
@@ -38,7 +39,8 @@ export const JOBS = [
   { name: 'types-web', kind: 'types-web', assets: true, steps: ['V1-types', 'V2-build-root', 'V2-build-worlds', 'V3-bundle'], paths: /^tools\/test-harness\/bundle-budget\// },
   { name: 'packages', kind: 'packages', assets: true, heavy: true, steps: ['V3-packages', 'V3-walk'] },
   { name: 'web', kind: 'web', assets: true, steps: ['V4-web'] },
-  { name: 'launcher', kind: 'launcher', assets: true, heavy: true, steps: ['V3-launcher-unit'] },
+  // the launcher unit tests in LAUNCHER_PIECES duration-balanced pieces (launcher-test-files.mjs), each file in exactly one
+  ...Array.from({ length: LAUNCHER_PIECES }, (_, piece) => ({ name: `launcher-${piece}`, kind: 'launcher', piece, assets: true, heavy: true, steps: ['V3-launcher-unit'] })),
   { name: 'client-cli', kind: 'client-cli', assets: true, steps: ['V3-client-cli'] },
   { name: 'native', kind: 'native', assets: true, steps: ['V3-mars-engine'] },
   { name: 'latency', kind: 'latency', assets: false, steps: ['V5-server-full'] },

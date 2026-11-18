@@ -37,7 +37,7 @@ as covered only when all of these hold (`CI_COVERED` and `ciEvidence` in `releas
 - the CI definitions it depends on are identical at the candidate and at the baseline, the live release: `ci.yml`
   (without comments and the `repo` and `smoke` jobs, which run no contract step), `.github/scripts/ci-scope.mjs`, and
   per step the `typecheck` or `test:client` script in `package.json`, `tools/test-harness/web-suite.sh` and
-  `web-loader.mjs`, or `.github/scripts/server-test-files.mjs`. The gate runs from the candidate's harness, so a
+  `web-loader.mjs`, `.github/scripts/launcher-test-files.mjs` or `.github/scripts/server-test-files.mjs`. The gate runs from the candidate's harness, so a
   candidate that weakens CI (`|| true`, `continue-on-error`, a test-name filter, an `echo` of the command) cannot have
   it counted; any change to these files since the baseline runs the affected steps on Modal for that release;
 - each covered job's log has complete node test summaries, and every test it skipped or marked todo is in
@@ -45,7 +45,7 @@ as covered only when all of these hold (`CI_COVERED` and `ciEvidence` in `releas
   the step to Modal, whose comparison reports it.
 
 A run that went green on a re-run of failed jobs counts (it ran at this sha); `ciEvidence.run.attempt` records it.
-CI runs everything a covered step needs: the `launcher` job installs the gate's pinned restic for
+CI runs everything a covered step needs: each `launcher-*` job installs the gate's pinned restic for
 `backup-restic.test.mjs` (x86_64 runners; elsewhere it skips and the step goes to Modal) and the `web` job builds the
 root web app before the web tests, as V2-build-root does in the gate. A harness test fails if `ci.yml` drifts from the
 table.
@@ -55,7 +55,7 @@ table.
 | V1-types | CI `types-web` | same command, `pnpm typecheck` |
 | V2-build-root | CI `types-web` | same web build |
 | V3-client-cli | CI `client-cli` | same command, `pnpm test:client` |
-| V3-launcher-unit | CI `launcher` | same command |
+| V3-launcher-unit | CI `launcher-0` … `launcher-<LAUNCHER_PIECES-1>` | the same files, split by measured time |
 | V4-web | CI `web` | same script, `web-suite.sh` |
 | V5-server-full | CI `server-0` … `server-<SERVER_SHARDS-1>` and `latency` | the same recursive server inventory, sharded |
 | V2-build-worlds | Modal | CI builds only the root base |

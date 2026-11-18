@@ -838,7 +838,7 @@ const here = p => readFileSync(new URL(p, import.meta.url), 'utf8');
 const tapLog = (names = ['works'], skipped = []) => [...names.map((n, i) => `2026-11-09T02:37:10.7160585Z ok ${i + 1} - ${n}`),
   ...skipped.map((n, i) => `2026-11-09T02:37:10.7160585Z ok ${names.length + i + 1} - ${n} # SKIP fixture`),
   `2026-11-09T02:37:10.7Z # tests ${names.length + skipped.length}`, '2026-11-09T02:37:10.7Z # pass 1', `2026-11-09T02:37:10.7Z # skipped ${skipped.length}`, '2026-11-09T02:37:10.7Z # todo 0'].join('\n');
-const allJobs = { 'types-web': 'success', 'client-cli': 'success', launcher: 'success', web: 'success', latency: 'success', 'server-0': 'success', 'server-1': 'success', 'server-2': 'success', packages: 'success', native: 'success' };
+const allJobs = { 'types-web': 'success', 'client-cli': 'success', 'launcher-0': 'success', 'launcher-1': 'success', web: 'success', latency: 'success', 'server-0': 'success', 'server-1': 'success', 'server-2': 'success', packages: 'success', native: 'success' };
 function fakeGithub({ sha, runs, jobs, logs = {} }) {
   const calls = [];
   const ids = {};
@@ -847,6 +847,7 @@ function fakeGithub({ sha, runs, jobs, logs = {} }) {
     const id = Number(/\/runs\/(\d+)\/jobs/.exec(path)?.[1]); return { jobs: Object.entries(jobs[id] || {}).map(([name, conclusion], i) => { ids[1000 + i] = name; return { id: 1000 + i, name, conclusion }; }) }; };
   const log = id => { const name = ids[id]; if (logs[name] instanceof Error) throw logs[name]; return logs[name] ?? tapLog(); };
   const files = { '.github/workflows/ci.yml': here('../../.github/workflows/ci.yml'), '.github/scripts/server-test-files.mjs': 'export const SERVER_SHARDS = 3;\n',
+    '.github/scripts/launcher-test-files.mjs': 'export const LAUNCHER_PIECES = 2;\n',
     '.github/scripts/ci-scope.mjs': '// picker\n', 'package.json': here('../../package.json'), 'tools/test-harness/web-suite.sh': here('./web-suite.sh'), 'tools/test-harness/web-loader.mjs': '// loader\n' };
   const base = { ...files };
   return { api, log, calls, files, base, args: (extra = {}) => ({ repo: 'o/r', api, log, file: p => files[p] ?? null, baselineFile: p => base[p] ?? null, ...extra }) };
@@ -858,7 +859,7 @@ test('CI evidence: the covered table is exact, and ci.yml still runs each covere
   const ci = here('../../.github/workflows/ci.yml'), names = new Set(JOBS.map(j => j.name));
   for (const [step, c] of Object.entries(CI_COVERED)) {
     assert.ok(ci.includes(c.command), `${step}: ci.yml runs ${c.command}`);
-    for (const j of c.jobs) assert.ok(j === 'server-*' ? names.has('server-0') : names.has(j), `${step}: CI job ${j}`);
+    for (const j of c.jobs) assert.ok(names.has(j.replace('*', '0')), `${step}: CI job ${j}`);
   }
   // the package.json scripts CI calls are the gate's commands today (one-validation.sh)
   const scripts = JSON.parse(here('../../package.json')).scripts, ov = here('./one-validation.sh').replaceAll(' --test-reporter=tap', '');
@@ -879,6 +880,9 @@ test('CI evidence: only a successful push-to-main or merge_group ci.yml run at t
   const shard = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: { ...allJobs, 'server-2': 'cancelled' } } });
   const s2 = ciEvidence(sha, shard.args());
   assert.ok(!s2.covered.includes('V5-server-full')); assert.match(s2.notCovered['V5-server-full'], /server-2=cancelled/);
+  // so does a launcher piece the run lacks
+  const { 'launcher-1': _, ...noPiece } = allJobs, piece = ciEvidence(sha, fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: noPiece } }).args());
+  assert.ok(!piece.covered.includes('V3-launcher-unit')); assert.match(piece.notCovered['V3-launcher-unit'], /launcher-1=absent/);
   // a path-scoped merge-group run covers what it ran
   const mg = fakeGithub({ sha, runs: [ciRun(sha, { id: 8, event: 'merge_group', head_branch: 'gh-readonly-queue/main/pr-1' })], jobs: { 8: { 'types-web': 'success', web: 'success' } } });
   assert.deepEqual(ciEvidence(sha, mg.args()).covered, ['V1-types', 'V2-build-root', 'V4-web']);
@@ -903,7 +907,7 @@ test('CI evidence is bound to the baseline\'s CI definitions: each weakening pro
   const workflowProbes = {
     'web-suite.sh || true': f => { f['.github/workflows/ci.yml'] = yml(f).replace('bash tools/test-harness/web-suite.sh', 'bash tools/test-harness/web-suite.sh || true'); },
     'continue-on-error': f => { f['.github/workflows/ci.yml'] = yml(f).replace('    timeout-minutes: ${{ matrix.kind', '    continue-on-error: true\n    timeout-minutes: ${{ matrix.kind'); },
-    'test name filter': f => { f['.github/workflows/ci.yml'] = yml(f).replace('node --test --test-concurrency=1 tools/world-launcher/*.test.mjs', 'node --test --test-name-pattern=nothing --test-concurrency=1 tools/world-launcher/*.test.mjs'); },
+    'test name filter': f => { f['.github/workflows/ci.yml'] = yml(f).replace('node --test --test-concurrency=1 $files', 'node --test --test-name-pattern=nothing --test-concurrency=1 $files'); },
     'echo of the command': f => { f['.github/workflows/ci.yml'] = yml(f).replace('              pnpm typecheck\n', '              echo "pnpm typecheck"\n'); },
   };
   for (const [name, edit] of Object.entries(workflowProbes)) {
@@ -916,6 +920,7 @@ test('CI evidence is bound to the baseline\'s CI definitions: each weakening pro
   one(f => { f['tools/test-harness/web-suite.sh'] += 'exit 0\n'; }, 'V4-web', /web-suite\.sh/);
   one(f => { f['tools/test-harness/web-loader.mjs'] += '// changed\n'; }, 'V4-web', /web-loader\.mjs/);
   one(f => { f['.github/scripts/server-test-files.mjs'] = 'export const SERVER_SHARDS = 4;\n'; }, 'V5-server-full', /server-test-files\.mjs/);
+  one(f => { f['.github/scripts/launcher-test-files.mjs'] = 'export const LAUNCHER_PIECES = 1;\n'; }, 'V3-launcher-unit', /launcher-test-files\.mjs/);
   one(f => { f['package.json'] = JSON.stringify({ scripts: { ...JSON.parse(f['package.json']).scripts, typecheck: 'true' } }); }, 'V1-types', /package\.json#typecheck/);
   one(f => { f['package.json'] = JSON.stringify({ scripts: { ...JSON.parse(f['package.json']).scripts, 'test:client': 'true' } }); }, 'V3-client-cli', /package\.json#test:client/);
   // the job picker and a missing baseline definition drop everything; comments and the repo job do not count
@@ -930,7 +935,7 @@ test('CI evidence refuses a covered job whose log shows an unquarantined skip or
   const real = here('../world-launcher/backup-restic.test.mjs').includes("'backup, version history, restore by night, retention, off-box copy'");
   assert.ok(real, 'the launcher test the CI job used to skip');
   const skip = 'backup, version history, restore by night, retention, off-box copy';
-  const g = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs }, logs: { launcher: tapLog(['works'], [skip]), 'server-1': '2026-11-09T02:37:10.7Z no tests ran\n' } });
+  const g = fakeGithub({ sha, runs: [ciRun(sha)], jobs: { 7: allJobs }, logs: { 'launcher-1': tapLog(['works'], [skip]), 'server-1': '2026-11-09T02:37:10.7Z no tests ran\n' } });
   const r = ciEvidence(sha, g.args());
   assert.match(r.notCovered['V3-launcher-unit'], /unquarantined skip "backup, version history/);
   assert.match(r.notCovered['V5-server-full'], /server-1: incomplete node test summaries/);

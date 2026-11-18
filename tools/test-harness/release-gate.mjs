@@ -764,7 +764,8 @@ export const CI_COVERED = {
   'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck', defs: ['package.json#typecheck'], tests: false },
   'V2-build-root': { jobs: ['types-web'], command: 'pnpm --filter @souls/web build', defs: [], tests: false },
   'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client', defs: ['package.json#test:client'], tests: true },
-  'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs tools/world-launcher/soul/*.test.mjs', defs: [], tests: true },
+  // every launcher piece (LAUNCHER_PIECES at the candidate, .github/scripts/launcher-test-files.mjs)
+  'V3-launcher-unit': { jobs: ['launcher-*'], command: 'files=$(node .github/scripts/launcher-test-files.mjs "$LAUNCHER_PIECE")', defs: ['.github/scripts/launcher-test-files.mjs'], tests: true },
   'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh', defs: ['tools/test-harness/web-suite.sh', 'tools/test-harness/web-loader.mjs'], tests: true },
   // every server shard (SERVER_SHARDS at the candidate, .github/scripts/server-test-files.mjs) plus the latency job
   'V5-server-full': { jobs: ['server-*', 'latency'], command: "import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';",
@@ -839,7 +840,9 @@ export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id)
   }
   const conclusion = Object.fromEntries(jobs.map(j => [j.name, j.conclusion])), jobId = Object.fromEntries(jobs.map(j => [j.name, j.id]));
   const ciYml = ciDefinition('ci.yml', file) || '';
-  const shards = Number(/export const SERVER_SHARDS = (\d+)/.exec(file('.github/scripts/server-test-files.mjs') || '')?.[1]);
+  // a job pattern `x-*` stands for every one of the commit's N jobs x-0 … x-<N-1>, N read from the script that splits them
+  const count = (path, name) => Number(new RegExp(`export const ${name} = (\\d+)`).exec(file(path) || '')?.[1]);
+  const split = { 'server-*': count('.github/scripts/server-test-files.mjs', 'SERVER_SHARDS'), 'launcher-*': count('.github/scripts/launcher-test-files.mjs', 'LAUNCHER_PIECES') };
   const drifted = name => { const now = ciDefinition(name, file), then = ciDefinition(name, baselineFile); return now === null || then === null || now !== then; };
   const logs = new Map(), readLog = name => {
     if (!logs.has(name)) { try { logs.set(name, ciLogSkips(log(jobId[name]))); } catch (e) { logs.set(name, { error: String(e.message).split('\n')[0] }); } }
@@ -853,8 +856,8 @@ export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id)
     if (!ciYml.includes(c.command)) { notCovered[step] = `the commit's ci.yml does not run \`${c.command}\``; continue; }
     const changed = [...CI_COMMON_DEFINITIONS, ...c.defs].filter(drifted);
     if (changed.length) { notCovered[step] = `CI definitions differ from the baseline's: ${changed.join(', ')}`; continue; }
-    const names = c.jobs.flatMap(j => j === 'server-*' ? (Number.isInteger(shards) && shards > 0 ? Array.from({ length: shards }, (_, i) => `server-${i}`) : [null]) : [j]);
-    if (names.includes(null)) { notCovered[step] = 'SERVER_SHARDS unreadable at the commit'; continue; }
+    const names = c.jobs.flatMap(j => j in split ? (Number.isInteger(split[j]) && split[j] > 0 ? Array.from({ length: split[j] }, (_, i) => j.replace('*', i)) : [null]) : [j]);
+    if (names.includes(null)) { notCovered[step] = 'SERVER_SHARDS or LAUNCHER_PIECES unreadable at the commit'; continue; }
     const bad = names.filter(n => conclusion[n] !== 'success');
     if (bad.length) { notCovered[step] = `job(s) not successful in run ${run.id}: ${bad.map(n => `${n}=${conclusion[n] ?? 'absent'}`).join(', ')}`; continue; }
     if (c.tests) {

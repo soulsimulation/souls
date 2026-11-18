@@ -26,7 +26,7 @@ test('the shards plus latency cover nested server tests exactly once', t => {
 
 test('the real inventory: same files as the two shards, every shard used, slowest shard under 12 minutes measured', t => {
   const all = serverTestFiles(), shards = serverShards(all), flat = shards.flatMap((s) => s.files);
-  assert.equal(shards.length, SERVER_SHARDS); assert.ok(SERVER_SHARDS >= 4 && SERVER_SHARDS <= 6);
+  assert.equal(shards.length, SERVER_SHARDS); assert.ok(SERVER_SHARDS >= 4 && SERVER_SHARDS <= 8);
   assert.equal(new Set(flat).size, flat.length);
   assert.deepEqual([...flat].sort(), twoShardUnion(all), 'union equals the old two shards\' file sets');
   assert.ok(!flat.includes(`src/${LATENCY_TEST}`), 'latency stays in its own job');

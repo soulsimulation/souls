@@ -192,8 +192,17 @@ is not a gate step, so the gate's suite tree and cached baseline don't change.
 `tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
 `ci-ok`. Like `soul-actions`, it is not a gate step.
 
+**Launcher and server pieces.** The launcher unit tests (`tools/world-launcher/*.test.mjs` and
+`tools/world-launcher/soul/*.test.mjs`, about 24 minutes serial) run as the CI jobs `launcher-0` … `launcher-<N-1>`
+(`LAUNCHER_PIECES` in `.github/scripts/launcher-test-files.mjs`), split by measured file time
+(`launcher-test-durations.json`); the recursive server inventory runs the same way as `server-0` … `server-<N-1>`
+(`SERVER_SHARDS` in `server-test-files.mjs`). Every piece is selected wherever one is, and `ci-ok` needs them all. A
+new test file needs no assignment: it goes to the lightest piece, and each piece's job fails unless the pieces hold
+every file exactly once (`launcher-test-files.test.mjs` and `server-test-files.test.mjs` check the same in the `repo`
+job). When pieces drift apart, regenerate the durations from the jobs' logs (the scripts' headers say how).
+
 **Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
-whose hosted median is over about 8 minutes: `packages`, `launcher`, `soul-actions`) run on the runners named by the
+whose hosted median is over about 8 minutes: `packages`, the `launcher-*` pieces, `soul-actions`) run on the runners named by the
 repository variable `CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`, or a JSON array of labels). Every
 other leg, and every leg while the variable is unset, runs on GitHub-hosted runners, so one run uses both pools at
 once. The browser `smoke` leg and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a
