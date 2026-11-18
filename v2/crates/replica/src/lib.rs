@@ -4,6 +4,7 @@
 // No float in a verdict (K14, #2648; v2/tools/arch/README.md): a module of drawing helpers allows it by name.
 #![deny(clippy::float_arithmetic)]
 
+pub mod activity;
 pub mod apply;
 pub mod audience;
 pub mod bodies;
@@ -11,6 +12,7 @@ pub mod directory;
 pub mod durability;
 pub mod effects;
 pub mod encode;
+pub mod group;
 pub mod hash;
 pub mod host;
 pub mod ids;
