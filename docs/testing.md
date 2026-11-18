@@ -134,7 +134,7 @@ The engine's own browser tests are in `mars/viewer/e2e/`.
 ## CI window
 
 Per-PR CI (`ci.yml`) shares GitHub's hosted-runner cap: 60 concurrent jobs, measured on 17 November (four times that
-evening 60 ran at once while 15 to 34 more sat queued, up to 8.5 minutes). A server change selects about ten
+evening 60 ran at once while 20 to 34 more sat queued, some for up to 8.5 minutes). A server change selects about ten
 heavy legs, so with several workers pushing, unready PRs used to starve the merge path. Pull request runs are
 therefore **windowed**:
 
