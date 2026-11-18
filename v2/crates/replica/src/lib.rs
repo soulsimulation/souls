@@ -16,6 +16,7 @@ pub mod ids;
 pub mod intents;
 pub mod pose;
 pub mod query;
+pub mod rules;
 pub mod sync;
 pub mod time;
 pub mod tree;
