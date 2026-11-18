@@ -378,6 +378,28 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   members or not: each member is unlinked first (event `released`) and no body moves. Nothing waits for a time: hours
   are a schedule (SA-F16). The example is `packages/form-rules/cases/kinds/test/class.json`.
 
+- **Between two Souls** (proposed: a `pair` section; SA-G4, [#2876](https://github.com/soulsimulation/souls/issues/2876)):
+  give, hug, handshake, high five, dance, push the swing. Bodies touch only inside an activity both joined. A pair has
+  two `required` roles. The offer is a proposal for one Soul (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)):
+  its `invited` link names who may accept, a `proposer` link who may offer. The asker enters its role by its own act;
+  the invited Soul accepts by entering the other, while the countdown (`now.ends`) is above 0. At 0, with nobody
+  accepting, the world's timer form (`expires`) removes the offer: the asker is released (`released`) and the form's
+  event names the outcome. A give names the link to its thing (`gives`): the accepting form moves it into the
+  accepter's free hand in the same batch (`"what": {"link": "offered"}`), both sides or neither (E24,
+  [#2793](https://github.com/soulsimulation/souls/issues/2793)). `contact` states, in the activity's own frame, each
+  role's move, the point its effector touches in whole millimetres and the beat the contact lands on; a beat is
+  `beat_us` whole microseconds (B8, [#2740](https://github.com/soulsimulation/souls/issues/2740)). The list is closed:
+  `invited`, `accept`, `expires`, `gives`, `beat_us`, `contact`.
+
+  ```json
+  "pair": { "invited": "invited", "accept": "accept", "expires": "lapse", "beat_us": 500000,
+            "contact": [{ "role": "asker", "move": "press", "contact_mm": [-10, 1000, 0], "beat": 1 },
+                        { "role": "partner", "move": "press", "contact_mm": [10, 1000, 0], "beat": 1 }] }
+  ```
+
+  The examples are test kinds (`give`, `hug`, `handshake`, `high_five`, `dance`, `push_swing` in
+  `packages/form-rules/cases/kinds/test/`).
+
 ## A move
 
 A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
