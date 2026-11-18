@@ -254,6 +254,11 @@ impl NodeRef<'_> {
         self.tree.place_of(self.rec)
     }
 
+    /// Its hash as last sealed (K5), covering its children's: none once changed and not sealed since (R5 reads it).
+    pub fn sealed(&self) -> Option<Hash> {
+        self.rec.hash
+    }
+
     /// The motion its last sample gave it, while it moves.
     pub fn moved(&self) -> Option<Moved> {
         match self.rec.at {
@@ -471,6 +476,11 @@ impl Tree {
     /// The dense array of moving nodes. A free entry is `None`.
     pub fn moving(&self) -> &[Option<Moving>] {
         &self.moving
+    }
+
+    /// The pending timers by id (T6 rule 15), each with the node that owns it.
+    pub fn timers(&self) -> &BTreeMap<Id, TimerState> {
+        &self.timers
     }
 
     /// The time effects applied, in order (T5).

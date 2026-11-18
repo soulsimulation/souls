@@ -37,6 +37,8 @@
 // iterated, so their order reaches no route.
 #![allow(clippy::disallowed_types)]
 
+pub mod way;
+
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;
