@@ -7,11 +7,12 @@
 #
 #   sudo bash tools/ci/setup-runners.sh --token <registration token> [--count 4] [--user <runner user>] \
 #        [--label souls-ci] [--prefix souls-ci] [--repo soulsimulation/souls] [--root /opt] [--version <x.y.z>] [--no-playwright] \
-#        [--cpus <list> | --cpus-from <instance>,<instance>,...] [--dry-run]
+#        [--cpus <list> | --cpus-from <instance>,<instance>,... | --cpus-except <instance>,<instance>,...] [--dry-run]
 #
 # --cpus pins the instances' services to those CPUs (systemd CPUAffinity=, a drop-in; "0-5,24-29"). --cpus-from takes the
 # union of the CPUs other instances already run on (their service's live affinity, else its CPUAffinity= or AllowedCPUs=),
-# as the wide timed runner does (docs/testing.md, "Wide runner"). --dry-run prints what it would do and changes nothing.
+# as the wide timed runner does (docs/testing.md, "Wide runner"); --cpus-except takes every other CPU of the host, as the
+# light runners do beside the timed ones. --dry-run prints what it would do and changes nothing.
 #
 # From a workstation, without copying the file there (the token is minted with your gh login, valid for one hour):
 #
@@ -22,14 +23,14 @@
 set -euo pipefail
 
 TOKEN="" COUNT=4 RUNNER_USER="ci-runner" LABEL="souls-ci" PREFIX="souls-ci" REPO="soulsimulation/souls" ROOT="/opt" VERSION="" PLAYWRIGHT=1
-CPUS_ARG="" CPUS_FROM="" DRY=0
+CPUS_ARG="" CPUS_FROM="" CPUS_OPT="--cpus-from" EXCEPT=0 DRY=0
 # The Playwright the repository locks (pnpm-lock.yaml); its install-deps knows each supported OS's package names.
 PLAYWRIGHT_VERSION="1.64.1"
 # Tests only (setup-runners.test.mjs): a directory standing in for / when reading /etc, /proc and /sys and writing units.
 SYS="${SETUP_RUNNERS_SYSROOT:-}"
 UNIT_DIR="$SYS/etc/systemd/system"
 
-usage() { sed -n '2,21p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,22p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; }
 die() { echo "setup-runners: $*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
@@ -44,7 +45,8 @@ while [ $# -gt 0 ]; do
     --version) VERSION="${2:-}"; shift 2 ;;
     --no-playwright) PLAYWRIGHT=0; shift ;;
     --cpus) CPUS_ARG="${2:-}"; shift 2 ;;
-    --cpus-from) CPUS_FROM="${2:-}"; shift 2 ;;
+    --cpus-from|--cpus-except) [ -z "$CPUS_FROM" ] || die "--cpus-from and --cpus-except: one or the other"
+      CPUS_OPT="$1"; [ "$1" = --cpus-except ] && EXCEPT=1; CPUS_FROM="${2:-}"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1 (--help lists them)" ;;
@@ -56,9 +58,9 @@ done
 [[ "$RUNNER_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "--user must be a plain user name"
 [[ "$PREFIX" =~ ^[A-Za-z0-9_-]+$ && "$LABEL" =~ ^[A-Za-z0-9_-]+$ ]] || die "--prefix and --label: letters, digits, - and _"
 [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "--repo must be owner/name"
-[ -z "$CPUS_ARG" ] || [ -z "$CPUS_FROM" ] || die "--cpus and --cpus-from: one or the other"
+[ -z "$CPUS_ARG" ] || [ -z "$CPUS_FROM" ] || die "--cpus and $CPUS_OPT: one or the other"
 [ -z "$CPUS_ARG" ] || [[ "$CPUS_ARG" =~ ^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$ ]] || die "--cpus must be a CPU list such as 0-5,24-29"
-[ -z "$CPUS_FROM" ] || [[ "$CPUS_FROM" =~ ^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*$ ]] || die "--cpus-from must be instance names separated by commas"
+[ -z "$CPUS_FROM" ] || [[ "$CPUS_FROM" =~ ^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*$ ]] || die "$CPUS_OPT must be instance names separated by commas"
 [ "$DRY" = 1 ] || [ "$(id -u)" -eq 0 ] || die "run as root (sudo bash $0 ...)"
 [ "$(uname -s)" = Linux ] || die "Linux only"
 case "$(uname -m)" in x86_64) ARCH=x64 ;; aarch64|arm64) ARCH=arm64 ;; *) die "unsupported CPU $(uname -m)" ;; esac
@@ -104,7 +106,7 @@ instance_unit() {
 # CPUAffinity= or AllowedCPUs=. A set equal to every CPU is no pinning at all, and is refused.
 instance_cpus() {
   local unit pid v p
-  unit="$(instance_unit "$1")" || die "--cpus-from: no runner service named $1 (looked under $ROOT and in systemd's units)"
+  unit="$(instance_unit "$1")" || die "$CPUS_OPT: no runner service named $1 (looked under $ROOT and in systemd's units)"
   pid="$(systemctl show -p MainPID --value "$unit" 2>/dev/null || true)"
   if [ -n "$pid" ] && [ "$pid" != 0 ]; then
     v="$(sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' "$SYS/proc/$pid/status" 2>/dev/null || true)"
@@ -114,7 +116,7 @@ instance_cpus() {
     v="$(systemctl show -p "$p" --value "$unit" 2>/dev/null | tr ' ' ',' || true)"
     if [ -n "$v" ] && [ "$(cpu_norm "$v")" != "$ALL_CPUS" ]; then echo "$(cpu_norm "$v") $p"; return 0; fi
   done
-  die "--cpus-from: $1 ($unit) is not pinned to CPUs of its own; pass --cpus instead"
+  die "$CPUS_OPT: $1 ($unit) is not pinned to CPUs of its own; pass --cpus instead"
 }
 
 # ---- the OS, first: it decides whether Playwright's browser packages can be installed at all
@@ -139,6 +141,11 @@ elif [ -n "$CPUS_FROM" ]; then
     acc="$acc,$got"
   done
   CPUS="$(cpu_norm "$acc")"
+  if [ "$EXCEPT" = 1 ]; then
+    # every online CPU outside the named instances' union
+    CPUS="$(comm -23 <(cpu_expand "$ALL_CPUS" | sort -u) <(cpu_expand "$CPUS" | sort -u) | sort -n | cpu_compress)"
+    [ -n "$CPUS" ] || die "--cpus-except: $CPUS_FROM use every CPU of this host; none is left"
+  fi
 fi
 if [ -n "$CPUS" ]; then
   echo "== pinning to CPUs $CPUS: $(physical_cores "$CPUS") physical cores, $(cpu_expand "$CPUS" | wc -l | tr -d ' ') logical"

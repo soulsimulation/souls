@@ -82,6 +82,9 @@ jobs:
           DRAFT: ${{ github.event.pull_request.draft || false }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           GREEN: ${{ steps.green.outputs.green || steps.queued.outputs.covered || false }}
+          # Administration: read, to find an idle souls-light runner for the light jobs (docs/testing.md#self-hosted-runners).
+          # Unset, unreachable or refused: every light job runs hosted.
+          CI_RUNNERS_TOKEN: ${{ secrets.CI_RUNNERS_TOKEN }}
         # A push to main and a manual run check everything (FULL_EVENTS); the merge train reads those runs.
         run: node .github/scripts/ci-scope.mjs --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --draft "$DRAFT" --labels "$LABELS" --green-at-head "$GREEN"
 
@@ -110,6 +113,7 @@ jobs:
           .github/scripts/gate-renames.test.mjs
           .github/scripts/server-test-files.test.mjs
           .github/scripts/server-test-durations.test.mjs
+          .github/scripts/test-pieces.test.mjs
           .github/scripts/guards.test.mjs
           .github/scripts/merge-train.test.mjs
           .github/scripts/restack.test.mjs
@@ -130,8 +134,10 @@ jobs:
     # CI_HEAVY_RUNNER when it is set; every other job, and every job while it is unset, runs on ubuntu-latest, so a run
     # uses both pools at once. The value is one runner label (`souls-ci`) or a JSON array (`["self-hosted","souls-ci"]`).
     # `native` is never heavy: its camera perf budget is wall time, and a shared host under load misses it (#1162).
-    runs-on: ${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}
-    # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
+    # A light job (soul-tools) carries `runner: souls-light` only when the scope job found an idle online runner with that
+    # label (ci-scope.mjs assignLight); otherwise it has none and runs hosted. The steps never depend on the runner.
+    runs-on: ${{ matrix.runner || (matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER)) || 'ubuntu-latest' }}
+    # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~8 minutes each.
     timeout-minutes: ${{ matrix.kind == 'server' && 45 || 60 }}
     strategy:
       fail-fast: false
@@ -166,6 +172,7 @@ jobs:
         env:
           CHECK_KIND: ${{ matrix.kind }}
           SERVER_SHARD: ${{ matrix.shard }}
+          TEST_PIECE: ${{ matrix.piece }}
           GOD_SKILL: ${{ matrix.godSkill || false }}
         shell: bash
         run: |
@@ -215,7 +222,10 @@ jobs:
                 bunzip2 -c "$RUNNER_TEMP/restic.bz2" > "$RUNNER_TEMP/bin/restic" && chmod 755 "$RUNNER_TEMP/bin/restic"
                 export PATH="$RUNNER_TEMP/bin:$PATH"; restic version
               fi
-              node --test --test-concurrency=1 tools/world-launcher/*.test.mjs tools/world-launcher/soul/*.test.mjs
+              # One of LAUNCHER_PIECES duration-balanced pieces of tools/world-launcher/*.test.mjs and
+              # tools/world-launcher/soul/*.test.mjs; the script fails unless the pieces hold every such file exactly once
+              files=$(node .github/scripts/test-pieces.mjs launcher "$TEST_PIECE")
+              node --test --test-concurrency=1 $files
               ;;
             client-cli)
               # V3-client-cli
@@ -226,16 +236,21 @@ jobs:
               ;;
             soul-actions)
               # #1061: not a gate step; picked by ci-scope.mjs from its own paths
-              node --test --test-concurrency=4 tools/soul-actions/*.test.mjs
+              # one of SOUL_ACTIONS_PIECES duration-balanced pieces of tools/soul-actions/*.test.mjs (test-pieces.mjs)
+              files=$(node .github/scripts/test-pieces.mjs soul-actions "$TEST_PIECE")
+              node --test --test-concurrency=4 $files
               ;;
             soul-tools)
               # #1111: not a gate step; picked by ci-scope.mjs from its own paths
               node --test --test-concurrency=4 tools/soul-runtime/*.test.mjs tools/soul-trace/*.test.mjs
               # the entry format and its gates (check, look, prove); picked by tools/entry, content and packages/form-rules
               node --test --test-concurrency=4 tools/entry/*.test.mjs
-              # form-rules' own tests and the launcher test that reads content/kinds: a change confined to the low-risk
-              # paths (ci-scope.mjs LOW_RISK) runs this job and no packages or launcher job
-              node --test --test-concurrency=4 packages/form-rules/src/*.test.ts tools/world-launcher/soul/card-search.test.mjs
+              # form-rules' own tests and the launcher tests that read content/kinds or form-rules: a change confined to
+              # the low-risk paths (ci-scope.mjs LOW_RISK, CONTENT) runs this job and no packages or launcher job
+              node --test --test-concurrency=4 packages/form-rules/src/*.test.ts tools/world-launcher/soul/card-search.test.mjs tools/world-launcher/soul/can-i.test.mjs tools/world-launcher/soul/how.test.mjs
+              # eden.mjs inlines packages/form-rules/src/rules.ts and the CLI's modules: a stale block fails here, since a
+              # low-risk run has no launcher job (the launcher's soul-home test checks the same)
+              node tools/world-launcher/soul/inline.mjs --check
               ;;
             server)
               # The server shard, then (on the shard with `godSkill`, ci-scope.mjs) the god-skill unit tests, replay

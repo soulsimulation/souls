@@ -7,7 +7,7 @@
 // leaves a full-scope run on main, which the merge train reads as proof that main is green (mainCiState in
 // merge-train.mjs). Pull request and merge_group runs stay scoped to their paths (a merge group's diff is every PR in it).
 // A diff confined to the low-risk paths (LOW_RISK: entry, content, form-rules, docs, changelog fragments) runs only
-// their own tests; any other diff goes through the path map, where paths no rule names (root files, the lockfile, mars/,
+// their own tests and the jobs of what reads them (a content PR: the fixed CONTENT_JOBS lane); any other diff goes through the path map, where paths no rule names (root files, the lockfile, mars/,
 // worlds/, vendor/, .github/, changes/ ...) run every job; docs and tools-only changes run none (ci-ok still reports).
 // No diff, an unreadable one or an empty one runs every job. Writes `matrix`, `any`, `scope` and `smoke` to $GITHUB_OUTPUT.
 // `smoke` (the browser local smoke, e2e/local-smoke.mjs) runs when apps/web, apps/server or e2e change, or with no diff.
@@ -20,25 +20,28 @@
 // ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>]` prints whether the
 // head's newest ci run passed.
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REQUIRED_STEPS, scopeFor } from '../../tools/test-harness/release-gate.mjs';
-import { SERVER_SHARDS } from './server-test-files.mjs';
+import { LATENCY_TEST, SERVER_SHARDS, serverShards, serverTestFiles } from './server-test-files.mjs';
+import { LAUNCHER_PIECES, SOUL_ACTIONS_PIECES } from './test-pieces.mjs';
 
 // The qualify matrix. `steps` are the gate steps that make a job relevant, and the job runs the same command as that
-// step in tools/test-harness/one-validation.sh (web: V4-web, launcher: V3-launcher-unit, client-cli: V3-client-cli);
+// step in tools/test-harness/one-validation.sh (web: V4-web, launcher-*: V3-launcher-unit, client-cli: V3-client-cli);
 // `assets` says whether the job pulls media first. Keep this list and the case block in ci.yml in step;
 // ci-scope.test.mjs checks that every step the scope map can select has a job.
 // `heavy: true` sends the job to the self-hosted pool CI_HEAVY_RUNNER when that variable is set (runnerFor, ci.yml's
 // qualify runs-on): the server shards and the legs whose hosted median is over about 8 minutes. The short legs stay on
 // ubuntu-latest, so one run uses both pools at once (docs/testing.md#self-hosted-runners). `native` never is heavy (#1162).
+// `light: true` sends the job to an idle LIGHT_LABEL runner when the scope job finds one, else to ubuntu-latest (assignLight).
 export const JOBS = [
   // paths: a baseline or budget change is tools-only, so no step selects it, and this job is what compares it (#1117).
   { name: 'types-web', kind: 'types-web', assets: true, steps: ['V1-types', 'V2-build-root', 'V2-build-worlds', 'V3-bundle'], paths: /^tools\/test-harness\/bundle-budget\// },
   { name: 'packages', kind: 'packages', assets: true, heavy: true, steps: ['V3-packages', 'V3-walk'] },
   { name: 'web', kind: 'web', assets: true, steps: ['V4-web'] },
-  { name: 'launcher', kind: 'launcher', assets: true, heavy: true, steps: ['V3-launcher-unit'] },
+  // the launcher unit tests in LAUNCHER_PIECES duration-balanced pieces (test-pieces.mjs), each file in exactly one
+  ...Array.from({ length: LAUNCHER_PIECES }, (_, piece) => ({ name: `launcher-${piece}`, kind: 'launcher', piece, assets: true, heavy: true, steps: ['V3-launcher-unit'] })),
   { name: 'client-cli', kind: 'client-cli', assets: true, steps: ['V3-client-cli'] },
   { name: 'native', kind: 'native', assets: true, steps: ['V3-mars-engine'] },
   { name: 'latency', kind: 'latency', assets: false, steps: ['V5-server-full'] },
@@ -51,16 +54,52 @@ export const JOBS = [
   // 35 s, and some need the pulled media, so they ride on a leg that god paths already select (#918).
   ...Array.from({ length: SERVER_SHARDS }, (_, shard) => ({ name: `server-${shard}`, kind: 'server', shard, assets: true, heavy: true, ...(shard === 0 ? { godSkill: true } : {}), steps: ['V5-server-full', 'V6-'] })),
   // No gate step on purpose: picked by its own paths, so the gate's suite tree and cached baseline stay as they are (#1061).
-  { name: 'soul-actions', kind: 'soul-actions', assets: false, heavy: true, steps: [], paths: /^(tools\/soul-actions|apps\/server|packages\/world-compiler|packages\/engine-[^/]+)\// },
+  // In SOUL_ACTIONS_PIECES duration-balanced pieces (test-pieces.mjs), each file in exactly one.
+  ...Array.from({ length: SOUL_ACTIONS_PIECES }, (_, piece) => ({ name: `soul-actions-${piece}`, kind: 'soul-actions', piece, assets: false, heavy: true, steps: [], paths: /^(tools\/soul-actions|apps\/server|packages\/world-compiler|packages\/engine-[^/]+)\// })),
   // Also no gate step (#1111). soul-trace drives the thin CLI in tools/world-launcher/soul; soul-runtime's native client test uses the server's comms fixture. tools/entry's format, check and look gate tests ride here too, picked by tools/entry, content and packages/form-rules.
-  { name: 'soul-tools', kind: 'soul-tools', assets: false, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|tools\/entry|content|packages\/form-rules|apps\/server)\// },
+  { name: 'soul-tools', kind: 'soul-tools', assets: false, light: true, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|tools\/entry|content|packages\/form-rules|apps\/server)\// },
 ];
 
-/** The runner a qualify job gets, as ci.yml's runs-on computes it: a heavy job goes to CI_HEAVY_RUNNER (one label, or a
- * JSON array of labels) when it is set; every other job, and every job when it is unset, goes to ubuntu-latest. */
+/** The runner a qualify job gets, as ci.yml's runs-on computes it: the `runner` the scope job gave it (assignLight), else
+ * a heavy job goes to CI_HEAVY_RUNNER (one label, or a JSON array of labels) when it is set; every other job, and every
+ * job when it is unset, goes to ubuntu-latest. */
 export function runnerFor(job, heavyRunner = '') {
+  if (job.runner) return job.runner;
   if (!job.heavy || !heavyRunner) return 'ubuntu-latest';
   return heavyRunner.startsWith('[') ? JSON.parse(heavyRunner) : heavyRunner;
+}
+
+/** The self-hosted label of the light pool (tools/ci/setup-runners.sh --label souls-light, docs/testing.md#self-hosted-runners).
+ * A job with `light: true` runs there only while one of its runners is online and idle when the scope job looks; otherwise
+ * it runs on ubuntu-latest, with the same steps either way. `runs-on` cannot fall back by itself, so the scope job picks. */
+export const LIGHT_LABEL = 'souls-light';
+
+/** How many runners labelled `label` are online and idle, from the repository's runner list. Listing runners needs a token
+ * with Administration: read (the CI_RUNNERS_TOKEN secret); the workflow's own token cannot. No token, an HTTP error, a
+ * timeout or an unreadable answer is 0 idle, so every job stays hosted. */
+export async function idleRunners({ repo, label = LIGHT_LABEL, token, fetchImpl = globalThis.fetch, timeoutMs = 10_000 }) {
+  if (!token) return { idle: 0, online: 0, why: 'no runner token (CI_RUNNERS_TOKEN)' };
+  try {
+    const res = await fetchImpl(`https://api.github.com/repos/${repo}/actions/runners?per_page=100`, {
+      headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return { idle: 0, online: 0, why: `runner list: HTTP ${res.status}` };
+    const { runners } = await res.json();
+    if (!Array.isArray(runners)) return { idle: 0, online: 0, why: 'runner list: unreadable answer' };
+    const mine = runners.filter(r => r.labels?.some(l => l.name === label) && r.status === 'online');
+    const idle = mine.filter(r => r.busy === false).length;
+    return { idle, online: mine.length, why: `${idle} of ${mine.length} online ${label} runner(s) idle` };
+  } catch (e) {
+    return { idle: 0, online: 0, why: `runner list failed: ${e?.name === 'TimeoutError' ? 'timed out' : e?.message ?? e}` };
+  }
+}
+
+/** Gives the light jobs the light label, one per idle runner in matrix order; the rest, and every other job, keep their
+ * hosted (or CI_HEAVY_RUNNER) runner. Only `runner` changes: the steps a job runs never depend on it. */
+export function assignLight(include, idle, label = LIGHT_LABEL) {
+  let left = idle;
+  return include.map(job => (job.light && left > 0 ? (left--, { ...job, runner: label }) : job));
 }
 
 /** The god-skill unit tests (every *.test.mjs under tools/god-skill), run by the job with `godSkill` (ci.yml). */
@@ -70,10 +109,11 @@ const relevant = (job, steps) => job.steps.some(s => steps.some(step => s.endsWi
 
 const strip = ({ steps, paths, ...job }) => job;
 
-/** The low-risk paths: a change confined to them (every file) needs no server, browser smoke, walk or bundle job. Exact
- * prefixes, plus Markdown at the root other than the agent rules. Nothing in apps/server, the packages the walk audits or
- * the e2e reads them; the readers outside them are the entry and form-rules tests and card-search.test.mjs, which the
- * soul-tools job runs (ci.yml), and apps/web, which imports packages/form-rules/src (LOW_RISK_WEB). */
+/** The low-risk paths: a change confined to them (every file) needs no browser smoke, walk or bundle job, and only the
+ * server jobs that read them. Exact prefixes, plus Markdown at the root other than the agent rules. Nothing the walk
+ * audits or the e2e reads them; the readers outside them are the entry and form-rules tests and the launcher tests that
+ * read content/kinds or form-rules, which the soul-tools job runs (ci.yml), apps/web, which imports
+ * packages/form-rules/src (LOW_RISK_WEB), and the server's forms adapter (LOW_RISK_SERVER, serverReaders). */
 export const LOW_RISK = /^(?:tools\/entry|content\/(?:kinds|asks|moves)|packages\/form-rules|docs|changes)\//;
 const LOW_RISK_ROOT = file => /^[^/]+\.md$/.test(file) && !['AGENTS.md', 'CLAUDE.md'].includes(file);
 export const lowRisk = files => Array.isArray(files) && files.length > 0 && files.every(f => LOW_RISK.test(f) || LOW_RISK_ROOT(f));
@@ -81,15 +121,54 @@ export const lowRisk = files => Array.isArray(files) && files.length > 0 && file
  * typecheck, build and bundle comparison (types-web) and the web unit suite. */
 export const LOW_RISK_WEB = /^packages\/form-rules\/src\//;
 
-/** The jobs a diff needs. No diff (null: no usable base, or an unreadable one) and an empty diff run every job. A diff
- * confined to the low-risk paths runs only the jobs their own `paths` pick (soul-tools, docs-reference) and, for
+/** The low-risk paths the server reads: the forms adapter (apps/server/src/god/forms-adapter.ts) loads content/kinds,
+ * content/moves and packages/form-rules/cases/kinds and imports packages/form-rules/src, and its tests load kinds with
+ * tools/entry. A low-risk change here also runs the server jobs holding a test that reads them (serverReaders). */
+export const LOW_RISK_SERVER = /^(?:tools\/entry|content\/(?:kinds|asks|moves)|packages\/form-rules)\//;
+/** What in a server test's source (apps/server/src/**\/*.test.ts) marks it as a reader of LOW_RISK_SERVER: a path into
+ * them, the forms adapter, or a def tagged `entry` (the adapter reads content/kinds only for such a def). */
+export const SERVER_READER = /content\/(?:kinds|asks|moves)|form-rules|tools\/entry\/|forms-adapter|tags:\s*\[[^\]]*['"]entry['"]/;
+const SERVER_SRC = fileURLToPath(new URL('../../apps/server/src', import.meta.url));
+
+/** The server jobs (`server-<shard>`, or `latency` for its one file) holding a server test that reads the low-risk
+ * paths, from the tree as it is: a new reader, or shards rebalanced by a new test file, are followed with no edit here. */
+export function serverReaders({ files = serverTestFiles(SERVER_SRC), read = f => readFileSync(join(SERVER_SRC, f), 'utf8') } = {}) {
+  const readers = files.filter(f => SERVER_READER.test(read(f)));
+  if (!readers.length) return [];
+  const shards = serverShards(files);
+  const job = f => f === LATENCY_TEST ? 'latency' : `server-${shards.findIndex(s => s.files.includes(`src/${f}`))}`;
+  return [...new Set(readers.map(job))].sort();
+}
+
+/** The content fast lane. A content PR changes only kinds (content/kinds/<family>/), the form-rules cases and changelog
+ * fragments: the shape of the content batches. It runs exactly these jobs, written out so the list cannot drift
+ * (ci-scope.test.mjs checks each reader of those paths against it):
+ * - `soul-tools` (ci.yml): the entry tests (tools/entry: format, check, look, prove), the form-rules tests, the inline
+ *   check of eden.mjs, and the launcher tests that read content/kinds (card-search, can-i, how);
+ * - the server shard(s) holding a server test that reads content or cases (serverReaders: the forms adapter's tests);
+ * - no web or bundle job: apps/web reads packages/form-rules/src/looks.ts and content/tunes, which a content PR cannot
+ *   change. */
+export const CONTENT = /^(?:content\/kinds\/[^/]+\/|packages\/form-rules\/cases\/|changes\/)/;
+export const CONTENT_JOBS = ['soul-tools'];
+export const CONTENT_WEB = [];
+/** At least one kind or case, and nothing outside CONTENT (fragments alone are not content: they run no job). */
+export const contentOnly = files => Array.isArray(files) && files.every(f => CONTENT.test(f)) && files.some(f => !f.startsWith('changes/'));
+
+/** The jobs a diff needs. No diff (null: no usable base, or an unreadable one) and an empty diff run every job. A content
+ * diff runs the content lane (CONTENT_JOBS and the server readers). A diff confined to the low-risk paths runs only the
+ * jobs their own `paths` pick (soul-tools, docs-reference), the server readers for the paths the server reads and, for
  * form-rules source, the web jobs; any other diff is picked by the release gate's path map, where an unmapped path (the
- * lockfile, .github, changes/ beside other files ...) runs every job. */
-export function jobsFor(files, reason = files === null ? 'no usable base' : 'an empty diff') {
+ * lockfile, .github, changes/ beside other files ...) runs every job. `readers` is serverReaders, injectable for tests. */
+export function jobsFor(files, reason = files === null ? 'no usable base' : 'an empty diff', { readers = serverReaders } = {}) {
   if (!files?.length) return { scope: 'full', steps: [...REQUIRED_STEPS], include: JOBS.map(strip), diff: { reason } };
+  if (contentOnly(files)) {
+    const want = [...CONTENT_JOBS, ...CONTENT_WEB, ...readers()];
+    return { scope: 'content', steps: [], include: JOBS.filter(job => want.includes(job.name)).map(strip), diff: { files: files.length, content: true } };
+  }
   if (lowRisk(files)) {
     const web = files.some(f => LOW_RISK_WEB.test(f)) ? ['types-web', 'web'] : [];
-    const include = JOBS.filter(job => web.includes(job.name) || files.some(f => job.paths?.test(f))).map(strip);
+    const server = files.some(f => LOW_RISK_SERVER.test(f)) ? readers() : [];
+    const include = JOBS.filter(job => web.includes(job.name) || server.includes(job.name) || files.some(f => job.paths?.test(f))).map(strip);
     return { scope: include.length ? 'low-risk' : 'none', steps: [], include, diff: { files: files.length, lowRisk: true } };
   }
   const scope = scopeFor(files);
@@ -136,7 +215,7 @@ export function changedFiles(base, head = 'HEAD', git = (...a) => execFileSync('
   catch { return null; }
 }
 
-function main(argv) {
+async function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
   if (argv[0] === 'green') {
     const runs = JSON.parse(execFileSync('gh', ['api', `repos/${opt('--repo')}/actions/workflows/ci.yml/runs?head_sha=${opt('--sha')}&per_page=100`], { encoding: 'utf8' })).workflow_runs ?? [];
@@ -151,12 +230,19 @@ function main(argv) {
   try { const l = JSON.parse(opt('--labels') || '[]'); if (Array.isArray(l)) labels = l; } catch { /* unreadable labels: none */ }
   const win = windowFor({ event, draft: opt('--draft') === 'true', labels });
   const plan = { ...full, ...windowed({ include: full.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
+  // The light pool is asked only when a light job will run; any failure keeps it hosted (idleRunners).
+  const light = plan.include.some(j => j.light)
+    ? await idleRunners({ repo: process.env.GITHUB_REPOSITORY, token: process.env.CI_RUNNERS_TOKEN })
+    : { idle: 0, why: 'no light job selected' };
+  plan.include = assignLight(plan.include, light.idle);
+  const placed = plan.include.filter(j => j.runner).map(j => j.name);
   const out = { matrix: JSON.stringify({ include: plan.include }), any: String(plan.include.length > 0), scope: plan.scope, smoke: String(plan.smoke), deferred: String(plan.deferred), window: plan.why };
-  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: full.include.map(j => j.name), diff: plan.diff }, null, 2));
+  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: full.include.map(j => j.name), light: { ...light, placed }, diff: plan.diff }, null, 2));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(out).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     `### CI scope: ${plan.scope}\n\nJobs: ${plan.include.map(j => '`' + j.name + '`').join(', ') || 'none (docs/tools only)'}; local smoke: ${out.smoke}\n` +
+    `\nLight pool (${LIGHT_LABEL}): ${placed.length ? placed.map(n => '`' + n + '`').join(', ') : 'none placed, all hosted'} (${light.why})\n` +
     (plan.deferred ? `\n**Full CI deferred** (${plan.why}): ${full.include.length} job(s) selected, none run. Add \`ci:run\` or \`merge:ready\` to a ready PR to run them (docs/testing.md#ci-window).\n` : ''));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));

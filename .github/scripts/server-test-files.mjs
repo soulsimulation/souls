@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const LATENCY_TEST = 'owner-response-milestones.test.ts';
-export const SERVER_SHARDS = 6;
+export const SERVER_SHARDS = 8;
 /** Files per shard run in parallel (ubuntu-latest has 4 vCPUs). Files that bind a fixed port run afterwards, one at a time. */
 export const SERVER_TEST_CONCURRENCY = 3;
 /** A test file that binds or targets a fixed local port cannot share a runner with another such file: an env or option
