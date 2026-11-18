@@ -23,6 +23,7 @@ pub mod query;
 pub mod read;
 pub mod refusals;
 pub mod rules;
+pub mod stream;
 pub mod sync;
 pub mod time;
 pub mod tree;
