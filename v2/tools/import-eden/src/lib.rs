@@ -54,6 +54,8 @@ pub const F_PLACE_OF: u64 = 20; // what a place is derived from: area, water, sh
 pub const F_STAIRS: u64 = 21; // a floor: [[link, kind, to, width, y0, y1, [[x, z] …]] …] for each stair from it
 pub const F_DOORWAYS: u64 = 22; // a doorway's owning end: [[link, kind, x, z, yaw mdeg, width, height] …]
 pub const F_SCALE: u64 = 23; // a thing's scale in parts per million, when it is not 1
+pub const F_ASSET: u64 = 24; // X6: [SHA-256 …] of the world's uploads the thing names (a mesh's, a picture's)
+pub const F_ENTRY: u64 = 25; // X6: the Soul Actions entry of the thing's kind (SA-E11's map), when it has one
 
 pub const WORLD: &str = "eden:world";
 pub const GROUND: &str = "eden:ground";
@@ -404,6 +406,16 @@ pub fn load(text: &str) -> R<Import> {
         let sc = int(t, "scale_ppm")?;
         if sc != 1_000_000 {
             fields.insert(F_SCALE, i(sc));
+        }
+        if let Some(a) = t.get("asset") {
+            let hs = a.arr().iter().map(|x| {
+                let h = x.str().ok_or_else(|| "an upload's hash".to_owned())?;
+                hex(h).map(Value::Bytes)
+            });
+            fields.insert(F_ASSET, Value::Array(hs.collect::<R<_>>()?));
+        }
+        if let Some(e) = t.get("entry").and_then(Json::str) {
+            fields.insert(F_ENTRY, Value::Text(name(e)?));
         }
         if let Some(d) = t.get("door") {
             fields.insert(
