@@ -29,6 +29,9 @@ step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
+# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md).
+# The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
+step origin-headers node --test tools/origin/origin.test.mjs
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 
@@ -110,7 +113,7 @@ step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p re
     cargo test -p replica --test intents --locked the_built_checker_artifact_loads_by_its_hash -- --nocapture'
 # The client's library by build hash (R5, #2699): cached or downloaded, refused by name, run in a worker with a limit.
 step client-sync node --test client/src/sync/*.test.mjs
-# The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's stand-in end of it.
+# The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4).
 step client-daemon bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/daemon/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs

@@ -1,5 +1,5 @@
-// The resident daemon (Engine v2 R6, #2700) against the real gateway (`gatewayd`, I1) and the world's stand-in end
-// of it (`worldd gateway-link`), through a TCP relay that the test cuts to force drops. Run from v2/ after
+// The resident daemon (Engine v2 R6, #2700) against the real gateway (`gatewayd`, I1) and the world's end of it
+// (`worldd gateway-link`, I4's world of lamps), through a TCP relay that the test cuts to force drops. Run from v2/ after
 //   cargo build -p gatewayd -p worldd --locked, and replica's wasm-bindgen package in target/wasm-load/pkg.
 // R6_REPORT=1 prints each drop's time and the memory, for the PR.
 
@@ -24,9 +24,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const dir = mkdtempSync(join(tmpdir(), 'souls-r6-'));
 const home = join(dir, '.souls');
-const scope = randomBytes(16).toString('hex');
+// The Soul is the world's first body, beside its own lamp: `worldd gateway-link`'s world mints from scope 2b, the
+// place first, then the room, then each body and its lamp (`worldd::checkers::toggles`).
+const scope = '2b'.repeat(16);
+const LAMP = `${scope}-3`;
 const secret = randomBytes(32).toString('hex'); // the canary: the token's secret part
-const token = `soul-${scope}-7.${secret}`;
+const token = `soul-${scope}-2.${secret}`; // the world's first body
 const procs = [];
 const outputs = []; // every answer and message a command printed
 let relay, arrivals, rt;
@@ -74,7 +77,7 @@ before(async () => {
   const world = join(dir, 'w.sock');
   arrivals = join(dir, 'arrivals.txt');
   const tokens = join(dir, 'tokens.txt');
-  writeFileSync(tokens, `soul-${scope}-7 ${createHash('sha256').update(token).digest('hex')}\n`);
+  writeFileSync(tokens, `soul-${scope}-2 ${createHash('sha256').update(token).digest('hex')}\n`);
   const lineage = randomBytes(16).toString('hex');
   const wl = spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--arrivals', arrivals], { stdio: 'ignore' });
   procs.push(wl);
@@ -125,12 +128,12 @@ test('A2: after each of ten forced drops it is current within 2 s, and no intent
   const times = [];
   for (let k = 0; k < 10; k++) {
     // An intent answered while connected.
-    const a = await request(rt.socket, { op: 'act', verb: 'eden:wave' });
+    const a = await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP }); // its lamp on
     outputs.push(JSON.stringify(a));
     await waitFor(async () => (await status()).unanswered.length === 0);
     // Another, whose answer the world gives while the relay drops what comes back; then the drop.
     relay.deaf = true;
-    const b = await request(rt.socket, { op: 'act', verb: 'eden:wave' });
+    const b = await request(rt.socket, { op: 'act', verb: 'r2:switch_off', target: LAMP });
     outputs.push(JSON.stringify(b));
     await waitFor(() => taken().length === b.sequence);
     await sleep(50);

@@ -11,9 +11,9 @@
 
 use crate::apply::Replica;
 use crate::effects::Actor;
-use crate::encode::{Name, Value, decode, encode, to_hex};
+use crate::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use crate::ids::{Id, Scope, Version};
-use crate::intents::{Hello, Intent, PROTOCOL};
+use crate::intents::{Hello, Intent, PROTOCOL, Target};
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::{JsError, wasm_bindgen};
 
@@ -122,8 +122,9 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     Ok(format!("answer {sequence} {version}"))
 }
 
-/// A Soul's intent with no target or parameters, decided against `basis` (a version's bytes; empty for the zero
-/// version) and expiring at `expiry` world microseconds; read back as the world reads it.
+/// A Soul's intent with no parameters, on `target` (a node's id as `<scope hex>-<counter>`, or empty for none),
+/// decided against `basis` (a version's bytes; empty for the zero version) and expiring at `expiry` world
+/// microseconds; read back as the world reads it.
 #[wasm_bindgen(js_name = wireIntent)]
 pub fn wire_intent(
     scope: &[u8],
@@ -132,7 +133,20 @@ pub fn wire_intent(
     sequence: u64,
     basis: &[u8],
     expiry: u64,
+    target: &str,
 ) -> Result<Vec<u8>, JsError> {
+    let target = match target {
+        "" => None,
+        t => {
+            let (scope, counter) = t
+                .split_once('-')
+                .and_then(|(s, c)| Some((from_hex(s).ok()?.try_into().ok()?, c.parse().ok()?)))
+                .ok_or_else(|| JsError::new("target-not-an-id"))?;
+            let id =
+                Id::new(Scope(scope), counter).ok_or_else(|| JsError::new("target-not-an-id"))?;
+            Some(Target::Node(id))
+        }
+    };
     let scope = Scope(
         scope
             .try_into()
@@ -152,7 +166,7 @@ pub fn wire_intent(
     let intent = Intent {
         actor: Actor::Soul(id),
         verb: Name::new(verb).ok_or_else(|| JsError::new("verb-not-a-name"))?,
-        target: None,
+        target,
         parameters: BTreeMap::new(),
         sequence,
         basis,

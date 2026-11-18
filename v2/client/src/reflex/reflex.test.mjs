@@ -118,7 +118,7 @@ test('A1: 1,000 matching events send 1,000 intents, the daemon\'s own delay unde
       const a = performance.now();
       for (const f of t.onEvent(event, T0 + i)) {
         // What the daemon does for each firing: build the intent's bytes through replica, as its `act` does.
-        wire.wireIntent(scope, 7n, f.intent.verb, BigInt(++sequence), new Uint8Array(), BigInt(Number.MAX_SAFE_INTEGER));
+        wire.wireIntent(scope, 7n, f.intent.verb, BigInt(++sequence), new Uint8Array(), BigInt(Number.MAX_SAFE_INTEGER), '');
         sent++;
       }
       delays.push(performance.now() - a);
