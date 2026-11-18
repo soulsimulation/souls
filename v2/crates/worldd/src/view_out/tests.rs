@@ -269,3 +269,131 @@ fn a_writer_killed_mid_write_leaves_no_broken_part() {
     assert!(temps > 0, "no kill landed inside a write");
     let _ = fs::remove_dir_all(&base);
 }
+
+const DAY: &str = include_str!("../../../replica/fixtures/views/1-day.diag");
+
+/// T7's fixture log (T6's base, then a day with private notes and transfers) and the view of `key` built over it.
+fn fixture_view(key: Key) -> Vec<(i64, Value)> {
+    use replica::effects::{FIXTURES, State};
+    use replica::views::{Redactions, build};
+    let h = header();
+    let root = h
+        .kinds
+        .iter()
+        .find(|k| k.as_str().starts_with("souls:place@"))
+        .expect("the root's kind")
+        .clone();
+    let start = State::start(h.zone, root);
+    let parts: Vec<Part> = [FIXTURES[0].1, DAY]
+        .iter()
+        .map(|t| Part::read(&fixture_bytes(t).expect("bytes")).expect("a part"))
+        .collect();
+    let out = build(&start, &h, &parts, &[key], &Redactions::default()).expect("the view");
+    out.into_iter().next().expect("one").records
+}
+
+/// #3239 A1: the public views of a log with private entries (T7's fixture day: aa:1's notes are entries 7, 8 and 14)
+/// skip them; the writer declares each jump, and a player plays every part to the end, holding the writer's state.
+/// A2: the same part without its declaration, or with a wrong one, is refused by name and applies nothing.
+#[test]
+fn a_view_that_skips_private_entries_plays_to_the_end() {
+    let h = header();
+    let note = encode(&Id::new(Scope([0xee; 16]), 20).expect("an id").to_value()).expect("bytes");
+    for (node, level) in [(0, Level::Full), (0, Level::Sampled), (1, Level::Full)] {
+        let key = Key {
+            node: Id::new(Scope([0xee; 16]), node).expect("an id"),
+            level,
+            audience: Audience::Everyone,
+        };
+        let records = fixture_view(key);
+        let root = scratch(&format!("gaps-{node}-{}", level.number()));
+        let mut w = Writer::create(&root, &h, &key, (0, 0)).expect("a writer");
+        for (_, r) in &records {
+            w.frame(&frame(vec![r.clone()])).expect("written");
+        }
+        w.flush().expect("flushed");
+        let hb = fs::read(root.join(stream::header_path(&h))).expect("the header");
+        let mut p = Player::start(&hb).expect("a player");
+        let mut declared = Vec::new();
+        for i in 0..w.written().parts {
+            let bytes = fs::read(w.dir().join(i.to_string())).expect("a part");
+            let sp = StreamPart::read(&bytes).expect("reads");
+            assert!(
+                !sp.part.windows(note.len()).any(|x| x == note.as_slice()),
+                "the public stream names aa:1's note"
+            );
+            if !sp.gaps.is_empty() {
+                let at = p.replica().version();
+                let bare = StreamPart {
+                    gaps: Vec::new(),
+                    ..sp.clone()
+                };
+                let e = p
+                    .play(&bare.to_bytes().expect("bytes"))
+                    .expect_err("undeclared");
+                assert_eq!(e.name, "sequence-gap", "{e}");
+                let (first, count) = sp.gaps[0];
+                let wrong = StreamPart {
+                    gaps: vec![(first, count + 1)],
+                    ..sp.clone()
+                };
+                let e = p
+                    .play(&wrong.to_bytes().expect("bytes"))
+                    .expect_err("wrong");
+                assert_eq!(e.name, "sequence-gap", "{e}");
+                let extra = StreamPart {
+                    gaps: [sp.gaps.clone(), vec![(u64::MAX - 1, 1)]].concat(),
+                    ..sp.clone()
+                };
+                let e = p
+                    .play(&extra.to_bytes().expect("bytes"))
+                    .expect_err("unmet");
+                assert_eq!(e.name, "gap-unmet", "{e}");
+                assert_eq!(p.replica().version(), at, "a refused part applies nothing");
+                assert_eq!(p.next(), i);
+            }
+            declared.extend(sp.gaps.iter().copied());
+            let played = p.play(&bytes).expect("plays");
+            assert_ne!(played.hash, Some(false), "part {i}'s hash");
+        }
+        println!(
+            "view_out gaps: node ee:{node} level {}: {} records, {} parts, declared gaps {declared:?}, played to version {}",
+            level.number(),
+            records.len(),
+            w.written().parts,
+            p.replica().version()
+        );
+        assert!(!declared.is_empty(), "the view skipped aa:1's entries");
+        assert_eq!(
+            replica::hash::state_hash(p.replica().tree()).expect("a hash"),
+            replica::hash::state_hash(w.copy.tree()).expect("a hash")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+/// A2 at R1's replica: a view's part applied as if it skipped nothing is refused as `sequence-gap`.
+#[test]
+fn an_undeclared_gap_is_refused_by_the_replica() {
+    let h = header();
+    let key = key(&h);
+    let root = scratch("undeclared");
+    let mut w = Writer::create(&root, &h, &key, (0, 0)).expect("a writer");
+    for (_, r) in fixture_view(key) {
+        w.frame(&frame(vec![r])).expect("written");
+    }
+    w.flush().expect("flushed");
+    let mut r = Replica::start(h.stored()).expect("a replica");
+    let mut refused = None;
+    for i in 0..w.written().parts {
+        let sp = StreamPart::read(&fs::read(w.dir().join(i.to_string())).expect("a part"))
+            .expect("reads");
+        if let Err(e) = r.apply(&Part::read(&sp.part).expect("a part")) {
+            refused = Some((i, e.name));
+            break;
+        }
+    }
+    println!("view_out: the replica without declarations refused {refused:?}");
+    assert!(matches!(refused, Some((_, "sequence-gap"))));
+    let _ = fs::remove_dir_all(&root);
+}

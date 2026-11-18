@@ -16,6 +16,13 @@
 //! - A4: body 0's interest set, tick by tick, is the same in `light`, `8k` and `4k`.
 //! - The tier's cost: the hub's time a tick with 1,000 subscribers, mean and 99th percentile (reported; no bar).
 //!
+//! And for R4b (#3151):
+//!
+//! - The forms of the hall's counts by cell, bytes a world second: the whole table and the changes since the last
+//!   second, on N16's cells and grids 2 and 4 times coarser. The hub sends the smallest ([`GRID`]).
+//! - A2 (`8k`): every entry is sent on its tick, and no subscriber's level drops (no `souls:over-budget`, every
+//!   subscriber at `full` at the end).
+//!
 //! Run from `v2/`: `cargo run -p bench --release --bin subscription -- [ticks] [repeats]` (1,200, 2).
 
 // Times its own runs: the wall-clock rule (K7) binds the engine, not this bench.
@@ -31,7 +38,8 @@ use replica::ids::{Hash, Id, Purpose, Scope as IdScope};
 use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Vec3};
 use replica::views::Level;
 use replica::world_model::Audience;
-use worldd::views::subscription::{Hub, Kind, Request, Scope};
+use worldd::views::interest::Table;
+use worldd::views::subscription::{GRID, Hub, Kind, Request, Scope, cell_bytes};
 
 const BODY: &str =
     "souls:body@1220ee1ad75a34f067112ef6d2a095fe5bd3e121a75611a1a95ba85198efcb131cb2";
@@ -262,7 +270,7 @@ fn run(arm: &Arm, ticks: u64, seed: u64) -> Result {
             for o in hub.drain(s) {
                 *per_second[i].entry(second).or_default() += o.bytes.len() as u64;
                 match o.kind {
-                    Kind::Cells => {
+                    Kind::Cells | Kind::Changes => {
                         cells[i].insert(second);
                     }
                     Kind::Grant => {
@@ -303,6 +311,45 @@ fn run(arm: &Arm, ticks: u64, seed: u64) -> Result {
     }
     res.mean_bps = total as f64 / (subs.len() as u64 * seconds) as f64;
     res
+}
+
+/// The hall's counts by cell each world second, in each form: (grid factor, whole B/s mean, changes B/s mean, the
+/// most changes in a second).
+fn forms(ticks: u64, seed: u64) -> Vec<(i64, f64, f64, usize)> {
+    let mut w = World::new(seed);
+    let mut hub = Hub::new();
+    hub.tick(&w.create()).expect("a tick");
+    let factors = [1, 2, 4];
+    let mut prev: Vec<Option<(i64, Table)>> = vec![None; factors.len()];
+    let mut sums = vec![(0usize, 0usize, 0usize, 0usize); factors.len()];
+    for _ in 0..ticks {
+        let second = (w.tick as i64 * TICK_US).div_euclid(1_000_000);
+        let new_second = w.tick.is_multiple_of(TICKS_A_SECOND);
+        hub.tick(&w.step()).expect("a tick");
+        if !new_second {
+            continue;
+        }
+        for (k, f) in factors.iter().enumerate() {
+            let now = hub.places().cells(*f).remove(&w.hall).expect("the hall");
+            let (whole, changes) =
+                cell_bytes(w.hall, second, &now, prev[k].as_ref()).expect("bytes");
+            if let Some(c) = changes {
+                sums[k].0 += whole;
+                sums[k].1 += c;
+                sums[k].2 += 1;
+                sums[k].3 = sums[k].3.max(c);
+            }
+            prev[k] = Some(now);
+        }
+    }
+    factors
+        .iter()
+        .zip(sums)
+        .map(|(f, (w, c, n, most))| {
+            let n = n.max(1) as f64;
+            (*f, w as f64 / n, c as f64 / n, most)
+        })
+        .collect()
 }
 
 fn mean(v: &[f64]) -> f64 {
@@ -349,6 +396,18 @@ fn main() {
     );
     println!();
     println!(
+        "Counts by cell of the hall, bytes a world second, by form (repeat 1's world; the hub sends grid {GRID}, changes):"
+    );
+    println!();
+    println!(
+        "| grid | cell m | whole table B/s mean | changes B/s mean | most changes B in a second |"
+    );
+    println!("|---|---|---|---|---|");
+    for (f, whole, changes, most) in forms(ticks, 1) {
+        println!("| {f} | {} | {whole:.0} | {changes:.0} | {most} |", f * 2);
+    }
+    println!();
+    println!(
         "| repeat | arm | subs | budget B/s | most B in a second | mean B/s | due | on tick | seconds without cells | over-budget named | lowered at end | levels at end | addressed in / out | gaps | hub µs/tick mean | p99 |"
     );
     println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
@@ -381,16 +440,18 @@ fn main() {
         let a2 = res.iter().zip(&arms).all(|(x, a)| x.most <= a.budget);
         let a3 = k4.named_drop > 0 && k4.addressed_in == k4.addressed_out;
         let a4 = light.set0 == k8.set0 && light.set0 == k4.set0;
+        let no_drop = k8.named_drop == 0 && k8.levels.get(Level::Full.name()) == Some(&BODIES);
         println!();
         println!(
-            "repeat {r}: A1 {}, A2 {}, A3 {}, A4 {}",
+            "repeat {r}: R4 A1 {}, A2 {}, A3 {}, A4 {}; R4b A2 (on tick and no drop at 8k) {}",
             ok(a1),
             ok(a2),
             ok(a3),
-            ok(a4)
+            ok(a4),
+            ok(a1 && no_drop)
         );
         println!();
-        pass &= a1 && a2 && a3 && a4;
+        pass &= a1 && a2 && a3 && a4 && no_drop;
     }
     println!(
         "{}",
