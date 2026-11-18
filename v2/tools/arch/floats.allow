@@ -1,0 +1,2 @@
+# Files of v2/crates/replica/src (paths from v2/) where floats are allowed: drawing helpers only, never a verdict.
+# A verdict is any answer that must come out the same on the server and in a client (K14, #2648). Empty today.
