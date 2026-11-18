@@ -34,6 +34,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
@@ -247,6 +248,9 @@ pub struct Controller {
     /// The last driver number given.
     drivers: Driver,
     log: Vec<Logged>,
+    /// Where each body not being carried across a link stands, kept as the bodies move: "who is near" (N16). A body
+    /// the world carries by its own rule (N10's walk-out) stays on its node, and in the index.
+    near: Index,
 }
 
 impl Slot {
@@ -301,12 +305,21 @@ impl Controller {
         Controller::default()
     }
 
+    /// No bodies yet, kept in `near` (N16: `Index::fixed()` turns splitting off).
+    pub fn with_index(near: Index) -> Controller {
+        Controller {
+            near,
+            ..Controller::default()
+        }
+    }
+
     /// Adds a body of `family`, standing as the mover placed it, with the neutral input facing as it faces.
     pub fn add(&mut self, family: Family, moved: Moved) -> R<()> {
         if self.bodies.contains_key(&moved.id) {
             return refuse("body-duplicate", replica::world_model::show(moved.id));
         }
         let input = Input::neutral(moved.pose.orientation);
+        self.near.put_moved(&moved);
         self.bodies.insert(
             moved.id,
             Slot {
@@ -400,7 +413,11 @@ impl Controller {
             return refuse("crossing-under-way", replica::world_model::show(body));
         }
         s.input.velocity = Vec3::ZERO;
+        let across = track.link.is_some();
         s.track = Some(track);
+        if across {
+            self.near.remove_body(body);
+        }
         Ok(())
     }
 
@@ -412,6 +429,11 @@ impl Controller {
     /// Whether `body` is being carried, across a link or by the world's own rule.
     pub fn carried(&self, body: Id) -> bool {
         self.bodies.get(&body).is_some_and(|s| s.track.is_some())
+    }
+
+    /// The spatial index of the bodies not being carried across a link, as the mover last left them (N16).
+    pub fn near(&self) -> &Index {
+        &self.near
     }
 
     /// The bodies as the mover last left them, in id order.
@@ -497,6 +519,9 @@ impl Controller {
                         out.refused.push((id, r));
                     }
                 }
+                if s.track.as_ref().is_none_or(|t| t.link.is_none()) {
+                    self.near.put_moved(&s.moved);
+                }
                 continue;
             }
             // Standing still with no velocity asked: the mover would leave it as it is.
@@ -532,6 +557,7 @@ impl Controller {
                 Ok(None) => {}
                 Err(r) => out.refused.push((id, r)),
             }
+            self.near.put_moved(&s.moved);
         }
         out
     }

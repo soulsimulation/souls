@@ -1,0 +1,31 @@
+{
+  "format": "souls-library/1",
+  "library": "garments",
+  "about": "Garments for Eden's wardrobes and dressers (SA-E12, #2927): an id, a style of eden:garment, tags, a name and the look it gives each body family it fits (Engine v2 E15: the worn slot draws the family's variant). A garment that names no family fits none and is refused by name. Which wardrobe holds which garments is content/worlds/eden/stock.json. Rows are only appended.",
+  "garments": [
+    {"id": "garment:navy_wool_coat", "style": "coat", "tags": ["everyday", "warm"], "name": "a navy wool coat", "looks": {"eden:humanoid": "outfit:coat_navy"}},
+    {"id": "garment:rain_cape", "style": "coat", "tags": ["everyday", "outdoor"], "name": "a green rain cape", "looks": {"eden:humanoid": "outfit:cape_green"}},
+    {"id": "garment:quilted_jacket", "style": "coat", "tags": ["warm", "outdoor"], "name": "a quilted jacket", "looks": {"eden:humanoid": "outfit:jacket_quilted"}},
+    {"id": "garment:long_grey_overcoat", "style": "coat", "tags": ["smart", "warm"], "name": "a long grey overcoat", "looks": {"eden:humanoid": "outfit:coat_long_grey"}},
+    {"id": "garment:linen_shirt", "style": "shirt", "tags": ["everyday", "summer"], "name": "a white linen shirt", "looks": {"eden:humanoid": "outfit:shirt_linen"}},
+    {"id": "garment:striped_shirt", "style": "shirt", "tags": ["everyday"], "name": "a blue striped shirt", "looks": {"eden:humanoid": "outfit:shirt_striped"}},
+    {"id": "garment:checked_work_shirt", "style": "shirt", "tags": ["work", "outdoor"], "name": "a checked work shirt", "looks": {"eden:humanoid": "outfit:shirt_checked"}},
+    {"id": "garment:knitted_jumper", "style": "shirt", "tags": ["warm", "everyday"], "name": "a cream knitted jumper", "looks": {"eden:humanoid": "outfit:jumper_cream"}},
+    {"id": "garment:pressed_white_shirt", "style": "shirt", "tags": ["smart"], "name": "a pressed white shirt", "looks": {"eden:humanoid": "outfit:shirt_pressed"}},
+    {"id": "garment:summer_dress", "style": "dress", "tags": ["summer", "everyday"], "name": "a yellow summer dress", "looks": {"eden:humanoid": "outfit:dress_yellow"}},
+    {"id": "garment:green_tea_dress", "style": "dress", "tags": ["smart"], "name": "a green tea dress", "looks": {"eden:humanoid": "outfit:dress_green"}},
+    {"id": "garment:red_party_dress", "style": "dress", "tags": ["party", "smart"], "name": "a red party dress", "looks": {"eden:humanoid": "outfit:dress_red"}},
+    {"id": "garment:pinafore", "style": "dress", "tags": ["work", "everyday"], "name": "a denim pinafore", "looks": {"eden:humanoid": "outfit:pinafore_denim"}},
+    {"id": "garment:corduroy_trousers", "style": "trousers", "tags": ["everyday", "warm"], "name": "brown corduroy trousers", "looks": {"eden:humanoid": "outfit:trousers_cord"}},
+    {"id": "garment:work_dungarees", "style": "trousers", "tags": ["work"], "name": "blue work dungarees", "looks": {"eden:humanoid": "outfit:dungarees_blue"}},
+    {"id": "garment:linen_shorts", "style": "trousers", "tags": ["summer", "outdoor"], "name": "linen shorts", "looks": {"eden:humanoid": "outfit:shorts_linen"}},
+    {"id": "garment:dark_suit_trousers", "style": "trousers", "tags": ["smart", "party"], "name": "dark suit trousers", "looks": {"eden:humanoid": "outfit:trousers_suit"}},
+    {"id": "garment:straw_hat", "style": "hat", "tags": ["summer", "outdoor"], "name": "a straw sun hat", "looks": {"eden:humanoid": "outfit:hat_straw"}},
+    {"id": "garment:wool_beanie", "style": "hat", "tags": ["warm", "outdoor"], "name": "a red wool beanie", "looks": {"eden:humanoid": "outfit:hat_beanie"}},
+    {"id": "garment:felt_hat", "style": "hat", "tags": ["smart"], "name": "a brown felt hat", "looks": {"eden:humanoid": "outfit:hat_felt"}},
+    {"id": "garment:paper_party_crown", "style": "hat", "tags": ["party"], "name": "a paper party crown", "looks": {"eden:humanoid": "outfit:hat_crown"}},
+    {"id": "garment:striped_scarf", "style": "scarf", "tags": ["warm", "everyday"], "name": "a long striped scarf", "looks": {"eden:humanoid": "outfit:scarf_striped"}},
+    {"id": "garment:silk_scarf", "style": "scarf", "tags": ["smart", "party"], "name": "a silk scarf", "looks": {"eden:humanoid": "outfit:scarf_silk"}},
+    {"id": "garment:fishermans_scarf", "style": "scarf", "tags": ["warm", "outdoor"], "name": "a thick fisherman's scarf", "looks": {"eden:humanoid": "outfit:scarf_thick"}}
+  ]
+}
