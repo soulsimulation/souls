@@ -1,11 +1,13 @@
 //! The world: tree, clock, controllers, movers, log. Native only (Engine v2, #2635). Empty so far (K1, #2638).
 #![forbid(unsafe_code)]
 
+pub mod checkpoint;
 pub mod clock;
 pub mod controller;
 pub mod ground;
 pub mod host;
 pub mod links;
+pub mod log;
 pub mod mover;
 pub mod routes;
 pub mod spots;

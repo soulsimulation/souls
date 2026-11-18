@@ -25,6 +25,8 @@ step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
+# The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
+step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 
 # The WASM build: one artifact (wasm-bindgen --target web) that Node loads with initSync and a page with init().
 # The command's version is the wasm-bindgen crate's in Cargo.lock; it is installed under target/, which CI caches.
@@ -80,3 +82,16 @@ step effects-goldens node --input-type=module -e '
   const got = r.effects_goldens(), want = readFileSync("crates/replica/fixtures/effects/goldens.txt", "utf8");
   console.log(`${got}effects-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
   if (got !== want) process.exit(1);'
+# The intents goldens (T10, #2664): every kind of intent's envelope, the same way (crates/replica/tests/intents.rs).
+step intents-goldens node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
+  const got = r.intents_goldens(), want = readFileSync("crates/replica/fixtures/intents/goldens.txt", "utf8");
+  console.log(`${got}intents-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
+  if (got !== want) process.exit(1);'
+# The checker a client loads by hash (T10, #2664): replica for wasm32 with no wasm-bindgen exports, so no imports.
+step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p replica --release \
+    --target wasm32-unknown-unknown --locked --features checker &&
+  CHECKER_WASM="$PWD/target/checker/wasm32-unknown-unknown/release/replica.wasm" \
+    cargo test -p replica --test intents --locked the_built_checker_artifact_loads_by_its_hash -- --nocapture'

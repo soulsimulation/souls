@@ -1,0 +1,3 @@
+# A move inside a joint activity (rule 7): accepted, then resolved. Its parameter is one of the activity's next beats,
+# at most about two seconds ahead (B8): a parameter of an accepted move, not an order waiting on the world.
+{1: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 2: "souls:move", 3: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 30], 4: {1: 12}, 5: 8, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0], 1, 42], 7: 61000000}
