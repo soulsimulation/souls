@@ -6,6 +6,9 @@
 //! exported facts file (`node v2/tools/import-eden/export/export.ts` from the repository root) and run with
 //! `cargo test -p sim --release --test water -- --ignored --nocapture`.
 
+mod common;
+
+use common::humanoid;
 use import_eden::Import;
 use replica::effects::{Header, schema_hash};
 use replica::encode::{Value, encode};
@@ -13,11 +16,11 @@ use replica::ids::{Hash, Id, Purpose, Scope};
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Vec3, fixture};
 use sim::gaits::{Gait, Ground, SWIM, WADE, WADE_DEPTH};
 use sim::ground::{HUMAN_RADIUS, OpenGround, Piece, SQUARE, Scene};
+use sim::host::Runner;
 use sim::links::Doors;
 use sim::mover::{Body, Surface};
 use sim::routes::{HANDS, SWIM as CAN_SWIM, WADE as CAN_WADE};
 use sim::unstick::{Ladder, Rung, in_water};
-use sim::walk::Crowd;
 use sim::walk::town::Town;
 use std::collections::BTreeMap;
 
@@ -316,8 +319,8 @@ fn a_walker_left_in_the_water_walks_out() {
     let ground = nodes["ground"];
     let open = OpenGround::of(&tree, ground, HUMAN_RADIUS).unwrap();
     let mut t = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
-    let (mut c, mut l) = (Crowd::new(TICK), Ladder::new());
-    let b = t.surfaces[&ground]
+    let (mut c, mut l) = (Runner::new(TICK), Ladder::new());
+    let mut b = t.surfaces[&ground]
         .place(
             id(900),
             Frame {
@@ -329,12 +332,12 @@ fn a_walker_left_in_the_water_walks_out() {
         )
         .expect("on dry ground");
     let p = b.pose.position;
-    l.add(&mut c, &mut t, b, SPEED, id(10_900), ground, p)
-        .expect("a still body");
-    l.step(&mut c, &mut t).expect("a tick");
-    // The pond grows under it (an edit): it now stands in the water, where it may not.
+    // The pond grows under it (an edit): it now stands in the water, where it may not. A still body: no order runs.
     let into = Vec3::new(6_000_000, p.y, 8_000_000);
-    c.walkers[0].body.pose.position = into;
+    b.pose.position = into;
+    c.add_body(humanoid(), b).expect("a still body");
+    l.add(id(900), id(10_900), SPEED, ground, into, Vec::new());
+    l.step(&mut c, &mut t).expect("a tick");
     let pieces: Vec<Piece> = open
         .cut_square(0, 0)
         .pieces
@@ -345,10 +348,11 @@ fn a_walker_left_in_the_water_walks_out() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].why, "in-water");
     l.walk_out(&mut c, &t, id(900)).expect("a walk-out");
+    let at = |c: &Runner| c.controller.body(id(900)).expect("the body").pose.position;
     let (mut was, mut ticks, mut largest) = (into, 0, 0);
     while !l.done(&c) && ticks < 400 {
         l.step(&mut c, &mut t).expect("a tick");
-        let q = c.walkers[0].body.pose.position;
+        let q = at(&c);
         let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
         let step = (d(was.x, q.x) + d(was.z, q.z)).isqrt() as i64;
         largest = largest.max(step);
@@ -359,8 +363,7 @@ fn a_walker_left_in_the_water_walks_out() {
         was = q;
         ticks += 1;
     }
-    let w = &c.walkers[0];
-    assert_eq!(w.held, None, "walked out");
+    assert!(!c.controller.carried(id(900)), "walked out");
     let out: Vec<&Rung> = l
         .log
         .iter()
@@ -370,10 +373,11 @@ fn a_walker_left_in_the_water_walks_out() {
     println!("{out:?}; largest move in a tick {largest} µm, {ticks} ticks");
     assert!(matches!(out[0], Rung::WalkOut { from, .. } if *from == into));
     assert!(matches!(out[1], Rung::WalkedOut { .. }));
-    let at = w.body.pose.position;
+    let w = *c.controller.body(id(900)).expect("the body");
+    let at = w.pose.position;
     assert!(
         t.surfaces[&ground]
-            .place(id(900), w.body.pose.frame, at, Quat::IDENTITY)
+            .place(id(900), w.pose.frame, at, Quat::IDENTITY)
             .is_ok()
     );
     assert!(
