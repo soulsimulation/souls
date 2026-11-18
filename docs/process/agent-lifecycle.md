@@ -93,7 +93,7 @@ The `proof-check` bot keeps one comment
 up to date with the tier, the proof that tier needs, and which acceptance boxes have evidence. The `claude-review`
 workflow is the default reviewer on every push, including whether the evidence supports each acceptance claim.
 An independent provider fallback follows the same [review contract and required checks](agent-workflow.md#review),
-with its source, reviewer and findings recorded explicitly. `@claude` in a PR review answers
+with its source, reviewer and findings recorded explicitly. `@claude` answers
 follow-ups, and the author answers each comment with a fix or a reason. The maintainer reviews T3 and above and
 anything labelled for them. See [review](review.md).
 
