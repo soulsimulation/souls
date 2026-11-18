@@ -45,5 +45,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 import-eden = { path = "../import-eden" }
+skills = { path = "../../crates/skills" }
 # The `moves` bench places its bodies with the script driver's helpers (B2, #2681).
 body-script = { path = "../body-script" }
