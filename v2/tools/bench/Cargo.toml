@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671; `timers`: K9, #2672."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671; `timers`: K9, #2672; `restart`: K5, #2669."
 
 [[bin]]
 name = "tree"
@@ -36,6 +36,10 @@ path = "src/timers.rs"
 [[bin]]
 name = "act-latency"
 path = "act-latency/main.rs"
+
+[[bin]]
+name = "restart"
+path = "src/restart.rs"
 
 [dependencies]
 replica = { path = "../../crates/replica" }
