@@ -46,4 +46,9 @@ impl WasmPlayer {
     pub fn next(&self) -> u64 {
         self.0.next()
     }
+
+    /// Answers one query on the copy it has played (R1's `query.rs`, Engine v2 V5 #2714).
+    pub fn query(&self, query: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.0.replica().query(query).map_err(js)
+    }
 }
