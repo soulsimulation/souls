@@ -29,12 +29,13 @@
 //!   it is on, its height and the width left for the centre at the doorway's middle. A shut door is the link's state
 //!   (N4, #2652), never an obstacle.
 //! - **Height.** Every vertex is `[x, y, z]` in whole millimetres in the node's frame (T4, #2644: never a 2D point on a
-//!   floor). A floor's vertices carry its surface's height. The open ground's carry the terrain's (N11a, #2735, from
-//!   N1b's `scene::Terrain`, read by [`OpenGround::of`]), and a vertex over water (on ground cover: a pier, a shore)
-//!   keeps 0, the cover's height as before. The triangles stay as coarse as on flat ground: the mover reads heights
-//!   inside a triangle on the terrain from the terrain itself (`crate::mover::Surface::on_terrain`). Cutting through
-//!   every 1 m sample instead made Eden's open ground 24 times as many triangles and slowed N15's thousand walkers
-//!   past real time. With no terrain (N3's tests, a floor) every open-ground vertex is at 0.
+//!   floor). A floor's vertices carry its surface's height. The open ground's are at 0, its plan: the routes, the
+//!   doorways' meets and the spots read it as one level. Its heights are the terrain's (N11a, #2735, from N1b's
+//!   `scene::Terrain`, read by [`OpenGround::of`]): the mover reads them at the point inside every triangle that
+//!   lies on the terrain ([`OpenGround::on_terrain`], `crate::mover::Surface::on_terrain`), and a triangle with a
+//!   corner or its middle over water (ground cover: a pier, a shore) keeps 0, the cover's height as before. Cutting
+//!   through every 1 m sample instead made Eden's open ground 24 times the triangles and slowed N15's thousand
+//!   walkers past real time; heights on the vertices made the routes' one level many.
 //! - **Steep cells.** A 1 m cell whose slope is above [`STEEP`] (a rise over run of 0.5774, today's) is taken from
 //!   the open ground before its cover is added back: no centre stands on it, so the mover slides along its edge and
 //!   a route goes round it. Cells are taken as they are, not grown by the radius: a body's edge may hang over one.
@@ -639,15 +640,6 @@ fn in_any(rings: &[Vec<P>], p: P) -> bool {
     })
 }
 
-/// A piece of the open ground, each vertex at `height`'s height (mm).
-fn ground_piece(shape: &IntShape<i32>, height: &dyn Fn(P) -> i32) -> Piece {
-    let mut p = piece(shape, 0);
-    for v in p.outline.iter_mut().flatten().chain(p.vertices.iter_mut()) {
-        v[1] = height(P::new(v[0], v[2]));
-    }
-    p
-}
-
 /// The doorways' meets with the pieces just cut (all at height `y`).
 fn meets(
     g: &Grown,
@@ -778,6 +770,42 @@ impl OpenGround {
         self.1.as_ref()
     }
 
+    /// Per piece of `pieces` (cut from this open ground), per triangle: whether it lies on the terrain, so that its
+    /// heights are the terrain's. Not when there is no terrain, nor when a corner or the middle of the triangle lies
+    /// in or on a water's outline (ground cover over water keeps 0).
+    pub fn on_terrain(&self, pieces: &[Piece]) -> Vec<Vec<bool>> {
+        let wet = |p: P| {
+            self.0.waters.iter().any(|(r, bb)| {
+                bb[0] <= p.x
+                    && p.x <= bb[2]
+                    && bb[1] <= p.y
+                    && p.y <= bb[3]
+                    && in_any(std::slice::from_ref(r), p)
+            })
+        };
+        pieces
+            .iter()
+            .map(|pc| {
+                pc.triangles
+                    .iter()
+                    .map(|t| {
+                        let c = t.map(|k| {
+                            let v = pc.vertices[k as usize];
+                            P::new(v[0], v[2])
+                        });
+                        let mid = P::new(
+                            ((i64::from(c[0].x) + i64::from(c[1].x) + i64::from(c[2].x)) / 3)
+                                as i32,
+                            ((i64::from(c[0].y) + i64::from(c[1].y) + i64::from(c[2].y)) / 3)
+                                as i32,
+                        );
+                        self.1.is_some() && !c.iter().chain([&mid]).any(|&p| wet(p))
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     /// The same open ground on terrain `t`.
     pub fn on(mut self, t: Terrain) -> OpenGround {
         self.1 = Some(t);
@@ -829,9 +857,8 @@ impl OpenGround {
         };
         let (wet, cover) = (near(&g.waters), near(&g.covers));
         let mut open = op(&[square_ring(w)], &wet, OverlayRule::Difference);
-        // The terrain's steep cells in the square, taken away in runs along x; and whether any sample is off 0.
+        // The terrain's steep cells in the square, taken away in runs along x.
         let n = (SQUARE as i32 / CELL) as usize;
-        let mut level = true;
         if let Some(t) = &self.1 {
             let um = |v: i32| i64::from(v) * 1000;
             let mut steep: Vec<Vec<P>> = Vec::new();
@@ -840,7 +867,6 @@ impl OpenGround {
                 let mut run: Option<i32> = None;
                 for c in 0..=n {
                     let x = w[0] + c as i32 * CELL;
-                    level &= t.height_at(um(x), um(z)).is_none_or(|h| h == 0);
                     let is = r < n
                         && c < n
                         && t.slope_at(um(x) + 500_000, um(z) + 500_000)
@@ -868,20 +894,7 @@ impl OpenGround {
         let shapes = cut_level(g, open, 0, Some(w));
         let mut meets_out = Vec::new();
         meets(&self.0, &shapes, 0, 0, Some(w), &mut meets_out);
-        let pieces = if level {
-            shapes.iter().map(|sh| piece(sh, 0)).collect()
-        } else {
-            // The terrain's height at each vertex; 0 over water.
-            let t = self.1.as_ref();
-            let height = |p: P| -> i32 {
-                if in_any(&wet, p) {
-                    return 0;
-                }
-                t.and_then(|t| t.height_at(i64::from(p.x) * 1000, i64::from(p.y) * 1000))
-                    .map_or(0, |h| mm(h) as i32)
-            };
-            shapes.iter().map(|sh| ground_piece(sh, &height)).collect()
-        };
+        let pieces = shapes.iter().map(|sh| piece(sh, 0)).collect();
         Patch {
             radius: self.0.d - MARGIN - 1,
             pieces,

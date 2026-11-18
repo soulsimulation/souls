@@ -161,26 +161,9 @@ impl Surface {
     }
 
     /// The same surface on terrain `t` (the open ground's, `crate::ground::OpenGround::terrain`): inside a triangle
-    /// whose corners all lie at the terrain's height, the height is the terrain's, read at the point; elsewhere (a
-    /// pier over water, a floor) it is the triangle's.
-    pub fn on_terrain(mut self, t: Terrain) -> Surface {
-        let mm = |um: i64| (um + if um < 0 { -500 } else { 500 }) / 1000;
-        let on = self
-            .tris
-            .iter()
-            .zip(&self.pieces)
-            .map(|(list, pc)| {
-                list.iter()
-                    .map(|(_, idx, _)| {
-                        idx.iter().all(|&k| {
-                            let v = pc.vertices[k as usize];
-                            let h = t.height_at(i64::from(v[0]) * 1000, i64::from(v[2]) * 1000);
-                            h.is_some_and(|h| mm(h) == i64::from(v[1]))
-                        })
-                    })
-                    .collect()
-            })
-            .collect();
+    /// that `on` marks (per piece, per triangle: `crate::ground::OpenGround::on_terrain`), the height is the
+    /// terrain's, read at the point; elsewhere (a pier over water, a floor) it is the triangle's.
+    pub fn on_terrain(mut self, t: Terrain, on: Vec<Vec<bool>>) -> Surface {
         self.terrain = Some((std::sync::Arc::new(t), on));
         self
     }
@@ -212,7 +195,11 @@ impl Surface {
     /// The surface's height at `p` in triangle `t` of piece `q`, µm.
     fn height(&self, q: u32, t: u32, p: [i128; 2]) -> i64 {
         if let Some((ground, on)) = &self.terrain
-            && on[q as usize][t as usize]
+            && on
+                .get(q as usize)
+                .and_then(|l| l.get(t as usize))
+                .copied()
+                .unwrap_or(false)
             && let Some(h) = ground.height_at(p[0] as i64, p[1] as i64)
         {
             return h;

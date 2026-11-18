@@ -57,7 +57,9 @@ fn surface(im: &Import) -> Surface {
     let ground = im.nodes["ground"];
     let open = OpenGround::of(&im.tree, ground, HUMAN_RADIUS).expect("the open ground");
     let t = open.terrain().expect("the terrain").clone();
-    Surface::new(ground, open.cut_square(0, 0).pieces).on_terrain(t)
+    let pieces = open.cut_square(0, 0).pieces;
+    let on = open.on_terrain(&pieces);
+    Surface::new(ground, pieces).on_terrain(t, on)
 }
 
 fn place(s: &Surface, at: [i64; 2]) -> Option<Body> {
@@ -409,7 +411,10 @@ fn a1_eden_hills() {
         cut.as_millis(),
         t1.elapsed().as_millis()
     );
-    let s = Surface::new(ground, pieces).on_terrain(terrain.clone());
+    let on = open.on_terrain(&pieces);
+    let wet = on.iter().flatten().filter(|o| !**o).count();
+    println!("Eden: {wet} triangles off the terrain (a corner or the middle over water)");
+    let s = Surface::new(ground, pieces).on_terrain(terrain.clone(), on);
     let mut spots = 0;
     'sq: for &(i, j) in &squares {
         for k in 0..16 {

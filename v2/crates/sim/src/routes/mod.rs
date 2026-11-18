@@ -680,14 +680,15 @@ impl Map {
             p[0].div_euclid(SQUARE) as i32,
             p[1].div_euclid(SQUARE) as i32,
         );
-        let list = self
-            .by_patch
-            .get(&(node, None))
-            .or_else(|| self.by_patch.get(&(node, Some(square))))?;
+        let (list, open) = match self.by_patch.get(&(node, None)) {
+            Some(l) => (l, false),
+            None => (self.by_patch.get(&(node, Some(square)))?, true),
+        };
         let y = mm(at.y);
+        // The open ground is one level, its plan at 0; a body on it stands at the terrain's height (N11a, #2735).
         list.iter()
             .filter(|&&q| {
-                self.pieces[q as usize]
+                open || self.pieces[q as usize]
                     .piece
                     .vertices
                     .first()
