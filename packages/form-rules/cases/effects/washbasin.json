@@ -1,0 +1,128 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:washbasin (core/washbasin@1, 1 placed): its tap runs and stops; with the water running, hands are washed with a free hand, using water from the supply.",
+ "cases": [
+  {
+   "name": "washbasin_run_wash_stop",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:washbasin",
+      "fields": {}
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       150
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    },
+    "now_us": 0
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "wash_hands"
+     },
+     "now_us": 0,
+     "receipt": "rwash_hands0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "turn_on"
+     },
+     "now_us": 1000000,
+     "receipt": "rturn_on1000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "running",
+        "n": 2,
+        "to": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "wash_hands"
+     },
+     "now_us": 2000000,
+     "receipt": "rwash_hands2000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "water",
+        "n": 1,
+        "to": 999999500
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:hands_washed",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "turn_off"
+     },
+     "now_us": 8000000,
+     "receipt": "rturn_off8000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    }
+   ]
+  }
+ ]
+}
