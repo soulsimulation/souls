@@ -1,0 +1,23 @@
+{
+  "format": "souls-move/1",
+  "move": "consume",
+  "claims": [
+    "manipulator",
+    "voice"
+  ],
+  "blocks": [
+    "manipulator",
+    "voice"
+  ],
+  "cancels_on": [
+    "claim_taken",
+    "out_of_reach"
+  ],
+  "effector": "held_point",
+  "reach_mm": 600,
+  "phases": {
+    "start_up_us": 800000,
+    "consume_us": 1200000,
+    "recovery_us": 600000
+  }
+}

@@ -40,7 +40,7 @@ async function world(t) {
     child.on("exit", (code) => { let j = null; try { j = JSON.parse(out); } catch { /* text */ } done({ code, err, json: j, out }); });
   });
   w.state = () => JSON.parse(readFileSync(join(dir, ".eden-serve.json"), "utf8"));
-  w.copyHas = () => { try { return JSON.parse(readFileSync(join(dir, "world-live.json"), "utf8")).live?.things?.kettle?.water === "boiled"; } catch { return false; } };
+  w.copy = () => { try { return JSON.parse(readFileSync(join(dir, "world-live.json"), "utf8")); } catch { return null; } };
   t.after(async () => { await w.cli("serve", "--stop"); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); });
   return w;
 }
@@ -57,15 +57,20 @@ test("A1: the tea chain continues within 2 s of the copy showing the kettle boil
   await new Promise((r) => setTimeout(r, 2_500));   // the rule takes the kettle's state as it is
   assert.deepEqual(w.acts, [], "nothing is sent while the kettle is cold");
   w.kettle = "boiled";
-  const seen = await until(() => w.copyHas() && Date.now());
+  // the lag is the client's own: from when its copy showed the boil (the copy's receivedAt) to when it sent the chain on (the rule's
+  // lastFired), both on its clock. The test's polling and the stand-in world's scheduling under load are not part of it.
+  const seen = await until(() => { const c = w.copy(); return c?.live?.things?.kettle?.water === "boiled" && c.receivedAt; });
   assert.ok(seen, "the copy shows the kettle boiled");
   assert.ok(await until(() => w.acts.length === 2), `both steps were sent: ${JSON.stringify(w.acts)}`);
   assert.deepEqual(w.acts.map((a) => a.id), ["object:kettle:pour", "object:cup:steep"]);
-  const lag = w.acts[0].at - seen;
-  assert.ok(lag <= 2_000, `the first step went ${lag} ms after the copy showed it`);
+  // the world has the last step before the client has its answer: wait for the client to close the chain and queue what it wakes
+  await until(() => w.state().wake.queue.length > 0);
+  const rule = w.state().wake.rules.at(-1);
+  assert.equal(rule.ended, "fired");
+  const lag = rule.lastFired - seen;
+  assert.ok(lag <= 2_000, `the chain went on ${lag} ms after the copy showed it`);
   assert.deepEqual(w.state().wake.queue.map((q) => q.id), ["plan-finished"], "the only wake is the chain's own end, after it ran: no turn was asked for between");
-  assert.equal(w.state().wake.rules.at(-1).ended, "fired");
-  console.log(`A1 lag from the copy showing it to the first step: ${lag} ms`);
+  console.log(`A1 lag from the copy showing it to the chain going on, on the client's clock: ${lag} ms`);
 });
 
 test("A2: past its end the entry is dropped and the mind is told once; an `at` entry sends at its time", async (t) => {
