@@ -132,6 +132,10 @@ step rules-equal node --input-type=module -e '
   const got = r.rules_run(readFileSync("target/tmp/rules/run.json", "utf8")), want = readFileSync("target/tmp/rules/native.txt", "utf8");
   console.log(`rules-equal: ${want.split("\n").length - 1} cases, WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} native`);
   if (got !== want) process.exit(1);'
+# The fact sheet (V10, #2720): a 20 s recording's live and history sheets and one factsAt record, the same bytes
+# from the same WASM build in Node as natively (tools/facts/wasm.mjs).
+step facts-wasm bash -c 'cargo run -p facts --release --locked --quiet -- vectors target/facts-vectors &&
+  node tools/facts/wasm.mjs target/wasm-load/pkg target/facts-vectors'
 # The form rules' drift report (R2, #2685): the live packages/form-rules cases against this library, whose required
 # test reads a pinned snapshot. Only the daily full run on main (schedule) or V2_FULL=1, never per change; it prints
 # each disagreement and never fails the job.
