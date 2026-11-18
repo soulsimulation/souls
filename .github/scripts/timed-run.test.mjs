@@ -306,7 +306,7 @@ test('v2-bench: --bin and plain tokens after --; the bin must be a [[bin]] of th
   assert.deepEqual(benchLines(parseInputs({ ...ENV, INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin tree' })).run, ['run', '-p', 'bench', '--release', '--locked', '--bin', 'tree']);
   assert.deepEqual(checkBenchArgs('--bin tree -- --rows=10 target/x a.b_c'), ['--bin', 'tree', '--', '--rows=10', 'target/x', 'a.b_c']);
   for (const a of ['', '400 2', '--bin', '--bin ../x', '--bin View', '--bin a;b', '--bin tree 400', '--bin tree -- $(id)', '--bin tree -- a;b', '--bin tree -- `id`', '--bin tree -- a|b',
-    '--bin tree -- "x"', '--bin tree -- a&&b', '--bin tree -- ~/x', `--bin tree -- ${Array(21).fill('1').join(' ')}`])
+    '--bin tree -- "x"', '--bin tree -- a&&b', '--bin tree -- a~b', '--bin tree -- a>b',`--bin tree -- ${Array(21).fill('1').join(' ')}`])
     assert.throws(() => checkBenchArgs(a), /input args/, a);
   assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin tree', INPUT_RUNNER: 'hosted' }), /input runner=/);
   assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin tree', INPUT_RUNNER: 'souls-wide' }), /input runner=/);
