@@ -52,7 +52,9 @@ export const UNITS = Object.freeze(['count', 'mm', 'g', 'mg', 'mC', 'permille'])
 export const AUDIENCE_RULES = Object.freeze(['everyone', 'owner', 'linked', 'creator']);
 /** What may be at a link's `from` end: a Soul, a body, a thing, or a kind named `namespace:name`. The other end is the
  *  kind that declares the link; links are found from either end (contract T2, #2641). */
-export const LINK_ENDS = Object.freeze(['soul', 'body', 'thing']);
+/** `place`: a node whose kind is a place (owner `place`), such as the place a thing stands in; a `state` need reads its
+ *  fields through the link, never from the tree (contract T2: a parent means lifetime and frame only). */
+export const LINK_ENDS = Object.freeze(['soul', 'body', 'thing', 'place']);
 export const POINT_ROLES = Object.freeze(['stand', 'grip', 'contact', 'outlet']);
 export const SLOT_ADMITS = Object.freeze(['body', 'thing']);
 /** A row's ends: the first and the last place of a row of slots, found by `place` (SA-D3, #2855). */
@@ -72,7 +74,7 @@ export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'durati
 export const SELECT = Object.freeze({of: ['things', 'free_slots'], in: ['this', 'here', 'parent'], anchor: ['me', 'this'], order: ['nearest', 'furthest']});
 /** The closed lists. Each grows only with the task that first needs a new member. */
 /** `moves`: the thing argument moves the way the form moves it (`carry` or `push`), by its kind's section 18. */
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'moves']);
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough', 'moves']);
 export const MOVED_BY = Object.freeze(['carry', 'push']);
 /** `settle`: a body takes a ground posture where it stands, with no slot (SA-G3, #2875). */
 export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait', 'settle']);
@@ -198,7 +200,7 @@ export function validateEntry(entry) {
     }
   }
 
-  const ctx = {text, state, links, points, slots, forms, areas: isObj(entry.areas) ? entry.areas : {}};
+  const ctx = {state, links, points, slots, forms, text, areas: isObj(entry.areas) ? entry.areas : {}};
   for (const [name, f] of Object.entries(forms)) {
     if (!IDENT.test(name)) err(`forms.${name}`, 'a form name is lower_snake_case');
     form(f, `forms.${name}`, ctx, err);
@@ -770,8 +772,26 @@ function form(f, path, ctx, err) {
   if (!STARTS.includes(f.starts)) err(`${path}.starts`, `one of ${STARTS.join(', ')}`);
   if ((f.starts === 'timer') !== (f.who === 'world')) err(`${path}.who`, 'a form started by a timer is the world\'s, and only such a form is');
 
-  list(f.needs, `${path}.needs`, 'need', NEEDS, err, (n, p) => {
-    if (n.need === 'state') {
+  list(f.needs, `${path}.needs`, 'need', NEEDS, err, (withWords, p) => {
+    // `says`: the words of this need's refusal, a key of the text table (words by reference, SA-F6b).
+    const {says, ...n} = withWords;
+    if ('says' in withWords && !(typeof says === 'string' && says in ctx.text)) err(`${p}.says`, 'names an entry of the text table: the words of this need\'s refusal');
+    if (n.need === 'state' && 'link' in n) {
+      // A field of the place at the end of a link (`from: "place"`, most 1): it is that place's kind's field, numbered
+      // and with its audience there, so its name and values are checked when the rules read it.
+      only(n, ['need', 'link', 'field', 'is', 'not', 'at_least', 'at_most'], p, err);
+      linkName(n.link, `${p}.link`);
+      const l = ctx.links[n.link];
+      if (isObj(l) && !(l.from === 'place' && l.most === 1)) err(`${p}.link`, 'a link to the place this thing stands in: from "place", most 1');
+      if (!(typeof n.field === 'string' && IDENT.test(n.field))) err(`${p}.field`, 'names a state field of the place\'s kind, lower_snake_case');
+      const ranged = 'at_least' in n || 'at_most' in n, exact = 'is' in n, negated = 'not' in n;
+      if (ranged) {
+        if (exact || negated) err(p, 'a range (at_least, at_most) or one of is, not; not both');
+        for (const k of ['at_least', 'at_most']) if (k in n && !isInt(n[k])) err(`${p}.${k}`, 'a whole number');
+        if (isInt(n.at_least) && isInt(n.at_most) && n.at_least > n.at_most) err(p, 'at_least is above at_most; nothing is in that range');
+      } else if (exact === negated) err(p, 'exactly one of is, not, or a range (at_least, at_most)');
+      else { const v = exact ? n.is : n.not; if (!(typeof v === 'boolean' || isInt(v) || (typeof v === 'string' && IDENT.test(v)))) err(`${p}.${exact ? 'is' : 'not'}`, 'a flag, a whole number or an enum value'); }
+    } else if (n.need === 'state') {
       only(n, ['need', 'field', 'is', 'not', 'at_least', 'at_most'], p, err);
       fieldName(n.field, `${p}.field`);
       const ranged = 'at_least' in n || 'at_most' in n, exact = 'is' in n, negated = 'not' in n;
@@ -792,13 +812,15 @@ function form(f, path, ctx, err) {
       if (!MOVED_BY.includes(n.by)) err(`${p}.by`, `how the form moves it, one of ${MOVED_BY.join(', ')}`);
     }
     else if (n.need === 'hand') {
-      only(n, ['need', 'free', 'holds'], p, err);
-      if (('free' in n) === ('holds' in n)) err(p, 'exactly one of free, holds');
+      only(n, ['need', 'free', 'empty', 'holds'], p, err);
+      const which = ['free', 'empty', 'holds'].filter(k => k in n);
+      if (which.length !== 1) err(p, 'exactly one of free (one hand free), empty (every hand empty), holds');
       else if ('free' in n) { if (n.free !== true) err(`${p}.free`, 'true (a hand that must hold something is "holds")'); }
+      else if ('empty' in n) { if (n.empty !== true) err(`${p}.empty`, 'true: every hand holds nothing'); }
       else if (!(typeof n.holds === 'string' && KIND.test(n.holds))) err(`${p}.holds`, 'a kind, "namespace:name"');
-    } else if (n.need === 'room') {
+    } else if (n.need === 'room' || n.need === 'enough') {
       only(n, ['need'], p, err);
-      if (!(Array.isArray(f.effects) && f.effects.some(e => e?.change === 'transfer'))) err(p, 'room is that every amount the form\'s transfers move has room where it lands; this form has no transfer');
+      if (!(Array.isArray(f.effects) && f.effects.some(e => e?.change === 'transfer'))) err(p, `${n.need} is about every amount the form's transfers move (room where it lands, enough at its source); this form has no transfer`);
     } else { only(n, ['need', 'link'], p, err); linkName(n.link, `${p}.link`); }
   });
   list(f.steps, `${path}.steps`, 'step', STEPS, err, (s, p) => {
