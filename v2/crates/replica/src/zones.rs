@@ -165,13 +165,15 @@ impl fmt::Display for Fault {
         match self {
             Fault::WriteOutsideOwn { system, own, wrote } => write!(
                 f,
-                "system {system} at {} wrote {}",
+                "system {system} at {} wrote {} [TRUNK T1, v2/docs/zones.md rules 2 and 3] fix: write only your own \
+                 node (Own); change another by a transfer, or let its own system read yours next tick",
                 show(*own),
                 show(*wrote)
             ),
             Fault::ReadSameTick { system, own } => write!(
                 f,
-                "system {system} at {} wrote differently in another order",
+                "system {system} at {} wrote differently in another order [TRUNK T1, v2/docs/zones.md rules 2 and \
+                 3] fix: read other nodes only through Prev; drop the shared state, or put both sides in one activity node",
                 show(*own)
             ),
             Fault::LeaveNotHere(id) => {
