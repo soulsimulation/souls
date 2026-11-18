@@ -19,6 +19,10 @@ step() {
 step toolchain bash -c 'rustup component add rustfmt clippy && rustup target add wasm32-unknown-unknown'
 
 step format cargo fmt --all --check
+# Engine code names no kind (K3, #2667): the fixture kinds' names are in no Rust code under the crates' src/. Comment
+# lines and lines that embed a fixture file (data) are set aside; tests and fixtures name kinds on purpose.
+step no-kind-names bash -c '! grep -rniEw --include="*.rs" "lamps?|seats?|cups?" crates/*/src |
+  grep -vE "^[^:]+:[0-9]+:[[:space:]]*//" | grep -v "include_str!"'
 step lints cargo clippy --workspace --all-targets --locked -- -D warnings
 # replica's WASM-only code (the wasm-bindgen export) is linted on its own target too.
 step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked -- -D warnings
@@ -102,3 +106,7 @@ step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p re
     --target wasm32-unknown-unknown --locked --features checker &&
   CHECKER_WASM="$PWD/target/checker/wasm32-unknown-unknown/release/replica.wasm" \
     cargo test -p replica --test intents --locked the_built_checker_artifact_loads_by_its_hash -- --nocapture'
+# The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
+# same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
+step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
+  node tools/bench/replica-equal/node.mjs target/wasm-load/pkg target/replica-equal crates/replica/tests/queries.txt'

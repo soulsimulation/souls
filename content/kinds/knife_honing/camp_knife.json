@@ -1,0 +1,38 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:camp_knife",
+  "owner": "thing",
+  "state": {
+    "honings": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [-70, 12, 0] }
+  },
+  "geometry": { "bounds_mm": [240, 24, 36] },
+  "forms": {},
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:camp_knife",
+    "table": [
+      { "part": "blade", "field": "honings", "do": "tint", "at": { "0": "#7a5a3c", "1": "#9c9890", "2": "#c3c6c8", "3": "#e8eef2" } },
+      { "part": "blade", "field": "honings", "do": "glow", "range": [0, 3], "to": [0, 300] }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        { "kind": "box", "at": [-70, 10, 0], "size": [100, 20, 28], "tint": "handle" },
+        { "kind": "box", "at": [-15, 10, 0], "size": [10, 22, 34], "tint": "steel" },
+        { "kind": "extrude", "at": [0, 8, 0], "polygon": [[-10, -14], [80, -14], [120, 0], [90, 12], [-10, 14]], "h": 4, "tint": "steel", "role": "blade" }
+      ],
+      "palette": { "handle": "#5a3d27", "steel": "#9aa0a4" },
+      "tags": ["camping", "tool", "item", "knife", "object"]
+    }
+  },
+  "text": {
+    "card": "A camp knife whose edge goes from dull to fully maintained on a whetstone.",
+    "knife": "knife",
+    "blade": "blade"
+  },
+  "card": { "text": "card", "category": "knife", "synonyms": ["blade"] }
+}

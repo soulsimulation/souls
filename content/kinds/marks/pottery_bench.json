@@ -1,0 +1,341 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pottery_bench",
+  "owner": "thing",
+  "state": {
+    "clay": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1000
+      ],
+      "yaw_mdeg": 180000
+    },
+    "wheel": {
+      "role": "contact",
+      "at_mm": [
+        -150,
+        1000,
+        100
+      ]
+    }
+  },
+  "slots": {
+    "out": {
+      "admits": "thing",
+      "kinds": [
+        "eden:clay_vase"
+      ],
+      "most": 1,
+      "at_mm": [
+        300,
+        1000,
+        0
+      ],
+      "fits_mm": [
+        300,
+        500,
+        300
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1200,
+      1080,
+      800
+    ]
+  },
+  "forms": {
+    "make_vase": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "clay",
+          "at_least": 1
+        },
+        {
+          "need": "slot_free",
+          "slot": "out"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "wheel"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "clay",
+          "by": -1,
+          "event": "clay_used"
+        },
+        {
+          "change": "create",
+          "kind": "eden:clay_vase",
+          "into": "out",
+          "event": "vase_made"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:pottery_bench",
+    "table": [
+      {
+        "part": "fill",
+        "field": "clay",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          0,
+          3
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            965,
+            0
+          ],
+          "size": [
+            1200,
+            30,
+            800
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            475,
+            -300
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            475,
+            300
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            500,
+            475,
+            -300
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            500,
+            475,
+            300
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            990,
+            0
+          ],
+          "size": [
+            350,
+            20,
+            400
+          ],
+          "tint": "tray"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -150,
+            1000,
+            100
+          ],
+          "r": 160,
+          "h": 30,
+          "segments": 20,
+          "tint": "tray"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -150,
+            1040,
+            100
+          ],
+          "r": 60,
+          "h": 60,
+          "segments": 14,
+          "tint": "clay"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -480,
+            1020,
+            -220
+          ],
+          "r": 60,
+          "h": 80,
+          "segments": 10,
+          "tint": "clay",
+          "role": "fill",
+          "pivot": [
+            -560,
+            1020,
+            -220
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -350,
+            1020,
+            -220
+          ],
+          "r": 60,
+          "h": 80,
+          "segments": 10,
+          "tint": "clay",
+          "role": "fill",
+          "pivot": [
+            -560,
+            1020,
+            -220
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -220,
+            1020,
+            -220
+          ],
+          "r": 60,
+          "h": 80,
+          "segments": 10,
+          "tint": "clay",
+          "role": "fill",
+          "pivot": [
+            -560,
+            1020,
+            -220
+          ]
+        }
+      ],
+      "palette": {
+        "wood": "#ae875d",
+        "tray": "#403d39",
+        "clay": "#b18a70"
+      },
+      "tags": [
+        "art",
+        "pottery",
+        "workbench",
+        "table"
+      ]
+    }
+  },
+  "text": {
+    "card": "A pottery bench with three portions of clay: make a terracotta vase from one.",
+    "art": "art",
+    "pottery": "pottery",
+    "workbench": "workbench",
+    "howto_vase": "With a hand free and the tray clear, make a vase: ten seconds and one clay portion. Take it from the tray to make the next."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "pottery",
+      "workbench"
+    ]
+  },
+  "howtos": {
+    "vase": {
+      "text": "howto_vase",
+      "steps": [
+        {
+          "form": "make_vase"
+        }
+      ]
+    }
+  }
+}

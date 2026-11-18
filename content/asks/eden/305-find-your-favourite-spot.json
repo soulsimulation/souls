@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":305,"group":"open-ended","words":"find your favourite spot","obvious":2,"things":{"bench":"eden:bench","tree":"eden:tree"},"chain":[{"any":[[{"this":"bench","form":"sit","args":{"seat":"left"}}],[{"this":"me","form":"lean_on","args":{"support":"tree"}}]]}]}

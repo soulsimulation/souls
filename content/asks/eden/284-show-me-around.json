@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":284,"group":"open-ended","words":"show me around","obvious":3,"things":{"path":"eden:footpath","signpost":"eden:signpost"},"chain":[{"this":"me","form":"go_to","args":{"place":"path"}},{"this":"me","form":"point","args":{"toward":"signpost"}},{"say":"this way"}]}
