@@ -100,17 +100,17 @@ move's resources cancels it at its next phase end (`claim-taken`).
 ## Postures and seats (B3)
 
 `v2/crates/sim/src/slots` (B3 #2682) seats bodies. A seat is one slot of a thing, with its kind's data
-(`replica::moves::Seat`, fixture `v2/crates/replica/fixtures/seats/`): the slot's height above the floor, taken from
+(`replica::moves::Place`, fixture `v2/crates/replica/fixtures/seats/`): the slot's height above the floor, taken from
 the model geometry, and a point to stand at. Sitting and lying are moves (`sit.diag`, `lie.diag`). At a move's contact
-instant the controller hands the body from the floor into the slot (`Controller::seat`, T4's hand-off from mover to
+instant the controller hands the body from the floor into the slot (`Controller::slot_in`, T4's hand-off from mover to
 slot) with the stance the request named. Postures are the controller's stance input: stand, sit, lie. Rising
 (`rise.diag`) is the reverse: at contact the body is handed back onto the floor at the stand point
 (`Controller::stand`).
 
 - **Reserved at commit.** One tick's requests are taken together and ordered by a stable key: the body's id, then the
-  seat's. The first takes the seat. Each later request is refused `seat-taken`, and the refusal names the holder. The
+  seat's. The first takes the seat. Each later request is refused `place-taken`, and the refusal names the holder. The
   hold is keyed by the seat's thing, so finding the holder is one lookup, never a scan.
-- **A seat above standing reach is refused** `seat-out-of-reach`. Its height alone is compared with the move's reach.
+- **A seat above standing reach is refused** `place-out-of-reach`. Its height alone is compared with the move's reach.
 - **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
   controller keeps it apart from the bodies it steps, so a tick never visits it.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
