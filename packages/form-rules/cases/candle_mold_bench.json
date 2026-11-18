@@ -1,0 +1,442 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:candle_mold_bench (from #1899, candle molding): six wax portions and six wicks; a Soul with empty hands chooses a pillar or a taper and red, blue or ivory, and the bench makes that candle in its out place, which must be free (one candle is taken before the next). Refusals carry the original's reasons by key.",
+ "cases": [
+  {
+   "name": "mold_every_need_met",
+   "act": {
+    "this": "k1",
+    "form": "mold",
+    "args": {
+     "shape": "taper",
+     "colour": "blue"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:candle_mold_bench",
+      "fields": {},
+      "slots": {
+       "out": []
+      }
+     },
+     "c1": {
+      "kind": "eden:molded_candle"
+     },
+     "x1": {},
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       120,
+       900,
+       400
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "yes"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "mold_no_wax",
+   "act": {
+    "this": "k1",
+    "form": "mold",
+    "args": {
+     "shape": "taper",
+     "colour": "blue"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:candle_mold_bench",
+      "fields": {
+       "wax": 0
+      },
+      "slots": {
+       "out": []
+      }
+     },
+     "c1": {
+      "kind": "eden:molded_candle"
+     },
+     "x1": {},
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       120,
+       900,
+       400
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "wax",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "no_wax"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "mold_no_wicks",
+   "act": {
+    "this": "k1",
+    "form": "mold",
+    "args": {
+     "shape": "taper",
+     "colour": "blue"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:candle_mold_bench",
+      "fields": {
+       "wicks": 0
+      },
+      "slots": {
+       "out": []
+      }
+     },
+     "c1": {
+      "kind": "eden:molded_candle"
+     },
+     "x1": {},
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       120,
+       900,
+       400
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "wicks",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "no_wicks"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "mold_candle_not_taken",
+   "act": {
+    "this": "k1",
+    "form": "mold",
+    "args": {
+     "shape": "taper",
+     "colour": "blue"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:candle_mold_bench",
+      "fields": {},
+      "slots": {
+       "out": [
+        "c1"
+       ]
+      }
+     },
+     "c1": {
+      "kind": "eden:molded_candle"
+     },
+     "x1": {},
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       120,
+       900,
+       400
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 2,
+    "detail": {
+     "node": "k1",
+     "slot": "out"
+    },
+    "fix": null,
+    "says": "take_candle_first"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "mold_hands_full",
+   "act": {
+    "this": "k1",
+    "form": "mold",
+    "args": {
+     "shape": "taper",
+     "colour": "blue"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:candle_mold_bench",
+      "fields": {},
+      "slots": {
+       "out": []
+      }
+     },
+     "c1": {
+      "kind": "eden:molded_candle"
+     },
+     "x1": {},
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      },
+      "effector_mm": [
+       120,
+       900,
+       400
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 3,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "mold_out_of_reach",
+   "act": {
+    "this": "k1",
+    "form": "mold",
+    "args": {
+     "shape": "taper",
+     "colour": "blue"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:candle_mold_bench",
+      "fields": {},
+      "slots": {
+       "out": []
+      }
+     },
+     "c1": {
+      "kind": "eden:molded_candle"
+     },
+     "x1": {},
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       120,
+       900,
+       1200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 4,
+    "fix": {
+     "step": "walk_to",
+     "point": "mold"
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "mold_a_colour_not_offered",
+   "act": {
+    "this": "k1",
+    "form": "mold",
+    "args": {
+     "shape": "taper",
+     "colour": "green"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:candle_mold_bench",
+      "fields": {},
+      "slots": {
+       "out": []
+      }
+     },
+     "c1": {
+      "kind": "eden:molded_candle"
+     },
+     "x1": {},
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       120,
+       900,
+       400
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "bad_input",
+    "need": -1,
+    "detail": {
+     "what": "not_a_choice",
+     "arg": "colour",
+     "value": "green"
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  }
+ ]
+}
