@@ -278,6 +278,11 @@ impl Skill for Route {
         }
     }
 
+    /// The walk never draws and never sets a timer: the world may step it beside others (N17b, #3255).
+    fn beside(&mut self) -> Option<&mut (dyn Skill + Send)> {
+        Some(self)
+    }
+
     fn step(&mut self, host: &mut dyn Host) -> Progress {
         let body = host.body();
         let Some(me) = host.read(body) else {

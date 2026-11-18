@@ -38,7 +38,7 @@ use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, floor_joins, ground_doors};
 use crate::mover::{Body, Surface};
-use crate::routes::{HANDS, Hop, Map};
+use crate::routes::{HANDS, Hop, Map, Scratch};
 use crate::spots::{Ask, CLEAR, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Refusal};
 use replica::encode::Value;
@@ -99,6 +99,22 @@ pub struct Spent {
     pub lines_blocked: u64,
 }
 
+impl Spent {
+    /// Adds what `o` counted: a thread's costs joined to the town's (N17b). Times are summed across threads.
+    pub fn add(&mut self, o: &Spent) {
+        self.corners += o.corners;
+        self.corner_ns += o.corner_ns;
+        self.clears += o.clears;
+        self.clear_ns += o.clear_ns;
+        self.searches += o.searches;
+        self.search_ns += o.search_ns;
+        self.lines_new += o.lines_new;
+        self.lines_off += o.lines_off;
+        self.lines_end += o.lines_end;
+        self.lines_blocked += o.lines_blocked;
+    }
+}
+
 /// The engine as the walk skill reads it.
 pub struct Town {
     pub tree: Tree,
@@ -118,6 +134,8 @@ pub struct Town {
     pub spent: Cell<Spent>,
     /// Each walker's line of corners (#3167), kept from the search that found it.
     lines: BTreeMap<Id, Line>,
+    /// One route search scratch per thread asking (N17b, #3255): the first is [`Town::view`]'s.
+    scratches: Vec<Scratch>,
     crossings: BTreeMap<Id, Crossing>,
     /// Where each link is in `buildings` (building, link), the first that holds it: read every tick by each walker
     /// with a link ahead, so not searched for (#3213).
@@ -224,6 +242,7 @@ impl Town {
             meter: None,
             spent: Cell::new(Spent::default()),
             lines: BTreeMap::new(),
+            scratches: vec![Scratch::default()],
             crossings: BTreeMap::new(),
         })
     }
@@ -244,28 +263,99 @@ impl Town {
             .map(|b| b.place)
     }
 
-    /// The town as the host's questions read it in a tick: the map behind a cell (a route is cached as it is
-    /// found), the rest shared.
+    /// The town as the host's questions read it in a tick: the map shared, a route search's scratch behind a cell
+    /// (what it finds is cached), the rest shared.
     pub fn view(&mut self) -> View<'_> {
-        View {
-            tree: &self.tree,
-            map: RefCell::new(&mut self.map),
-            surfaces: &self.surfaces,
-            buildings: &self.buildings,
-            link_at: &self.link_at,
-            turns: self.turns.as_ref(),
-            meter: self.meter,
+        let split = self.split(1);
+        split
+            .shared
+            .view(&mut split.scratches[0], split.lines, split.spent)
+    }
+
+    /// The town split for `workers` threads asking its questions side by side (N17b, #3255): the parts every thread
+    /// reads, one route search scratch each, and the walkers' lines and the costs, which the caller hands out. What
+    /// the scratches found since the last split joins the map's caches first.
+    pub fn split(&mut self, workers: usize) -> Split<'_> {
+        for s in &mut self.scratches {
+            self.map.keep(s);
+        }
+        let workers = workers.max(1);
+        if self.scratches.len() < workers {
+            self.scratches.resize_with(workers, Scratch::default);
+        }
+        Split {
+            shared: Shared {
+                tree: &self.tree,
+                map: &self.map,
+                surfaces: &self.surfaces,
+                buildings: &self.buildings,
+                link_at: &self.link_at,
+                turns: self.turns.as_ref(),
+                meter: self.meter,
+                ground: self.ground,
+            },
+            scratches: &mut self.scratches[..workers],
+            lines: &mut self.lines,
             spent: &self.spent,
-            lines: RefCell::new(&mut self.lines),
+        }
+    }
+}
+
+/// The town split for threads ([`Town::split`]).
+pub struct Split<'a> {
+    pub shared: Shared<'a>,
+    pub scratches: &'a mut [Scratch],
+    /// Each walker's line of corners, by walker: a thread's view needs those of the walkers it steps.
+    pub lines: &'a mut BTreeMap<Id, Line>,
+    pub spent: &'a Cell<Spent>,
+}
+
+/// The parts of the town every thread reads in a tick, never writes.
+#[derive(Clone, Copy)]
+pub struct Shared<'a> {
+    pub tree: &'a Tree,
+    map: &'a Map,
+    surfaces: &'a BTreeMap<Id, Surface>,
+    buildings: &'a [Building],
+    link_at: &'a BTreeMap<Id, (usize, usize)>,
+    turns: Option<&'a Turns>,
+    meter: Option<fn() -> u64>,
+    ground: Id,
+}
+
+impl<'a> Shared<'a> {
+    /// The town as one thread's questions read it: its own scratch, the lines of the walkers it steps, and the costs
+    /// it counts.
+    pub fn view<'b>(
+        &self,
+        scratch: &'b mut Scratch,
+        lines: &'b mut BTreeMap<Id, Line>,
+        spent: &'b Cell<Spent>,
+    ) -> View<'b>
+    where
+        'a: 'b,
+    {
+        View {
+            tree: self.tree,
+            map: self.map,
+            scratch: RefCell::new(scratch),
+            surfaces: self.surfaces,
+            buildings: self.buildings,
+            link_at: self.link_at,
+            turns: self.turns,
+            meter: self.meter,
+            spent,
+            lines: RefCell::new(lines),
             ground: self.ground,
         }
     }
 }
 
-/// The town as the walk skill's questions read it ([`Town::view`]).
+/// The town as the walk skill's questions read it ([`Town::view`], [`Shared::view`]).
 pub struct View<'a> {
     pub tree: &'a Tree,
-    map: RefCell<&'a mut Map>,
+    map: &'a Map,
+    scratch: RefCell<&'a mut Scratch>,
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
     link_at: &'a BTreeMap<Id, (usize, usize)>,
@@ -687,7 +777,7 @@ impl View<'_> {
         if self.clear(body, [to.x, to.z], 0)? {
             return Ok(line(vec![p, [to.x, to.z]], true));
         }
-        let mut map = self.map.borrow_mut();
+        let map = self.map;
         let (Some(from), Some(goal)) = (
             map.spot_near(node, body.pose.position, AT_EDGE),
             // A link's near end lies on its piece's edge, within the grid's rounding.
@@ -696,7 +786,7 @@ impl View<'_> {
             return Err(refusal("off-ground", show(node)));
         };
         let t0 = self.now();
-        let r = map.route(self.tree, from, goal, HANDS);
+        let r = map.route_in(&mut self.scratch.borrow_mut(), self.tree, from, goal, HANDS);
         let t1 = self.now();
         self.spend(|s| {
             s.searches += 1;

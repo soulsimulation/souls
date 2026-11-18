@@ -34,7 +34,10 @@
 //!
 //! Not here: entries to the log, timers (K9).
 
+mod beside;
 pub mod restart;
+
+pub use beside::{BESIDE_ORDERED, CHUNK, UNIT_PANICKED};
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -132,7 +135,8 @@ struct WorldHost<'a, G> {
     seed: u64,
     body: Id,
     driver: Driver,
-    minter: &'a mut Minter,
+    /// `None` for a skill stepped beside others ([`Skill::beside`]): it may neither draw nor set a timer.
+    minter: Option<&'a mut Minter>,
     staged: &'a mut Staged,
     /// Host calls, reads and questions included (they take `&self`).
     calls: Cell<u64>,
@@ -242,8 +246,11 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
 
     fn set_timer(&mut self, after: Micros, name: Name) -> Id {
         self.count();
+        let Some(minter) = self.minter.as_deref_mut() else {
+            panic!("{BESIDE_ORDERED}: a skill stepped beside others set a timer");
+        };
         // A scope's 2^64 counters cannot run out in a world's life; if they did, the timer is named by its body.
-        let id = self.minter.mint().unwrap_or(self.body);
+        let id = minter.mint().unwrap_or(self.body);
         self.staged.timers.push(Timer {
             body: self.body,
             id,
@@ -260,6 +267,9 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
 
     fn draw(&mut self) -> u64 {
         self.count();
+        if self.minter.is_none() {
+            panic!("{BESIDE_ORDERED}: a skill stepped beside others drew");
+        }
         self.staged.draws += 1;
         splitmix(self.seed ^ splitmix(self.staged.draws))
     }
@@ -311,7 +321,7 @@ pub fn step(
             seed,
             body: r.body,
             driver: r.driver,
-            minter: &mut *minter,
+            minter: Some(&mut *minter),
             staged: &mut staged,
             calls: Cell::new(0),
         };
@@ -349,7 +359,7 @@ pub fn lend<T>(
         seed,
         body,
         driver,
-        minter,
+        minter: Some(minter),
         staged,
         calls: Cell::new(0),
     };
@@ -429,6 +439,11 @@ pub struct Runner {
     routes: BTreeMap<Id, u64>,
     seed: u64,
     minter: Minter,
+    /// Threads stepping the skills that may be stepped side by side ([`Skill::beside`], N17b #3255), the tick's own
+    /// included; 1 steps them all on it. Whatever the count, every tick's outcome is the same.
+    pub threads: usize,
+    /// How many such skills one thread takes at a time, in body order. The outcome does not depend on it either.
+    pub chunk: usize,
 }
 
 fn decode_int(v: &Value) -> Option<i64> {
@@ -482,7 +497,7 @@ struct Here<'a> {
     town: View<'a>,
     controller: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
-    settled: BTreeSet<Id>,
+    settled: &'a BTreeSet<Id>,
     /// A body's kind, named once a tick, not at each read (#3213).
     kind: Name,
 }
@@ -562,6 +577,8 @@ impl Runner {
             routes: BTreeMap::new(),
             seed: 1,
             minter: Minter::new(Scope([0x9b; 16])),
+            threads: 1,
+            chunk: CHUNK,
         }
     }
 
@@ -756,26 +773,21 @@ impl Runner {
             .filter(|b| self.settled(*b))
             .collect();
         let drivers: BTreeMap<Id, Driver> = self.runs.iter().map(|r| (r.body, r.driver)).collect();
-        let staged = {
-            let view = town.view();
-            let tree = view.tree;
-            let here = Here {
-                town: view,
+        // A skill that panicked is that body's fault alone (K11's unit): its run ended by name, its stage dropped.
+        let (staged, mut refused) = beside::step(
+            town.split(self.threads),
+            beside::Reads {
                 controller: &self.controller,
                 fields: &self.fields,
-                settled,
-                kind: body_kind(),
-            };
-            step(
-                tree,
-                &here,
-                self.now,
-                self.seed,
-                &mut self.minter,
-                &mut self.runs,
-            )
-        };
-        let mut refused = hand_on(&staged, &mut self.controller);
+                settled: &settled,
+                now: self.now,
+                seed: self.seed,
+            },
+            &mut self.minter,
+            &mut self.runs,
+            self.chunk,
+        );
+        refused.extend(hand_on(&staged, &mut self.controller));
         refused.extend(carry(&staged, &mut self.controller, town, at));
         // The tick's end: each skill's own entries set its body's fields.
         for e in &staged.emits {

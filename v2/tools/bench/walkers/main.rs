@@ -324,10 +324,22 @@ fn pct(v: &mut [i64], q: usize) -> i64 {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
     let fast = args.iter().any(|a| a == "--fast");
+    // `--threads N` (N17b, #3255): threads stepping the walkers' skills; any count gives the same walks.
+    let threads: usize = match args.iter().position(|a| a == "--threads") {
+        Some(k) => {
+            let t = args
+                .get(k + 1)
+                .and_then(|t| t.parse().ok())
+                .expect("--threads N");
+            args.drain(k..k + 2);
+            t
+        }
+        None => 1,
+    };
     let args: Vec<&String> = args.iter().filter(|a| *a != "--fast").collect();
-    let usage = "usage: walkers <facts.json> <labels.json> <uniform|event> <seed> [walkers] [seconds] [out-dir] [--fast]";
+    let usage = "usage: walkers <facts.json> <labels.json> <uniform|event> <seed> [walkers] [seconds] [out-dir] [--fast] [--threads N]";
     let (facts, labels, arm) = (
         args.get(1).expect(usage),
         args.get(2).expect(usage),
@@ -469,6 +481,7 @@ fn main() {
     // The walkers: on legal ground at seeded places, each with an order.
     let mut seed = Seed(seed_n ^ if arm == "event" { 0xE7E7 } else { 0x0F0F });
     let mut runner = Runner::new(TICK);
+    runner.threads = threads;
     let mut ladder = Ladder::new();
     let mut plans: Vec<Plan> = vec![Plan::default(); n];
     let mut orders = 0u64;
@@ -1047,6 +1060,32 @@ fn main() {
         rm / 1000,
         r90 / 1000,
         rmax / 1000
+    );
+    // Every walker's end: its node and position, in id order. Equal digests, equal walks (a speed-up changes none).
+    let mut end = Vec::new();
+    for b in runner.controller.bodies() {
+        for id in [b.id, node_of(b)] {
+            end.extend(id.scope().0);
+            end.extend(id.counter().to_le_bytes());
+        }
+        for v in [b.pose.position.x, b.pose.position.y, b.pose.position.z] {
+            end.extend(v.to_le_bytes());
+        }
+    }
+    println!("walkers: end digest {}", Hash::of(Purpose::Fixture, &end));
+    // The controller's input log, every record in order (N17b): equal at any thread count.
+    let mut log = Vec::new();
+    for l in runner.controller.log() {
+        log.extend(l.at.to_le_bytes());
+        log.extend(l.body.scope().0);
+        log.extend(l.body.counter().to_le_bytes());
+        log.extend((l.bytes.len() as u64).to_le_bytes());
+        log.extend(&l.bytes);
+    }
+    println!(
+        "walkers: threads {threads}; input log {} records, digest {}",
+        runner.controller.log().len(),
+        Hash::of(Purpose::Fixture, &log)
     );
     println!(
         "walkers: longest without progress under a live order {} ms (walker {}); orders past 30 s by state {over:?}; rungs {rungs:?}",

@@ -125,6 +125,12 @@ pub trait Host {
 pub trait Skill {
     fn shape(&self) -> SkillShape;
     fn step(&mut self, host: &mut dyn Host) -> Progress;
+    /// This skill, if the world may step it on another thread, beside other bodies' skills (N17b, #3255): only a
+    /// skill whose step never draws and never sets a timer (both are numbered in the tick's order; such a step is
+    /// refused by a panic, at any thread count). `None`, the default, is stepped on the tick's own thread.
+    fn beside(&mut self) -> Option<&mut (dyn Skill + Send)> {
+        None
+    }
 }
 
 // --- The code hatch, shape only -----------------------------------------------------------------------------------
