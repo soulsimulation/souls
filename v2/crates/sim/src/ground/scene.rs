@@ -17,6 +17,7 @@ use super::{P, STEP, ccw, op};
 pub const F_OPEN_DOOR_LINK: u64 = 7; // a door thing: the doorway link it stands in (N1's F_DOORWAY)
 pub const F_OUTLINE: u64 = 11;
 pub const F_SOLIDS: u64 = 12;
+pub const F_SLOTS: u64 = 13;
 pub const F_SURFACES: u64 = 14;
 pub const F_LINE: u64 = 16;
 pub const F_LINE_WIDTH: u64 = 17;
@@ -312,20 +313,37 @@ pub fn xform_to(tree: &Tree, from: Handle, frame: Handle) -> Result<Xform, Strin
     while at != frame {
         let n = tree.node(at).ok_or("a node that is gone")?;
         let p = n.place().ok_or("a node outside the frame")?;
-        chain.push(Xform {
-            pos: p.position,
-            rot: p.orientation,
-        });
-        at = n
+        let parent = n
             .parent()
             .and_then(|p| tree.handle(p))
             .ok_or("a node outside the frame")?;
+        // A thing in a slot stands from the slot's point (T4's carry, as the import writes it since #3285).
+        let point = match n.slot() {
+            Some(sl) => slot_point(tree, parent, sl).ok_or("a slot its parent does not have")?,
+            None => Vec3::ZERO,
+        };
+        chain.push(Xform {
+            pos: point.plus(p.position).map_err(|e| format!("{e:?}"))?,
+            rot: p.orientation,
+        });
+        at = parent;
     }
     let mut x = Xform::IDENTITY;
     for c in chain.iter().rev() {
         x = x.then(*c)?;
     }
     Ok(x)
+}
+
+/// Slot `n`'s point (`F_SLOTS`' `[n, x, y, z, …]` mm, the thing's frame) of node `h`, µm.
+fn slot_point(tree: &Tree, h: Handle, n: u64) -> Option<Vec3> {
+    let node = tree.node(h)?;
+    let rows = node.fields().get(&F_SLOTS).map(row)?;
+    rows.iter().map(row).find_map(|r| {
+        (r.first().and_then(int)? == i64::try_from(n).ok()?).then_some(())?;
+        let at = |k: usize| r.get(k).and_then(int).map(|v| v * 1000);
+        Some(Vec3::new(at(1)?, at(2)?, at(3)?))
+    })
 }
 
 fn int(v: &Value) -> Option<i64> {
