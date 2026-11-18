@@ -3199,6 +3199,8 @@ const MAX_HANDS = 8;
                                                
                                                                              
                                
+                                                                                                                       
+                                                     
   
                     
                 
@@ -3246,6 +3248,10 @@ const int = (v         )                       => whole(v) || typeof v === 'bigi
 /** A flag is stored as 0 or 1 (Engine v2's encoding has no booleans); an entry may still write true or false. */
 const flag = (def                   , v         )          => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
 
+/** Who may see a state field: the container's audience when the kind is closed and names it, else the field's own. */
+const audienceOf = (entry                   , field        , def = entry?.state?.[field])           =>
+  entry?.closed?.fields?.includes(field) ? entry.closed.audience : (def?.audience            );
+
 /** Decide whether `input.act` can be done now. Never throws on bad data: it answers `bad_input`. */
 function decide(input       )          {
   const read         = [];
@@ -3274,10 +3280,12 @@ function decide(input       )          {
   const sees = (audience          ) => seesAudience(asker.sees, audience);
 
   // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
-  const formFix = (meets                        )             => {
+  // `ready`, when given, passes over a form its own needs would refuse now (a dimmer step on a lamp that is dark).
+  const formFix = (meets                        , ready                       )             => {
     for (const name of sorted(entry.forms)) {
       const f = entry.forms [name];
       if (name === act.form || f.who !== 'anyone' || f.starts !== 'act') continue;
+      if (ready && !ready(f)) continue;
       if ((f.effects ?? []).some(meets)) return { form: name };
     }
     return null;
@@ -3295,7 +3303,7 @@ function decide(input       )          {
       const field = n.field ?? '';
       const def = has(entry.state, field) ? entry.state [field] : undefined;
       if (!def) return { ok: false, no: bad(i, 'no_such_field', { field }) };
-      if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
+      if (!sees(audienceOf(entry, field))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
       let value = has(self.fields, field) ? self.fields [field] : def.default;
       if (def.type === 'timed') {
         const now = valueAt(def, value, state.now_us);
@@ -3305,15 +3313,18 @@ function decide(input       )          {
       read.push([`${act.this}/field/${def.n}`, value]);
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
-      const meets = (v         ) =>
-        (!has(n, 'is') || flag(def, v) === flag(def, n.is)) &&
-        (!has(n, 'not') || flag(def, v) !== flag(def, n.not)) &&
-        (!has(n, 'at_least') || (int(v) && v >= (n.at_least          ))) &&
-        (!has(n, 'at_most') || (int(v) && v <= (n.at_most          )));
+      const holds = (m      , v         ) =>
+        (!has(m, 'is') || flag(def, v) === flag(def, m.is)) &&
+        (!has(m, 'not') || flag(def, v) !== flag(def, m.not)) &&
+        (!has(m, 'at_least') || (int(v) && v >= (m.at_least          ))) &&
+        (!has(m, 'at_most') || (int(v) && v <= (m.at_most          )));
+      const meets = (v         ) => holds(n, v);
       if (meets(value)) return { ok: true };
       const wanted                          = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n                           )[k];
-      const fix = formFix((e) => e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to));
+      // the fix's own needs on this field must hold now, or it would be refused in turn
+      const fix = formFix((e) => e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to),
+        (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
 
@@ -3408,7 +3419,7 @@ function decide(input       )          {
         const m = measure(kinds, nodes, act.this, args, e);
         if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
         for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]]         ) {
-          if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
+          if (!sees(audienceOf(kinds[nodes[node]?.kind ?? ''], m.field, def))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
         }
         read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
         read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
@@ -3806,7 +3817,14 @@ function waitOf(entry, form) {
 
 /** `h` for `thing` as the client's plan: steps up to and including the first wait, and what remains with the wake that continues it. */
 function planOf(ix, h, thing, { copy, me, now = Date.now() } = {}) {
-  const used = h.steps.slice(0, HOW_STEPS_MAX), cut = h.steps.length - used.length;
+  // A leading step whose every effect is a set this copy already shows is done (a kettle already filled): passed over, and said.
+  const fields = copy?.live?.things?.[thing.id];
+  const isDone = (s) => { const fx = h.entry.forms?.[s.form]?.effects ?? []; return !!fields && fx.length > 0 && fx.every((e) => e.change === "set" && fields[e.field] === e.to); };
+  let skip = 0;
+  while (skip < h.steps.length && isDone(h.steps[skip])) skip++;
+  const done = h.steps.slice(0, skip).map((s) => ({ form: s.form, act: `object:${thing.id}:${s.form}`,
+    why: `already so on this copy: ${(h.entry.forms[s.form].effects).map((e) => `${e.field} is ${JSON.stringify(e.to)}`).join(", ")}` }));
+  const used = h.steps.slice(skip, skip + HOW_STEPS_MAX), cut = h.steps.length - skip - used.length;
   const rows = used.map((s) => {
     const form = h.entry.forms?.[s.form], c = canI(ix, thing.id, s.form, { copy, me, now });
     return { form: s.form, act: `object:${thing.id}:${s.form}`, can: c.can, ...(c.missing ? { missing: c.missing.text } : c.why ? { why: c.why } : {}), ...(c.next ? { next: c.next } : {}),
@@ -3820,7 +3838,7 @@ function planOf(ix, h, thing, { copy, me, now = Date.now() } = {}) {
     plan: rest.map((r) => r.act),
     ...(w.field ? { wake: `wake add thing-state '${JSON.stringify({ thing: thing.id, field: w.field, is: w.is })}' --plan '${JSON.stringify(rest.map((r) => r.act))}' --end ${new Date(now + (w.after_s * 2 + 60) * 1000).toISOString()}` } : {}),
   } : null;
-  return { plan, steps: rows.map(({ wait, ...r }) => ({ ...r, ...(wait ? { then_waits_s: wait.after_s } : {}) })), ...(later ? { later } : {}), ...(cut > 0 ? { cut: `${cut} more step${cut === 1 ? "" : "s"} not shown: a how-to here is at most ${HOW_STEPS_MAX}` } : {}) };
+  return { plan, ...(done.length ? { done } : {}), steps: rows.map(({ wait, ...r }) => ({ ...r, ...(wait ? { then_waits_s: wait.after_s } : {}) })), ...(later ? { later } : {}), ...(cut > 0 ? { cut: `${cut} more step${cut === 1 ? "" : "s"} not shown: a how-to here is at most ${HOW_STEPS_MAX}` } : {}) };
 }
 
 /** `how "<words>"`: the best how-to for the words, with real things of its kind from this copy, or the kind that is missing. */

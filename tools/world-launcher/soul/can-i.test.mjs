@@ -51,7 +51,7 @@ test("A1: an empty kettle: the client names what is missing and the next act, an
   assert.equal(r.missing.field, "water");
   assert.equal(r.missing.found, "empty");
   assert.match(r.missing.text, /water is "empty"; this needs it to be anything but "empty"/);
-  assert.deepEqual(r.next, { find: "water" }, "nothing in the kettle's forms fills it: the next act is to look for water");
+  assert.deepEqual(r.next, { find: "water" }, "fill is the holder's form, not a fix anyone can start: the next act is to look for water");
   assert.equal(typeof r.age_s, "number");
   assert.deepEqual(w.asked, [], "no act was sent");
   const again = (await run(dir, "can", "object:kettle:switch_on")).out;
@@ -79,7 +79,7 @@ test("a definite no from the thing's state wins over what the copy cannot judge;
   assert.equal(r.can, "no");
   assert.equal(r.missing.field, "heating", "the first unmet need is named");
   const all = (await run(dir, "can", "kettle")).out;
-  assert.deepEqual(all.forms.map((f) => f.form), ["switch_on", "pour"]);
+  assert.deepEqual(all.forms.map((f) => f.form), ["fill", "switch_on", "pour"]);
   assert.equal(all.forms.find((f) => f.form === "switch_on").can, "no");
 });
 
