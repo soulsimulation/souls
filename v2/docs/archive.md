@@ -4,8 +4,9 @@ Engine v2 V3 (#2712), contract T7 in [TRUNK.md](TRUNK.md): the log is what is ke
 a view of it. This page fixes how the sealed log becomes objects in a private bucket, how the public history a
 browser plays is packed from them, and what that costs in object writes. Code: `v2/tools/archive` (packer, restore
 tool, write count) and `v2/crates/replica/src/history` (the bundle and day-index formats). Checks:
-`v2/tools/archive/tests/archive.rs`. Not here: ten-second shipping (O3), serving a restored world (O12), seeking
-(V4), removal (W7), the corpus check (V18).
+`v2/tools/archive/tests/archive.rs`. Seeking, the event index and the coarse levels are V4's (#2713), below; checks
+`v2/tools/archive/tests/seek.rs`. Not here: ten-second shipping (O3), serving a restored world (O12), the scrub bar
+(V9), search by Soul (W6), removal (W7), the corpus check (V18).
 
 ## The objects
 
@@ -19,6 +20,9 @@ a store path inside a value is a byte string, since text in v2 is always a name.
 | `archive/head` | The **head**: `{1: format, 2: root id, 3: root kind, 4: newest manifest}` | When a new day's first object is written |
 | `bundles/<day>/<start µs>` | A **bundle**: `{1: format, 2: header hash, 3: start µs, 4: length µs, 5: snapshot, 6: view}` | Once, create-only, when its window closes |
 | `bundles/<day>/index` | A **day index**: `{1: format, 2: day, 3: [[start µs, key, SHA-256], ...]}` | When the day closes, and at shutdown |
+| `history/everyone/events/<day>/<hour>` | An **hour of the event index** (V4): `{1: format, 2: day, 3: hour, 4: [kind, ...], 5: [[at µs, kind number, node, actor], ...]}` | When a later hour's event arrives, and at shutdown |
+| `history/everyone/counts/day/<day>` | A **day's counts** (V4): `{1: format, 2: 1, 3: day, 4: [kind, ...], 5: [[ten-minute slot, kind number, count], ...]}` | When a later day's event arrives, and at shutdown |
+| `history/everyone/counts/year/<year>` | A **year's counts** (V4), 365 world days: as a day's, `2: 2`, a slot a day | With each day's counts |
 
 1. **Records are K4's, as stored:** each is one tick's T6 part, which names its header by hash
    ([effects.md](effects.md) rule 7). K4's log file holds the epoch and its salt, not the T6 header, so each object
@@ -37,10 +41,11 @@ a store path inside a value is a byte string, since text in v2 is always a name.
 
 5. **The history level** is the root's public view at R3's `sampled` level (T7 rule 3: a moving node's samples
    thinned to one a world second). R3 builds no separate history level, so bundles pack this view as it arrives.
-   Size at the `record` load (100 bodies moving, ten steps a tick): 30,000 records and 5.4 MB a five-minute bundle,
+   Size at the `record` load (100 bodies moving, ten steps a tick): 6,000 records and 1.1 MB a one-minute bundle,
    one record per moving body a second, about 180 bytes each, uncompressed (18 kB a world second; compression in
    transit is V1's).
-6. **A bundle is five minutes of world time** (windows on five-minute boundaries), with the public snapshot at its
+6. **A bundle is one minute of world time** (windows on minute boundaries; five until V4, which shortened them so a
+   seek fetches at most a minute of view, rule 13), with the public snapshot at its
    start: `{1: [[id, node], ...], 2: [[id, link], ...]}` in T6's state layout, nodes and links whose audience is
    everyone, every reference passed through the redaction list. A window with no public record writes no bundle, so
    **a still world writes nothing.** A bundle is a view: its format may change, and bundles are made again from the
@@ -49,6 +54,27 @@ a store path inside a value is a byte string, since text in v2 is always a name.
    reach a viewer beside a reference, at delivery ([audience.md](audience.md) rule 8), never from history. The check
    decodes every object, record and bundle, refuses a reference with words beside it, and searches the bytes for every
    word the world's text store holds.
+
+## Seeking, the event index and the coarse levels
+
+8. **A seek** (`archive::seek`, applied by `replica::history::seek::state_at`, which builds for WASM) gives the public
+   state at world time `t`: it reads the day's bundle index, takes the last bundle that starts at or before `t` (a
+   day with none sends it to the day before, back to a year), checks it by the SHA-256 the index names, and applies
+   the bundle's records up to `t` on its snapshot. Two requests, nothing kept between seeks. The state is the
+   history level's: motion samples less than a second apart are thinned (rule 5).
+9. **The event index** is a view, keyed by audience; only the public audience's (`everyone`) is built. One object
+   per world hour: each public named event (T6) as `[time, kind, node, actor]`, the kind being the event's name and
+   the actor `[1, Soul]`, `[2, creator]` (a principal id, never an account id) or `[3]` the world. No fields, so
+   no text reference and no words. An effect for another audience, or whose node or actor is redacted, gives no row.
+10. **The coarse levels** count those events by kind: per ten minutes for a day (144 slots) and per day for a year of
+    365 world days. A day's timeline is drawn from its counts; scrubbing reads them while the handle moves and seeks
+    on release (V9).
+11. **All of it is made again** from the archive (`rebuild_views`), equal by SHA-256 to what the archiver stored.
+12. **Measured** by `cargo run -p archive --release -- seek` (`seek_bench.rs`): RESULTS
+13. **Why one minute, not five with ten-second ranges:** at the busiest load the view grows 172 kB a world second
+    (10.3 MB a one-minute bundle, uncompressed) and the snapshot is 2.9 MB; a seek into a five-minute bundle through
+    ranges reads on average 150 s of view, over 25 MB. One-minute bundles cost 34,560 more writes a busy month
+    (below) and need no range support from the cache.
 
 ## The write sum
 

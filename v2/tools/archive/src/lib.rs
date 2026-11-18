@@ -30,7 +30,8 @@ use miniz_oxide::inflate::decompress_to_vec_with_limit;
 use replica::audience::{REFERENCE, WORDS};
 use replica::effects::{Header, Part, Refusal, State, read_id};
 use replica::encode::{Name, Value, decode, encode};
-use replica::history::{Bundle, DayIndex, WINDOW_MOST, day_of, public_snapshot};
+use replica::history::events::Indexer;
+use replica::history::{Bundle, DayIndex, WINDOW_LEAST, day_of, public_snapshot};
 use replica::ids::{Id, sha256};
 use replica::tree::Tree;
 use replica::views::{Key, Level, Redactions, View};
@@ -168,11 +169,13 @@ pub struct Writes {
     pub heads: u64,
     pub bundles: u64,
     pub indexes: u64,
+    /// The event index's hours and the coarse levels (V4).
+    pub views: u64,
 }
 
 impl Writes {
     pub fn total(&self) -> u64 {
-        self.objects + self.manifests + self.heads + self.bundles + self.indexes
+        self.objects + self.manifests + self.heads + self.bundles + self.indexes + self.views
     }
 
     fn add(&mut self, o: Writes) {
@@ -181,6 +184,7 @@ impl Writes {
         self.heads += o.heads;
         self.bundles += o.bundles;
         self.indexes += o.indexes;
+        self.views += o.views;
     }
 }
 
@@ -500,9 +504,14 @@ impl<S: Store> Packer<S> {
 
 // --- Bundles ------------------------------------------------------------------------------------------------------
 
+/// How long a bundle's window is, µs: one minute (V4, #2713). A seek fetches a snapshot and one whole bundle, and at
+/// the busiest load a five-minute bundle alone is past what the reference link carries in two seconds
+/// (`v2/docs/archive.md`, seeking).
+pub const WINDOW: i64 = WINDOW_LEAST;
+
 /// Builds bundles from records (rule 3): the root's public view at the history level ([`Level::Sampled`]: motion
-/// thinned to one sample a second per node, R3's lowest level that still draws motion), in windows of
-/// [`WINDOW_MOST`] of world time, each with the public snapshot at its start.
+/// thinned to one sample a second per node, R3's lowest level that still draws motion), in windows of [`WINDOW`] of
+/// world time, each with the public snapshot at its start.
 pub struct Bundler {
     header: Option<Header>,
     redactions: Redactions,
@@ -533,14 +542,7 @@ impl Bundler {
         if out.records.is_empty() {
             return Ok(None);
         }
-        Bundle::new(
-            h.hash().to_bytes(),
-            start,
-            WINDOW_MOST,
-            snapshot,
-            out.to_value(),
-        )
-        .map(Some)
+        Bundle::new(h.hash().to_bytes(), start, WINDOW, snapshot, out.to_value()).map(Some)
     }
 
     /// Feeds one record (a T6 part, named by `header`); returns the bundles it closed.
@@ -552,7 +554,7 @@ impl Bundler {
         }
         let part = Part::read(bytes)?;
         for e in &part.effects {
-            let start = e.envelope.at.div_euclid(WINDOW_MOST) * WINDOW_MOST;
+            let start = e.envelope.at.div_euclid(WINDOW) * WINDOW;
             if self.open.as_ref().is_some_and(|(s, _, _)| *s != start) {
                 done.extend(self.close()?);
             }
@@ -586,6 +588,8 @@ pub struct Shelf<S: Store> {
     store: S,
     prefix: String,
     day: Option<(DayIndex, Option<String>)>,
+    /// The ETag of each view written here (V4's event index and coarse levels), to write over it.
+    etags: BTreeMap<String, String>,
     pub writes: Writes,
 }
 
@@ -595,8 +599,23 @@ impl<S: Store> Shelf<S> {
             store,
             prefix: prefix.to_owned(),
             day: None,
+            etags: BTreeMap::new(),
             writes: Writes::default(),
         }
+    }
+
+    /// Writes a view of the event index or the coarse levels (V4) at `key` under the prefix, over its last version.
+    pub fn put_view(&mut self, key: &str, bytes: &[u8]) -> R<()> {
+        let key = format!("{}{key}", self.prefix);
+        let e = put(
+            &self.store,
+            &key,
+            bytes,
+            self.etags.get(&key).map(String::as_str),
+        )?;
+        self.etags.insert(key, e);
+        self.writes.views += 1;
+        Ok(())
     }
 
     fn index_key(&self, day: i64) -> String {
@@ -652,6 +671,7 @@ pub struct Archiver<S: Store> {
     pub packer: Packer<S>,
     pub shelf: Shelf<S>,
     bundler: Bundler,
+    indexer: Indexer,
     header: Header,
 }
 
@@ -661,6 +681,7 @@ impl<S: Store + Clone> Archiver<S> {
             packer: Packer::open(store.clone(), prefix, header.stored(), root, kind.clone())?,
             shelf: Shelf::new(store, prefix),
             bundler: Bundler::new(root, kind),
+            indexer: Indexer::default(),
             header: header.clone(),
         })
     }
@@ -672,6 +693,11 @@ impl<S: Store> Archiver<S> {
         for b in self.bundler.feed(&self.header, &bytes)? {
             self.shelf.put(&b)?;
         }
+        for e in &Part::read(&bytes)?.effects {
+            for (k, v) in self.indexer.feed(e)? {
+                self.shelf.put_view(&k, &v)?;
+            }
+        }
         self.packer.push(n, bytes)
     }
 
@@ -680,6 +706,9 @@ impl<S: Store> Archiver<S> {
         self.packer.flush()?;
         if let Some(b) = self.bundler.finish()? {
             self.shelf.put(&b)?;
+        }
+        for (k, v) in self.indexer.finish()? {
+            self.shelf.put_view(&k, &v)?;
         }
         self.shelf.flush()
     }
@@ -877,4 +906,66 @@ pub fn words_in_object(bytes: &[u8], known: &[&str]) -> R<Vec<String>> {
 
 pub fn words_in_bundle(bytes: &[u8], known: &[&str]) -> R<Vec<String>> {
     Ok(words(&dec(bytes)?, bytes, known))
+}
+
+// --- Seeking and the event index (V4, #2713) ----------------------------------------------------------------------
+
+/// The event index and the coarse levels made again from what was fetched, as the archiver made them live: each
+/// view's key (under the prefix) and its last bytes.
+pub fn rebuild_views(f: &Fetched) -> R<BTreeMap<String, Vec<u8>>> {
+    let mut ix = Indexer::default();
+    let mut out = BTreeMap::new();
+    for s in &f.segments {
+        for r in &s.records {
+            for e in &Part::read(r)?.effects {
+                out.extend(ix.feed(e)?);
+            }
+        }
+    }
+    out.extend(ix.finish()?);
+    Ok(out)
+}
+
+/// What a seek fetched: the public state at its moment, the bytes and the requests it took.
+pub struct Seeked {
+    pub state: State,
+    pub bytes: u64,
+    pub requests: u32,
+    /// The keys it read, in order.
+    pub keys: Vec<String>,
+}
+
+/// The public state at world time `at` (µs), from the store alone and cold: the day's index, then the bundle that
+/// holds `at` (the last that starts at or before it), checked by its hash and applied up to `at`. A day with none
+/// before `at` sends it to the day before, back to a year.
+pub fn seek<S: Store>(store: &S, prefix: &str, header: &Header, at: i64) -> R<Seeked> {
+    let (mut bytes, mut requests, mut keys) = (0u64, 0u32, Vec::new());
+    let day = day_of(at);
+    for d in (day - replica::history::events::YEAR_DAYS..=day).rev() {
+        requests += 1;
+        let k = format!("{prefix}bundles/{d:08}/index");
+        let Some(o) = store.get(&k)? else {
+            continue;
+        };
+        keys.push(k);
+        bytes += o.bytes.len() as u64;
+        let ix = DayIndex::read(&o.bytes)?;
+        let Some((_, key, hash)) = replica::history::seek::nearest(&ix, at) else {
+            continue;
+        };
+        let b = get(store, key)?;
+        requests += 1;
+        bytes += b.len() as u64;
+        let b = Bundle::read_named(&b, hash)?;
+        return Ok(Seeked {
+            state: replica::history::seek::state_at(&b, header, at)?,
+            bytes,
+            requests,
+            keys: [keys, vec![key.clone()]].concat(),
+        });
+    }
+    refuse(
+        "history-none",
+        format!("no bundle in the year before {at} µs"),
+    )
 }

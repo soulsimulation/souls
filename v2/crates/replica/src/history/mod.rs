@@ -12,6 +12,9 @@
 //!
 //! Not here: building bundles from the log and storing them (`v2/tools/archive`), seeking (V4), the page (V9).
 
+pub mod events;
+pub mod seek;
+
 use std::collections::BTreeMap;
 
 use crate::effects::{Refusal, State, read_id};
@@ -158,6 +161,26 @@ impl Bundle {
     }
 
     pub fn read(bytes: &[u8]) -> R<Bundle> {
+        let b = Bundle::parse(bytes)?;
+        if b.stored != bytes {
+            return refuse("history-bad", "a bundle not in its one encoding");
+        }
+        Ok(b)
+    }
+
+    /// Reads a bundle a day index names by `hash` (V4's seek): the hash is checked, and stands for the check of its
+    /// one encoding, which [`Bundle::read`] makes by writing it again.
+    pub fn read_named(bytes: &[u8], hash: &[u8; 32]) -> R<Bundle> {
+        if sha256(bytes) != *hash {
+            return refuse(
+                "history-hash",
+                "a bundle that is not the one its index names",
+            );
+        }
+        Bundle::parse(bytes)
+    }
+
+    fn parse(bytes: &[u8]) -> R<Bundle> {
         let Value::Map(mut m) = dec(bytes)? else {
             return refuse("history-bad", "a bundle is a map");
         };
@@ -175,11 +198,17 @@ impl Bundle {
             read_int(&take(3)?, "a start")?,
             read_int(&take(4)?, "a length")?,
         );
-        let b = Bundle::new(header, start, length, take(5)?, take(6)?)?;
-        if b.stored != bytes {
-            return refuse("history-bad", "a bundle not in its one encoding");
+        if !(WINDOW_LEAST..=WINDOW_MOST).contains(&length) {
+            return refuse("history-window", format!("{length} µs"));
         }
-        Ok(b)
+        Ok(Bundle {
+            header,
+            start,
+            length,
+            snapshot: take(5)?,
+            view: take(6)?,
+            stored: bytes.to_vec(),
+        })
     }
 
     pub fn bytes(&self) -> &[u8] {
