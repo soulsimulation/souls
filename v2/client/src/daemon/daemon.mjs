@@ -8,7 +8,8 @@
 //   as `daemon-already-running`, naming the Soul and the pid.
 // - **Commands on a Unix socket** (`runtime/daemon.sock`), one JSON line each way. No TCP port.
 //     {"op":"status"}            where it is: connected, cursor, intents sent and answered, memory
-//     {"op":"act","verb":"..."}  builds the next intent and sends it once (now, or at the next sign-in)
+//     {"op":"act","verb":"...","target":"<scope hex>-<counter>"}  builds the next intent (the target optional) and
+//                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
 //     {"op":"stop"}              ends the process
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
@@ -214,7 +215,7 @@ function answer(req) {
     case 'act': {
       state.sequence++;
       const bytes = wire.wireIntent(scope, seat.grant.counter, String(req.verb ?? ''), BigInt(state.sequence),
-        state.cursor ? unhex(state.cursor) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER));
+        state.cursor ? unhex(state.cursor) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER), String(req.target ?? ''));
       save();
       if (signedIn) send(bytes, state.sequence); else queued.push({ bytes, sequence: state.sequence });
       return { ok: true, sequence: state.sequence, sent: signedIn };
