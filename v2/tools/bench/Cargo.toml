@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646. `view-tier`: R3, #2697."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646. `view-tier`: R3, #2697. `subscription`: R4, #2698."
 
 [[bin]]
 name = "tree"
@@ -12,6 +12,10 @@ path = "src/tree.rs"
 [[bin]]
 name = "view-tier"
 path = "view-tier/main.rs"
+
+[[bin]]
+name = "subscription"
+path = "subscription/main.rs"
 
 [dependencies]
 replica = { path = "../../crates/replica" }
