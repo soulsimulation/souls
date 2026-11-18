@@ -133,7 +133,8 @@ The engine's own browser tests are in `mars/viewer/e2e/`.
 
 ## CI window
 
-Per-PR CI (`ci.yml`) shares GitHub's hosted-runner cap, about 20 concurrent jobs. A server change selects about ten
+Per-PR CI (`ci.yml`) shares GitHub's hosted-runner cap: 60 concurrent jobs, measured on 17 November (four times that
+evening 60 ran at once while 15 to 34 more sat queued, up to 8.5 minutes). A server change selects about ten
 heavy legs, so with several workers pushing, unready PRs used to starve the merge path. Pull request runs are
 therefore **windowed**:
 
@@ -224,6 +225,21 @@ commands, which need a core plan there, and `settled`. Viewer arms above 2,000 a
 - **Remove it.** On the host, in its install directory: `sudo ./svc.sh stop && sudo ./svc.sh uninstall`. Then delete its
   `<unit>.d` drop-in under `/etc/systemd/system`, run `sudo systemctl daemon-reload` and delete the directory. Finally,
   delete the runner on GitHub (`gh api -X DELETE repos/soulsimulation/souls/actions/runners/<id>`).
+
+**Light runners.** The `qualify` legs that `ci-scope.mjs` marks `light: true` (`soul-tools`: the Soul runtime, trace,
+entry and form-rules tests) run on a self-hosted runner labelled `souls-light` when one is online and idle, and on
+`ubuntu-latest` otherwise, with the same steps either way. `runs-on` cannot fall back by itself, so the `scope` job asks
+the runner list (`GET /repos/{owner}/{repo}/actions/runners`) and gives each light job the label while idle runners last
+(`idleRunners`, `assignLight`); its step summary says where each went and why. Listing runners needs a token with
+Administration: read, which the workflow's own token cannot have, so it comes from the repository secret
+`CI_RUNNERS_TOKEN`. Without the secret, or on any API error or timeout (10 s), every light job runs hosted, as before.
+- **Where.** Three instances on the timed-runner host, pinned to every CPU the six `souls-timed` instances do not own
+  (physical cores 18-23 and their siblings: 6 physical, 12 logical), so the timed runs keep their cores. Set them up with
+  `tools/ci/setup-runners.sh --count 3 --prefix souls-light --label souls-light --no-playwright --cpus-except
+  souls-timed-1,souls-timed-2,souls-timed-3,souls-timed-4,souls-timed-5,souls-timed-6`, run as root on the host,
+  `--dry-run` first: it prints the CPUs it read from each timed instance and the set it pins to.
+- **Turn it off** by deleting the secret (`gh secret delete CI_RUNNERS_TOKEN -R soulsimulation/souls`) or stopping the
+  instances; light jobs then run hosted. A light job placed on a runner that goes offline before it starts waits for it.
 
 ## Remote gate
 

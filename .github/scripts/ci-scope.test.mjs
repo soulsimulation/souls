@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, greenAtHead, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, LIGHT_LABEL, WINDOW_LABELS, assignLight, changedFiles, greenAtHead, idleRunners, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -84,8 +84,75 @@ test('routing fallback: with CI_HEAVY_RUNNER unset every job is hosted', () => {
 test('ci.yml: qualify runs-on reads the matrix flag, and smoke stays hosted (#1162)', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const runsOn = /^  qualify:[\s\S]*?^    runs-on: (.*)$/m.exec(workflow)?.[1] ?? '';
-  assert.equal(runsOn, "${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}");
+  assert.equal(runsOn, "${{ matrix.runner || (matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER)) || 'ubuntu-latest' }}");
   assert.equal(/^  smoke:[\s\S]*?^    runs-on: (.*)$/m.exec(workflow)?.[1], 'ubuntu-latest');
+});
+
+// The light pool: a fake runner list (GET /repos/{repo}/actions/runners) and a fetch that records its calls.
+const runner = (name, label, status, busy) => ({ name, status, busy, labels: [{ name: 'self-hosted' }, { name: label }] });
+const listing = (...runners) => { const calls = []; return { calls, fetchImpl: async (url, init) => { calls.push({ url, auth: init.headers.authorization }); return Response.json({ total_count: runners.length, runners }); } }; };
+const lightPlan = () => jobsFor(['tools/entry/check.mjs', 'packages/form-rules/src/index.ts']).include;
+
+test('light pool: soul-tools is the light job; an idle online souls-light runner takes it, and nothing else moves', async () => {
+  assert.deepEqual(JOBS.filter(j => j.light).map(j => j.name), ['soul-tools']);
+  const api = listing(runner('souls-light-1', LIGHT_LABEL, 'online', true), runner('souls-light-2', LIGHT_LABEL, 'online', false),
+    runner('souls-light-3', LIGHT_LABEL, 'offline', false), runner('souls-timed-1', 'souls-timed', 'online', false));
+  const got = await idleRunners({ repo: 'o/r', token: 'tok-FAKE', fetchImpl: api.fetchImpl });
+  assert.deepEqual(got, { idle: 1, online: 2, why: '1 of 2 online souls-light runner(s) idle' });
+  assert.deepEqual(api.calls, [{ url: 'https://api.github.com/repos/o/r/actions/runners?per_page=100', auth: 'Bearer tok-FAKE' }]);
+  const before = lightPlan(), after = assignLight(before, got.idle);
+  assert.deepEqual(after.map(j => [j.name, runnerFor(j)]), [['types-web', 'ubuntu-latest'], ['web', 'ubuntu-latest'], ['soul-tools', 'souls-light']]);
+  // the same matrix entry apart from `runner`: the steps, which ci.yml picks by kind, are the same on either runner
+  const { runner: label, ...rest } = after.find(j => j.name === 'soul-tools');
+  assert.equal(label, 'souls-light');
+  assert.deepEqual(rest, before.find(j => j.name === 'soul-tools'));
+  // only light jobs take the light label; heavy jobs keep CI_HEAVY_RUNNER
+  const full = assignLight(jobsFor(null).include, 5);
+  assert.deepEqual(full.filter(j => j.runner).map(j => j.name), ['soul-tools']);
+  assert.equal(runnerFor(full.find(j => j.name === 'server-0'), 'souls-ci'), 'souls-ci');
+});
+
+test('light pool: busy or offline runners, none labelled, or no token leave every job hosted', async () => {
+  for (const runners of [[runner('souls-light-1', LIGHT_LABEL, 'online', true), runner('souls-light-2', LIGHT_LABEL, 'offline', false)], [runner('souls-ci-1', 'souls-ci', 'online', false)], []]) {
+    const got = await idleRunners({ repo: 'o/r', token: 'tok-FAKE', fetchImpl: listing(...runners).fetchImpl });
+    assert.equal(got.idle, 0, JSON.stringify(runners));
+    assert.ok(assignLight(lightPlan(), got.idle).every(j => runnerFor(j) === 'ubuntu-latest'));
+  }
+  const api = listing(runner('souls-light-1', LIGHT_LABEL, 'online', false));
+  assert.deepEqual(await idleRunners({ repo: 'o/r', token: '', fetchImpl: api.fetchImpl }), { idle: 0, online: 0, why: 'no runner token (CI_RUNNERS_TOKEN)' });
+  assert.equal(api.calls.length, 0, 'no token: the API is not asked');
+});
+
+test('light pool: an API failure (refused, server error, network error, timeout, unreadable) falls back to hosted', async () => {
+  const cases = [
+    [async () => new Response('{"message":"Resource not accessible by integration"}', { status: 403 }), /HTTP 403/],
+    [async () => new Response('', { status: 502 }), /HTTP 502/],
+    [async () => { throw new TypeError('fetch failed'); }, /runner list failed: fetch failed/],
+    [(url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason))), /timed out/],
+    [async () => new Response('not json'), /runner list failed/],
+    [async () => Response.json({ message: 'odd' }), /unreadable answer/],
+  ];
+  for (const [fetchImpl, why] of cases) {
+    const got = await idleRunners({ repo: 'o/r', token: 'tok-FAKE', fetchImpl, timeoutMs: 50 });
+    assert.equal(got.idle, 0);
+    assert.match(got.why, why);
+    assert.ok(!got.why.includes('tok-FAKE'), 'the token never reaches the log');
+    assert.ok(assignLight(lightPlan(), got.idle).every(j => runnerFor(j) === 'ubuntu-latest'));
+  }
+});
+
+test('light pool: the scope command with no token runs every job hosted and says why', () => {
+  const env = { ...process.env, CI_RUNNERS_TOKEN: '', GITHUB_OUTPUT: '', GITHUB_STEP_SUMMARY: '' };
+  const out = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('./ci-scope.mjs', import.meta.url)), '--files', 'tools/entry/check.mjs', '--event', 'pull_request', '--labels', '["ci:run"]'], { encoding: 'utf8', env }));
+  assert.ok(out.matrix.includes('soul-tools'));
+  assert.deepEqual(out.light.placed, []);
+  assert.match(out.light.why, /no runner token/);
+});
+
+test('ci.yml: the runner reaches only runs-on; the scope step passes the runner token', () => {
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  assert.equal(workflow.match(/matrix\.runner/g)?.length, 1, 'matrix.runner is read once, in runs-on, and by no step');
+  assert.match(workflow, /^          CI_RUNNERS_TOKEN: \$\{\{ secrets\.CI_RUNNERS_TOKEN \}\}$/m);
 });
 
 test('the soul-actions job runs on its own paths, full scope included, and on nothing else (#1061)', () => {

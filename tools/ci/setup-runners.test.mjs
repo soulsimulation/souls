@@ -141,6 +141,50 @@ test('--cpus on a registered, running instance: one drop-in and a restart; run a
   } finally { rmSync(h.d, { recursive: true, force: true }); }
 });
 
+/** All six timed instances pinned and installed, as on the timed-runner host: 1 by CPUAffinity=, 2 under --root. */
+function pinAllTimed(h) {
+  writeFileSync(join(h.state, `${REPO_UNIT('souls-timed-1')}.MainPID`), '0');
+  writeFileSync(join(h.state, `${REPO_UNIT('souls-timed-1')}.CPUAffinity`), '0-2 24-26');
+  const t2 = join(h.root, 'elsewhere-2'); mkdirSync(t2);
+  writeFileSync(join(t2, '.runner'), '{"agentName": "souls-timed-2"}'); writeFileSync(join(t2, '.service'), REPO_UNIT('souls-timed-2'));
+  writeFileSync(join(h.state, `${REPO_UNIT('souls-timed-2')}.AllowedCPUs`), '3-5,27-29');
+}
+const LIGHT = ['--token', 'tok-FAKE', '--count', '3', '--prefix', 'souls-light', '--label', 'souls-light', '--user', 'runner', '--no-playwright'];
+const EXCEPT = ['--cpus-except', 'souls-timed-1,souls-timed-2,souls-timed-3,souls-timed-4,souls-timed-5,souls-timed-6'];
+
+test('--cpus-except: every CPU outside the six timed instances (cores 18-23 and their siblings), for three light instances', () => {
+  const h = fakeHost();
+  try {
+    pinAllTimed(h);
+    const r = spawnSync('bash', [script, ...LIGHT, '--root', h.root, ...EXCEPT, '--dry-run'], { encoding: 'utf8', env: h.env });
+    assert.equal(r.status, 0, r.stderr);
+    for (let k = 1; k <= 6; k++) assert.match(r.stdout, new RegExp(`== souls-timed-${k}: CPUs ${3 * (k - 1)}-${3 * k - 1},${3 * (k - 1) + 24}-${3 * k + 23} \\(3 physical cores`));
+    assert.match(r.stdout, /== pinning to CPUs 18-23,42-47: 6 physical cores, 12 logical/);
+    for (let i = 1; i <= 3; i++) {
+      assert.match(r.stdout, new RegExp(`--name souls-light-${i} --labels souls-light --work _work --replace`));
+      assert.match(r.stdout, new RegExp(`${REPO_UNIT(`souls-light-${i}`).replace(/\./g, '\\.')}: CPUAffinity=18-23,42-47 \\(new, `));
+    }
+    assert.ok(!r.stdout.includes('tok-FAKE'), 'the token is never printed');
+    assert.deepEqual(readdirSync(join(h.sys, 'etc/systemd/system')), [], 'a dry run writes nothing');
+    assert.ok(h.calls().split('\n').filter(Boolean).every((l) => /^systemctl (show|list-units|list-unit-files|is-active) /.test(l)), h.calls());
+  } finally { rmSync(h.d, { recursive: true, force: true }); }
+});
+
+test('--cpus-except refuses an instance that is not pinned, and goes with neither --cpus nor --cpus-from', () => {
+  const h = fakeHost();
+  try {
+    for (const [args, why] of [[EXCEPT, /--cpus-except: souls-timed-1 .* is not pinned to CPUs of its own/],
+      [[...EXCEPT, '--cpus', '18-23'], /--cpus and --cpus-except: one or the other/],
+      [[...EXCEPT, '--cpus-from', 'souls-timed-3'], /--cpus-from and --cpus-except: one or the other/],
+      [['--cpus-except', 'a b'], /--cpus-except must be instance names/]]) {
+      const r = spawnSync('bash', [script, ...LIGHT, '--root', h.root, ...args, '--dry-run'], { encoding: 'utf8', env: h.env });
+      assert.notEqual(r.status, 0, args.join(' '));
+      assert.match(r.stderr, why, args.join(' '));
+      assert.ok(!r.stdout.includes('would run'), 'it stops before any step');
+    }
+  } finally { rmSync(h.d, { recursive: true, force: true }); }
+});
+
 /** The arguments of the dry run in the PR's command for the host; the real run is the same without --dry-run. */
 export const GENE_DRY = '--token $TOKEN --count 1 --prefix souls-wide --label souls-wide --user <runner user> --cpus-from souls-timed-3,souls-timed-4,souls-timed-5,souls-timed-6 --dry-run';
 

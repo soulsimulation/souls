@@ -33,6 +33,7 @@ import { SERVER_SHARDS } from './server-test-files.mjs';
 // `heavy: true` sends the job to the self-hosted pool CI_HEAVY_RUNNER when that variable is set (runnerFor, ci.yml's
 // qualify runs-on): the server shards and the legs whose hosted median is over about 8 minutes. The short legs stay on
 // ubuntu-latest, so one run uses both pools at once (docs/testing.md#self-hosted-runners). `native` never is heavy (#1162).
+// `light: true` sends the job to an idle LIGHT_LABEL runner when the scope job finds one, else to ubuntu-latest (assignLight).
 export const JOBS = [
   // paths: a baseline or budget change is tools-only, so no step selects it, and this job is what compares it (#1117).
   { name: 'types-web', kind: 'types-web', assets: true, steps: ['V1-types', 'V2-build-root', 'V2-build-worlds', 'V3-bundle'], paths: /^tools\/test-harness\/bundle-budget\// },
@@ -53,14 +54,49 @@ export const JOBS = [
   // No gate step on purpose: picked by its own paths, so the gate's suite tree and cached baseline stay as they are (#1061).
   { name: 'soul-actions', kind: 'soul-actions', assets: false, heavy: true, steps: [], paths: /^(tools\/soul-actions|apps\/server|packages\/world-compiler|packages\/engine-[^/]+)\// },
   // Also no gate step (#1111). soul-trace drives the thin CLI in tools/world-launcher/soul; soul-runtime's native client test uses the server's comms fixture. tools/entry's format, check and look gate tests ride here too, picked by tools/entry, content and packages/form-rules.
-  { name: 'soul-tools', kind: 'soul-tools', assets: false, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|tools\/entry|content|packages\/form-rules|apps\/server)\// },
+  { name: 'soul-tools', kind: 'soul-tools', assets: false, light: true, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|tools\/entry|content|packages\/form-rules|apps\/server)\// },
 ];
 
-/** The runner a qualify job gets, as ci.yml's runs-on computes it: a heavy job goes to CI_HEAVY_RUNNER (one label, or a
- * JSON array of labels) when it is set; every other job, and every job when it is unset, goes to ubuntu-latest. */
+/** The runner a qualify job gets, as ci.yml's runs-on computes it: the `runner` the scope job gave it (assignLight), else
+ * a heavy job goes to CI_HEAVY_RUNNER (one label, or a JSON array of labels) when it is set; every other job, and every
+ * job when it is unset, goes to ubuntu-latest. */
 export function runnerFor(job, heavyRunner = '') {
+  if (job.runner) return job.runner;
   if (!job.heavy || !heavyRunner) return 'ubuntu-latest';
   return heavyRunner.startsWith('[') ? JSON.parse(heavyRunner) : heavyRunner;
+}
+
+/** The self-hosted label of the light pool (tools/ci/setup-runners.sh --label souls-light, docs/testing.md#self-hosted-runners).
+ * A job with `light: true` runs there only while one of its runners is online and idle when the scope job looks; otherwise
+ * it runs on ubuntu-latest, with the same steps either way. `runs-on` cannot fall back by itself, so the scope job picks. */
+export const LIGHT_LABEL = 'souls-light';
+
+/** How many runners labelled `label` are online and idle, from the repository's runner list. Listing runners needs a token
+ * with Administration: read (the CI_RUNNERS_TOKEN secret); the workflow's own token cannot. No token, an HTTP error, a
+ * timeout or an unreadable answer is 0 idle, so every job stays hosted. */
+export async function idleRunners({ repo, label = LIGHT_LABEL, token, fetchImpl = globalThis.fetch, timeoutMs = 10_000 }) {
+  if (!token) return { idle: 0, online: 0, why: 'no runner token (CI_RUNNERS_TOKEN)' };
+  try {
+    const res = await fetchImpl(`https://api.github.com/repos/${repo}/actions/runners?per_page=100`, {
+      headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return { idle: 0, online: 0, why: `runner list: HTTP ${res.status}` };
+    const { runners } = await res.json();
+    if (!Array.isArray(runners)) return { idle: 0, online: 0, why: 'runner list: unreadable answer' };
+    const mine = runners.filter(r => r.labels?.some(l => l.name === label) && r.status === 'online');
+    const idle = mine.filter(r => r.busy === false).length;
+    return { idle, online: mine.length, why: `${idle} of ${mine.length} online ${label} runner(s) idle` };
+  } catch (e) {
+    return { idle: 0, online: 0, why: `runner list failed: ${e?.name === 'TimeoutError' ? 'timed out' : e?.message ?? e}` };
+  }
+}
+
+/** Gives the light jobs the light label, one per idle runner in matrix order; the rest, and every other job, keep their
+ * hosted (or CI_HEAVY_RUNNER) runner. Only `runner` changes: the steps a job runs never depend on it. */
+export function assignLight(include, idle, label = LIGHT_LABEL) {
+  let left = idle;
+  return include.map(job => (job.light && left > 0 ? (left--, { ...job, runner: label }) : job));
 }
 
 /** The god-skill unit tests (every *.test.mjs under tools/god-skill), run by the job with `godSkill` (ci.yml). */
@@ -136,7 +172,7 @@ export function changedFiles(base, head = 'HEAD', git = (...a) => execFileSync('
   catch { return null; }
 }
 
-function main(argv) {
+async function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
   if (argv[0] === 'green') {
     const runs = JSON.parse(execFileSync('gh', ['api', `repos/${opt('--repo')}/actions/workflows/ci.yml/runs?head_sha=${opt('--sha')}&per_page=100`], { encoding: 'utf8' })).workflow_runs ?? [];
@@ -151,12 +187,19 @@ function main(argv) {
   try { const l = JSON.parse(opt('--labels') || '[]'); if (Array.isArray(l)) labels = l; } catch { /* unreadable labels: none */ }
   const win = windowFor({ event, draft: opt('--draft') === 'true', labels });
   const plan = { ...full, ...windowed({ include: full.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
+  // The light pool is asked only when a light job will run; any failure keeps it hosted (idleRunners).
+  const light = plan.include.some(j => j.light)
+    ? await idleRunners({ repo: process.env.GITHUB_REPOSITORY, token: process.env.CI_RUNNERS_TOKEN })
+    : { idle: 0, why: 'no light job selected' };
+  plan.include = assignLight(plan.include, light.idle);
+  const placed = plan.include.filter(j => j.runner).map(j => j.name);
   const out = { matrix: JSON.stringify({ include: plan.include }), any: String(plan.include.length > 0), scope: plan.scope, smoke: String(plan.smoke), deferred: String(plan.deferred), window: plan.why };
-  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: full.include.map(j => j.name), diff: plan.diff }, null, 2));
+  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: full.include.map(j => j.name), light: { ...light, placed }, diff: plan.diff }, null, 2));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(out).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     `### CI scope: ${plan.scope}\n\nJobs: ${plan.include.map(j => '`' + j.name + '`').join(', ') || 'none (docs/tools only)'}; local smoke: ${out.smoke}\n` +
+    `\nLight pool (${LIGHT_LABEL}): ${placed.length ? placed.map(n => '`' + n + '`').join(', ') : 'none placed, all hosted'} (${light.why})\n` +
     (plan.deferred ? `\n**Full CI deferred** (${plan.why}): ${full.include.length} job(s) selected, none run. Add \`ci:run\` or \`merge:ready\` to a ready PR to run them (docs/testing.md#ci-window).\n` : ''));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));
