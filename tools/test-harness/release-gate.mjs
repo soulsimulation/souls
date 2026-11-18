@@ -764,8 +764,8 @@ export const CI_COVERED = {
   'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck', defs: ['package.json#typecheck'], tests: false },
   'V2-build-root': { jobs: ['types-web'], command: 'pnpm --filter @souls/web build', defs: [], tests: false },
   'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client', defs: ['package.json#test:client'], tests: true },
-  // every launcher piece (LAUNCHER_PIECES at the candidate, .github/scripts/launcher-test-files.mjs)
-  'V3-launcher-unit': { jobs: ['launcher-*'], command: 'files=$(node .github/scripts/launcher-test-files.mjs "$LAUNCHER_PIECE")', defs: ['.github/scripts/launcher-test-files.mjs'], tests: true },
+  // every launcher piece (LAUNCHER_PIECES at the candidate, .github/scripts/test-pieces.mjs)
+  'V3-launcher-unit': { jobs: ['launcher-*'], command: 'files=$(node .github/scripts/test-pieces.mjs launcher "$TEST_PIECE")', defs: ['.github/scripts/test-pieces.mjs'], tests: true },
   'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh', defs: ['tools/test-harness/web-suite.sh', 'tools/test-harness/web-loader.mjs'], tests: true },
   // every server shard (SERVER_SHARDS at the candidate, .github/scripts/server-test-files.mjs) plus the latency job
   'V5-server-full': { jobs: ['server-*', 'latency'], command: "import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';",
@@ -842,7 +842,7 @@ export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id)
   const ciYml = ciDefinition('ci.yml', file) || '';
   // a job pattern `x-*` stands for every one of the commit's N jobs x-0 … x-<N-1>, N read from the script that splits them
   const count = (path, name) => Number(new RegExp(`export const ${name} = (\\d+)`).exec(file(path) || '')?.[1]);
-  const split = { 'server-*': count('.github/scripts/server-test-files.mjs', 'SERVER_SHARDS'), 'launcher-*': count('.github/scripts/launcher-test-files.mjs', 'LAUNCHER_PIECES') };
+  const split = { 'server-*': count('.github/scripts/server-test-files.mjs', 'SERVER_SHARDS'), 'launcher-*': count('.github/scripts/test-pieces.mjs', 'LAUNCHER_PIECES') };
   const drifted = name => { const now = ciDefinition(name, file), then = ciDefinition(name, baselineFile); return now === null || then === null || now !== then; };
   const logs = new Map(), readLog = name => {
     if (!logs.has(name)) { try { logs.set(name, ciLogSkips(log(jobId[name]))); } catch (e) { logs.set(name, { error: String(e.message).split('\n')[0] }); } }

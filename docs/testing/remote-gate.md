@@ -37,7 +37,7 @@ as covered only when all of these hold (`CI_COVERED` and `ciEvidence` in `releas
 - the CI definitions it depends on are identical at the candidate and at the baseline, the live release: `ci.yml`
   (without comments and the `repo` and `smoke` jobs, which run no contract step), `.github/scripts/ci-scope.mjs`, and
   per step the `typecheck` or `test:client` script in `package.json`, `tools/test-harness/web-suite.sh` and
-  `web-loader.mjs`, `.github/scripts/launcher-test-files.mjs` or `.github/scripts/server-test-files.mjs`. The gate runs from the candidate's harness, so a
+  `web-loader.mjs`, `.github/scripts/test-pieces.mjs` or `.github/scripts/server-test-files.mjs`. The gate runs from the candidate's harness, so a
   candidate that weakens CI (`|| true`, `continue-on-error`, a test-name filter, an `echo` of the command) cannot have
   it counted; any change to these files since the baseline runs the affected steps on Modal for that release;
 - each covered job's log has complete node test summaries, and every test it skipped or marked todo is in

@@ -71,7 +71,7 @@ test('the types-web job, which runs the bundle comparison, covers what can move 
 
 test('routing: the server shards and the long legs go to CI_HEAVY_RUNNER; the short legs, native and smoke stay hosted', () => {
   const heavy = JOBS.filter(j => j.heavy).map(j => j.name).sort();
-  assert.deepEqual(heavy, [...JOBS.filter(j => ['server', 'launcher'].includes(j.kind)).map(j => j.name), 'packages', 'soul-actions'].sort());
+  assert.deepEqual(heavy, [...JOBS.filter(j => ['server', 'launcher', 'soul-actions'].includes(j.kind)).map(j => j.name), 'packages'].sort());
   for (const job of JOBS) assert.deepEqual(runnerFor(job, '["self-hosted","souls-heavy"]'), job.heavy ? ['self-hosted', 'souls-heavy'] : 'ubuntu-latest', job.name);
   assert.equal(runnerFor(JOBS.find(j => j.kind === 'native'), '["self-hosted","souls-heavy"]'), 'ubuntu-latest');
   assert.equal(runnerFor(JOBS.find(j => j.kind === 'server'), 'souls-ci'), 'souls-ci');
@@ -90,10 +90,12 @@ test('ci.yml: qualify runs-on reads the matrix flag, and smoke stays hosted (#11
 });
 
 test('the soul-actions job runs on its own paths, full scope included, and on nothing else (#1061)', () => {
-  for (const f of ['tools/soul-actions/shared-crew.test.mjs', 'apps/server/src/edge/ledger/together.ts', 'apps/server/test/native-owner-fixture.ts', 'packages/world-compiler/src/model.ts', 'packages/engine-mars/src/x.ts']) assert.ok(names([f]).includes('soul-actions'), f);
-  for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'packages/edge-cli/x.ts']) assert.ok(!names([f]).includes('soul-actions'), f);
-  assert.ok(names(['pnpm-lock.yaml']).includes('soul-actions'));
-  assert.ok(!('paths' in jobsFor(['tools/soul-actions/x.test.mjs']).include.find(j => j.name === 'soul-actions')));
+  const pieces = JOBS.filter(j => j.kind === 'soul-actions').map(j => j.name), all = files => pieces.every(n => names(files).includes(n));
+  assert.ok(pieces.length > 1, pieces.join());
+  for (const f of ['tools/soul-actions/shared-crew.test.mjs', 'apps/server/src/edge/ledger/together.ts', 'apps/server/test/native-owner-fixture.ts', 'packages/world-compiler/src/model.ts', 'packages/engine-mars/src/x.ts']) assert.ok(all([f]), f);
+  for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'packages/edge-cli/x.ts']) assert.ok(!pieces.some(n => names([f]).includes(n)), f);
+  assert.ok(all(['pnpm-lock.yaml']));
+  assert.ok(!('paths' in jobsFor(['tools/soul-actions/x.test.mjs']).include.find(j => j.name === pieces[0])));
 });
 
 test('the soul-tools job runs on its own paths, full scope included, and on nothing else (#1111)', () => {
@@ -275,7 +277,7 @@ test('ci.yml: the window reaches the scope step, and a deferred run fails ci-ok'
 // Low-risk paths (Gene, 17 Nov): a change confined to entry, content, form-rules, docs or changelog fragments runs no
 // server, smoke (e2e), walk (packages) or bundle (types-web) job; it keeps repo (always), the entry tests and the
 // form-rules tests (soul-tools).
-const SKIPPED = JOBS.filter(j => ['server', 'launcher'].includes(j.kind) || ['latency', 'packages', 'types-web', 'native', 'client-cli', 'soul-actions'].includes(j.name)).map(j => j.name);
+const SKIPPED = JOBS.filter(j => ['server', 'launcher', 'soul-actions'].includes(j.kind) || ['latency', 'packages', 'types-web', 'native', 'client-cli'].includes(j.name)).map(j => j.name);
 const LOW = ['tools/entry/check.mjs', 'content/kinds/seating/bench.json', 'content/asks/a.json', 'content/moves/a.json', 'packages/form-rules/cases/kettle.json', 'docs/testing.md', 'changes/a-fragment.md', 'README.md'];
 
 test('low-risk: a diff confined to the allowlist runs soul-tools only: no server, smoke, walk or bundle job', () => {

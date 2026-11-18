@@ -847,7 +847,7 @@ function fakeGithub({ sha, runs, jobs, logs = {} }) {
     const id = Number(/\/runs\/(\d+)\/jobs/.exec(path)?.[1]); return { jobs: Object.entries(jobs[id] || {}).map(([name, conclusion], i) => { ids[1000 + i] = name; return { id: 1000 + i, name, conclusion }; }) }; };
   const log = id => { const name = ids[id]; if (logs[name] instanceof Error) throw logs[name]; return logs[name] ?? tapLog(); };
   const files = { '.github/workflows/ci.yml': here('../../.github/workflows/ci.yml'), '.github/scripts/server-test-files.mjs': 'export const SERVER_SHARDS = 3;\n',
-    '.github/scripts/launcher-test-files.mjs': 'export const LAUNCHER_PIECES = 2;\n',
+    '.github/scripts/test-pieces.mjs': 'export const LAUNCHER_PIECES = 2;\n',
     '.github/scripts/ci-scope.mjs': '// picker\n', 'package.json': here('../../package.json'), 'tools/test-harness/web-suite.sh': here('./web-suite.sh'), 'tools/test-harness/web-loader.mjs': '// loader\n' };
   const base = { ...files };
   return { api, log, calls, files, base, args: (extra = {}) => ({ repo: 'o/r', api, log, file: p => files[p] ?? null, baselineFile: p => base[p] ?? null, ...extra }) };
@@ -920,7 +920,7 @@ test('CI evidence is bound to the baseline\'s CI definitions: each weakening pro
   one(f => { f['tools/test-harness/web-suite.sh'] += 'exit 0\n'; }, 'V4-web', /web-suite\.sh/);
   one(f => { f['tools/test-harness/web-loader.mjs'] += '// changed\n'; }, 'V4-web', /web-loader\.mjs/);
   one(f => { f['.github/scripts/server-test-files.mjs'] = 'export const SERVER_SHARDS = 4;\n'; }, 'V5-server-full', /server-test-files\.mjs/);
-  one(f => { f['.github/scripts/launcher-test-files.mjs'] = 'export const LAUNCHER_PIECES = 1;\n'; }, 'V3-launcher-unit', /launcher-test-files\.mjs/);
+  one(f => { f['.github/scripts/test-pieces.mjs'] = 'export const LAUNCHER_PIECES = 1;\n'; }, 'V3-launcher-unit', /test-pieces\.mjs/);
   one(f => { f['package.json'] = JSON.stringify({ scripts: { ...JSON.parse(f['package.json']).scripts, typecheck: 'true' } }); }, 'V1-types', /package\.json#typecheck/);
   one(f => { f['package.json'] = JSON.stringify({ scripts: { ...JSON.parse(f['package.json']).scripts, 'test:client': 'true' } }); }, 'V3-client-cli', /package\.json#test:client/);
   // the job picker and a missing baseline definition drop everything; comments and the repo job do not count

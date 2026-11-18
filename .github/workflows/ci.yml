@@ -110,7 +110,7 @@ jobs:
           .github/scripts/gate-renames.test.mjs
           .github/scripts/server-test-files.test.mjs
           .github/scripts/server-test-durations.test.mjs
-          .github/scripts/launcher-test-files.test.mjs
+          .github/scripts/test-pieces.test.mjs
           .github/scripts/guards.test.mjs
           .github/scripts/merge-train.test.mjs
           .github/scripts/restack.test.mjs
@@ -167,7 +167,7 @@ jobs:
         env:
           CHECK_KIND: ${{ matrix.kind }}
           SERVER_SHARD: ${{ matrix.shard }}
-          LAUNCHER_PIECE: ${{ matrix.piece }}
+          TEST_PIECE: ${{ matrix.piece }}
           GOD_SKILL: ${{ matrix.godSkill || false }}
         shell: bash
         run: |
@@ -219,7 +219,7 @@ jobs:
               fi
               # One of LAUNCHER_PIECES duration-balanced pieces of tools/world-launcher/*.test.mjs and
               # tools/world-launcher/soul/*.test.mjs; the script fails unless the pieces hold every such file exactly once
-              files=$(node .github/scripts/launcher-test-files.mjs "$LAUNCHER_PIECE")
+              files=$(node .github/scripts/test-pieces.mjs launcher "$TEST_PIECE")
               node --test --test-concurrency=1 $files
               ;;
             client-cli)
@@ -231,7 +231,9 @@ jobs:
               ;;
             soul-actions)
               # #1061: not a gate step; picked by ci-scope.mjs from its own paths
-              node --test --test-concurrency=4 tools/soul-actions/*.test.mjs
+              # one of SOUL_ACTIONS_PIECES duration-balanced pieces of tools/soul-actions/*.test.mjs (test-pieces.mjs)
+              files=$(node .github/scripts/test-pieces.mjs soul-actions "$TEST_PIECE")
+              node --test --test-concurrency=4 $files
               ;;
             soul-tools)
               # #1111: not a gate step; picked by ci-scope.mjs from its own paths
