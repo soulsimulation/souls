@@ -3,11 +3,22 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `frozen`: K8, #2671."
 
 [[bin]]
 name = "tree"
 path = "src/tree.rs"
 
+# R1, #2684: the replica's native and WASM builds compared (node.mjs beside it), and its three numbers.
+[[bin]]
+name = "replica-equal"
+path = "replica-equal/main.rs"
+
+# K8, #2671: publishing a frozen copy each tick, with and without readers.
+[[bin]]
+name = "frozen"
+path = "src/frozen.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
+sim = { path = "../../crates/sim" }

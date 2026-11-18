@@ -1,0 +1,19 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:gauge",
+  "owner": "thing",
+  "links": {
+    "place": { "n": 1, "from": "place", "most": 1, "audience": { "rule": "everyone" } }
+  },
+  "forms": {
+    "read": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "link": "place", "field": "survey", "at_least": 1 }],
+      "steps": [],
+      "effects": []
+    }
+  },
+  "text": { "card": "A test gauge: reads a field of its place that only the world's creator sees." },
+  "card": { "text": "card" }
+}
