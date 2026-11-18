@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":134,"group":"two-things","words":"grab a book and read it on the sofa","obvious":3,"things":{"bookshelf":"eden:bookshelf","book":"eden:book","sofa":"eden:sofa"},"chain":[{"this":"bookshelf","form":"take"},{"this":"me","form":"sit_down","args":{"spot":"sofa"}},{"this":"book","form":"read"}]}

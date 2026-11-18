@@ -1,0 +1,1607 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "content/kinds/containers (SA-X14, #2909): containers and carried furniture converted from the merged rules of #1054, #1060, #1598, #1592, #1602, #1257 and #1027.",
+  "cases": [
+    {
+      "name": "swap_shelf_leave_held_thing_into_a_free_place",
+      "act": {
+        "this": "x1",
+        "form": "leave",
+        "args": {
+          "thing": "t1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:swap_shelf",
+            "slots": {
+              "shelf": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "swap_shelf_leave_a_thing_not_in_hand_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "leave",
+        "args": {
+          "thing": "t1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:swap_shelf",
+            "slots": {
+              "shelf": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0
+      }
+    },
+    {
+      "name": "swap_shelf_leave_when_full_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "leave",
+        "args": {
+          "thing": "t1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:swap_shelf",
+            "slots": {
+              "shelf": [
+                "f0",
+                "f1",
+                "f2"
+              ]
+            }
+          },
+          "f0": {
+            "kind": "eden:cut_flower"
+          },
+          "f1": {
+            "kind": "eden:cut_flower"
+          },
+          "f2": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1
+      }
+    },
+    {
+      "name": "swap_shelf_take_with_a_hand_free",
+      "act": {
+        "this": "x1",
+        "form": "take",
+        "args": {
+          "thing": "f0"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:swap_shelf",
+            "slots": {
+              "shelf": [
+                "f0"
+              ]
+            }
+          },
+          "f0": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "swap_shelf_take_with_both_hands_full_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "take",
+        "args": {
+          "thing": "f0"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:swap_shelf",
+            "slots": {
+              "shelf": [
+                "f0"
+              ]
+            }
+          },
+          "f0": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          },
+          "t2": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0
+      }
+    },
+    {
+      "name": "hollow_stump_hide_held_thing_into_a_free_place",
+      "act": {
+        "this": "x1",
+        "form": "hide",
+        "args": {
+          "thing": "t1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "hollow_stump_hide_a_thing_not_in_hand_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "hide",
+        "args": {
+          "thing": "t1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0
+      }
+    },
+    {
+      "name": "hollow_stump_hide_when_full_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "hide",
+        "args": {
+          "thing": "t1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": [
+                "f0"
+              ]
+            }
+          },
+          "f0": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1
+      }
+    },
+    {
+      "name": "hollow_stump_search_with_a_hand_free",
+      "act": {
+        "this": "x1",
+        "form": "search",
+        "args": {
+          "thing": "f0"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": [
+                "f0"
+              ]
+            }
+          },
+          "f0": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "hollow_stump_search_with_both_hands_full_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "search",
+        "args": {
+          "thing": "f0"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": [
+                "f0"
+              ]
+            }
+          },
+          "f0": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          },
+          "t2": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0
+      }
+    },
+    {
+      "name": "wall_niche_hide_held_thing_into_a_free_place",
+      "act": {
+        "this": "x1",
+        "form": "hide",
+        "args": {
+          "thing": "t1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wall_niche",
+            "slots": {
+              "inside": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "wall_niche_hide_a_thing_not_in_hand_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "hide",
+        "args": {
+          "thing": "t1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wall_niche",
+            "slots": {
+              "inside": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0
+      }
+    },
+    {
+      "name": "wall_niche_hide_when_full_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "hide",
+        "args": {
+          "thing": "t1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wall_niche",
+            "slots": {
+              "inside": [
+                "f0"
+              ]
+            }
+          },
+          "f0": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1
+      }
+    },
+    {
+      "name": "wall_niche_search_with_a_hand_free",
+      "act": {
+        "this": "x1",
+        "form": "search",
+        "args": {
+          "thing": "f0"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wall_niche",
+            "slots": {
+              "inside": [
+                "f0"
+              ]
+            }
+          },
+          "f0": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "wall_niche_search_with_both_hands_full_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "search",
+        "args": {
+          "thing": "f0"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wall_niche",
+            "slots": {
+              "inside": [
+                "f0"
+              ]
+            }
+          },
+          "f0": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          },
+          "t1": {
+            "kind": "eden:cut_flower"
+          },
+          "t2": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0
+      }
+    },
+    {
+      "name": "arranging_vase_put_in_a_held_flower",
+      "act": {
+        "this": "v1",
+        "form": "put_in",
+        "args": {
+          "thing": "s1",
+          "place": "stem_2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {
+            "kind": "eden:arranging_vase",
+            "slots": {
+              "stem_2": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "s1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "arranging_vase_put_in_a_flower_not_in_hand_is_refused",
+      "act": {
+        "this": "v1",
+        "form": "put_in",
+        "args": {
+          "thing": "s1",
+          "place": "stem_2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {
+            "kind": "eden:arranging_vase",
+            "slots": {
+              "stem_2": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "s2"
+            }
+          },
+          "s1": {
+            "kind": "eden:cut_flower"
+          },
+          "s2": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0
+      }
+    },
+    {
+      "name": "arranging_vase_put_in_holding_no_flower_is_refused",
+      "act": {
+        "this": "v1",
+        "form": "put_in",
+        "args": {
+          "thing": "c1",
+          "place": "stem_2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {
+            "kind": "eden:arranging_vase",
+            "slots": {
+              "stem_2": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": null
+            }
+          },
+          "c1": {
+            "kind": "eden:cup"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_holding_kind",
+        "need": 1
+      }
+    },
+    {
+      "name": "arranging_vase_put_in_a_taken_place_is_refused",
+      "act": {
+        "this": "v1",
+        "form": "put_in",
+        "args": {
+          "thing": "s1",
+          "place": "stem_2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {
+            "kind": "eden:arranging_vase",
+            "slots": {
+              "stem_1": [
+                "s3"
+              ],
+              "stem_2": [
+                "s2"
+              ],
+              "stem_3": [
+                "s4"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "s1",
+              "right": null
+            }
+          },
+          "s1": {
+            "kind": "eden:cut_flower"
+          },
+          "s2": {
+            "kind": "eden:cut_flower"
+          },
+          "s3": {
+            "kind": "eden:cut_flower"
+          },
+          "s4": {
+            "kind": "eden:cut_flower"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 2
+      }
+    },
+    {
+      "name": "arranging_vase_take_out_with_a_hand_free",
+      "act": {
+        "this": "v1",
+        "form": "take_out",
+        "args": {
+          "thing": "s2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {
+            "kind": "eden:arranging_vase",
+            "slots": {
+              "stem_2": [
+                "s2"
+              ]
+            }
+          },
+          "s2": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "arranging_vase_take_out_with_both_hands_full_is_refused",
+      "act": {
+        "this": "v1",
+        "form": "take_out",
+        "args": {
+          "thing": "s2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "v1": {
+            "kind": "eden:arranging_vase",
+            "slots": {
+              "stem_2": [
+                "s2"
+              ]
+            }
+          },
+          "s2": {
+            "kind": "eden:cut_flower"
+          },
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": "c2"
+            }
+          },
+          "c1": {
+            "kind": "eden:cup"
+          },
+          "c2": {
+            "kind": "eden:cup"
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0
+      }
+    },
+    {
+      "name": "camp_bench_sit_free_seat",
+      "act": {
+        "this": "e1",
+        "form": "sit",
+        "args": {
+          "seat": "left"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "e1": {
+            "kind": "eden:camp_bench",
+            "slots": {
+              "left": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "camp_bench_sit_taken_seat_is_refused",
+      "act": {
+        "this": "e1",
+        "form": "sit",
+        "args": {
+          "seat": "left"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "e1": {
+            "kind": "eden:camp_bench",
+            "slots": {
+              "left": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0
+      }
+    },
+    {
+      "name": "candle_stand_light_when_not",
+      "act": {
+        "this": "x1",
+        "form": "light",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:candle_stand",
+            "fields": {
+              "lit": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "candle_stand_light_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "light",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:candle_stand",
+            "fields": {
+              "lit": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "candle_stand_put_out_when_lit",
+      "act": {
+        "this": "x1",
+        "form": "put_out",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:candle_stand",
+            "fields": {
+              "lit": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "candle_stand_put_out_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "put_out",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:candle_stand",
+            "fields": {
+              "lit": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "parasol_open_when_not",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:parasol",
+            "fields": {
+              "open": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "parasol_open_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:parasol",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "parasol_close_when_open",
+      "act": {
+        "this": "x1",
+        "form": "close",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:parasol",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "parasol_close_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "close",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:parasol",
+            "fields": {
+              "open": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "tent_open_when_not",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:tent",
+            "fields": {
+              "open": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "tent_open_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:tent",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "tent_close_when_open",
+      "act": {
+        "this": "x1",
+        "form": "close",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:tent",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "tent_close_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "close",
+        "args": {}
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:tent",
+            "fields": {
+              "open": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "field_gate_open_when_not",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {
+          "side": "front"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:field_gate",
+            "fields": {
+              "open": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "field_gate_open_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {
+          "side": "front"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:field_gate",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "field_gate_close_when_open",
+      "act": {
+        "this": "x1",
+        "form": "close",
+        "args": {
+          "side": "front"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:field_gate",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "field_gate_close_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "close",
+        "args": {
+          "side": "front"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:field_gate",
+            "fields": {
+              "open": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "garden_gate_open_when_not",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {
+          "side": "back"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:garden_gate",
+            "fields": {
+              "open": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "garden_gate_open_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {
+          "side": "back"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:garden_gate",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "garden_gate_close_when_open",
+      "act": {
+        "this": "x1",
+        "form": "close",
+        "args": {
+          "side": "back"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:garden_gate",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "garden_gate_close_twice_is_refused",
+      "act": {
+        "this": "x1",
+        "form": "close",
+        "args": {
+          "side": "back"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:garden_gate",
+            "fields": {
+              "open": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    }
+  ]
+}

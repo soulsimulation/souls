@@ -1,0 +1,104 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:juggling_balls (from core-juggling-balls@1, #441). Three balls carried as one thing in one hand. Its holder juggles them for twenty seconds (the original's default run) with the other hand free: 'Hold the balls before juggling.' (not held) and 'Juggling needs the other hand free.' (a hand full). A cancel ends the run early, the balls still in hand. Each run counts.",
+ "cases": [
+  {
+   "name": "juggle_every_need_met",
+   "act": {
+    "this": "j1",
+    "form": "juggle"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "j1": {
+      "kind": "eden:juggling_balls"
+     },
+     "b1": {
+      "hands": {
+       "left": "j1",
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "juggle_not_held",
+   "act": {
+    "this": "j1",
+    "form": "juggle"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "j1": {
+      "kind": "eden:juggling_balls"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_held",
+    "need": 0
+   }
+  },
+  {
+   "name": "juggle_other_hand_full",
+   "act": {
+    "this": "j1",
+    "form": "juggle"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "j1": {
+      "kind": "eden:juggling_balls"
+     },
+     "b1": {
+      "hands": {
+       "left": "j1",
+       "right": "c1"
+      }
+     },
+     "c1": {
+      "kind": "eden:cup"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  }
+ ]
+}

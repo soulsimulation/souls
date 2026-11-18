@@ -1,0 +1,604 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pigment_tray",
+  "owner": "thing",
+  "state": {
+    "stage": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "chunks",
+        "coarse",
+        "fine"
+      ],
+      "default": "chunks",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        850
+      ],
+      "yaw_mdeg": 180000
+    },
+    "bed": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1000,
+        80
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      950,
+      1100,
+      650
+    ]
+  },
+  "forms": {
+    "crush": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "chunks"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "bed"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "coarse",
+          "event": "crushed"
+        }
+      ]
+    },
+    "grind": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "coarse"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "bed"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "fine",
+          "event": "ground"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:pigment_tray",
+    "table": [
+      {
+        "part": "lid",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "chunks": 1,
+          "coarse": 0,
+          "fine": 0
+        }
+      },
+      {
+        "part": "knob",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "chunks": 0,
+          "coarse": 1,
+          "fine": 0
+        }
+      },
+      {
+        "part": "fill",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "chunks": 0,
+          "coarse": 0,
+          "fine": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            965,
+            0
+          ],
+          "size": [
+            950,
+            30,
+            650
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -380,
+            475,
+            -230
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -380,
+            475,
+            230
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            380,
+            475,
+            -230
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            380,
+            475,
+            230
+          ],
+          "size": [
+            60,
+            950,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            998,
+            80
+          ],
+          "size": [
+            550,
+            36,
+            360
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -260,
+            1030,
+            80
+          ],
+          "size": [
+            25,
+            30,
+            360
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1030,
+            80
+          ],
+          "size": [
+            25,
+            30,
+            360
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1030,
+            -90
+          ],
+          "size": [
+            550,
+            30,
+            25
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1030,
+            250
+          ],
+          "size": [
+            550,
+            30,
+            25
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            1055,
+            40
+          ],
+          "size": [
+            100,
+            75,
+            75
+          ],
+          "tint": "pigment",
+          "yaw": 0,
+          "role": "lid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1055,
+            120
+          ],
+          "size": [
+            100,
+            75,
+            75
+          ],
+          "tint": "pigment",
+          "yaw": 23000,
+          "role": "lid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            1055,
+            40
+          ],
+          "size": [
+            100,
+            75,
+            75
+          ],
+          "tint": "pigment",
+          "yaw": 46000,
+          "role": "lid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            1034,
+            -15
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 0,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            1034,
+            90
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 17000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            1034,
+            180
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 34000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -60,
+            1034,
+            -15
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 17000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -60,
+            1034,
+            90
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 34000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -60,
+            1034,
+            180
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 51000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            60,
+            1034,
+            -15
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 34000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            60,
+            1034,
+            90
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 51000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            60,
+            1034,
+            180
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 68000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            1034,
+            -15
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 51000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            1034,
+            90
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 68000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            1034,
+            180
+          ],
+          "size": [
+            47,
+            28,
+            40
+          ],
+          "tint": "pigment",
+          "yaw": 85000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1030,
+            80
+          ],
+          "size": [
+            480,
+            26,
+            300
+          ],
+          "tint": "pigment",
+          "role": "fill"
+        }
+      ],
+      "palette": {
+        "wood": "#856342",
+        "stone": "#73737a",
+        "pigment": "#ce694d"
+      },
+      "tags": [
+        "art",
+        "pigment",
+        "grinding",
+        "table"
+      ]
+    }
+  },
+  "text": {
+    "card": "A tray of soft artist chalk: crush it to coarse pigment, then grind it fine.",
+    "art": "art",
+    "pigment": "pigment",
+    "grind": "grind",
+    "howto_pigment": "Crush the chunks for ten seconds, then grind the coarse pigment for ten more into fine powder."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "pigment",
+      "grind"
+    ]
+  },
+  "howtos": {
+    "pigment": {
+      "text": "howto_pigment",
+      "steps": [
+        {
+          "form": "crush"
+        },
+        {
+          "form": "grind"
+        }
+      ]
+    }
+  }
+}

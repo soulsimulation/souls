@@ -5,7 +5,16 @@ import type {EdgeLedger} from '../ledger/ledger.ts';
 import {buildCatalog, type CatalogThingIn} from './catalog.ts';
 import {inPoly} from '../ledger/places.ts';
 
-type WorldEntity = {def?: string; label?: string; name?: string; human?: unknown; pose?: {p: number[]}};
+import {vehicleOf} from '../comms/objects/ride.ts';
+
+type WorldEntity = {def?: string; label?: string; name?: string; human?: unknown; pose?: {p: number[]}; carrier?: {route?: {id?: string}}};
+
+/** A god's ferris wheel or carousel rides on a carrier of the balloon's def; it is listed as what it is. Balloons and punts keep their def. */
+export function listedKind(id: string, e: WorldEntity): string {
+  if (e.def !== 'hot-air-balloon') return e.def!;
+  const v = vehicleOf({id, def: e.def, route: e.carrier?.route});
+  return v === 'balloon' ? e.def : v;
+}
 
 export function ledgerCatalog(L: EdgeLedger) {
   const world = L.host.engine.world as unknown as {entities: Record<string, WorldEntity>};
@@ -19,7 +28,7 @@ export function ledgerCatalog(L: EdgeLedger) {
     if (secretOutlines.some(poly => inPoly(x, z, poly))) continue;
     // on its own floor, as its activity spots are: a lamp upstairs is in the bedroom, not the kitchen under it
     const place = locate(x, z, Number.isFinite(y) ? L.levelAt?.(x, z, y) ?? 0 : 0);
-    things.push({id, kind: e.def, name: L.thingName?.(id) ?? e.name ?? e.label ?? id, at: [x, z], place: place && place.parent !== null ? place.id : null, ...(L.seatThing?.(id) ? {seat: true} : {}), hand: L.thingActs?.(id)});
+    things.push({id, kind: listedKind(id, e), name: L.thingName?.(id) ?? e.name ?? e.label ?? id, at: [x, z], place: place && place.parent !== null ? place.id : null, ...(L.seatThing?.(id) ? {seat: true} : {}), hand: L.thingActs?.(id), entry: L.thingEntry?.(id)});
   }
   // a spot of a thing the world no longer has (a god removed it; a world's authored spots outlive it) is not an act
   const spots = L.spots.spots.filter(s => !L.spotThingGone(s.id));

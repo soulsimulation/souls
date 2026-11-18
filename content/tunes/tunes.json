@@ -1,0 +1,20 @@
+{
+  "format": "souls-tunes/1",
+  "about": "Short original phrases, as notes, that a looks row names by id or picks by a mood tag. A tune is [midi, start step, length in steps] over steps of step_us microseconds, repeating. No audio: the page synthesises it. Never composed per request; add one by appending.",
+  "tunes": [
+    { "id": "tune:slow_rain", "moods": ["sad","lonely"], "step_us": 375000, "steps": 16, "notes": [[64,0,3], [60,3,1], [62,4,3], [59,7,1], [60,8,4], [57,12,4]] },
+    { "id": "tune:small_sun", "moods": ["happy","bright"], "step_us": 200000, "steps": 16, "notes": [[60,0,2], [64,2,2], [67,4,2], [64,6,2], [69,8,2], [67,10,2], [64,12,2], [60,14,2]] },
+    { "id": "tune:still_pond", "moods": ["calm","peaceful"], "step_us": 450000, "steps": 16, "notes": [[60,0,4], [64,4,2], [67,6,2], [64,8,4], [62,12,4]] },
+    { "id": "tune:thin_ice", "moods": ["tense","nervous"], "step_us": 180000, "steps": 16, "notes": [[52,0,1], [53,1,1], [52,2,1], [53,3,1], [52,4,2], [59,6,1], [57,7,1], [53,8,2], [52,10,1], [53,11,1], [52,12,4]] },
+    { "id": "tune:hop_skip", "moods": ["playful","silly"], "step_us": 150000, "steps": 16, "notes": [[64,0,1], [68,2,1], [71,4,1], [76,6,1], [71,8,1], [68,10,1], [73,12,1], [69,14,1]] },
+    { "id": "tune:warm_blanket", "moods": ["sleepy","lullaby"], "step_us": 500000, "steps": 12, "notes": [[62,0,2], [59,2,2], [55,4,4], [59,8,2], [57,10,2]] },
+    { "id": "tune:big_doors", "moods": ["grand","proud"], "step_us": 300000, "steps": 16, "notes": [[48,0,3], [55,4,3], [60,8,2], [64,10,2], [60,12,4], [55,14,2]] },
+    { "id": "tune:cellar_stair", "moods": ["eerie","strange"], "step_us": 330000, "steps": 16, "notes": [[50,0,2], [56,2,2], [61,4,2], [56,6,2], [52,8,4], [49,12,4]] },
+    { "id": "tune:held_hand", "moods": ["tender","warm"], "step_us": 360000, "steps": 16, "notes": [[60,0,2], [64,2,2], [67,4,3], [64,7,1], [60,8,2], [59,10,2], [57,12,4]] },
+    { "id": "tune:quick_errand", "moods": ["brisk","busy"], "step_us": 120000, "steps": 16, "notes": [[62,0,1], [62,1,1], [69,2,1], [69,3,1], [71,4,1], [71,5,1], [69,6,2], [67,8,1], [67,9,1], [66,10,1], [66,11,1], [64,12,1], [64,13,1], [62,14,2]] },
+    { "id": "tune:sunday_stroll", "moods": ["hopeful","morning"], "step_us": 280000, "steps": 16, "notes": [[64,0,2], [66,2,1], [64,3,1], [61,4,4], [59,8,2], [61,10,2], [64,12,4]] },
+    { "id": "tune:last_bus", "moods": ["bluesy","late"], "step_us": 260000, "steps": 16, "notes": [[55,0,2], [58,2,1], [60,3,1], [61,4,3], [60,7,1], [58,8,2], [55,10,6]] },
+    { "id": "tune:wind_in_wire", "moods": ["lonely","windy"], "step_us": 420000, "steps": 16, "notes": [[69,0,4], [66,4,2], [68,6,2], [62,8,6], [59,14,2]] },
+    { "id": "tune:birthday_ish", "moods": ["festive","happy"], "step_us": 220000, "steps": 16, "notes": [[60,0,1], [60,1,1], [62,2,2], [60,4,2], [65,6,2], [64,8,4], [60,12,1], [60,13,1], [62,14,2]] }
+  ]
+}

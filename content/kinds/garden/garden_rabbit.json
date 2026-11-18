@@ -1,0 +1,30 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:garden_rabbit",
+  "owner": "thing",
+  "state": {
+    "feed": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "mouth": { "role": "contact", "at_mm": [0, 160, 190] }
+  },
+  "geometry": { "bounds_mm": [220, 320, 420] },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:garden_rabbit",
+    "table": [
+      { "part": "head", "field": "feed", "do": "rotate", "axis": "x", "range": [0, 1], "to": [0, 35000] },
+      { "part": "ear.l", "field": "feed", "do": "rotate", "axis": "x", "range": [0, 1], "to": [0, -70000] },
+      { "part": "ear.r", "field": "feed", "do": "rotate", "axis": "x", "range": [0, 1], "to": [0, -70000] }
+    ],
+    "shape": {"round":20,"shapes":[{"kind":"box","at":[0,110,-30],"size":[200,180,300],"tint":"fur"},{"kind":"box","at":[0,90,-190],"size":[70,70,60],"tint":"tail"},{"kind":"box","at":[0,170,130],"size":[140,130,130],"tint":"fur","role":"head","pivot":[0,150,80]},{"kind":"box","at":[0,180,200],"size":[30,25,10],"tint":"nose","role":"head","pivot":[0,150,80]},{"kind":"box","at":[-35,290,110],"size":[35,140,25],"tint":"fur","role":"ear.l","pivot":[0,230,110]},{"kind":"box","at":[35,290,110],"size":[35,140,25],"tint":"fur","role":"ear.r","pivot":[0,230,110]},{"kind":"box","at":[-60,20,100],"size":[40,40,60],"tint":"fur"},{"kind":"box","at":[60,20,100],"size":[40,40,60],"tint":"fur"}],"palette":{"fur":"#9a8a76","tail":"#efe9df","nose":"#d99a9a"},"tags":["garden","animal","rabbit","object"]}
+  },
+  "text": {
+    "card": "A garden rabbit at its feeding place; once fed a portion, it rests.",
+    "garden": "garden",
+    "bunny": "bunny",
+    "animal": "animal"
+  },
+  "card": { "text": "card", "category": "garden", "synonyms": ["bunny", "animal"] }
+}
