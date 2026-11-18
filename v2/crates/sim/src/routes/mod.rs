@@ -33,6 +33,8 @@
 //!
 //! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), routes across water (N11). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
+pub mod way;
+
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;

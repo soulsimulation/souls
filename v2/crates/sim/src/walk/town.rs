@@ -728,6 +728,35 @@ impl View<'_> {
 }
 
 impl Town {
+    /// The legs of a walk shaped by `way` (E10, #2781): the routes from where `body` stands through each of the way's
+    /// points (`crate::routes::way`) and on to `goal` when one is named, joined into one walk. A point is a leg with
+    /// no link that is not the last, which the walk passes without stopping. Each point is one route search, counted
+    /// in the points returned.
+    pub fn plan_way(
+        &mut self,
+        body: &Body,
+        way: &replica::walk::Way,
+        goal: Option<Vec3>,
+    ) -> Result<(Vec<Leg>, crate::routes::way::Points), Refusal> {
+        let from = body.pose.position;
+        let pts = crate::routes::way::points(&self.tree, &self.map, self.ground, from, goal, way)?;
+        let mut stops = pts.on.clone();
+        stops.extend(goal.map(|g| (self.ground, g)));
+        if stops.is_empty() {
+            return Err(refusal("way-empty", "a walk with no point and no goal"));
+        }
+        let (mut legs, mut at) = (Vec::new(), *body);
+        for (node, p) in stops {
+            legs.extend(self.plan(&at, node, p)?);
+            at = self
+                .surfaces
+                .get(&node)
+                .ok_or_else(|| refusal("no-surface", show(node)))?
+                .place(body.id, Frame { node, slot: None }, p, Quat::IDENTITY)?;
+        }
+        Ok((legs, pts))
+    }
+
     /// The track across `link` for `body` from where it stands, at `speed`, and the end it goes in by. A shut door
     /// in the link is asked open and the opening written at once (`cause`, the body as the acting Soul), and there is
     /// no track yet: the body stands this tick and asks again the next (T1).
