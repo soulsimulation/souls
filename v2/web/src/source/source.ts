@@ -14,6 +14,8 @@ export type NodeRec = {
   rot: [number, number, number, number];
   /** The world time of its newest motion sample, when it has moved (a body). */
   at: number | null;
+  /** Today's id of an imported thing (import-eden's field 1), the key of V17's model table (V8). */
+  origin?: string;
   /** Solids `[cx, cz, hx, hz, yaw mdeg, y0, y1, tag, abs]` mm in its own frame (import-eden's field 12). */
   solids?: number[][];
   /** Slots `[n, x, y, z, yaw mdeg, capacity]` mm (field 13). */

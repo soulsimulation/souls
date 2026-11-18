@@ -36,6 +36,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
     rot: ((pose?.get(3) as unknown[]) ?? [1 << 30, 0, 0, 0]).map(num) as NodeRec['rot'],
     at: moved ? num(moved.get(1)) : null,
   };
+  if (f.has(1)) rec.origin = new TextDecoder().decode(f.get(1) as Uint8Array);
   if (f.has(12)) rec.solids = rows(f.get(12));
   if (f.has(13)) rec.slots = rows(f.get(13));
   if (f.has(23)) rec.scale = num(f.get(23));

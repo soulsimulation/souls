@@ -4,9 +4,10 @@
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 import { Track } from '../clock/samples.ts';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const UM = 1e-6, MM = 1e-3;
-const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
+export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
 const plain = (kind: string) => kind.split('@')[0];
 /** Terrain vertices kept per tile side: every TERRAIN_STEP-th. */
 const TERRAIN_STEP = 8;
@@ -27,6 +28,8 @@ export class WorldView {
   private thingsDirty = false;
   private terrainDone = false;
   extent: [number, number, number, number] | null = null;
+  /** False when V8's thing layer draws the things instead of these boxes. */
+  drawThings = true;
 
   constructor() {
     const capsule = new THREE.CapsuleGeometry(0.28, 1.1, 4, 10);
@@ -87,7 +90,7 @@ export class WorldView {
     this.terrainDone = true;
     const side = (ground.tileSize ?? 64_000) * MM;
     let ext: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true }), tiles: THREE.BufferGeometry[] = [];
     for (const [tx, tz, heights, classes] of ground.tiles ?? []) {
       const n = Math.round(Math.sqrt(classes.length));
       const hv = new DataView(heights.buffer, heights.byteOffset, heights.byteLength);
@@ -113,9 +116,10 @@ export class WorldView {
       g.setAttribute('color', new THREE.BufferAttribute(col, 3));
       g.setIndex(index);
       g.computeVertexNormals();
-      this.group.add(new THREE.Mesh(g, mat));
+      tiles.push(g); // V8: one draw for the ground, not one a tile (Eden has 256)
       ext = [Math.min(ext[0], tx * side), Math.min(ext[1], tz * side), Math.max(ext[2], (tx + 1) * side), Math.max(ext[3], (tz + 1) * side)];
     }
+    if (tiles.length) this.group.add(new THREE.Mesh(mergeGeometries(tiles), mat));
     if (Number.isFinite(ext[0])) this.extent = ext;
   }
 
@@ -166,7 +170,7 @@ export class WorldView {
 
   /** Places every body at world time `t` and returns how many were drawn. */
   draw(t: number): number {
-    if (this.thingsDirty) this.rebuildThings();
+    if (this.thingsDirty && this.drawThings) this.rebuildThings();
     if (this.bodyIds.length > this.bodies.instanceMatrix.count) {
       const grown = new THREE.InstancedMesh(this.bodies.geometry, this.bodies.material, this.bodyIds.length * 2);
       this.group.remove(this.bodies);

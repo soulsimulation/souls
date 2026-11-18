@@ -8,6 +8,7 @@ import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
+import { pageThings } from '../things/page.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -32,6 +33,8 @@ const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
 const clock = new PlaybackClock();
+const things = pageThings(scene, world, new URLSearchParams(location.search));
+Object.assign(globalThis, { v2: { renderer, scene, cam, world, things } }); // for V8's measure
 
 let pointer: Pointer | null = null;
 let newestTo: number | null = null;
@@ -51,6 +54,7 @@ else new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
     world.apply(p.nodes, p.removed);
+    things.apply(p.nodes, p.removed);
     newestTo = p.to;
     played++;
     if (p.hash !== null) (hashes++, p.hash && hashesEqual++);
@@ -70,6 +74,7 @@ renderer.setAnimationLoop((now) => {
   fps = fps * 0.95 + (1000 / Math.max(1, dt)) * 0.05;
   last = now;
   cam.update(Math.min(100, dt));
+  things.update(cam.camera.position);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
   const t = worldNow === null ? null : clock.step(dt, worldNow, newestTo);
   let drawn = 0;
