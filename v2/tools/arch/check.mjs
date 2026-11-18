@@ -46,7 +46,7 @@ export const problem = (rule, where, what) => `${rule}: ${where}: ${what} [${RUL
 /** The dependencies each crate under v2/crates may have (normal, dev and build alike). A crate not listed fails. */
 export const ALLOWED = {
   replica: ['wasm-bindgen'],
-  // skills: a dev-dependency, so the world host's tests step the built-in skills (K13a, #2676).
+  // skills: the world wakes the form runner and steps the walk it starts (F1, #2766; K13a, #2676).
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld', 'skills'],
   worldd: ['replica', 'sim'],
   // Agents' sockets (I1, #2683): WebSocket on tokio through axum, a constant-time compare, the OS random source.
