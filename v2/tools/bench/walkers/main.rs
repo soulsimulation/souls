@@ -20,7 +20,9 @@
 //!   the ticks back to back: world time and every walker's path are the same, so it serves the progress bar and a
 //!   quick look, never the timing bars.
 //! - **Tick time** is the whole clock-thread tick: new orders (their routing included), then the ladder's tick (the
-//!   runner's tick inside it). Not in it: the per-tick record, progress and the trace.
+//!   runner's tick inside it). By phase (#3167): `orders` (new orders, their routing included), `corner` (the next
+//!   corner, timed by the town's [`Town::meter`]) and `step` (the rest of the ladder's and the runner's tick). Not in
+//!   it: the per-tick record, progress, the trace and the bench's own bookkeeping.
 //! - **Progress** (the bar's 30 s): under a live order, a walker progresses when it arrives, when its leg advances (a
 //!   link crossed), or when it stands 1 m nearer its leg's end than at its last progress. A new route from the ladder
 //!   is not progress: the distance is measured again, from the new leg's end.
@@ -31,8 +33,8 @@
 //!   (crossing, walking out, waiting for a link, or walking), and the faults and refused routes are listed by link and
 //!   by piece.
 //!
-//! Out: a summary line per measure on stdout; with `out-dir`, `ticks.csv` (one row per tick, µs) and `run.trace`
-//! (V14's throwaway `birdseye/0` trace, for `v2/tools/birdseye/view.html`). Generated, never committed.
+//! Out: a summary line per measure on stdout; with `out-dir`, `ticks.csv` (one row per tick, µs by phase) and
+//! `run.trace` (V14's throwaway `birdseye/0` trace, for `v2/tools/birdseye/view.html`). Generated, never committed.
 
 // A bench: it times its own ticks (K7's wall-clock rule binds the engine, not its benches).
 #![allow(clippy::disallowed_methods)]
@@ -56,11 +58,12 @@ use sim::links::Doors;
 use sim::mover::Body;
 use sim::routes::HANDS;
 use sim::unstick::{Ladder, Unstick};
-use sim::walk::town::Town;
+use sim::walk::town::{Spent, Town};
 use sim::walk::{World, node_of};
 use skills::route::Route;
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 /// µs a tick: 20 a second.
@@ -124,6 +127,14 @@ impl Clock for Real {
             }
         }
     }
+}
+
+const NAMES: [&str; 3] = ["orders", "corner", "step"];
+
+/// The bench's monotonic clock in ns, for the town's [`Town::meter`].
+fn mono_ns() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_nanos() as u64
 }
 
 /// A body with two legs, as the sim tests give their walkers.
@@ -327,6 +338,7 @@ fn main() {
     let text = std::fs::read_to_string(facts).expect("the facts file");
     let facts_hash = Hash::of(Purpose::Fixture, text.as_bytes());
     let mut town = town_of(import_eden::load(&text).expect("Eden loads"));
+    town.meter = Some(mono_ns);
     drop(text);
     let ground = town.ground;
     let gh = town.tree.handle(ground).expect("the ground");
@@ -547,6 +559,7 @@ fn main() {
             ..Plan::default()
         };
     }
+    town.spent.set(Spent::default());
     println!(
         "walkers: {n} placed; {pockets} starts in a pocket and {restarts} with no route out drawn again"
     );
@@ -617,7 +630,7 @@ fn main() {
         f.write_all(head.as_bytes()).unwrap();
         f.write_all(&vec![0u8; (4 - (4 + head.len()) % 4) % 4]).unwrap();
         let mut c = std::io::BufWriter::new(std::fs::File::create(d.join("ticks.csv")).expect("the csv"));
-        writeln!(c, "tick,total_us,orders_us,walking").unwrap();
+        writeln!(c, "tick,total_us,{},walking", NAMES.join("_us,") + "_us").unwrap();
         (f, c)
     });
 
@@ -643,6 +656,7 @@ fn main() {
 
     // The run.
     let mut tick_us: Vec<i64> = Vec::with_capacity(ticks as usize);
+    let mut phase_us: Vec<[i64; 3]> = Vec::with_capacity(ticks as usize);
     let mut route_us: Vec<i64> = Vec::new();
     let (mut finished, mut ended) = (0u64, 0u64);
     let mut ended_names: BTreeMap<String, u64> = BTreeMap::new();
@@ -668,6 +682,7 @@ fn main() {
     while ticker.next_tick() < ticks {
         let mut body = |_: i64, start: Micros| {
             let at = start + TICK;
+            let s0 = town.spent.get();
             let a0 = Instant::now();
             // Orders due this tick: the next walk of each walker that waited, and the crowd moments.
             if at >= next_moment {
@@ -752,7 +767,7 @@ fn main() {
                     ..Plan::default()
                 };
             }
-            let orders_us = a0.elapsed().as_micros() as i64;
+            let orders_ns = a0.elapsed().as_nanos() as i64;
             let carried: std::collections::BTreeSet<Id> = runner
                 .controller
                 .bodies()
@@ -760,8 +775,20 @@ fn main() {
                 .map(|b| b.id)
                 .collect();
             // The first refusal is in `runner.refused` with the rest: each is one walker's fault, taken below.
+            let s1 = town.spent.get();
+            let b0 = Instant::now();
             let _ = ladder.step(&mut runner, &mut town);
-            tick_us.push(a0.elapsed().as_micros() as i64);
+            let step_ns = b0.elapsed().as_nanos() as i64;
+            let s2 = town.spent.get();
+            tick_us.push((orders_ns + step_ns) / 1000);
+            phase_us.push(
+                [
+                    orders_ns - (s1.corner_ns - s0.corner_ns) as i64,
+                    (s2.corner_ns - s0.corner_ns) as i64,
+                    (step_ns - (s2.corner_ns - s1.corner_ns) as i64).max(0),
+                ]
+                .map(|v| v / 1000),
+            );
 
             // Not timed: faults, rungs, arrivals, progress, the record and the trace.
             let refused = std::mem::take(&mut runner.refused);
@@ -910,11 +937,15 @@ fn main() {
                     row[4 * n + k] = node_ix.get(&node).copied().unwrap_or(0);
                 }
                 f.write_all(&row).unwrap();
+                let ph = phase_us.last().unwrap();
                 writeln!(
                     c,
-                    "{},{},{orders_us},{walking}",
+                    "{},{},{},{},{},{walking}",
                     tick_us.len() - 1,
                     tick_us.last().unwrap(),
+                    ph[0],
+                    ph[1],
+                    ph[2],
                 )
                 .unwrap();
             }
@@ -934,6 +965,20 @@ fn main() {
     // The summary.
     let mut t = tick_us.clone();
     let (med, p99, max) = (pct(&mut t, 50), pct(&mut t, 99), *t.last().unwrap_or(&0));
+    let by_phase: Vec<String> = (0..3)
+        .map(|i| {
+            let mut v: Vec<i64> = phase_us.iter().map(|p| p[i]).collect();
+            let sum: i64 = v.iter().sum();
+            format!(
+                "{} median {} us, p99 {} us, max {} us, share {}%",
+                NAMES[i],
+                pct(&mut v, 50),
+                pct(&mut v, 99),
+                v.last().copied().unwrap_or(0),
+                sum * 100 / tick_us.iter().sum::<i64>().max(1)
+            )
+        })
+        .collect();
     let (rm, r90, rmax) = {
         let mut r = route_us.clone();
         (
@@ -950,6 +995,9 @@ fn main() {
         p99,
         max
     );
+    for l in &by_phase {
+        println!("walkers: phase {l}");
+    }
     println!(
         "walkers: clock: ticks {}, overruns {}, longest {} us, most lag {} us",
         s.ticks, s.overruns, s.max_tick_us, s.max_lag_us
