@@ -414,6 +414,14 @@ impl Intent {
 
 // --- Answers ------------------------------------------------------------------------------------------------------
 
+/// The one optional field of an answer frame `{1: version, 2: answer}` (O4, #2694): where the act's time went, `[µs,
+/// ...]`, each the time between two stamps of one machine's steady clock, never a time of day. As the client gets
+/// it: `[gateway's receipt to send, gateway in, link in, world in, check, tick wait, commit, log sync, world out, link
+/// out, gateway out]`; the rest sum to the first, and the client's wait less the first is the network. It is added as
+/// the answer leaves, after its tick is on the disk, so it is in no logged or hashed record, and a frame without it is
+/// the same answer. A 16-byte trace id may follow the integers when one is carried (OpenTelemetry's, later).
+pub const ANSWER_TIMES: u64 = 3;
+
 /// How an intent is answered (rules 8 and 9). The zone's writer mints an id for each intent it reads (T3, from its
 /// own scope), which every effect it causes names as its cause (T6 rule 6). A checked act gets a receipt, naming that
 /// id and the entries that carried it out, or a refusal naming its reason and what changed since its basis. A move
