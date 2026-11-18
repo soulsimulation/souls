@@ -21,7 +21,8 @@ The mapping, the field numbers and what each node holds are in the module doc of
 open ground → things; a thing with rooms → a floor per level → rooms → the things in them and the windows; a doorway
 is a link from the room it opens from to the room, the floor (a balcony) or the open ground it leads to, and its door
 keeps the link's id; a stair is a link between two floors; each named place that is not a room is a node under the
-open ground, holding nobody. Today's ids, refs and hashes are stored as bytes, and names by reference (SHA-256), since
+open ground, holding nobody; the open ground holds the terrain, every 64 m tile's 1 m heights and class bytes as
+exported (N1b, #3197). Today's ids, refs and hashes are stored as bytes, and names by reference (SHA-256), since
 a log's only text is `namespace:name`.
 
 Tests: `cargo test -p import-eden` runs a small world written in the test. The Eden 2026 test needs the exported file:
