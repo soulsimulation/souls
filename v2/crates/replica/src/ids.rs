@@ -360,6 +360,11 @@ impl KindSource {
         &self.name
     }
 
+    /// The kind's numbered sections as written; K3 reads its state, points and forms from them.
+    pub fn sections(&self) -> &BTreeMap<u64, Value> {
+        &self.sections
+    }
+
     fn references(&self) -> Vec<&str> {
         match self.sections.get(&SECTION_REFERENCES) {
             Some(Value::Map(refs)) => refs

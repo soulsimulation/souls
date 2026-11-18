@@ -1,0 +1,681 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:humanoid",
+  "owner": "family",
+  "state": {
+    "posture": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "stand",
+        "sit",
+        "kneel",
+        "lie",
+        "lean"
+      ],
+      "default": "stand",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "forms": {
+    "wave": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "wave"
+        }
+      ],
+      "effects": []
+    },
+    "wave_at": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "toward": {
+          "type": "thing"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "wave",
+          "toward": {
+            "arg": "toward"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "bow": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "bow"
+        }
+      ],
+      "effects": []
+    },
+    "bow_to": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "toward": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "bow",
+          "toward": {
+            "arg": "toward"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "clap": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "clap"
+        }
+      ],
+      "effects": []
+    },
+    "cheer": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "cheer"
+        }
+      ],
+      "effects": []
+    },
+    "shrug": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "shrug"
+        }
+      ],
+      "effects": []
+    },
+    "stretch": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "stretch"
+        }
+      ],
+      "effects": []
+    },
+    "jump": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "jump"
+        }
+      ],
+      "effects": []
+    },
+    "dance": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "dance"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        },
+        {
+          "step": "move",
+          "move": "dance"
+        }
+      ],
+      "effects": []
+    },
+    "slump": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "slump"
+        }
+      ],
+      "effects": []
+    },
+    "look_around": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "look_around"
+        }
+      ],
+      "effects": []
+    },
+    "point": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "toward": {
+          "type": "thing"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "point",
+          "toward": {
+            "arg": "toward"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "stand": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "not": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "rise"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "posture",
+          "to": "stand",
+          "event": "stood_up"
+        }
+      ]
+    },
+    "sit_down": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "spot": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "not": "sit"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "spot"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "posture",
+          "to": "sit",
+          "event": "sat_on_spot"
+        }
+      ]
+    },
+    "kneel": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "spot": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "not": "kneel"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "spot"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "posture",
+          "to": "kneel",
+          "event": "knelt_on_spot"
+        }
+      ]
+    },
+    "lie_down": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "spot": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "not": "lie"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "spot"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "posture",
+          "to": "lie",
+          "event": "lay_on_spot"
+        }
+      ]
+    },
+    "go_to": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "thing"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "place"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "posture",
+          "to": "stand",
+          "event": "arrived"
+        }
+      ]
+    },
+    "look_at": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "target": {
+          "type": "thing"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "look",
+          "toward": {
+            "arg": "target"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "touch": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "target": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "is": "stand"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "target"
+          }
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": {
+            "arg": "target"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "lean_on": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "support": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "posture",
+          "not": "lean"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "support"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "posture",
+          "to": "lean",
+          "event": "leaned_on_support"
+        }
+      ]
+    },
+    "wait_by": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "thing"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "place"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "posture",
+          "to": "stand",
+          "event": "waited_by"
+        }
+      ]
+    },
+    "pick_up": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "moves",
+          "thing": {
+            "arg": "thing"
+          },
+          "by": "carry"
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "thing"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "thing"
+          }
+        },
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "picked_up"
+        }
+      ]
+    },
+    "put": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        },
+        "at": {
+          "type": "placement"
+        },
+        "anchor": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "thing"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "put",
+          "place": {
+            "at": {
+              "arg": "at"
+            },
+            "anchor": {
+              "arg": "anchor"
+            }
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "here",
+          "event": "put_down"
+        }
+      ]
+    },
+    "push": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "moves",
+          "thing": {
+            "arg": "thing"
+          },
+          "by": "push"
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "thing"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "thing"
+          }
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": {
+            "arg": "thing"
+          }
+        },
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "took_hold_to_push"
+        }
+      ]
+    }
+  },
+  "text": {
+    "card": "A body on its own: gestures, postures, going to things, carrying, pushing."
+  },
+  "card": {
+    "text": "card"
+  }
+}

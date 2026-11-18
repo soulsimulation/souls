@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":105,"group":"object","words":"pick up the guitar and play","obvious":3,"things":{"stand":"eden:guitar_stand","guitar":"eden:guitar"},"chain":[{"this":"stand","form":"take"},{"this":"guitar","form":"play"}]}
