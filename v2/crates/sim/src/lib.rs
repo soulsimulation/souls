@@ -3,6 +3,7 @@
 
 pub mod clock;
 pub mod controller;
+pub mod daylight;
 pub mod ground;
 pub mod host;
 pub mod links;

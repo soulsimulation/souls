@@ -11,6 +11,7 @@ pub mod encode;
 pub mod host;
 pub mod ids;
 pub mod pose;
+pub mod sky;
 pub mod time;
 pub mod tree;
 pub mod views;
