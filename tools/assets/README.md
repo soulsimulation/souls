@@ -29,12 +29,17 @@ changed and checks it: `pnpm build` and `pnpm dev` run it, `--check` only verifi
 Every byte that lands is checked against the manifest's `sha256` and size of the decoded file. A re-run skips files
 already in place (a small size/mtime state file in the cache avoids rehashing). No credentials are needed.
 
+A request that sends nothing for 20 s (no response, or no body bytes) is aborted. Timeouts, network errors, 408, 429
+and 5xx are retried, five tries in all with jittered exponential backoff; a 404, 403 or wrong bytes fail at once. Each
+retry and each failed path is printed with its reason as it happens, also with `--quiet`.
+
 ## Who pulls
 
 | Consumer | How |
 |---|---|
 | Developers | `pnpm assets:pull` after cloning. |
 | Tests | `pretest` checks in the root, `apps/server` and `mars/viewer` (`test:engine`, `e2e`). |
+| CI (`.github/workflows/ci.yml`) | Legs with `assets` pull into `~/.cache/sim-assets`. GitHub-hosted runners restore it from the Actions cache keyed by the manifest, saved only by a pull on `main`; self-hosted runners keep it on disk. |
 | Web build | `apps/web` `prebuild` checks the `web` set (Vite only warns on a missing `new URL()` asset). |
 | Release (`tools/world-launcher/deploy/release.sh`) | Pulls `web` into the worktree before the build and `web,runtime` into the archived release tree. |
 | Modal gate (`tools/test-harness/remote-suite.sh`) | Stages this directory; `modal_suite.py` fills a cache layer keyed by the manifest, and each extracted tree pulls from it. |

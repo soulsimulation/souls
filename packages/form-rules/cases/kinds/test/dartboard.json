@@ -1,0 +1,30 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:dartboard",
+  "owner": "thing",
+  "state": {
+    "score": { "n": 1, "type": "int", "default": 0, "audience": "public" },
+    "practice": { "n": 2, "type": "int", "default": 1, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [450, 450, 50] },
+  "forms": {
+    "throw": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "holds": "test:dart" }],
+      "steps": [],
+      "effects": [
+        {
+          "change": "draw",
+          "outcomes": [
+            { "name": "miss", "weight": 6, "event": "test:missed", "set": [{ "field": "score", "to": 0 }] },
+            { "name": "single", "weight": 3, "event": "test:hit_single", "set": [{ "field": "score", "to": 20 }] },
+            { "name": "bull", "weight": { "field": "practice" }, "event": "test:hit_bull", "set": [{ "field": "score", "to": 50 }] }
+          ]
+        }
+      ]
+    }
+  },
+  "text": { "card": "A test dartboard: a throw scores from a weighted table, and the weight of the bull is the thrower's practice." },
+  "card": { "text": "card" }
+}
