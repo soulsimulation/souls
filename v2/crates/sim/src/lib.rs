@@ -13,6 +13,7 @@ pub mod mover;
 pub mod moves;
 pub mod routes;
 pub mod slots;
+pub mod spots;
 pub mod timers;
 pub mod unstick;
 pub mod walk;
