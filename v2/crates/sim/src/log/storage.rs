@@ -27,6 +27,13 @@ pub trait Storage: Send {
     fn sync(&mut self) -> R<()>;
     /// Every byte, synced or not, as the operating system would read them back.
     fn read(&mut self) -> R<Vec<u8>>;
+    /// At most `max` bytes from byte `at` on (none past the end): a restart reads the header and the log after its
+    /// checkpoint, not the bytes between (K4b). Storage that can seek reads only those.
+    fn read_from(&mut self, at: u64, max: usize) -> R<Vec<u8>> {
+        let all = self.read()?;
+        let from = usize::try_from(at).unwrap_or(usize::MAX).min(all.len());
+        Ok(all[from..from.saturating_add(max).min(all.len())].to_vec())
+    }
     /// Cuts the storage back to `len` bytes (recovery cutting a torn tail, then syncing).
     fn truncate(&mut self, len: u64) -> R<()>;
 }
@@ -236,6 +243,15 @@ impl Storage for FileStore {
         self.file
             .seek(SeekFrom::Start(0))
             .and_then(|_| self.file.read_to_end(&mut out))
+            .map_err(|e| self.io("log-io", e))?;
+        Ok(out)
+    }
+
+    fn read_from(&mut self, at: u64, max: usize) -> R<Vec<u8>> {
+        let mut out = Vec::new();
+        self.file
+            .seek(SeekFrom::Start(at))
+            .and_then(|_| (&self.file).take(max as u64).read_to_end(&mut out))
             .map_err(|e| self.io("log-io", e))?;
         Ok(out)
     }

@@ -9,6 +9,10 @@
 //! per node, so a change to any field of a node read invalidates the check (a false conflict costs a re-check, never
 //! a wrong commit). If every candidate's reads changed, the act goes back for one re-check on a newer copy
 //! ([`Outcome::Recheck`]); stale again after that, it is refused (`stale`).
+//!
+//! An act's life around the commit (repeats, receipts, deadlines, expiry) is [`acts`] (I4, #2687).
+
+pub mod acts;
 
 use replica::apply::Replica;
 use replica::effects::{
