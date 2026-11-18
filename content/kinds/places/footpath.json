@@ -1,0 +1,58 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:footpath",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      4000,
+      100,
+      4000
+    ]
+  },
+  "looks": {
+    "model": "look:footpath",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            30,
+            0
+          ],
+          "size": [
+            4000,
+            60,
+            1600
+          ],
+          "tint": "gravel"
+        }
+      ],
+      "round": 0,
+      "palette": {
+        "gravel": "#b8ab8f"
+      },
+      "tags": [
+        "path",
+        "terrain"
+      ]
+    }
+  },
+  "text": {
+    "card": "A footpath of gravel, dirt, cobbles, stone or boards, to walk along.",
+    "path": "path",
+    "track": "track",
+    "trail": "trail",
+    "walkway": "walkway"
+  },
+  "card": {
+    "text": "card",
+    "category": "path",
+    "synonyms": [
+      "path",
+      "track",
+      "trail",
+      "walkway"
+    ]
+  }
+}

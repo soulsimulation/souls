@@ -55,7 +55,7 @@ impl Host for Fake {
     fn ask(&self, q: &Ask) -> Option<Answer> {
         match q {
             Ask::Toward { to, .. } => Some(Answer::Point(*to)),
-            Ask::Distance { .. } => None,
+            Ask::Distance { .. } | Ask::Near { .. } => None,
         }
     }
     fn set_timer(&mut self, _after: Micros, _name: Name) -> Id {
@@ -72,6 +72,7 @@ impl Host for Fake {
         self.at.z += input.velocity.z * dt / 1_000_000;
         self.inputs.push(input);
     }
+    fn cross(&mut self, _link: Id, _speed: i64) {}
     fn emit(&mut self, _changes: Vec<Change>, _meaning: Option<Event>) -> Result<(), Refusal> {
         Ok(())
     }

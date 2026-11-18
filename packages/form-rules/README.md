@@ -50,11 +50,22 @@ carrying takes more hands), and `linked`
 / `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
 overflows) and `enough` (every amount they ask is there to give at the source, else `not_enough`, with the source, what
-it can give and the amount asked). A need on a `timed` field reads its value at the state's `now_us` (below). A `state`
+it can give and the amount asked), and `sum` (two or more `int` fields of this kind added up, `at_least` and/or
+`at_most`; with `after_moves`, each as the form's transfers would leave it, measured as `room` measures them; a refusal
+is `field_differs` with `detail: {fields, found, wanted}`). A need on a `timed` field reads its value at the state's `now_us` (below). A `state`
 need with a `link` reads a field of the place at the end of that link (`from: "place"`, `most` 1): the place's kind
 says the field's number and audience, the read is `<place>/field/<n>`, an asker outside it gets `unknown` naming the
 place, and a refusal names the place in `detail.node` with no fix (nothing this thing does changes its place); with no
-place linked it is `not_linked`. The place is never read from the tree (Engine v2 T2: a parent is lifetime and frame). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
+place linked it is `not_linked`. The place is never read from the tree (Engine v2 T2: a parent is lifetime and frame).
+A `state` need with `of: {arg}` reads a field of the thing that argument names, the same way: the named thing's kind
+says the field's number and audience, an asker outside it gets `unknown` naming the thing, a refusal names it in
+`detail.node` with no fix, and a missing argument is `bad_input` (`argument_missing`).
+A `state` need's `field` may be a `field` argument and its `is` or `not` a `value` argument: a choice from the form's
+own list (`takes.<name>.of`). Any act whose choice is outside that list is `bad_input` (`not_a_choice`, need -1)
+before a need is read, so a form never reads or writes a field it does not name. A refusal of a need compared with a
+value argument names as its fix the same form with the first other choice that meets it (brush the cell the other
+way). `any` (at least one of two or more fields of this kind is `not` a value; a refusal is `field_differs` with
+`detail: {fields, found: [each value], wanted: {not}}`, and its fix is a form that sets one of them to another value). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
 the test kinds in `cases/kinds/test/`.
 
 ## A case
@@ -114,10 +125,11 @@ is left out, and a `set` without `to` clears the field to its default. `outsideP
 leaves the profile, with the profile's name for the refusal (`simple`, `null`, `float`, `text-not-name`, ...);
 `effects` refuses to write such a value and `apply` refuses to accept one.
 
-The entry's effects map to changes like this: `set` sets a field of the thing (on a timed value, `rate`: the value at the state's `now_us` with the new rate, `{value, per_s, set_us}` written whole; with `by` instead of `to`, the int value plus `by`, refused as `out_of_range` outside the field's `min`, or 0, and `max`, and written as `to` alone, since nothing balances a sip); `transfer` moves an amount of one
+The entry's effects map to changes like this: `set` sets a field of the thing (the field a `field` argument chooses, named in the change by its own name and number; on a timed value, `rate`: the value at the state's `now_us` with the new rate, `{value, per_s, set_us}` written whole; with `by` instead of `to`, the int value plus `by`, refused as `out_of_range` outside the field's `min`, or 0, and `max`, and written as `to` alone, since nothing balances a sip); `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
 `"room"`), the least of what it asks and what the source has above its field's `min`, as two `set`s whose `by`s sum
-to zero; `reparent` moves the actor, the thing or a `thing` argument into a slot, the actor's first free hand or
+to zero, or between two fields of this one thing (`into_field`, both ends `"this"`), as two `set`s on it that sum to
+zero the same way; `reparent` moves the actor, the thing or a `thing` argument into a slot, the actor's first free hand or
 `here`, loose in the actor's place (holding is a parent);
 `create` makes a thing in a slot, the actor's first free hand or `here`, loose in the place the actor is in (where
 on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.<n>`; `link` / `unlink` join the
