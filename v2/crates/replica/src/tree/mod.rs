@@ -448,6 +448,7 @@ impl Tree {
             in_flight: self.in_flight.clone(),
             arrived: self.arrived.clone(),
             timers: self.timers.clone(),
+            timers_of: self.timers_of.clone(),
             time: self.time.clone(),
             undo: Vec::new(),
             dead: self.dead.clone(),
