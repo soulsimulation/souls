@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":271,"group":"over-time","words":"do a workout every morning","obvious":2,"when":"every morning","things":{"bar":"eden:pull_up_bar","bench":"eden:weight_bench"},"chain":[{"this":"bar","form":"pull_up"},{"this":"bench","form":"lift"}]}
