@@ -395,6 +395,8 @@ struct Grown {
     waters: Vec<(Vec<P>, [i32; 4])>,
     /// Ground cover: open ground, over water too.
     covers: Vec<(Vec<P>, [i32; 4])>,
+    /// The bounds of the open ground's named places: they only widen the squares cut.
+    areas: Vec<[i32; 4]>,
     doors: Vec<Door>,
     d: i64,
 }
@@ -516,12 +518,19 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
         let bb = bounds(&r);
         covers.push((r, bb));
     }
+    let mut areas = Vec::new();
+    for a in s.areas.iter().filter(|a| !a.is_empty()) {
+        areas.push(bounds(
+            &a.iter().map(|p| g(*p)).collect::<Result<Vec<_>, _>>()?,
+        ));
+    }
     Ok(Grown {
         levels,
         boxes,
         never,
         waters,
         covers,
+        areas,
         doors,
         d,
     })
@@ -612,7 +621,12 @@ fn meets(
                 } else {
                     door.n0 - g.d
                 };
-                let (pa, pb) = (door.point(a0, n), door.point(a1, n));
+                // The segment is the part of the narrowest width that reaches this piece: where a box beyond the
+                // wall leaves the piece only one side of the doorway, the middle of the whole width lies off it.
+                let lo = cs.iter().map(|c| c.0).min().unwrap_or(a0).max(a0);
+                let hi = cs.iter().map(|c| c.0).max().unwrap_or(a1).min(a1);
+                let (s0, s1) = if lo <= hi { (lo, hi) } else { (a0, a1) };
+                let (pa, pb) = (door.point(s0, n), door.point(s1, n));
                 let ym = mm(y) as i32;
                 sides[usize::from(side > 0)] = true;
                 found.push(Meet {
@@ -682,6 +696,7 @@ impl OpenGround {
             .map(|x| &x.3)
             .chain(g.never.iter().map(|x| &x.2))
             .chain(g.waters.iter().chain(&g.covers).map(|x| &x.1))
+            .chain(&g.areas)
         {
             b = [
                 b[0].min(bb[0]),
