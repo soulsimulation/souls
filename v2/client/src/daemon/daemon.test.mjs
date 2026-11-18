@@ -1,5 +1,5 @@
-// The resident daemon (Engine v2 R6, #2700) against the real gateway (`gatewayd`, I1) and the world's stand-in end
-// of it (`worldd gateway-link`), through a TCP relay that the test cuts to force drops. Run from v2/ after
+// The resident daemon (Engine v2 R6, #2700) against the real gateway (`gatewayd`, I1) and the world's end of it
+// (`worldd gateway-link`, I4's world of lamps), through a TCP relay that the test cuts to force drops. Run from v2/ after
 //   cargo build -p gatewayd -p worldd --locked, and replica's wasm-bindgen package in target/wasm-load/pkg.
 // R6_REPORT=1 prints each drop's time and the memory, for the PR.
 
@@ -20,16 +20,20 @@ const GATEWAYD = process.env.GATEWAYD ?? join(v2, 'target/debug/gatewayd');
 const WORLDD = process.env.WORLDD ?? join(v2, 'target/debug/worldd');
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const SOUL = 's_r6test';
+// The Soul is the world's first body, beside its own lamp: `worldd gateway-link`'s world mints from scope 2b, the
+// place first, then the room, then each body and its lamp (`worldd::checkers::toggles`).
+const WORLD_SCOPE = '2b'.repeat(16);
+const LAMP = `${WORLD_SCOPE}-3`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const dir = mkdtempSync(join(tmpdir(), 'souls-r6-'));
 const home = join(dir, '.souls');
-const scope = randomBytes(16).toString('hex');
+const scope = WORLD_SCOPE;
 const secret = randomBytes(32).toString('hex'); // the canary: the token's secret part
-const token = `soul-${scope}-7.${secret}`;
+const token = `soul-${scope}-2.${secret}`; // the world's first body
 const procs = [];
 const outputs = []; // every answer and message a command printed
-let relay, arrivals, rt;
+let relay, arrivals, roots, rt;
 
 /** A TCP relay to the gateway: `cut()` closes every connection; `deaf` drops what the gateway sends meanwhile. */
 function makeRelay(port) {
@@ -69,14 +73,17 @@ async function waitFor(f, ms = 5000) {
 
 const status = async () => { const s = await request(rt.socket, { op: 'status' }); outputs.push(JSON.stringify(s)); return s; };
 const taken = () => readFileSync(arrivals, 'utf8').split('\n').filter(Boolean);
+const changes = () => readFileSync(roots, 'utf8').split('\n').filter(Boolean); // one line per tick that changed the world
+const placeHash = () => changes().at(-1)?.split(' ')[1];
 
 before(async () => {
   const world = join(dir, 'w.sock');
   arrivals = join(dir, 'arrivals.txt');
+  roots = join(dir, 'roots.txt');
   const tokens = join(dir, 'tokens.txt');
-  writeFileSync(tokens, `soul-${scope}-7 ${createHash('sha256').update(token).digest('hex')}\n`);
+  writeFileSync(tokens, `soul-${scope}-2 ${createHash('sha256').update(token).digest('hex')}\n`);
   const lineage = randomBytes(16).toString('hex');
-  const wl = spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--arrivals', arrivals, '--room', '1000'], { stdio: 'ignore' });
+  const wl = spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--arrivals', arrivals, '--roots', roots, '--rooms', '1', '--bodies', '500'], { stdio: 'ignore' });
   procs.push(wl);
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
   const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
@@ -124,13 +131,13 @@ test('A3: a second start for the same Soul is refused by name', async () => {
 test('A2: after each of ten forced drops it is current within 2 s, and no intent is sent twice', async () => {
   const times = [];
   for (let k = 0; k < 10; k++) {
-    // An intent answered while connected.
-    const a = await request(rt.socket, { op: 'act', verb: 'eden:wave' });
+    // An intent answered while connected: its lamp on.
+    const a = await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP });
     outputs.push(JSON.stringify(a));
     await waitFor(async () => (await status()).unanswered.length === 0);
     // Another, whose answer the world gives while the relay drops what comes back; then the drop.
     relay.deaf = true;
-    const b = await request(rt.socket, { op: 'act', verb: 'eden:wave' });
+    const b = await request(rt.socket, { op: 'act', verb: 'r2:switch_off', target: LAMP });
     outputs.push(JSON.stringify(b));
     await waitFor(() => taken().length === b.sequence);
     await sleep(50);
@@ -153,6 +160,7 @@ test('A2: after each of ten forced drops it is current within 2 s, and no intent
   // Sent once each: 20 acts, 20 sends, and the world took sequences 1..20 once each, in order.
   assert.equal(s.sent, 20);
   assert.deepEqual(taken().map((l) => Number(l.split(' ')[1])), Array.from({ length: 20 }, (_, i) => i + 1));
+  assert.equal(changes().length, 20, 'each act switched the lamp, in a tick of its own');
   if (process.env.R6_REPORT) console.log(JSON.stringify({ dropsMs: times.map((t) => Math.round(t)), rssBytes: s.rssBytes, heapBytes: s.heapBytes, connects: s.connects, resumed: s.resumed }));
   for (const t of times) assert.ok(t < 2000, `current ${Math.round(t)} ms after a drop`);
 });
@@ -162,11 +170,13 @@ test('R5b A2, A3: told stream.cannot-resume, it compares and descends through th
   const snapshot = before.syncs.find((x) => x.kind === 'snapshot');
   assert.ok(snapshot, 'its first sign-in took its scope whole');
   // A cut long enough that resume fails: the relay drops all the gateway sends while the world answers more intents
-  // than the gateway keeps for a grant (256), then the connection is cut.
+  // than the gateway keeps for a grant (256), then the connection is cut. The first switches the Soul's lamp on, so
+  // the place changes while it is away; the rest find it on already and are refused.
   relay.deaf = true;
-  const n = 300, already = taken().length;
-  for (let k = 0; k < n; k++) outputs.push(JSON.stringify(await request(rt.socket, { op: 'act', verb: 'eden:wave' })));
+  const n = 300, already = taken().length, was = placeHash();
+  for (let k = 0; k < n; k++) outputs.push(JSON.stringify(await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP })));
   await waitFor(() => taken().length === already + n, 20_000);
+  await waitFor(() => placeHash() !== was);
   await sleep(50);
   const cut = performance.now();
   relay.cut();
@@ -177,13 +187,14 @@ test('R5b A2, A3: told stream.cannot-resume, it compares and descends through th
   assert.equal(resync.kind, 'resync');
   assert.equal(s.cannotResume, before.cannotResume + 1);
   // Current: its copy's hash of the place is the world's after the last intent the world took.
-  assert.deepEqual(Object.values(s.roots), [taken().at(-1).split(' ')[2]]);
-  // A3: fewer records and bytes than a snapshot of the same scope.
+  assert.deepEqual(Object.values(s.roots), [placeHash()]);
+  // A3: fewer records and bytes than a snapshot of the same scope, and what changed among them.
+  assert.ok(resync.changed > 0 && resync.fetched > 0, `changed ${resync.changed}, fetched ${resync.fetched}`);
   assert.ok(resync.fetched < resync.held, `fetched ${resync.fetched} of ${resync.held}`);
   assert.ok(resync.got < resync.heldBytes, `got ${resync.got} B, a snapshot ${resync.heldBytes} B`);
   // The stream carries on from the hashes' version: an intent is answered, and the next drop resumes.
   const answered = s.answered;
-  const a = await request(rt.socket, { op: 'act', verb: 'eden:wave' });
+  const a = await request(rt.socket, { op: 'act', verb: 'r2:switch_off', target: LAMP });
   outputs.push(JSON.stringify(a));
   await waitFor(async () => (await status()).answered === answered + 1);
   relay.cut();
