@@ -14,9 +14,9 @@
 
 use crate::apply::Replica;
 use crate::effects::Actor;
-use crate::encode::{Name, Value, decode, encode, to_hex};
+use crate::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use crate::ids::{Id, Scope, Version};
-use crate::intents::{Fallback, Hello, Intent, PROTOCOL};
+use crate::intents::{Fallback, Hello, Intent, PROTOCOL, Target};
 use crate::sync::{Copy, Descent, read_hashes, read_records, wire};
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::{JsError, wasm_bindgen};
@@ -136,9 +136,10 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     Ok(format!("answer {sequence} {version} {kind} {name}"))
 }
 
-/// A Soul's intent with no target or parameters, `verb` a ranked list of verbs split by spaces (the rest are its
-/// fallbacks, R7), decided against `basis` (a version's bytes; empty for the zero
-/// version) and expiring at `expiry` world microseconds; read back as the world reads it.
+/// A Soul's intent with no parameters, `verb` a ranked list of verbs split by spaces (the rest are its fallbacks,
+/// R7), each on `target` (a node's id as `<scope hex>-<counter>`, or empty for none), decided against `basis` (a
+/// version's bytes; empty for the zero version) and expiring at `expiry` world microseconds; read back as the world
+/// reads it.
 #[wasm_bindgen(js_name = wireIntent)]
 pub fn wire_intent(
     scope: &[u8],
@@ -147,7 +148,20 @@ pub fn wire_intent(
     sequence: u64,
     basis: &[u8],
     expiry: u64,
+    target: &str,
 ) -> Result<Vec<u8>, JsError> {
+    let target = match target {
+        "" => None,
+        t => {
+            let (scope, counter) = t
+                .split_once('-')
+                .and_then(|(s, c)| Some((from_hex(s).ok()?.try_into().ok()?, c.parse().ok()?)))
+                .ok_or_else(|| JsError::new("target-not-an-id"))?;
+            let id =
+                Id::new(Scope(scope), counter).ok_or_else(|| JsError::new("target-not-an-id"))?;
+            Some(Target::Node(id))
+        }
+    };
     let scope = Scope(
         scope
             .try_into()
@@ -170,24 +184,26 @@ pub fn wire_intent(
     let verb = ranked
         .next()
         .ok_or_else(|| JsError::new("verb-not-a-name"))??;
-    let fallbacks = ranked.map(|v| {
-        v.map(|verb| Fallback {
-            verb,
-            target: None,
-            parameters: BTreeMap::new(),
-            resources: Vec::new(),
+    let fallbacks = ranked
+        .map(|v| {
+            v.map(|verb| Fallback {
+                verb,
+                target: target.clone(),
+                parameters: BTreeMap::new(),
+                resources: Vec::new(),
+            })
         })
-    });
+        .collect::<Result<_, _>>()?;
     let intent = Intent {
         actor: Actor::Soul(id),
         verb,
-        target: None,
+        target,
         parameters: BTreeMap::new(),
         sequence,
         basis,
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
         resources: Vec::new(),
-        fallbacks: fallbacks.collect::<Result<_, _>>()?,
+        fallbacks,
         replaces: None,
         body: None,
     };

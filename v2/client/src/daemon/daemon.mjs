@@ -8,14 +8,15 @@
 //   as `daemon-already-running`, naming the Soul and the pid.
 // - **Commands on a Unix socket** (`runtime/daemon.sock`), one JSON line each way. No TCP port.
 //     {"op":"status"}            where it is: connected, cursor, intents sent and answered, memory
-//     {"op":"act","verb":"..."}  builds the next intent and sends it once (now, or at the next sign-in)
+//     {"op":"act","verb":"...","target":"<scope hex>-<counter>"}  builds the next intent (the target optional) and
+//                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
 //     {"op":"stop"}              ends the process
 //   and R7's (#2701), each answer ending with `at` (the copy's version) and `changed` (what changed since the answer
 //   before, by name, capped, the rest counted), the copy brought current first:
 //     {"op":"look"}                       the brief (`../brief/brief.mjs`)
 //     {"op":"find","words":"..."}         one search over the copy (`../find/find.mjs`)
-//     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks
+//     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks, each on `target`
 //     {"op":"wait","seconds":30}          returns when something addressed to this Soul happened, or at the timeout
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
@@ -349,7 +350,7 @@ async function answer(req) {
       const ranked = keep.map((c) => c.verb);
       state.sequence++;
       const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
-        basis ? unhex(basis) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER));
+        basis ? unhex(basis) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER), String(req.target ?? ''));
       save();
       const sequence = state.sequence, sent = signedIn;
       if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });

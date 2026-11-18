@@ -14,10 +14,18 @@ export type NodeRec = {
   rot: [number, number, number, number];
   /** The world time of its newest motion sample, when it has moved (a body). */
   at: number | null;
+  /** Today's id of an imported thing (import-eden's field 1), the key of V17's model table (V8). */
+  origin?: string;
   /** Solids `[cx, cz, hx, hz, yaw mdeg, y0, y1, tag, abs]` mm in its own frame (import-eden's field 12). */
   solids?: number[][];
   /** Slots `[n, x, y, z, yaw mdeg, capacity]` mm (field 13). */
   slots?: number[][];
+  /** An area's outline `[x, z]` mm, world (import-eden's field 11). */
+  outline?: number[][];
+  /** A floor's surfaces `[y, [[x, z] …]]` mm in its thing's frame (field 14). */
+  surfaces?: [number, number[][]][];
+  /** A water's level, mm (field 18). */
+  waterLevel?: number;
   /** Scale in parts per million (field 23). */
   scale?: number;
   /** The open ground's terrain tiles: side mm (field 24) and `[tx, tz, heights, classes]` (field 25). */
@@ -28,8 +36,11 @@ export type NodeRec = {
 /** Where the world is: its newest part's end, and world time against wall time. */
 export type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number };
 
-/** What one part changed, in the order played. */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; hash: boolean | null };
+/** One motion sample, as the part carried it: node, frame (parent node and slot), world time µs, position µm (V6). */
+export type SampleRec = [string, string, number | null, number, number, number, number];
+
+/** What one part changed, in the order played; `samples` is every motion sample in it, in entry order. */
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null };
 
 export type SourceEvents = {
   pointer(p: Pointer): void;
