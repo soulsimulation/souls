@@ -253,6 +253,8 @@ pub fn follow(mut writer: Writer, sub: Subscriber, stop: Arc<AtomicBool>) -> Joi
                         "the writer fell behind the tier and was handed a snapshot",
                     ));
                 }
+                // A view's subscriber is never sent the index (E1).
+                Some(Delivery::Index { .. }) => {}
                 None if stop.load(Ordering::Relaxed) => break,
                 None => {}
             }
