@@ -5,9 +5,12 @@
 #![deny(clippy::float_arithmetic)]
 
 pub mod apply;
+pub mod audience;
+pub mod bodies;
 pub mod effects;
 pub mod encode;
 pub mod hash;
+pub mod host;
 pub mod ids;
 pub mod kinds;
 pub mod pose;
@@ -15,6 +18,7 @@ pub mod query;
 pub mod read;
 pub mod time;
 pub mod tree;
+pub mod views;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 pub mod world_model;
