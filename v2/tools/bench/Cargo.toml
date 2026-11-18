@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671; `timers`: K9, #2672; `moves`: B2, #2681; `seats`: B3, #2682."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671; `timers`: K9, #2672; `moves`: B2, #2681; `seats`: B3, #2682; `fallbacks`: I5, #2690."
 
 [[bin]]
 name = "seats"
@@ -31,6 +31,11 @@ path = "src/frozen.rs"
 [[bin]]
 name = "commit-cost"
 path = "commit-cost/main.rs"
+
+# I5, #2690: ranked fallbacks for a crowd after the same seats, and the clock's time per bound act.
+[[bin]]
+name = "fallbacks"
+path = "fallbacks/main.rs"
 
 [[bin]]
 name = "timers"

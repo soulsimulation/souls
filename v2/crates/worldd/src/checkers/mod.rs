@@ -31,6 +31,7 @@ use std::thread;
 use std::time::Duration;
 
 pub mod lamps;
+pub mod seats;
 #[cfg(test)]
 mod tests;
 
