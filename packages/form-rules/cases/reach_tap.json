@@ -1,0 +1,50 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "A need measured against a point of another thing given as a form argument: the tap's outlet is at the tap's origin plus its own offset, from the actor's hand.",
+  "cases": [
+    {
+      "name": "fill_tap_in_reach",
+      "act": { "this": "k1", "form": "fill", "args": { "tap": "t1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "test:reach_kettle" },
+          "t1": { "kind": "test:reach_tap", "at_mm": [1000, 0, 0] },
+          "b1": { "hands": { "left": "k1", "right": null }, "effector_mm": [900, 100, 0] }
+        },
+        "moves": { "hold_under": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["b1/effector_mm", [900, 100, 0]], ["move/hold_under/reach_mm", 300], ["t1/at_mm", [1000, 0, 0]]] }
+    },
+    {
+      "name": "fill_tap_out_of_reach_walks_to_the_stand_point",
+      "act": { "this": "k1", "form": "fill", "args": { "tap": "t1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "test:reach_kettle" },
+          "t1": { "kind": "test:reach_tap", "at_mm": [1000, 0, 0] },
+          "b1": { "hands": { "left": "k1", "right": null }, "effector_mm": [400, 100, 0] }
+        },
+        "moves": { "hold_under": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 0, "detail": { "point": "outlet", "of": "t1", "move": "hold_under" }, "fix": { "step": "walk_to", "point": "stand", "thing": "t1" } }
+    },
+    {
+      "name": "fill_tap_missing_is_refused_by_name",
+      "act": { "this": "k1", "form": "fill" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "test:reach_kettle" },
+          "b1": { "hands": { "left": "k1", "right": null }, "effector_mm": [900, 100, 0] }
+        },
+        "moves": { "hold_under": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "bad_input", "need": 0, "detail": { "what": "argument_missing", "arg": "tap" } }
+    }
+  ]
+}

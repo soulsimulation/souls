@@ -1,1 +1,1 @@
-{"format":"souls-ask/1","n":174,"group":"getting-around","words":"go into that house","obvious":3,"things":{"house":"eden:house","door":"eden:door"},"chain":[{"this":"door","form":"open"},{"this":"door","form":"go_through"}]}
+{"format":"souls-ask/1","n":174,"group":"getting-around","words":"go into that house","obvious":3,"things":{"house":"eden:house","door":"eden:door"},"chain":[{"this":"door","form":"open"},{"this":"me","form":"go_to","args":{"place":"house"}}]}

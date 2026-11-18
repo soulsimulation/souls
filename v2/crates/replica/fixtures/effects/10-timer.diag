@@ -1,0 +1,13 @@
+# Timers: the crate sets two timers, state of its own (rule 15), and the first fires and is cleared by the crate's
+# entry it caused (Engine v2 T6, #2645), applied to the base. The second is still pending. Layout as in 0-base.diag.
+{
+  1: h'12201b6152bdcb78adacbc5eb70d3aff3ee1fff947060db15527395c3c0706158db5',
+  2: [
+    {1: 2, 2: 6000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 7]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7],
+     11: [{1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 11], 3: 9000000, 4: "souls:cooled"},
+          {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 12], 3: 12000000, 4: "souls:emptied"}]},
+    {1: 3, 2: 9000000, 3: {1: 2, 2: 2}, 4: {1: 3}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7],
+     11: [{1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 11]}],
+     8: [{1: "souls:cooled"}]}
+  ]
+}
