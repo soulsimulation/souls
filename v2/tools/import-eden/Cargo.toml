@@ -1,0 +1,9 @@
+[package]
+name = "import-eden"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Eden 2026's built content imported into the tree (Engine v2 N1, #2649): the loader of export/export.ts's facts file."
+
+[dependencies]
+replica = { path = "../../crates/replica" }

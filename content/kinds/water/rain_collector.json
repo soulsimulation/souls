@@ -6,9 +6,6 @@
     "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 4000, "audience": { "rule": "everyone" } },
     "covered": { "n": 2, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
   },
-  "links": {
-    "place": { "n": 1, "from": "place", "most": 1, "audience": { "rule": "everyone" } }
-  },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 800] },
     "tap": { "role": "outlet", "at_mm": [0, 430, 410] }
@@ -41,21 +38,6 @@
       ],
       "effects": [{ "change": "set", "field": "covered", "to": true, "event": "covered" }]
     },
-    "collect": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        { "need": "hand", "empty": true, "says": "put_down_first" },
-        { "need": "state", "field": "covered", "is": false, "says": "uncover_first" },
-        { "need": "state", "field": "water", "at_most": 3000, "says": "no_room" },
-        { "need": "state", "link": "place", "field": "rain", "at_least": 101, "says": "no_rain" }
-      ],
-      "steps": [
-        { "step": "walk_to", "point": "stand" },
-        { "step": "wait", "us": 4000000 }
-      ],
-      "effects": [{ "change": "set", "field": "water", "by": 1000, "event": "rain_collected" }]
-    },
     "draw": {
       "who": "anyone",
       "starts": "act",
@@ -73,6 +55,8 @@
       "effects": [{ "change": "transfer", "field": "water", "from": "this", "into": { "arg": "into" }, "amount": "room", "event": "drawn" }]
     }
   },
+  "motion": { "how": "pushed_by_one" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:rain_collector",
     "table": [
@@ -87,16 +71,10 @@
     "water": "water",
     "barrel": "barrel",
     "rain": "rain",
-    "howto_draw": "Hold a pitcher and draw from the tap; it takes what the barrel has, up to what the pitcher holds.",
-    "howto_collect": "While it rains, uncover the inlet and spend four seconds at the barrel with empty hands: it gathers a litre.",
-    "put_down_first": "Put down what you hold before working on the rain inlet.",
-    "uncover_first": "Uncover the rain inlet first.",
-    "no_room": "The collector has less than one litre of room; draw some water first.",
-    "no_rain": "There is no collectable rain now; wait for authoritative rainy weather."
+    "howto_draw": "Hold a pitcher and draw from the tap; it takes what the barrel has, up to what the pitcher holds."
   },
   "card": { "text": "card", "category": "water", "synonyms": ["barrel", "rain"] },
   "howtos": {
-    "draw": { "text": "howto_draw", "steps": [{ "form": "draw" }] },
-    "collect": { "text": "howto_collect", "steps": [{ "form": "uncover" }, { "form": "collect" }] }
+    "draw": { "text": "howto_draw", "steps": [{ "form": "draw" }] }
   }
 }

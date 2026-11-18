@@ -1,6 +1,6 @@
 {
   "format": "souls-form-cases/1",
-  "about": "eden:rain_collector (from #1740). It holds up to 4000 g of rainwater behind a cover. With empty hands, four seconds at its stand uncover or cover the inlet ('The inlet is already uncovered'; 'The inlet is already covered'; 'Put down what you hold before working on the rain inlet'). Holding a pitcher, a Soul draws from the tap: what the barrel has, up to what the pitcher holds, out of the barrel and into the pitcher. Collecting rain is rain_collector_collect.json (it needs it to be raining where the barrel stands, read through the barrel's place link); an empty barrel names collect as its fix.",
+  "about": "eden:rain_collector (from #1740). It holds up to 4000 g of rainwater behind a cover. With empty hands, four seconds at its stand uncover or cover the inlet ('The inlet is already uncovered'; 'The inlet is already covered'; 'Put down what you hold before working on the rain inlet'). Holding a pitcher, a Soul draws from the tap: what the barrel has, up to what the pitcher holds, out of the barrel and into the pitcher. Collecting rain is not here: it needs it to be raining where the barrel stands, which no need can read yet (see the pull request).",
   "cases": [
     {
       "name": "uncover_every_need_met",
@@ -63,7 +63,7 @@
       "act": { "this": "r1", "form": "draw", "args": { "into": "p1" } },
       "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector" }, "p1": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p1", "right": null } } } },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "detail": { "field": "water", "found": 0, "wanted": { "at_least": 1 } }, "fix": { "form": "collect" } }
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "detail": { "field": "water", "found": 0, "wanted": { "at_least": 1 } }, "fix": null }
     }
   ]
 }

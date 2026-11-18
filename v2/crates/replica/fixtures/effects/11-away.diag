@@ -1,0 +1,26 @@
+# Transfers between zones (Engine v2 T6, #2645), applied to the base: the key leaves for zone ee..ee 50 and is
+# returned (the arrive was refused there, for a named reason), leaves again and is settled; then a key from another
+# zone arrives in the room, carried as a create. Leaves are the key's entries; returns, settles and arrives are the
+# room's, the node it left or reaches. Layout as in 0-base.diag.
+{
+  1: h'12201b6152bdcb78adacbc5eb70d3aff3ee1fff947060db15527395c3c0706158db5',
+  2: [
+    {1: 2, 2: 5000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 8]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6],
+     9: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 13], 3: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6],
+         4: h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 50],
+         6: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 51]], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 51], 3: 0}}},
+     8: [{1: "souls:sent-away"}]},
+    {1: 3, 2: 5100000, 3: {1: 2, 2: 2}, 4: {1: 3}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1],
+     9: {1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 13], 3: "souls:arrive-parent-missing"}},   # return: the key is back
+    {1: 4, 2: 5200000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 9]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6],
+     9: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 14], 3: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6],
+         4: h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 50],
+         6: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 52]], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 52], 3: 0}}}},
+    {1: 5, 2: 5300000, 3: {1: 2, 2: 4}, 4: {1: 3}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1],
+     9: {1: 3, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 14]}},                                           # settle: the key is gone
+    {1: 6, 2: 5400000, 3: {1: 3}, 4: {1: 3}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1],
+     9: {1: 2, 2: [h'ffffffffffffffffffffffffffffffff', 3],                                               # arrive from zone ff..ff
+         3: [{1: 1, 2: [h'ffffffffffffffffffffffffffffffff', 1], 3: "souls:key@1220781d89e0ae5ff74f79e61f020201f2128268af10ffa77355868f6c8497442ae1",
+              4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1]], 2: [4000000, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: 0}}, 5: {1: 1}, 6: {}}]}}
+  ]
+}
