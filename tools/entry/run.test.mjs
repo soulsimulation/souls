@@ -51,7 +51,8 @@ test('(2) a bool written 0/1 by an effect case is set and compared as false/true
 
 test('(3) text is carried as a string; a list, schedule or timed field is new engine only and its cases skip', () => {
   const {def, skipped} = loadDef(kind('kiosk'), 'x@1');
-  assert.equal(def.state.open_times, undefined);
+  assert.equal(def.state.open_times.type, 'json', 'held, so an effect can still set it');
+  assert.equal(startFields(kind('kiosk'), {}).open_times, undefined, 'but never set or compared by the gate: a Soul does not read it back');
   assert.ok(skipped.some(s => s.what === 'state.open_times' && /new engine only/.test(s.why)));
   assert.equal(loadDef(kind('mural_panel'), 'x@1').def.state.picture.type, 'string');
   assert.deepEqual(startFields(kind('mural_panel'), {}), {}, 'a text with nothing written is left unset, not set to null');
