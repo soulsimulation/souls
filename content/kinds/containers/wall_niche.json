@@ -1,0 +1,297 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wall_niche",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        810
+      ],
+      "yaw_mdeg": 180000
+    },
+    "lip": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1030,
+        210
+      ]
+    }
+  },
+  "slots": {
+    "inside": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        0,
+        980,
+        -30
+      ],
+      "fits_mm": [
+        300,
+        160,
+        300
+      ],
+      "stand": "stand"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1200,
+      1350,
+      420
+    ]
+  },
+  "forms": {
+    "hide": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "thing"
+          }
+        },
+        {
+          "need": "slot_free",
+          "slot": "inside"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "put",
+          "slot": "inside"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "inside",
+          "event": "hidden"
+        }
+      ]
+    },
+    "search": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "this",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "lip"
+        },
+        {
+          "step": "take",
+          "slot": "inside"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "found"
+        }
+      ]
+    }
+  },
+  "closed": {
+    "audience": {
+      "rule": "creator"
+    },
+    "fields": []
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:wall_niche",
+    "shape": {
+      "round": 10,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            490,
+            0
+          ],
+          "size": [
+            1200,
+            980,
+            420
+          ],
+          "round": 0,
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1285,
+            0
+          ],
+          "size": [
+            1200,
+            130,
+            420
+          ],
+          "round": 0,
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -420,
+            1100,
+            0
+          ],
+          "size": [
+            360,
+            250,
+            420
+          ],
+          "round": 0,
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            420,
+            1100,
+            0
+          ],
+          "size": [
+            360,
+            250,
+            420
+          ],
+          "round": 0,
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1100,
+            -190
+          ],
+          "size": [
+            500,
+            250,
+            40
+          ],
+          "round": 0,
+          "tint": "shade"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1005,
+            190
+          ],
+          "size": [
+            500,
+            50,
+            40
+          ],
+          "round": 0,
+          "tint": "stone"
+        }
+      ],
+      "palette": {
+        "stone": "#8d8577",
+        "shade": "#26221d"
+      },
+      "tags": [
+        "furniture",
+        "storage",
+        "hiding-place",
+        "hiding"
+      ]
+    }
+  },
+  "text": {
+    "card": "An old stone wall with a dark niche: hide a small thing in it, or search it.",
+    "hiding": "hiding",
+    "syn_niche": "niche",
+    "syn_wall": "stone wall",
+    "syn_hiding": "hiding place",
+    "howto_hide": "Hold a small thing and hide it at the back of the niche.",
+    "howto_find": "With a hand free, search the niche: whatever is in it comes out in your hand.",
+    "hands_full": "Put down what you are holding before searching the niche.",
+    "empty": "You searched the niche and came away with nothing."
+  },
+  "card": {
+    "text": "card",
+    "category": "hiding",
+    "synonyms": [
+      "syn_niche",
+      "syn_wall",
+      "syn_hiding"
+    ]
+  },
+  "howtos": {
+    "hide": {
+      "text": "howto_hide",
+      "steps": [
+        {
+          "form": "hide"
+        }
+      ]
+    },
+    "find": {
+      "text": "howto_find",
+      "steps": [
+        {
+          "form": "search"
+        }
+      ]
+    }
+  }
+}

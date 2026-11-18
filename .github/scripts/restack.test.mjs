@@ -54,8 +54,11 @@ test('comments name the merged PR, the target, the fork point and (on conflict) 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'restack-test-'));
   const origin = join(root, 'origin.git'), work = join(root, 'work');
-  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin]);
-  execFileSync('git', ['init', '-q', '-b', 'main', work]);
+  // No `git init -b` (git 2.28+): the self-hosted runners' git is older, so HEAD is pointed at main explicitly.
+  execFileSync('git', ['init', '-q', '--bare', origin]);
+  execFileSync('git', ['--git-dir', origin, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
+  execFileSync('git', ['init', '-q', work]);
+  execFileSync('git', ['-C', work, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
   const git = gitIn(work);
   git('config', 'user.name', 'test'); git('config', 'user.email', 'test@example.invalid'); git('config', 'commit.gpgsign', 'false');
   git('remote', 'add', 'origin', origin);

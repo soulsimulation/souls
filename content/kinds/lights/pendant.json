@@ -1,0 +1,52 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pendant",
+  "owner": "thing",
+  "state": {
+    "on": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "pull_cord": { "role": "contact", "at_mm": [200, 1760, 0] }
+  },
+  "geometry": { "bounds_mm": [600, 2920, 600] },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": false },
+        { "need": "within_reach", "point": "pull_cord" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "pull_cord" }],
+      "effects": [{ "change": "set", "field": "on", "to": true, "event": "switched_on" }]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": true },
+        { "need": "within_reach", "point": "pull_cord" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "pull_cord" }],
+      "effects": [{ "change": "set", "field": "on", "to": false, "event": "switched_off" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:pendant",
+    "table": [
+      { "part": "light", "field": "on", "do": "glow", "at": { "true": 1000, "false": 0 } },
+      { "part": "light", "field": "on", "do": "tint", "at": { "true": "#ffe2a8", "false": "#6b665e" } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,2620,0],"r":8,"h":600,"segments":4,"tint":"cord"},{"kind":"cone","at":[0,2190,0],"r":300,"h":260,"segments":14,"tint":"shade"},{"kind":"sphere","at":[0,2060,0],"r":70,"segments":8,"tint":"bulb","glow":1000,"role":"light"},{"kind":"torus","at":[0,2062,0],"r":292,"r2":10,"segments":14,"tint":"bulb","glow":1000,"role":"light","pitch":90000},{"kind":"cyl","at":[200,1910,0],"r":3,"h":300,"segments":4,"tint":"cord"},{"kind":"sphere","at":[200,1755,0],"r":14,"segments":6,"tint":"bead","role":"knob"}],"palette":{"cord":"#2b2623","shade":"#2f3332","bulb":"#ffe2a8","bead":"#b8913f"},"tags":["furniture","light","lamp","object"]}
+  },
+  "text": {
+    "card": "A ceiling pendant lamp: pull its cord to switch it on or off.",
+    "light": "light",
+    "ceiling_light": "ceiling light",
+    "lamp": "lamp",
+    "hanging_lamp": "hanging lamp"
+  },
+  "card": { "text": "card", "category": "light", "synonyms": ["ceiling_light", "lamp", "hanging_lamp"] }
+}

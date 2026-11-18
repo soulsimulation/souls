@@ -1,0 +1,151 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:theatre_row",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "seat_1_front": { "role": "stand", "at_mm": [-825, 0, 558], "yaw_mdeg": 180000 },
+    "seat_2_front": { "role": "stand", "at_mm": [-275, 0, 558], "yaw_mdeg": 180000 },
+    "seat_3_front": { "role": "stand", "at_mm": [275, 0, 558], "yaw_mdeg": 180000 },
+    "seat_4_front": { "role": "stand", "at_mm": [825, 0, 558], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "seat_1": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [-825, 500, 40],
+      "stand": "seat_1_front",
+      "row": "row",
+      "place": 1,
+      "end": "first"
+    },
+    "seat_2": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [-275, 500, 40],
+      "stand": "seat_2_front",
+      "row": "row",
+      "place": 2
+    },
+    "seat_3": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [275, 500, 40],
+      "stand": "seat_3_front",
+      "row": "row",
+      "place": 3
+    },
+    "seat_4": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [825, 500, 40],
+      "stand": "seat_4_front",
+      "row": "row",
+      "place": 4,
+      "end": "last"
+    }
+  },
+  "geometry": { "bounds_mm": [2260, 1094, 517] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:theatre_row",
+    "shape": {
+      "shapes": [
+        { "kind": "box", "at": [0, 60, 0], "size": [2200, 60, 400], "round": 0, "tint": "iron" },
+        { "kind": "box", "at": [-1100, 450, -20], "size": [60, 650, 500], "round": 0, "tint": "arm" },
+        { "kind": "box", "at": [-550, 450, -20], "size": [60, 650, 500], "round": 0, "tint": "arm" },
+        { "kind": "box", "at": [0, 450, -20], "size": [60, 650, 500], "round": 0, "tint": "arm" },
+        { "kind": "box", "at": [550, 450, -20], "size": [60, 650, 500], "round": 0, "tint": "arm" },
+        { "kind": "box", "at": [1100, 450, -20], "size": [60, 650, 500], "round": 0, "tint": "arm" },
+        {
+          "kind": "extrude",
+          "at": [-825, 420, 40],
+          "polygon": [[-210, -190], [210, -190], [210, 190], [-210, 190]],
+          "h": 40,
+          "tint": "pad"
+        },
+        {
+          "kind": "rbox",
+          "at": [-825, 780, -200],
+          "size": [480, 620, 100],
+          "tint": "pad",
+          "round": 30,
+          "pitch": -6875
+        },
+        {
+          "kind": "extrude",
+          "at": [-275, 420, 40],
+          "polygon": [[-210, -190], [210, -190], [210, 190], [-210, 190]],
+          "h": 40,
+          "tint": "pad"
+        },
+        {
+          "kind": "rbox",
+          "at": [-275, 780, -200],
+          "size": [480, 620, 100],
+          "tint": "pad",
+          "round": 30,
+          "pitch": -6875
+        },
+        {
+          "kind": "extrude",
+          "at": [275, 420, 40],
+          "polygon": [[-210, -190], [210, -190], [210, 190], [-210, 190]],
+          "h": 40,
+          "tint": "pad"
+        },
+        {
+          "kind": "rbox",
+          "at": [275, 780, -200],
+          "size": [480, 620, 100],
+          "tint": "pad",
+          "round": 30,
+          "pitch": -6875
+        },
+        {
+          "kind": "extrude",
+          "at": [825, 420, 40],
+          "polygon": [[-210, -190], [210, -190], [210, 190], [-210, 190]],
+          "h": 40,
+          "tint": "pad"
+        },
+        {
+          "kind": "rbox",
+          "at": [825, 780, -200],
+          "size": [480, 620, 100],
+          "tint": "pad",
+          "round": 30,
+          "pitch": -6875
+        }
+      ],
+      "palette": { "pad": "#8a2f35", "arm": "#3a2a22", "iron": "#3b3d40" },
+      "tags": ["furniture", "seat", "theatre"]
+    }
+  },
+  "text": {
+    "card": "A row of four tip-up theatre seats with armrests on a steel rail; four sit here.",
+    "seat": "seat",
+    "theatre": "theatre"
+  },
+  "card": { "text": "card", "category": "seat", "synonyms": ["theatre"] }
+}

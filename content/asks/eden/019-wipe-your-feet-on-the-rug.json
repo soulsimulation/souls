@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":19,"group":"object","words":"wipe your feet on the rug","obvious":2,"things":{"rug":"eden:rug"},"chain":[{"this":"me","form":"wipe_feet","args":{"spot":"rug"}}]}

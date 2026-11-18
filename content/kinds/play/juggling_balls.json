@@ -1,0 +1,108 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:juggling_balls",
+  "owner": "thing",
+  "state": {
+    "juggles": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1000000000,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        40,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      170,
+      80,
+      160
+    ]
+  },
+  "forms": {
+    "juggle": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "use_held"
+        },
+        {
+          "step": "wait",
+          "us": 20000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "juggles",
+          "by": 1,
+          "event": "juggled"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:juggling_balls",
+    "shape": {"round":15,"shapes":[
+        {"kind":"sphere","at":[-42,40,24],"r":40,"segments":6,"tint":"one"},
+        {"kind":"sphere","at":[42,40,24],"r":40,"segments":6,"tint":"two"},
+        {"kind":"sphere","at":[0,40,-48],"r":40,"segments":6,"tint":"three"}
+      ],
+      "palette":{"one":"#e2583e","two":"#e8b93c","three":"#3f8fc4"},"tags":["toy", "balls", "juggling", "object"]},
+    "table": []
+  },
+  "text": {
+    "card": "Three juggling balls: hold them, keep the other hand free, and juggle.",
+    "toy": "toy",
+    "balls": "balls",
+    "juggling": "juggling",
+    "howto_juggle": "Pick them up, keep your other hand free, then juggle for twenty seconds."
+  },
+  "card": {
+    "text": "card",
+    "category": "toy",
+    "synonyms": [
+      "balls",
+      "juggling"
+    ]
+  },
+  "howtos": {
+    "juggle": {
+      "text": "howto_juggle",
+      "steps": [
+        {
+          "form": "juggle"
+        }
+      ]
+    }
+  }
+}

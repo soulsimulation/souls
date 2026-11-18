@@ -1,0 +1,19 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sawhorse",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [1976, 871, 876] },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:sawhorse",
+    "shape": {"shapes":[{"kind":"extrude","at":[-700,752,0],"polygon":[[-38,-438],[38,-438],[38,438],[-38,438]],"h":56,"tint":"wood"},{"kind":"cyl","at":[-800,380,325],"r":30,"h":787,"segments":5,"tint":"wood","pitch":15183,"yaw":104049},{"kind":"cyl","at":[-600,380,325],"r":30,"h":787,"segments":5,"tint":"wood","pitch":15183,"yaw":-104049},{"kind":"cyl","at":[-800,380,-325],"r":30,"h":787,"segments":5,"tint":"wood","pitch":15183,"yaw":75974},{"kind":"cyl","at":[-600,380,-325],"r":30,"h":787,"segments":5,"tint":"wood","pitch":15183,"yaw":-75974},{"kind":"extrude","at":[700,752,0],"polygon":[[-38,-438],[38,-438],[38,438],[-38,438]],"h":56,"tint":"wood"},{"kind":"cyl","at":[600,380,325],"r":30,"h":787,"segments":5,"tint":"wood","pitch":15183,"yaw":104049},{"kind":"cyl","at":[800,380,325],"r":30,"h":787,"segments":5,"tint":"wood","pitch":15183,"yaw":-104049},{"kind":"cyl","at":[600,380,-325],"r":30,"h":787,"segments":5,"tint":"wood","pitch":15183,"yaw":75974},{"kind":"cyl","at":[800,380,-325],"r":30,"h":787,"segments":5,"tint":"wood","pitch":15183,"yaw":-75974},{"kind":"extrude","at":[0,837,0],"polygon":[[-988,-288],[988,-288],[988,288],[-988,288]],"h":26,"tint":"plank"}],"palette":{"wood":"#a47a4c","plank":"#d9bf8f"},"tags":["work","sawhorse","tools","construction","table","surface"],"round":12}
+  },
+  "text": {
+    "card": "Two sawhorses with a plank across: a quick table for work.",
+    "work": "work",
+    "trestle": "trestle",
+    "plank": "plank"
+  },
+  "card": { "text": "card", "category": "work", "synonyms": ["trestle", "plank"] }
+}

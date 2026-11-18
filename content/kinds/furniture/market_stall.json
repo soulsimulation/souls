@@ -1,0 +1,104 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:market_stall",
+  "owner": "thing",
+  "state": {
+    "apples": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 24,
+      "min": 0,
+      "max": 24,
+      "audience": { "rule": "everyone" }
+    },
+    "open_times": {
+      "n": 2,
+      "type": "schedule",
+      "most": 14,
+      "default": [
+        {
+          "repeat": "weekly",
+          "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+          "from_us": 28800000000,
+          "to_us": 64800000000
+        }
+      ],
+      "audience": { "rule": "everyone" }
+    }
+  },
+  "links": {
+    "queue": { "n": 1, "from": "body", "most": 8, "audience": { "rule": "everyone" } },
+    "minder": { "n": 2, "from": "soul", "most": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "vendor": { "role": "stand", "at_mm": [0, 0, -900], "yaw_mdeg": 0 },
+    "customer": { "role": "stand", "at_mm": [0, 0, 1000], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [2400, 2359, 1401] },
+  "forms": {
+    "take_apple": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "apples", "at_least": 1 }, { "need": "hand", "free": true }],
+      "steps": [{ "step": "walk_to", "point": "customer" }, { "step": "take" }],
+      "effects": [{ "change": "create", "kind": "eden:apple", "into": "actor_hand", "event": "apple_taken" }]
+    },
+    "queue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "walk_to", "point": "customer" }],
+      "effects": [{ "change": "link", "link": "queue", "from": "actor", "event": "joined_the_queue" }]
+    },
+    "leave_queue": {
+      "who": { "link": "queue" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": [{ "change": "unlink", "link": "queue", "from": "actor", "event": "left_the_queue" }]
+    },
+    "mind": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "unlinked", "link": "minder" }],
+      "steps": [{ "step": "walk_to", "point": "vendor" }],
+      "effects": [{ "change": "link", "link": "minder", "from": "actor", "event": "stall_minded" }]
+    },
+    "stop_minding": {
+      "who": { "link": "minder" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": [{ "change": "unlink", "link": "minder", "from": "actor", "event": "stall_left" }]
+    }
+  },
+  "stock": {
+    "apples": { "kind": "eden:apple", "count": "apples", "take": "take_apple", "refill": { "every_us": 600000000 } }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:market_stall",
+    "shape": {"shapes":[{"kind":"box","at":[0,860,0],"size":[2200,60,1000],"round":0,"tint":"table"},{"kind":"cyl","at":[-850,415,-150],"r":30,"h":990,"segments":5,"tint":"wood","pitch":33060},{"kind":"cyl","at":[-850,415,150],"r":30,"h":990,"segments":5,"tint":"wood","pitch":33060,"yaw":180023},{"kind":"cyl","at":[850,415,-150],"r":30,"h":990,"segments":5,"tint":"wood","pitch":33060},{"kind":"cyl","at":[850,415,150],"r":30,"h":990,"segments":5,"tint":"wood","pitch":33060,"yaw":180023},{"kind":"box","at":[0,450,0],"size":[1800,40,60],"round":0,"tint":"wood"},{"kind":"cyl","at":[-1150,1150,-600],"r":35,"h":2300,"segments":6,"tint":"wood"},{"kind":"cyl","at":[1150,1150,-600],"r":35,"h":2300,"segments":6,"tint":"wood"},{"kind":"cyl","at":[-1150,975,620],"r":35,"h":1950,"segments":6,"tint":"wood"},{"kind":"cyl","at":[1150,975,620],"r":35,"h":1950,"segments":6,"tint":"wood"},{"kind":"box","at":[-1000,2150,10],"size":[400,30,1420],"round":0,"tint":"awning","pitch":14553},{"kind":"box","at":[-600,2150,10],"size":[400,30,1420],"round":0,"tint":"stripe","pitch":14553},{"kind":"box","at":[-200,2150,10],"size":[400,30,1420],"round":0,"tint":"awning","pitch":14553},{"kind":"box","at":[200,2150,10],"size":[400,30,1420],"round":0,"tint":"stripe","pitch":14553},{"kind":"box","at":[600,2150,10],"size":[400,30,1420],"round":0,"tint":"awning","pitch":14553},{"kind":"box","at":[1000,2150,10],"size":[400,30,1420],"round":0,"tint":"stripe","pitch":14553},{"kind":"box","at":[-1000,1860,710],"size":[400,160,20],"round":0,"tint":"awning"},{"kind":"box","at":[-600,1860,710],"size":[400,160,20],"round":0,"tint":"stripe"},{"kind":"box","at":[-200,1860,710],"size":[400,160,20],"round":0,"tint":"awning"},{"kind":"box","at":[200,1860,710],"size":[400,160,20],"round":0,"tint":"stripe"},{"kind":"box","at":[600,1860,710],"size":[400,160,20],"round":0,"tint":"awning"},{"kind":"box","at":[1000,1860,710],"size":[400,160,20],"round":0,"tint":"stripe"},{"kind":"extrude","at":[-600,920,50],"polygon":[[-220,-160],[220,-160],[220,160],[-220,160]],"h":120,"tint":"crate"},{"kind":"extrude","at":[600,920,50],"polygon":[[-220,-160],[220,-160],[220,160],[-220,160]],"h":120,"tint":"crate"},{"kind":"sphere","at":[-720,1100,-50],"r":80,"segments":6,"tint":"fruit","role":"fill"},{"kind":"sphere","at":[-550,1100,120],"r":80,"segments":6,"tint":"fruit","role":"fill"},{"kind":"sphere","at":[-450,1100,-60],"r":80,"segments":6,"tint":"fruit","role":"fill"},{"kind":"sphere","at":[500,1100,-50],"r":80,"segments":6,"tint":"veg"},{"kind":"sphere","at":[680,1100,100],"r":80,"segments":6,"tint":"veg"},{"kind":"sphere","at":[720,1100,-80],"r":80,"segments":6,"tint":"veg"},{"kind":"extrude","at":[0,920,200],"polygon":[[-120,-95],[120,-95],[120,95],[-120,95]],"h":60,"tint":"basket"}],"palette":{"table":"#c79a63","wood":"#9a6b43","awning":"#c8553d","stripe":"#f2ead8","crate":"#b07c4f","fruit":"#b5322a","veg":"#6f9a3c","basket":"#d9a63a"},"tags":["building","commercial"]},
+    "table": [{ "part": "fill", "field": "apples", "do": "scale", "range": [0, 24], "to": [0, 1000] }]
+  },
+  "text": {
+    "card": "A market stall: apples free to take, a vendor behind, a queue in front.",
+    "market": "market",
+    "stall": "stall",
+    "produce": "produce",
+    "apples": "apples",
+    "open_times": "open times",
+    "queue": "queue",
+    "minder": "minder",
+    "howto_apple": "Join the queue, take an apple, then leave the queue."
+  },
+  "card": { "text": "card", "category": "market", "synonyms": ["stall", "produce"] },
+  "howtos": {
+    "apple": {
+      "text": "howto_apple",
+      "steps": [{ "form": "queue" }, { "form": "take_apple" }, { "form": "leave_queue" }]
+    }
+  }
+}
