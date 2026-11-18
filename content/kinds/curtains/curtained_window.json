@@ -1,0 +1,754 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:curtained_window",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "cord": {
+      "role": "grip",
+      "at_mm": [
+        880,
+        1250,
+        150
+      ]
+    },
+    "inside": {
+      "role": "stand",
+      "at_mm": [
+        880,
+        0,
+        600
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      2400,
+      2600,
+      200
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "cord"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "tug",
+          "at": "cord"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "curtains_opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "cord"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "tug",
+          "at": "cord"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "curtains_closed"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:curtained_window",
+    "table": [
+      {
+        "part": "curtain-l",
+        "field": "open",
+        "do": "scale",
+        "axis": "x",
+        "at": {
+          "true": 220,
+          "false": 1000
+        },
+        "over_us": 1100000
+      },
+      {
+        "part": "curtain-r",
+        "field": "open",
+        "do": "scale",
+        "axis": "x",
+        "at": {
+          "true": 220,
+          "false": 1000
+        },
+        "over_us": 1100000
+      }
+    ],
+    "shape": {
+      "round": 5,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            -950,
+            1300,
+            0
+          ],
+          "size": [
+            500,
+            2600,
+            160
+          ],
+          "round": 5,
+          "tint": "plaster"
+        },
+        {
+          "kind": "box",
+          "at": [
+            950,
+            1300,
+            0
+          ],
+          "size": [
+            500,
+            2600,
+            160
+          ],
+          "round": 5,
+          "tint": "plaster"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            1400,
+            900,
+            160
+          ],
+          "round": 5,
+          "tint": "plaster"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2400,
+            0
+          ],
+          "size": [
+            1400,
+            400,
+            160
+          ],
+          "round": 5,
+          "tint": "plaster"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            915,
+            40
+          ],
+          "size": [
+            1480,
+            30,
+            260
+          ],
+          "round": 5,
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1550,
+            0
+          ],
+          "size": [
+            40,
+            1300,
+            50
+          ],
+          "round": 4,
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1550,
+            0
+          ],
+          "size": [
+            1400,
+            40,
+            50
+          ],
+          "round": 4,
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1550,
+            0
+          ],
+          "size": [
+            1400,
+            1300,
+            12
+          ],
+          "round": 0,
+          "tint": "glass"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            2310,
+            130
+          ],
+          "r": 15,
+          "h": 1900,
+          "segments": 6,
+          "tint": "rod",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -900,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -800,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -700,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -600,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -100,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-l",
+          "pivot": [
+            -950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            900,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            800,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            700,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            500,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            400,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            100,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth2",
+          "yaw": -24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1625,
+            125
+          ],
+          "size": [
+            114,
+            1350,
+            12
+          ],
+          "round": 4,
+          "tint": "cloth",
+          "yaw": 24064,
+          "role": "curtain-r",
+          "pivot": [
+            950,
+            2300,
+            125
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            880,
+            1795,
+            150
+          ],
+          "r": 4,
+          "h": 1010,
+          "segments": 4,
+          "tint": "cord"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            880,
+            1250,
+            150
+          ],
+          "r": 18,
+          "h": 80,
+          "segments": 6,
+          "tint": "valve",
+          "r2": 12
+        }
+      ],
+      "palette": {
+        "plaster": "#d9d2c3",
+        "frame": "#f1ede4",
+        "glass": "#a9c7d6",
+        "cloth": "#a35f48",
+        "cloth2": "#8c4e3b",
+        "cord": "#e8e2d2",
+        "valve": "#c9b98f",
+        "rod": "#5b4a3a"
+      },
+      "tags": [
+        "window",
+        "curtains",
+        "home"
+      ]
+    }
+  },
+  "text": {
+    "card": "Curtains inside a window: draw them open or shut at the pull cord."
+  },
+  "card": {
+    "text": "card"
+  }
+}
