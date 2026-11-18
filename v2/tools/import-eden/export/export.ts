@@ -31,11 +31,15 @@ const pt = ([x, z]: V2) => [mm(x), mm(z)];
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
 // --- Replay --------------------------------------------------------------------------------------------------------
-const text = readFileSync(TEMPLATE, 'utf8');
-const g = JSON.parse(text);
+// X6 (#2819): `--backup <file> [--world <id>] [--map <map.json>]` takes a live world's model from a backup of its
+// database (v2/tools/import-world/export/backup.ts) in place of the template's replay.
+const BACKUP = arg('--backup', '');
+const live = BACKUP ? (await import('../../import-world/export/backup.ts')).fromBackup(BACKUP, arg('--world', ''), arg('--map', 'content/worlds/eden/map.json')) : null;
+const text = live ? '' : readFileSync(TEMPLATE, 'utf8');
+const g = live ? { batches: [] } : JSON.parse(text);
 const t0 = performance.now();
-const m = new WorldModel({ constants: { ground: 'land', extent: 1000, ...g.constants }, seed: SEED });
-m.library = coreLibrary();
+const m = live?.m ?? new WorldModel({ constants: { ground: 'land', extent: 1000, ...g.constants }, seed: SEED });
+if (!live) m.library = coreLibrary();
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
 if (g.state) apply({ ops: [{ op: 'world', state: g.state }], group: 'genesis' }, 'state');
@@ -109,6 +113,7 @@ for (const e of m.entities.values()) {
     ...(e.name ? { name: e.name } : {}),
     // A path or area thing at the world root carries world-frame geometry, heights above the ground unless `abs`.
     ...(isWorldShape ? { worldShape: true } : {}),
+    ...live?.thing(e, d),
   };
   if (isDoorDef(d as never)) {
     const v = e.state?.open ?? (d.state as Record<string, { default?: unknown } | undefined>)?.open?.default;
@@ -266,8 +271,8 @@ for (const e of m.entities.values()) {
 // --- Write ---------------------------------------------------------------------------------------------------------
 const file = {
   format: 'souls/import-eden/1',
-  template: { path: TEMPLATE, sha256: sha(text), batches: g.batches.length },
-  seed: SEED, entities: m.entities.size, bake, byRef,
+  ...(live ? live.head : { template: { path: TEMPLATE, sha256: sha(text), batches: g.batches.length } }),
+  seed: live ? m.seed : SEED, entities: m.entities.size, bake, byRef,
   kinds: [...kinds.values()].sort((a, b) => (a.ref < b.ref ? -1 : 1)),
   things, doors: doorPairs,
   // The recipe is today's own format (metres, fractions): kept whole as text for N3, never read here as numbers.

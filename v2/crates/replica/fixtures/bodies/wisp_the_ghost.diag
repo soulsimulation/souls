@@ -1,0 +1,11 @@
+# body:wisp_the_ghost: a body admitted from the authoring kit by v2/tools/import-body (Engine v2 B13, #2744). Validator asset
+# body_8111f1c4504c9c3b585fcc36d2590af26c3371aa7ce3390d8b7e7549f0e1a2bd, profile rigid. Footprint and height measured from the mesh across its clips.
+{1: "body:wisp_the_ghost", 2: "family", 3: {
+    1: {1: "size", 2: "enum", 3: "large", 4: "public", 5: ["small", "standard", "large"]},
+    2: {1: "height", 2: "int", 3: 700, 4: "public"},
+    3: {1: "hover", 2: "int", 3: 1100, 4: "public"},
+    4: {1: "radius", 2: "int", 3: 296, 4: "public"}},
+  13: {1: [{1: "souls:glide", 2: 1}, {1: "souls:eyes", 2: 3}, {1: "souls:voice", 2: 4}],
+    2: ["go", "stand", "turn", "look", "speak", "rest", "wake", "dance"],
+    3: "sha256:c28e71f98904795293992a7c80c24686d7b54ecbfc1feb502316ca49fc60827a",
+    4: "sha256:3ff51066d2d03d45288fb418a53a6f28e84ea0ae208e84609ce5da02eacbc2d1"}}

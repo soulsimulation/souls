@@ -1,0 +1,11 @@
+# A stand-in (Engine v2 E11, #2782): a whole-body leap, for anything the body throws itself into. Named by its clip.
+{
+  1: "Celebration", 2: 1,
+  3: [{1: 1, 2: 1}, {1: 1, 2: 2}],          # every leg and every hand
+  4: [1],
+  5: [1, 2],
+  6: [{1: "souls:start-up", 2: 300000}, {1: "souls:hold", 2: 2200000}],
+  7: {1: 1},
+  8: 1,
+  9: "souls:root"
+}
