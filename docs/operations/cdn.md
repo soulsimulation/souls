@@ -23,7 +23,7 @@ their holders: the CDN is a transport, not a licence. The records that admit a f
 
 | Record | Covers |
 |---|---|
-| Licence sources CSV (`DEFAULT_SOURCES` in `inventory.mjs`) + `approved-derivatives.json` | CC0 and own-work models and their derived LOD meshes, pinned by SHA and bytes |
+| Licence sources CSV (`DEFAULT_SOURCES` in `inventory.mjs`) + `approved-derivatives.json` | CC0 and own-work models and their derived LOD meshes, pinned by SHA and bytes; under `generated`, the models Engine v2's bake draws from this repository's own builders (`v2/tools/import-eden/README.md`) |
 | `served-public.json` (`served-public.mjs --write`; without `--write` it checks the file is current) | Every file of the server's core asset set that `GET /assets/<sha>` serves, the `/modular` set, with each index's licence text kept |
 | `served-blobs.json` | The `/blobs/assets/<sha>` files the client names (a test fails when a literal in `apps/web/src` has no record) |
 | `world-scoped.json` | Per-world files, with their world, served URL and authorisation, used only under `assets/w/<world>/` |

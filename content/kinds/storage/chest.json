@@ -1,0 +1,268 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:chest",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "locked": {
+      "n": 2,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        720
+      ],
+      "yaw_mdeg": 180000
+    },
+    "lid": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        560,
+        270
+      ]
+    },
+    "lock": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        330,
+        265
+      ]
+    }
+  },
+  "slots": {
+    "inside": {
+      "admits": "thing",
+      "most": 10,
+      "at_mm": [
+        0,
+        60,
+        0
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      950,
+      636,
+      540
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "locked",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "lid"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "lid"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "shut"
+        }
+      ]
+    },
+    "lock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "locked",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "lock"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "locked",
+          "to": true,
+          "event": "locked"
+        }
+      ]
+    },
+    "unlock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "locked",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "lock"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "locked",
+          "to": false,
+          "event": "unlocked"
+        }
+      ]
+    }
+  },
+  "closed": {
+    "audience": {
+      "rule": "owner"
+    },
+    "fields": []
+  },
+  "motion": {
+    "how": "pushed_by_one"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:chest",
+    "table": [
+      {
+        "part": "lid",
+        "field": "open",
+        "do": "rotate",
+        "axis": "x",
+        "at": {
+          "true": -50000,
+          "false": 0
+        },
+        "over_us": 400000
+      }
+    ],
+    "shape": {"shapes":[{"kind":"box","at":[0,210,0],"size":[840,360,440],"round":0,"tint":"wood"},{"kind":"box","at":[0,380,0],"size":[820,20,420],"round":0,"tint":"inside"},{"kind":"box","at":[-300,210,0],"size":[50,430,515],"round":0,"tint":"iron"},{"kind":"box","at":[300,210,0],"size":[50,430,515],"round":0,"tint":"iron"},{"kind":"torus","at":[-465,300,0],"r":45,"r2":10,"segments":6,"tint":"iron","yaw":90000},{"kind":"torus","at":[465,300,0],"r":45,"r2":10,"segments":6,"tint":"iron","yaw":90000},{"kind":"box","at":[0,330,255],"size":[100,120,15],"round":0,"tint":"brass"},{"kind":"box","at":[0,480,0],"size":[860,60,460],"round":0,"tint":"wood","role":"lid","pivot":[0,420,-250]},{"kind":"box","at":[-300,500,0],"size":[50,140,535],"round":0,"tint":"iron","role":"lid","pivot":[0,420,-250]},{"kind":"box","at":[300,500,0],"size":[50,140,535],"round":0,"tint":"iron","role":"lid","pivot":[0,420,-250]},{"kind":"box","at":[0,440,265],"size":[80,60,15],"round":0,"tint":"brass","role":"lid","pivot":[0,420,-250]},{"kind":"box","at":[0,530,0],"size":[860,100,460],"round":40,"tint":"wood","role":"lid","pivot":[0,420,-250]}],"palette":{"wood":"#9a6b43","inside":"#5e3d27","iron":"#3b3d40","brass":"#b8913f"},"tags":["object","container"]}
+  },
+  "text": {
+    "card": "A wooden chest: open the lid to store things inside; lock it shut.",
+    "storage": "storage",
+    "trunk": "trunk",
+    "coffer": "coffer",
+    "howto_store": "Unlock it if it is locked, open the lid, put things inside, close it and lock it."
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "trunk",
+      "coffer"
+    ]
+  },
+  "howtos": {
+    "store": {
+      "text": "howto_store",
+      "steps": [
+        {
+          "form": "unlock"
+        },
+        {
+          "form": "open"
+        },
+        {
+          "form": "close"
+        },
+        {
+          "form": "lock"
+        }
+      ]
+    }
+  }
+}
