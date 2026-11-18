@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, greenAtHead, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, ciRunsAt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -318,7 +318,8 @@ test('ci.yml: every label starts a real pull_request run with ci-ok, queued in t
   const job = name => workflow.slice(workflow.indexOf(`\n  ${name}:\n`) + 1).split(/\n  [a-z-]+:\n/)[0];
   // the queue reads only the newest ci run at a head: no label may leave one without a real ci-ok
   assert.doesNotMatch(workflow, /github\.event\.label\.name|other-label/);
-  for (const name of ['scope', 'repo']) assert.doesNotMatch(job(name), /^    if: /m, name);
+  assert.doesNotMatch(job('scope'), /^    if: /m);
+  assert.equal(job('repo').match(/^    if: (.*)$/m)[1], "needs.scope.outputs.green != 'true'", 'repo skips only on a green head');
   const ok = job('ci-ok');
   assert.doesNotMatch(ok, /^    name: /m, 'the job is always named ci-ok');
   assert.equal(ok.match(/^    if: (.*)$/m)[1], 'always()');
@@ -344,7 +345,7 @@ test('a window label opens the window on its own pull_request run, and green at 
   const heavy = { include: [{ name: 'server-0' }], smoke: true };
   const win = windowFor({ event: 'pull_request', labels: ['ci:run'] });
   assert.equal(win.open, true);
-  assert.deepEqual(windowed(heavy, win, { greenAtHead: true }), { include: [], smoke: false, deferred: false, why: 'a ci run at this head already passed' });
+  assert.deepEqual(windowed(heavy, win, { greenAtHead: true }), { include: [], smoke: false, deferred: false, green: true, why: 'a ci run at this head already passed' });
   assert.deepEqual(windowed(heavy, win).include, heavy.include);
   assert.equal(windowed(heavy, windowFor({ event: 'pull_request', draft: true, labels: ['ci:run'] })).deferred, true, 'a draft stays deferred');
 });
@@ -418,3 +419,50 @@ test('low-risk: a merge group of two allowlist PRs is scoped; one with a server 
   assert.deepEqual([mixed.scope, mixed.matrix, mixed.smoke], ['full', JOBS.filter(j => !j.heavy).map(j => j.name), 'true']);
 });
 
+
+// A label run at a head whose newest ci run passed: only scope and ci-ok run (18 Nov). The green step used the gh CLI,
+// which the light self-hosted runners lack, so it always answered nothing and every label re-ran the light legs.
+test('green at head: read with fetch and GH_TOKEN, no gh CLI; a failed read is not green', async () => {
+  const runs = [{ id: 1, event: 'pull_request', status: 'completed', conclusion: 'success' }, { id: 2, event: 'pull_request', status: 'in_progress', conclusion: null }];
+  let seen;
+  const get = async (url, init) => { seen = { url, auth: init.headers.authorization }; return { ok: true, json: async () => ({ workflow_runs: runs }) }; };
+  assert.deepEqual(await ciRunsAt('o/r', 'abc', { token: 't', api: 'https://api.example', fetch: get }), runs);
+  assert.deepEqual(seen, { url: 'https://api.example/repos/o/r/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100', auth: 'Bearer t' });
+  assert.equal(await greenCommand({ repo: 'o/r', sha: 'abc', self: 2 }, { token: 't', fetch: get }), 'true', 'the label run itself never counts');
+  assert.equal(await greenCommand({ repo: 'o/r', sha: 'abc', self: 9 }, { token: 't', fetch: get }), 'false', 'a newer run still going');
+  const warn = console.error; console.error = () => {};
+  try {
+    assert.equal(await greenCommand({ repo: 'o/r', sha: 'abc' }, { fetch: async () => ({ ok: false, status: 403 }) }), 'false');
+    assert.equal(await greenCommand({ repo: 'o/r', sha: 'abc' }, { fetch: async () => { throw new Error('offline'); } }), 'false');
+  } finally { console.error = warn; }
+  assert.doesNotMatch(readFileSync(fileURLToPath(new URL('./ci-scope.mjs', import.meta.url)), 'utf8'), /execFileSync\('gh'/);
+});
+
+test('green at head: a label run selects nothing and outputs green; a push, a closed window or a red head runs as today', () => {
+  const ready = [...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["merge:ready","approved:maintainer"]'];
+  const green = run(...ready, '--green-at-head', 'true');
+  assert.deepEqual([green.matrix, green.any, green.smoke, green.deferred, green.green], [[], 'false', 'false', 'false', 'true']);
+  const red = run(...ready, '--green-at-head', 'false');
+  assert.deepEqual([red.any, red.smoke, red.green], ['true', 'true', 'false'], 'a head that was not green runs its jobs');
+  const closed = run(...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["area:ci"]', '--green-at-head', 'true');
+  assert.deepEqual([closed.deferred, closed.green], ['true', 'false'], 'an earlier green never opens a closed window');
+  for (const event of ['merge_group', 'push']) assert.equal(run(...SERVER, '--event', event).green, 'false', event);
+  // ci.yml only asks on a label or a requested run: a synchronize, a merge group and a push never read green at head
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  assert.match(workflow, /- id: green\n        name: Already green at this head\n        if: github\.event\.action == 'labeled' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.pr != ''\)\n/);
+  assert.match(workflow, /^      green: \$\{\{ steps\.scope\.outputs\.green \}\}$/m);
+});
+
+test('ci-ok: on a green head it passes with repo, qualify and smoke skipped; a skipped repo fails anywhere else', () => {
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const ok = workflow.slice(workflow.indexOf('\n  ci-ok:'));
+  assert.match(ok, /GREEN: \$\{\{ needs\.scope\.outputs\.green \}\}/);
+  const script = ok.slice(ok.indexOf('        run: |\n', ok.indexOf('SCOPE:')) + 15).split('\n').filter(l => l.startsWith('          ')).map(l => l.slice(10)).join('\n');
+  const verdict = env => { try { execFileSync('bash', ['-e', '-c', script], { env: { PATH: process.env.PATH, ...env }, stdio: 'ignore' }); return 'pass'; } catch { return 'fail'; } };
+  const g = run(...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["merge:ready"]', '--green-at-head', 'true');
+  const skipped = { SCOPE: 'success', REPO: 'skipped', QUALIFY: 'skipped', ANY: g.any, SMOKE: 'skipped', SMOKE_SELECTED: g.smoke, GREEN: g.green };
+  assert.equal(verdict(skipped), 'pass');
+  assert.equal(verdict({ ...skipped, GREEN: 'false' }), 'fail', 'repo skipped without a green head');
+  assert.equal(verdict({ ...skipped, SCOPE: 'failure' }), 'fail');
+  assert.equal(verdict({ ...skipped, REPO: 'success', GREEN: '' }), 'pass', 'an ordinary run, green unset');
+});
