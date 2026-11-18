@@ -17,7 +17,8 @@
 //!   through the host the skill sees each result a tick later, T1).
 //! - **N10's ladder** (T9c #3127) reaches the walk by fields the world sets on its body: [`F_SHOULDER`] (no body
 //!   pushes it), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
-//!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended.
+//!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended. A route taken,
+//!   the walk leaves its count alone in [`F_ROUTE`] (`[count, []]`), so a read of the body copies no legs.
 //! - **Sent to a point** (N9, [`Route::sent`]). The world's spot tables grant the walker a standing spot near the
 //!   point and the world gives the route there as [`F_ROUTE`]; until then it stands. It arrives within [`AT_SPOT`] of
 //!   its spot, no body pushes it within [`CALM`] of it, and those standing on their own spots ([`F_SETTLED`]) do not
@@ -143,14 +144,17 @@ fn read_int(v: &Value) -> Option<i64> {
     }
 }
 
-/// A route the world gave the body ([`F_ROUTE`]): its count and legs.
-fn route_of(me: &replica::host::Seen) -> Option<(u64, Vec<Leg>)> {
+/// A route the world gave the body ([`F_ROUTE`]) after route `taken`: its count and legs.
+fn route_of(me: &replica::host::Seen, taken: u64) -> Option<(u64, Vec<Leg>)> {
     let Value::Array(a) = me.fields.get(&F_ROUTE)? else {
         return None;
     };
     let [Value::Uint(n), Value::Array(legs)] = a.as_slice() else {
         return None;
     };
+    if *n <= taken {
+        return None;
+    }
     let mut out = Vec::new();
     for l in legs {
         let Value::Array(l) = l else { return None };
@@ -280,11 +284,21 @@ impl Skill for Route {
             return Progress::Failed(name("souls:body-gone"));
         };
         // A new route from the world (N10's reroute): walked from its first leg.
-        if let Some((n, legs)) = route_of(&me)
-            && n > self.route
-        {
+        if let Some((n, legs)) = route_of(&me, self.route) {
             (self.route, self.legs, self.leg) = (n, legs, 0);
             (self.crossing, self.last) = (None, None);
+            // Taken: the legs are the walk's own now. The field keeps the count alone, so a read of this body (each
+            // walker near it reads it every tick) does not copy the legs (#3213).
+            let taken = Value::Array(vec![Value::Uint(n), Value::Array(Vec::new())]);
+            let _ = host.emit(
+                vec![Change::Set {
+                    node: body,
+                    field: F_ROUTE,
+                    to: taken,
+                    by: None,
+                }],
+                None,
+            );
         }
         // Held while the world walks it out: it stands, unmarked.
         if me.fields.contains_key(&F_HELD) {
