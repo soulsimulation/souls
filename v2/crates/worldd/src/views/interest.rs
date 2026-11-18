@@ -19,10 +19,8 @@ use replica::ids::Id;
 use replica::pose::{Pose, Support};
 use sim::index::Index;
 
-/// A body enters the set closer than this, µm (talking distance and a step).
-pub const ENTER: i64 = 4_000_000;
-/// A body in the set leaves it at this distance or farther, µm.
-pub const LEAVE: i64 = 5_000_000;
+/// A body enters the set closer than [`ENTER`] and leaves it at [`LEAVE`] or farther: the rule speech shares (B11).
+pub use sim::speech::{ENTER, LEAVE};
 
 /// The node a pose stands on, and where on it (x, z µm): the surface it stands on, else its frame.
 pub fn place(p: &Pose) -> (Id, [i64; 2]) {

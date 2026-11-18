@@ -20,6 +20,11 @@
 //! - **Carried across a link** (T9b #3120). A link names the move that crosses it (T4); the world turns a skill's
 //!   `Host::cross` into a [`Track`] (`crate::host::carry`), and the controller carries the body along it, at most its
 //!   speed times the tick, then stands it on the far node's surface. Velocity inputs wait meanwhile.
+//! - **Gaze and voice** (B11 #2742). Where a body looks ([`Gaze`]: a node, a point or ahead) is part of its input,
+//!   set by the driver holding its gaze resources and logged when it changes. Its voice carries one utterance at a
+//!   time ([`Line`], [`Controller::say`]): a new one replaces the one under way or waits behind it, by the intent's
+//!   `replace`, and each lasts its length, one timer. A tick lists the utterances it started ([`Stepped::said`]); the
+//!   world resolves their hearers and writes them (`crate::speech`).
 //! - **A dry run** ([`Controller::probe`]): what one step would do to a copy of a body, moving nothing. The world's
 //!   geometry answers use it (is a straight walk clear?), so the mover has no caller but this module.
 //!
@@ -27,7 +32,7 @@
 //! records of a crossing (N6's `mover::cross`), and N7's `Crowd`, which keeps its own bodies until T9c retires it
 //! (it steps them through [`Controller::probe`] and [`Track::advance`]).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
@@ -58,6 +63,42 @@ pub enum Stance {
     Lie,
 }
 
+/// Where a body looks: a node, a point in its frame (µm), or ahead. Record `{1: 1 ahead | 2 node | 3 point, 2: node or
+/// [x, y, z]}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gaze {
+    Ahead,
+    Node(Id),
+    Point(Vec3),
+}
+
+impl Gaze {
+    fn record(&self) -> Value {
+        let (n, at) = match self {
+            Gaze::Ahead => return Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+            Gaze::Node(id) => (2, id.to_value()),
+            Gaze::Point(p) => (3, Value::Array(vec![int(p.x), int(p.y), int(p.z)])),
+        };
+        Value::Map(BTreeMap::from([(1, Value::Uint(n)), (2, at)]))
+    }
+}
+
+/// One utterance for a voice to carry: the reference its words are kept under, how long it lasts (from its words,
+/// `replica::speech::length_of`), and whether it replaces the one under way or waits behind it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Line {
+    pub words: Id,
+    pub length: Micros,
+    pub replace: bool,
+}
+
+/// A body's voice: the utterance under way, until when, and those waiting, in order.
+#[derive(Clone, Debug, Default)]
+struct Voice {
+    now: Option<(Line, Micros)>,
+    waiting: VecDeque<Line>,
+}
+
 /// What a body is driven by: the same type for every family.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Input {
@@ -67,6 +108,8 @@ pub struct Input {
     /// The body's orientation in its frame.
     pub facing: Quat,
     pub stance: Stance,
+    /// Where it looks: the gaze resources.
+    pub gaze: Gaze,
     /// One move per resource, by resource name; a resource with none is at rest (B2 says what a move is).
     pub moves: BTreeMap<Name, Name>,
 }
@@ -79,12 +122,14 @@ impl Input {
             mode: Mode::Surface,
             facing,
             stance: Stance::Stand,
+            gaze: Gaze::Ahead,
             moves: BTreeMap::new(),
         }
     }
 
     /// The log record of this input for `body` at `at`: `{1: at, 2: body, 3: [vx, vy, vz], 4: [w, x, y, z],
-    /// 5: mode, 6: stance, 7: [[resource, move], ...]}`, 7 left out when no resource has a move.
+    /// 5: mode, 6: stance, 7: [[resource, move], ...], 8: gaze}`, 7 left out when no resource has a move and 8 when it
+    /// looks ahead.
     pub fn record(&self, at: Micros, body: Id) -> Value {
         let ints = |v: &[i64]| Value::Array(v.iter().map(|n| int(*n)).collect());
         let v = self.velocity;
@@ -116,6 +161,9 @@ impl Input {
                 .collect();
             m.insert(7, Value::Array(moves));
         }
+        if self.gaze != Gaze::Ahead {
+            m.insert(8, self.gaze.record());
+        }
         Value::Map(m)
     }
 }
@@ -138,6 +186,8 @@ pub enum Part {
     Stance(Stance),
     /// A move for the named resource, or none (at rest).
     Move(Name, Option<Name>),
+    /// Where it looks: the gaze resources.
+    Gaze(Gaze),
 }
 
 /// An input record in the log: when, whose, and its bytes (T0's encoding of [`Input::record`]).
@@ -154,6 +204,9 @@ pub struct Logged {
 pub struct Stepped {
     pub samples: Vec<HandOff>,
     pub refused: Vec<(Id, Refusal)>,
+    /// The utterances started this tick, in body order, with when each ends: the world resolves their hearers and
+    /// writes them (`crate::speech`).
+    pub said: Vec<(Id, Line, Micros)>,
 }
 
 /// A carry across a link by its move (T9b #3120): a line to follow at a speed, then standing on a node's surface.
@@ -232,6 +285,7 @@ struct Slot {
     input: Input,
     logged: Option<Input>,
     track: Option<Track>,
+    voice: Voice,
 }
 
 /// Every body's claims, input and mover state; the only way any of them is moved or posed.
@@ -255,15 +309,54 @@ impl Slot {
             .any(|r| r.class == Class::Locomotion && held.contains(&r.name));
         if locomotion {
             let facing = self.input.facing;
+            let gaze = self.input.gaze;
             let moves = std::mem::take(&mut self.input.moves);
             self.input = Input {
                 moves,
+                gaze,
                 ..Input::neutral(facing)
             };
+        }
+        if Self::covers(family, Class::Gaze, held) {
+            self.input.gaze = Gaze::Ahead;
+        }
+        if Self::covers(family, Class::Voice, held) {
+            self.voice = Voice::default();
         }
         for r in held {
             self.input.moves.remove(r);
         }
+    }
+
+    /// Whether `held` names a resource of `class`.
+    fn covers(family: &Family, class: Class, held: &[Name]) -> bool {
+        family
+            .resources
+            .iter()
+            .any(|r| r.class == class && held.contains(&r.name))
+    }
+
+    /// Whether `driver` holds a resource of `class` (`resource-missing` when the body has none).
+    fn holds(&self, driver: Driver, class: Class) -> R<()> {
+        let family = self.claims.family();
+        let mut of = family
+            .resources
+            .iter()
+            .filter(|r| r.class == class)
+            .peekable();
+        if of.peek().is_none() {
+            return refuse(
+                "resource-missing",
+                format!("{} has no {class:?}", family.name.as_str()),
+            );
+        }
+        if of.any(|r| self.claims.holder(&r.name) == Some(driver)) {
+            return Ok(());
+        }
+        refuse(
+            "resource-not-held",
+            format!("{class:?} is not held by driver {driver}"),
+        )
     }
 
     /// Whether `driver` holds every locomotion resource of the body.
@@ -312,6 +405,7 @@ impl Controller {
                 input,
                 logged: None,
                 track: None,
+                voice: Voice::default(),
             },
         );
         Ok(())
@@ -447,8 +541,32 @@ impl Controller {
                     None => s.input.moves.remove(&r),
                 };
             }
+            Part::Gaze(g) => {
+                s.holds(driver, Class::Gaze)?;
+                s.input.gaze = g;
+            }
         }
         Ok(())
+    }
+
+    /// Gives `body`'s voice an utterance, if `driver` holds a voice resource: with `replace` it ends the one under way
+    /// and any waiting, and starts on the next step; else it waits behind them.
+    pub fn say(&mut self, body: Id, driver: Driver, line: Line) -> R<()> {
+        let s = self.slot(body)?;
+        s.holds(driver, Class::Voice)?;
+        if line.length <= 0 {
+            return refuse("utterance-empty", format!("{} µs", line.length));
+        }
+        if line.replace {
+            s.voice = Voice::default();
+        }
+        s.voice.waiting.push_back(line);
+        Ok(())
+    }
+
+    /// The utterance `body`'s voice carries now, and when it ends.
+    pub fn saying(&self, body: Id) -> Option<&(Line, Micros)> {
+        self.bodies.get(&body)?.voice.now.as_ref()
     }
 
     /// One tick: each body, in id order, has its input logged if it changed, takes its facing, and is stepped by
@@ -456,6 +574,16 @@ impl Controller {
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {
         let mut out = Stepped::default();
         for (&id, s) in self.bodies.iter_mut() {
+            if s.voice.now.as_ref().is_some_and(|(_, ends)| *ends <= at) {
+                s.voice.now = None;
+            }
+            if s.voice.now.is_none()
+                && let Some(line) = s.voice.waiting.pop_front()
+            {
+                let ends = at.saturating_add(line.length);
+                out.said.push((id, line.clone(), ends));
+                s.voice.now = Some((line, ends));
+            }
             if s.logged.as_ref() != Some(&s.input) {
                 match encode(&s.input.record(at, id)) {
                     Ok(bytes) => self.log.push(Logged {
