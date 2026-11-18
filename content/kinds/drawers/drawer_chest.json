@@ -1,0 +1,511 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:drawer_chest",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "knob": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        1105,
+        287
+      ]
+    },
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1085
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "slots": {
+    "place_1": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        -200,
+        1016,
+        80
+      ],
+      "fits_mm": [
+        360,
+        140,
+        360
+      ],
+      "stand": "front"
+    },
+    "place_2": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        200,
+        1016,
+        80
+      ],
+      "fits_mm": [
+        360,
+        140,
+        360
+      ],
+      "stand": "front"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      900,
+      1250,
+      500
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "knob"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "tug",
+          "at": "knob"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "drawer_opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "knob"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "tug",
+          "at": "knob"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "drawer_closed"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:drawer_chest",
+    "table": [
+      {
+        "part": "drawer",
+        "field": "open",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "true": 320,
+          "false": 0
+        },
+        "over_us": 350000
+      }
+    ],
+    "shape": {
+      "round": 4,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            -438,
+            625,
+            0
+          ],
+          "size": [
+            24,
+            1250,
+            500
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            438,
+            625,
+            0
+          ],
+          "size": [
+            24,
+            1250,
+            500
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            625,
+            -240
+          ],
+          "size": [
+            900,
+            1250,
+            20
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1265,
+            5
+          ],
+          "size": [
+            930,
+            30,
+            530
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            40,
+            0
+          ],
+          "size": [
+            900,
+            80,
+            480
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            990,
+            0
+          ],
+          "size": [
+            850,
+            20,
+            470
+          ],
+          "round": 0,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1105,
+            -220
+          ],
+          "size": [
+            850,
+            210,
+            10
+          ],
+          "round": 0,
+          "tint": "inside"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            840,
+            240
+          ],
+          "size": [
+            840,
+            270,
+            20
+          ],
+          "round": 0,
+          "tint": "front"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -220,
+            840,
+            265
+          ],
+          "r": 22,
+          "segments": 5,
+          "tint": "brass"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            220,
+            840,
+            265
+          ],
+          "r": 22,
+          "segments": 5,
+          "tint": "brass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            550,
+            240
+          ],
+          "size": [
+            840,
+            270,
+            20
+          ],
+          "round": 0,
+          "tint": "front"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -220,
+            550,
+            265
+          ],
+          "r": 22,
+          "segments": 5,
+          "tint": "brass"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            220,
+            550,
+            265
+          ],
+          "r": 22,
+          "segments": 5,
+          "tint": "brass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            260,
+            240
+          ],
+          "size": [
+            840,
+            270,
+            20
+          ],
+          "round": 0,
+          "tint": "front"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -220,
+            260,
+            265
+          ],
+          "r": 22,
+          "segments": 5,
+          "tint": "brass"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            220,
+            260,
+            265
+          ],
+          "r": 22,
+          "segments": 5,
+          "tint": "brass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1105,
+            240
+          ],
+          "size": [
+            840,
+            200,
+            20
+          ],
+          "round": 0,
+          "tint": "front",
+          "role": "drawer",
+          "pivot": [
+            0,
+            1105,
+            250
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            1080,
+            20
+          ],
+          "size": [
+            12,
+            150,
+            420
+          ],
+          "round": 0,
+          "tint": "inside",
+          "role": "drawer",
+          "pivot": [
+            0,
+            1105,
+            250
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            400,
+            1080,
+            20
+          ],
+          "size": [
+            12,
+            150,
+            420
+          ],
+          "round": 0,
+          "tint": "inside",
+          "role": "drawer",
+          "pivot": [
+            0,
+            1105,
+            250
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1010,
+            20
+          ],
+          "size": [
+            800,
+            12,
+            420
+          ],
+          "round": 0,
+          "tint": "inside",
+          "role": "drawer",
+          "pivot": [
+            0,
+            1105,
+            250
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1080,
+            -190
+          ],
+          "size": [
+            800,
+            150,
+            12
+          ],
+          "round": 0,
+          "tint": "inside",
+          "role": "drawer",
+          "pivot": [
+            0,
+            1105,
+            250
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            1105,
+            265
+          ],
+          "r": 22,
+          "segments": 6,
+          "tint": "brass",
+          "role": "drawer",
+          "pivot": [
+            0,
+            1105,
+            250
+          ]
+        }
+      ],
+      "palette": {
+        "wood": "#7f5535",
+        "front": "#93613f",
+        "inside": "#c9a77c",
+        "brass": "#c8a24a"
+      },
+      "tags": [
+        "furniture",
+        "storage",
+        "drawers"
+      ]
+    }
+  },
+  "text": {
+    "card": "A chest of drawers: pull the top drawer open and keep two small things in it."
+  },
+  "card": {
+    "text": "card"
+  }
+}

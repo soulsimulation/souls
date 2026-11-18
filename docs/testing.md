@@ -36,6 +36,27 @@ when you change `tools/body-authoring/robot/` or the humanoid renderer it fits.
 `--test-concurrency=1`. Prefer `node --test` on the files you touched while iterating; the full suite belongs to CI
 and the remote gate.
 
+### The Soul client file
+
+`tools/world-launcher/soul/eden.mjs` is served and copied as one file, so `inline.mjs` inlines the client's modules
+(the `MODULES` it lists: `soul/*.mjs` and `packages/form-rules/src/rules.ts`) into generated blocks of it. **A pull
+request does not carry the rebuilt file.** Edit the module (or eden.mjs's own code outside the blocks) and leave the
+blocks as they are, so two PRs that change form rules never collide on eden.mjs. Who builds it:
+
+- **CI**: every `qualify` job runs `node tools/world-launcher/soul/inline.mjs` before its checks, so PR, merge-group
+  and main runs test the client built from that head. A module that cannot be inlined fails the job, and the launcher
+  test `inline: inline.mjs builds eden.mjs from its modules` checks the same locally.
+- **Main**: `eden-sync.yml` runs after each push to main that touches a module. When the committed copy is stale it
+  opens one pull request carrying only the rebuilt file (branch `bot/eden-sync-<sha>`, labelled `merge:ready`), so
+  checkouts, tools and local worlds that read eden.mjs from git catch up within a queue cycle.
+- **Release**: `release-client.mjs stamp` rebuilds a stale copy into the stamp commit, so the client a world serves
+  (`/eden.mjs`, and `upgrade` on users' machines) always matches the rules the release runs.
+
+Locally, run `node tools/world-launcher/soul/inline.mjs` before running tests that load eden.mjs after a module
+change. Then leave the rebuilt blocks out of your commit: `git checkout tools/world-launcher/soul/eden.mjs` when you
+did not edit eden.mjs's own code, or `git add -p` it when you did. `inline.mjs --check` says whether a copy is
+current.
+
 ## Walk gate
 
 Walkability is a release invariant. `apps/server/src/god/walk-audit.ts` audits fixed fixture copies of several worlds,
@@ -167,7 +188,8 @@ therefore **windowed**:
 - Pushes to main, the daily run, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its
   daily full-scope runs, which the merge train reads (see CI on main below). A merge-group run is path-scoped over
   everything in the group since `main`, without the heavy legs, and
-  `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
+  `proof-ok` is skipped there (no runner; a skipped required check counts as passing), because a PR passes it at its
+  head to enter the queue.
 
 **Low-risk paths.** When every file a PR or a merge group changes sits under `tools/entry/`, `content/kinds/`,
 `content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
@@ -208,6 +230,14 @@ tree and cached baseline don't change.
 `soul-tools`, about 17 s measured on a loaded laptop. It is picked by its own paths (`tools/soul-runtime`,
 `tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
 `ci-ok`. Like `soul-actions`, it is not a gate step.
+
+**Engine v2 (`v2/`).** The CI job `v2` builds and tests the Rust workspace under `v2/` with `v2/tools/ci.sh`, on the
+toolchain `v2/rust-toolchain.toml` pins, with a cargo cache keyed on that file and `v2/Cargo.lock`; it skips the pnpm
+install. It is picked by its own paths (`v2/`) and by every full-scope run. A change only under `v2/` runs that job
+alone, has release-gate scope `none` (no walk, bundle, conformance or remote gate) and is T1, its docs included. The
+strict tiers for the core (`v2/crates/sim`, `replica`, `skills` T3; `v2/web` T2) are written in
+`docs/process/PROOF-POLICY.yml` and switched on at the cut-over by X8 (#2839). The publication check and the secret
+scanner always apply. Later tasks add their steps to `v2/tools/ci.sh`, not new jobs.
 
 **Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
 whose hosted median is over about 8 minutes: `packages`, `launcher`, `soul-actions`) run on the runners named by the

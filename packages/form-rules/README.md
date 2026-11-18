@@ -106,6 +106,14 @@ on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.
 actor to the thing. Effects are worked out in order on a copy, so a later one sees an earlier one; one that cannot be
 done refuses the whole form with `{verdict: "no", reason, effect, detail}`.
 
+A stock's take (an entry's `stock` section names the form, [#2851](https://github.com/soulsimulation/souls/issues/2851))
+is one event: its `create` into `actor_hand`, marked `stock: <name>` (and `carries`, the text fields the thing
+carries by reference), and a `set` of the count with `by: -1`. The make is the other side of that `by`, so `apply`
+counts it and the event balances. A take from an empty stock is refused `empty`, and from a container whose `closed`
+audience does not include the actor (not linked by the link it names) `closed`, each as `{verdict: "no", reason,
+effect, detail}` before the rules are asked. `stockList(kinds, state, node)` answers what a container is known to
+hold, or `null` while it is closed to the actor; a case may name such reads in `lists`.
+
 `apply(state, result)` applies a result to plain state, all of it or none: a refusal changes nothing; a receipt
 already in `state.applied` changes nothing and says `again: true`; an event whose `by`s do not sum to zero, or a
 change that cannot apply or a value outside the profile, refuses the batch with its index.
@@ -236,6 +244,36 @@ state, the `activity` node, and the Souls who `enter` in order: each with its `a
 `enter` should return (`expect`). The test checks that every body is where the rules placed it and that no place is
 given twice. Then it compares the nodes `after`. The examples are a lecture in three rooms and a supper whose host
 must be its owner. Both are test kinds, because `roles` is not in the entry format yet.
+
+### Leaving, the "now" line and the end
+
+`leave(input)` takes a rule case's input whose act is a leaving form: the form that unlinks one role from the actor.
+It asks who may, works out the form's effects, then applies the role's rule for leaving. A `required` role leaving,
+or the last member leaving, ends the activity: the rules add a `released` event (every remaining member unlinked, and
+a body in the activity's own slots moved out to its place) and an `ended` event (the activity removed). Their names
+carry the kind's namespace. It returns the effects with `role` and `ended` (1 or 0).
+
+`nowLine({kinds, state, node, asker})` reads the kind's `now` section: `{floor, stage, ends_us}`. `ends_us` is the
+first microsecond the `ends` timed field reaches 0 (SA-F5a's `crossing`). A part outside the asker's audience is left
+out and named in `unseen`. An activity nobody entered is removed by its own world form at that time; the engine's
+timer runs it with `effects`.
+
+A file in `cases/activity/leave/` is `{"format": "souls-activity-steps/1", "about": ..., "cases": [...]}`. Each case
+has a state, the `activity` node and `steps` in order. A step does `enter`, `leave`, `now` (the now line) or `world`
+(the world's form at `now_us`), with what it should return (`expect`). The test checks that no step removes a body.
+Then it compares the nodes `after` and checks that the nodes in `gone` are removed. The example is a one-off talk
+(`test:talk`).
+
+### A standing activity
+
+A kind with a `standing` section (see the format page) outlasts a sitting. `join(input)` runs a form that links the
+actor as a member, with no place. `enter` and `leave` then also keep the stage: once `enough` are present as one
+arrives, a `sitting_began` event sets the stage to `sitting`; when the last one present rises, `sitting_ended` returns
+it to `idle`; a member who is present cannot part (`still_present`); and a standing activity is not ended by its last
+member parting. `lapse(input)` is the end date: it runs the world form (the engine's timer, at the time its needs
+state) and puts a `released` event first, unlinking every member; it moves no body. Cases are in `cases/activity/standing/`
+(the same step format, with `join` and `world` running `lapse`); the example is a weekly class (`test:class`).
+
 ## Looks
 
 `looks(input)` in `src/looks.ts` (SA-D1a, [#2885](https://github.com/soulsimulation/souls/issues/2885)) turns a kind's

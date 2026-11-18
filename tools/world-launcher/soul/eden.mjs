@@ -3189,10 +3189,6 @@ const MAX_HANDS = 8;
                     
                                                                        
                        
-                                                                                    
-                
-                                                                                                                        
-              
   
 /** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
                                                                                                                                  
@@ -3285,13 +3281,12 @@ function decide(input       )          {
   // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
   const sees = (audience          ) => seesAudience(asker.sees, audience);
 
-  // A fix taken only from data: a form of this kind that anyone, or its holder, may start as an act and has an effect
-  // that meets the need. A holder's form refused for want of holding names its own fix (take).
+  // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
   // `ready`, when given, passes over a form its own needs would refuse now (a dimmer step on a lamp that is dark).
   const formFix = (meets                        , ready                       )             => {
     for (const name of sorted(entry.forms)) {
       const f = entry.forms [name];
-      if (name === act.form || (f.who !== 'anyone' && f.who !== 'holder') || f.starts !== 'act') continue;
+      if (name === act.form || f.who !== 'anyone' || f.starts !== 'act') continue;
       if (ready && !ready(f)) continue;
       if ((f.effects ?? []).some(meets)) return { form: name };
     }
@@ -3329,10 +3324,8 @@ function decide(input       )          {
       if (meets(value)) return { ok: true };
       const wanted                          = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n                           )[k];
-      // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does;
       // the fix's own needs on this field must hold now, or it would be refused in turn
-      const fix = formFix((e) => (e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
-        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))),
+      const fix = formFix((e) => e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to),
         (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
@@ -3951,7 +3944,36 @@ function roomBrief(ix, { me, live, plan, snap, changed, bytes = ROOM_BRIEF_BYTES
   while (size(out) > bytes && cards > 0) out = build(--cards, purposes);
   return out;
 }
-return { ROOM_BRIEF_BYTES, OUTWARD_MAX, CHANGES_MAX, snapshotOf, changesOf, changedLine, roomBrief };
+
+/** SA-C9: the nearest building (or house) a place is in, or the place itself: what "this house" means from this copy. */
+const houseOf = (ix, id) => { for (let p = ix.place(id ?? ""), n = 0; p && n < 12; p = p.parent ? ix.places.get(p.parent) : null, n++) if (p.kind === "building" || p.kind === "house") return p.id; return id; };
+
+/** The things of a kind in this room or house, from the copy: nearest first, at most `max`, with how many were left out. */
+function eachOf(ix, me, { each, in: where = "room", max }) {
+  if (!me?.place) return { error: "this copy does not say where I am: no room to list from" };
+  const scope = ix.within(where === "house" ? houseOf(ix, me.place) : me.place), name = (k) => String(k).split(":").pop();
+  const all = ix.cat.things.filter((t) => scope.has(t.place) && (t.kind === each || name(t.kind) === each)).map((t) => ({ t, d: dist(me.at, t.at) ?? 1e9 }))
+    .sort((a, b) => a.d - b.d || (a.t.id < b.t.id ? -1 : 1)).map((x) => x.t);
+  return { things: all.slice(0, max), more: Math.max(0, all.length - max) };
+}
+
+/** Plan steps with each repeated step replaced by one step per thing it finds (`each` on a step says which). Nothing is sent. */
+function expandEach(ix, me, steps, limit = 24) {
+  const out = [], note = [];
+  for (const s of steps) {
+    if (!s.each) { out.push(s); continue; }
+    const r = eachOf(ix, me, s);
+    if (r.error) return r;
+    if (!r.things.length) return { error: `this copy lists no ${s.each} in this ${s.in}: nothing was sent` };
+    const entry = ix.cat.entries?.[r.things[0].kind];
+    if (entry && !entry.forms?.[s.form]) return { error: `${s.each} has no form "${s.form}": its forms are ${Object.keys(entry.forms ?? {}).join(", ") || "none"}` };
+    r.things.forEach((t, i) => out.push({ id: `object:${t.id}:${s.form}`, ...(s.params ? { params: s.params } : {}), each: { kind: s.each, n: i + 1, of: r.things.length } }));
+    note.push({ kind: s.each, in: s.in, steps: r.things.length, ...(r.more ? { left_out: r.more, why: `max ${s.max}` } : {}) });
+  }
+  if (out.length > limit) return { error: `that makes ${out.length} steps; a plan has at most ${limit}` };
+  return { steps: out, each: note };
+}
+return { ROOM_BRIEF_BYTES, OUTWARD_MAX, CHANGES_MAX, snapshotOf, changesOf, changedLine, roomBrief, eachOf, expandEach };
 })();
 // </inline room.mjs>
 // <inline net.mjs> generated by inline.mjs: edit net.mjs, not this block
@@ -4550,7 +4572,7 @@ return { SHOOT_KINDS, SHOOT_USAGE, NO_BROWSER, parseShootArgs, findPlaywright, h
 // every fetch this client makes goes through the proxy its environment names (HTTPS_PROXY, NO_PROXY), as worldFetch does
 const fetch = soulNet.netFetch;
 
-const VERSION = "2.36.1";
+const VERSION = "2.36.2";
 // #1936: every request this client makes says which client it is
 const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";
@@ -6660,11 +6682,15 @@ async function act(...argv) {
 // SA-C8: `act <id> --else <id> --else any:sit`: the ranked list the act carries. The client sends the first; when the world
 // refuses it, or the act it began ends failed before it held, the next is sent at once: the mind is not woken between. An
 // entry is an offered id, `{"id":...,"params":...}`, or `any:sit`, which stands for the seats in this Soul's own room, nearest
-// first (this copy's guess: the world decides each). The answer says which entry held (`fallback.took`), or, when the list runs
+// first, a crowd spread over the nearest few (this copy's guess: the world decides each). The answer says which entry held (`fallback.took`), or, when the list runs
 // out, every entry with the world's word (`fallback.tried`) and what the world last offered (`did_you_mean`): that is the one
 // wake. A write the world did not confirm, an act limit and a stop are never tried past: the next entry could double the act.
 export const FALLBACK_MAX = 12, ANY_SEAT = "any:sit";
 const NO_FALLBACK = new Set(["rate-limited", "act.stopped", "act.replaced"]);
+/** any:sit spreads a crowd over the nearest FALLBACK_SPREAD free seats: a pick drawn from the Soul's id and the try, the same on
+ *  every run. Wider is worse: past the seats the world names free, the copy cannot tell a taken seat from a free one. */
+export const FALLBACK_SPREAD = 3;
+const spreadOf = (id, n) => { let h = 2166136261; for (const c of String(id ?? "")) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return n > 1 ? h % n : 0; };
 const entryOf = (e, shared) => typeof e === "string" ? { id: e, ...(shared ? { params: shared } : {}) } : e && typeof e.id === "string" ? { id: e.id, ...(e.params ? { params: e.params } : {}) } : null;
 async function actRanked(first, ranked, o) {
   const shared = first.params?.seconds !== undefined ? { seconds: first.params.seconds } : undefined;   // a duration is the same wherever
@@ -6678,8 +6704,11 @@ async function actRanked(first, ranked, o) {
       // the seats the world just named free (its own `did_you_mean`) first, then this room's seats nearest first
       const named = (last?.did_you_mean ?? []).map((d) => d?.id).filter((id) => /^sit:/.test(id ?? ""));
       const ids = [...new Set([...named, ...soulCatalog.seatsHere(ix, me?.place, me?.at, [...seen, ...queue.map((x) => x.id)])])].filter((id) => !seen.has(id));
-      // one seat at a time, read again after each refusal: what is free changes while the others are asking too
-      if (ids.length) queue.unshift({ id: ids[0], ...(shared ? { params: shared } : {}) }, e);
+      // one seat at a time, read again after each refusal: what is free changes while the others are asking too. A crowd refused
+      // together hears the same free seats, so each Soul takes its own one of the nearest few, drawn again on each try: all
+      // asking for the nearest, all but one would be refused again on every try, and the last would run out of tries.
+      const pick = spreadOf(`${load().soul}:${tried.length}`, Math.min(ids.length, FALLBACK_SPREAD));
+      if (ids.length) queue.unshift({ id: ids[pick], ...(shared ? { params: shared } : {}) }, e);
       continue;
     }
     if (seen.has(e.id)) continue; seen.add(e.id);
@@ -7916,10 +7945,11 @@ export function takePending(st, now = Date.now(), heldMs = soulWake.HELD_MS, rea
 // plan lives in SERVE_STATE and each step keeps its clientRef, so a killed serve carries on and the world acts once.
 const PLAN_STEPS_MAX = 24, PLAN_FIX_WAIT_MS = 120_000, PLAN_ENDED_MAX = 20, PLAN_STEP_ID = /^[a-z][\w-]*(?::\S+)?$/i;   // some offers have no target: pray
 const PLAN_OVER = new Set(["done", "failed", "replaced"]);
+const EACH_USAGE = `a repeated step: {"each":"<kind>","form":"<form>","in":"room"|"house","max":<n>}  (for example {"each":"lamp","form":"turn_off","in":"room","max":6}: the form on each lamp the copy lists, nearest first, one after another)`;
 const plainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
 /** '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' → {steps, fixes}. Throws what is wrong. */
-export function parsePlanSteps(text) {
+export function parsePlanSteps(text, { each = false } = {}) {
   const usage = `usage: plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for <message-id>|none], or plan '[{"id":"walk:pond","fixes":2}]' to replace refused step 2`;
   let list; try { list = JSON.parse(text); } catch { throw new Error(usage); }
   if (!Array.isArray(list) || !list.length) throw new Error(usage);
@@ -7927,6 +7957,16 @@ export function parsePlanSteps(text) {
   let fixes;
   const steps = list.map((x) => {
     const s = typeof x === "string" ? { id: x } : x;
+    // SA-C9: "for each <kind> in this room|house, up to <max>": one step the plan expands from this machine's copy (`expandEach`)
+    if (plainObject(s) && s.each !== undefined) {
+      const bad = Object.keys(s).filter((k) => !["each", "form", "in", "max", "params"].includes(k));
+      if (!each) throw new Error(`a repeated step ({"each":…}) is for plan, which runs it now; a schedule entry holds named steps`);
+      if (bad.length || typeof s.each !== "string" || !/^[\w:.-]+$/.test(s.each) || typeof s.form !== "string" || !/^[\w-]+$/.test(s.form)) throw new Error(EACH_USAGE);
+      if (s.in !== undefined && !["room", "house"].includes(s.in)) throw new Error(`"in" is "room" or "house": ${EACH_USAGE}`);
+      if (!Number.isInteger(s.max) || s.max < 1 || s.max > PLAN_STEPS_MAX) throw new Error(`"max" is a whole number from 1 to ${PLAN_STEPS_MAX}: ${EACH_USAGE}`);
+      if (s.params !== undefined && !plainObject(s.params)) throw new Error(`${s.each}: params must be a JSON object`);
+      return { each: s.each, form: s.form, in: s.in ?? "room", max: s.max, ...(s.params ? { params: s.params } : {}) };
+    }
     if (!plainObject(s) || typeof s.id !== "string") throw new Error(usage);
     // SA-C4a: a step names what to do and nothing about when. A wait is a schedule entry of the client's own (`wake add … --plan`).
     const stray = Object.keys(s).filter((k) => !["id", "params", "fixes"].includes(k));
@@ -7998,6 +8038,7 @@ export function planView(p) {
   const refused = p.steps.find((s) => s.state === "refused");
   return {
     id: p.id, state: p.state, step: Math.min(p.at + 1, p.steps.length), of: p.steps.length, ...(p.for ? { for: p.for } : {}),
+    ...(p.steps.some((s) => s.each) ? { each: [...new Set(p.steps.filter((s) => s.each).map((s) => s.each.kind))].map((k) => ({ kind: k, done: p.steps.filter((s) => s.each?.kind === k && ["done", "held"].includes(s.state)).length, of: p.steps.filter((s) => s.each?.kind === k).length })) } : {}),
     steps: p.steps.map((s, i) => ({ n: i + 1, id: s.id, state: s.state, ...(s.receipt ? { receipt: s.receipt } : {}), ...(s.carried ? { carried: "the act already under way, kept from the plan this replaced" } : {}), ...(s.why ? s.why : {}) })),
     ...(p.state === "stopped" && refused ? { next: `Step ${p.at + 1} was refused. Send one replacement: plan '[{"id":"<offered id>","fixes":${p.at + 1}}]'. Otherwise the plan ends failed.` } : {}),
   };
@@ -8369,6 +8410,16 @@ async function serveForeground() {
         if (p.state !== "running") return;
         const s = p.steps[p.at];
         if (s.state !== "pending") return;
+        // SA-C9: a step from a repeated one is asked of this machine's copy first (SA-C3's `can`): a definite no is a refusal with
+        // nothing sent, and the rest of the repeat is not tried. An unknown never blocks: the world decides.
+        if (s.each) {
+          const o = soulCanI.parseOffer(s.id), c = o ? await worldCopy({ local: true }).catch(() => null) : null;
+          const v = c ? soulCanI.canI(c.ix, o.thing, o.form, { args: s.params ?? {}, copy: c.live, me: c.me }) : null;
+          if (v?.can === "no") {
+            planRefused(p, s, { code: "can.no", reason: v.missing?.text ?? "the copy says no", ...(v.next ? { next: v.next } : {}), sent: "nothing" }, Date.now());
+            persist(); log(`plan: step ${p.at + 1} not possible by the copy (${s.id})`); wake(); return;
+          }
+        }
         const last = p.at === p.steps.length - 1;
         // Only the last step closes the owner's message; an earlier one posts progress and the card stays open (the world's D3c).
         const reportT0 = performance.now();   // a plan's step is this process's own request; a proxied one is recorded by the CLI that asked
@@ -8783,10 +8834,18 @@ async function plan(...argv) {
     return a;
   }
   const { args, for: forArg } = waitOption(argv);
-  const { steps, fixes } = parsePlanSteps(args[0] ?? "");
+  let { steps, fixes } = parsePlanSteps(args[0] ?? "", { each: true });
   const up = await askServe({ op: "status" });
   if (!up?.serving) throw new Error(`A plan runs in serve, and none is up in this folder. Start one: ${CLI} serve`);
   let copy = null; try { copy = await worldCopy(); } catch { /* no local copy: no step is vouched for */ }
+  let eachNote;
+  if (steps.some((x) => x.each)) {
+    if (fixes) throw new Error("a repeated step cannot replace a refused step");
+    if (!copy?.ix) throw new Error(`a repeated step is listed from this machine's copy of the world, and there is none yet: ${CLI} catalog --refresh`);
+    const e = soulRoom.expandEach(copy.ix, copy.me, steps);
+    if (e.error) { process.exitCode = 2; return { accepted: false, code: "plan.each", reason: e.error, sent: "nothing" }; }
+    steps = e.steps; eachNote = e.each;
+  }
   const known = copy?.ix ?? null, souls = otherSouls(copy?.live);
   const bad = known ? steps.findIndex((x) => planUnknown(known, x.id, souls)) : -1;
   if (bad >= 0) { process.exitCode = 2; return planUnknownAnswer(known, fixes ?? bad + 1, steps[bad].id, { at: copy.me?.at, here: copy.me?.place, states: copy.live?.live?.things, souls }); }
@@ -8797,7 +8856,7 @@ async function plan(...argv) {
   if (!a || a.lost) throw new Error("the serve process stopped before it took the plan");
   if (!a.accepted) process.exitCode = 2;
   else if (implicit) save({ lastAckedActed: true });
-  return a.accepted && unchecked.length ? { ...a, unchecked } : a;
+  return a.accepted ? { ...a, ...(unchecked.length ? { unchecked } : {}), ...(eachNote ? { each: eachNote } : {}) } : a;
 }
 
 // batch '[{"here":{}},{"receipt":"r_1"}]': several reads in one call; each answer or error stands on its own.
@@ -8987,7 +9046,7 @@ const HELP = [
     `serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)`,
   ],
   ["",
-    `plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)`,
+    `plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why; one step may repeat over a kind: {"each":"lamp","form":"switch_off","in":"room"|"house","max":6} lists them from this copy, nearest first, asks can before each and stops at the first no; plan '[{"id":"<id>","fixes":<step>}]' replaces it once)`,
   ],
   ["",
     `wake [add <act-ended|plan-finished|soul-arrives|place-busy|idle> [params-json] [--every s] | add at <ISO time> | add every <minutes ≥ 5> | remove <id>]   (when serve wakes you, besides the owner, speech to you and a refused plan step)`,

@@ -501,7 +501,8 @@ test('workflow: every required check reports on merge_group, and queue entries n
   const proof = read('proof-check.yml');
   assert.match(proof, /group: proof-check-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
   assert.match(proof, /cancel-in-progress: \$\{\{ github\.event_name != 'merge_group' \}\}/);
-  assert.match(proof, /if: github\.event_name == 'merge_group' \|\| \(?github\.event\.pull_request\.draft == false/);
+  // On a merge group proof-ok reports as skipped (a job skipped by its `if` counts as passing) and takes no runner.
+  assert.match(proof, /if: github\.event_name != 'merge_group' && github\.event\.pull_request\.draft == false/);
 });
 
 test('workflow: only a label being added starts the train or the kick; removing one does not', async () => {
