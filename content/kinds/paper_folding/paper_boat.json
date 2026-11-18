@@ -44,6 +44,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,4,0],"size":[250,8,90],"tint":"fold"},{"kind":"box","at":[0,45,-55],"size":[250,90,6],"pitch":-22918,"tint":"paper"},{"kind":"box","at":[0,45,55],"size":[250,90,6],"pitch":22918,"tint":"paper"},{"kind":"extrude","at":[0,0,0],"polygon":[[-110,0],[110,0],[0,120]],"h":6,"pitch":-90000,"tint":"paper"},{"kind":"box","at":[-110,35,0],"size":[6,70,110],"roll":-25783,"tint":"paper"},{"kind":"box","at":[110,35,0],"size":[6,70,110],"roll":25783,"tint":"paper"}],"palette":{"paper":"#f0dfb7","fold":"#d1b77e"},"tags":["art","paper","item","object"]},
     "model": "look:paper_boat"

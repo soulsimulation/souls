@@ -130,6 +130,8 @@
       1000
     ]
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,1000,0],"size":[1500,80,1000],"tint":"backing"},{"kind":"box","at":[-650,480,-350],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[-650,480,350],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[650,480,-350],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[650,480,350],"size":[60,960,60],"tint":"wood"}],"palette":{"backing":"#efe2c3","wood":"#9c7952"},"tags":["art","collage","board","object"]},
     "model": "look:collage_board"

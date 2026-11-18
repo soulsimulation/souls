@@ -130,6 +130,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,2,0],"size":[380,4,40],"tint":"page"},{"kind":"box","at":[-40,4,0],"size":[260,1,8],"when":"@ink>=1","tint":"ink"}],"palette":{"page":"#f1e3be","ink":"#273749"},"tags":["writing","line","object"]},
     "model": "look:journal_entry"

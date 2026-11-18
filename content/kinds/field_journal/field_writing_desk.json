@@ -53,6 +53,8 @@
       650
     ]
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {"round":0,"shapes":[{"kind":"box","at":[-430,480,-230],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[-430,480,230],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[430,480,-230],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[430,480,230],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[0,980,0],"size":[1000,40,650],"tint":"wood"},{"kind":"box","at":[-340,1035,-140],"size":[120,70,120],"when":"@ink>=1","tint":"ink"}],"palette":{"wood":"#84603e","ink":"#263646"},"tags":["camping","writing","desk","object"]},
     "model": "look:field_writing_desk"

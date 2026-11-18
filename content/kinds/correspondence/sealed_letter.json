@@ -197,6 +197,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,120,0],"size":[340,240,18],"tint":"paper"},{"kind":"box","at":[0,185,14],"size":[280,45,12],"when":"@stage!=opened","tint":"fold"},{"kind":"box","at":[0,253,-12],"size":[280,65,12],"when":"@stage=opened","tint":"fold"},{"kind":"sphere","at":[0,185,32],"r":30,"segments":8,"scale":[1000,1000,300],"when":"@stage=sealed","tint":"wax"},{"kind":"sphere","at":[-45,190,32],"r":18,"segments":6,"scale":[1000,1000,350],"when":"@stage=opened","tint":"wax"},{"kind":"sphere","at":[40,240,4],"r":18,"segments":6,"scale":[1000,1000,350],"when":"@stage=opened","tint":"wax"},{"kind":"box","at":[0,110,11],"size":[240,6,3],"when":"@stage!=blank","tint":"ink"},{"kind":"box","at":[-30,80,11],"size":[180,6,3],"when":"@stage!=blank","tint":"ink"}],"palette":{"paper":"#eee4c7","fold":"#d8cbaa","wax":"#a52d37","ink":"#34302d"},"tags":["item","correspondence","letter","object"]},
     "model": "look:sealed_letter"

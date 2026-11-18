@@ -165,6 +165,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,965,0],"size":[1200,30,700],"tint":"wood"},{"kind":"box","at":[-500,475,-250],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[-500,475,250],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,-250],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,250],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[350,990,0],"size":[400,20,360],"tint":"tray"},{"kind":"box","at":[-150,984,140],"size":[350,8,320],"tint":"mat"},{"kind":"box","at":[-150,1009,140],"size":[280,6,280],"yaw":0,"when":"@sheets>=1","tint":"paper"},{"kind":"box","at":[-150,1017,140],"size":[280,6,280],"yaw":2292,"when":"@sheets>=2","tint":"paper"}],"palette":{"wood":"#8b6746","tray":"#57483e","mat":"#698e83","paper":"#f0dfb7"},"tags":["art","paper","desk","object"]},
     "model": "look:folding_desk"

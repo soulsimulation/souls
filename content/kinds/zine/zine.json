@@ -390,6 +390,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,7,0],"size":[380,14,270],"tint":"paper"},{"kind":"box","at":[8,19,0],"size":[360,10,250],"tint":"paper"},{"kind":"box","at":[15,30,0],"size":[340,10,230],"tint":"paper"},{"kind":"box","at":[0,44,0],"size":[400,14,290],"when":"@stage=bound","tint":"cover"},{"kind":"box","at":[-193,28,0],"size":[14,56,290],"when":"@stage=bound","tint":"spine"},{"kind":"box","at":[100,37,80],"size":[160,6,20],"when":"@binding>=1&@stage=draft","tint":"spine"}],"palette":{"paper":"#eee2c7","cover":"#416c7b","spine":"#b36a45"},"tags":["art","paper","booklet","object"]},
     "model": "look:zine"

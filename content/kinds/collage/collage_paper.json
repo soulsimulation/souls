@@ -128,6 +128,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,5,0],"size":[300,10,180],"when":"@colour=red&@shape=wide","tint":"red"},{"kind":"box","at":[0,5,0],"size":[180,10,300],"when":"@colour=red&@shape=tall","tint":"red"},{"kind":"box","at":[0,5,0],"size":[300,10,180],"when":"@colour=blue&@shape=wide","tint":"blue"},{"kind":"box","at":[0,5,0],"size":[180,10,300],"when":"@colour=blue&@shape=tall","tint":"blue"},{"kind":"box","at":[0,5,0],"size":[300,10,180],"when":"@colour=gold&@shape=wide","tint":"gold"},{"kind":"box","at":[0,5,0],"size":[180,10,300],"when":"@colour=gold&@shape=tall","tint":"gold"}],"palette":{"red":"#d2644f","blue":"#5296ce","gold":"#e3bb4f"},"tags":["art","paper","item","object"]},
     "model": "look:collage_paper"

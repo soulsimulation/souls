@@ -50,6 +50,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,9,0],"size":[440,18,300],"tint":"cover"},{"kind":"box","at":[0,25,0],"size":[420,14,280],"tint":"page"},{"kind":"box","at":[0,35,0],"size":[8,6,280],"tint":"cover"}],"palette":{"cover":"#633c2d","page":"#f1e3be"},"tags":["camping","writing","item","object"]},
     "model": "look:field_journal"
