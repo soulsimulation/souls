@@ -3,3 +3,13 @@
 
 # Nothing under v2/ is published yet, so Clippy may suggest changes to public signatures too.
 avoid-breaking-exported-api = false
+
+# The wall-clock rule (K7, #2647): the engine reads time only through `sim::clock::Clock`, never a clock itself
+# (v2/docs/time.md rule 10). Code that must read one (worldd's real clock, a tool or a test that times a run) allows
+# `clippy::disallowed_methods` by name where it does, and says why.
+disallowed-methods = [
+  { path = "std::time::Instant::now", reason = "the wall-clock rule (K7, TRUNK T5): read time through sim::clock::Clock" },
+  { path = "std::time::Instant::elapsed", reason = "the wall-clock rule (K7, TRUNK T5): read time through sim::clock::Clock" },
+  { path = "std::time::SystemTime::now", reason = "the wall-clock rule (K7, TRUNK T5): read time through sim::clock::Clock" },
+  { path = "std::time::SystemTime::elapsed", reason = "the wall-clock rule (K7, TRUNK T5): read time through sim::clock::Clock" },
+]
