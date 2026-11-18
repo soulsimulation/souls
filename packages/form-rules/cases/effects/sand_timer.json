@@ -1,0 +1,233 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The sand timer (from #1822): five seconds timed, a second interval refused until it is flipped, then ten and fifteen seconds with a flip between; the Soul takes it.",
+ "cases": [
+  {
+   "name": "time_refuse_flip_time_flip_time_take",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:sand_timer"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "time_5s"
+     },
+     "receipt": "rs1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "sand",
+        "n": 1,
+        "to": "bottom"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:interval_timed",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "time_10s"
+     },
+     "receipt": "rs2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "fix": {
+       "form": "flip"
+      },
+      "says": "flip_first"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "flip"
+     },
+     "receipt": "rs3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "sand",
+        "n": 1,
+        "to": "top"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:flipped",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "time_10s"
+     },
+     "receipt": "rs4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "sand",
+        "n": 1,
+        "to": "bottom"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:interval_timed",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "flip"
+     },
+     "receipt": "rs5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "sand",
+        "n": 1,
+        "to": "top"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:flipped",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "time_15s"
+     },
+     "receipt": "rs6",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "sand",
+        "n": 1,
+        "to": "bottom"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:interval_timed",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "take"
+     },
+     "receipt": "rs7",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "t1",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:taken",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:sand_timer",
+     "fields": {
+      "sand": "bottom"
+     }
+    },
+    "b1": {
+     "hands": {
+      "left": "t1",
+      "right": null
+     }
+    }
+   }
+  }
+ ]
+}

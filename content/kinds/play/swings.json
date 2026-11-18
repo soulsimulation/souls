@@ -1,0 +1,74 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:swings",
+  "owner": "thing",
+  "links": { "swinger": { "n": 1, "from": "body", "most": 2, "audience": { "rule": "everyone" } } },
+  "points": {
+    "by_swing_1": { "role": "stand", "at_mm": [-700, 0, 700] },
+    "by_swing_2": { "role": "stand", "at_mm": [700, 0, 700] }
+  },
+  "slots": {
+    "swing_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-700, 580, 0], "stand": "by_swing_1" },
+    "swing_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [700, 580, 0], "stand": "by_swing_2" }
+  },
+  "geometry": { "bounds_mm": [3400, 2470, 1931] },
+  "forms": {
+    "swing": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "place" } },
+        { "step": "sit", "slot": { "arg": "place" } },
+        { "step": "wait", "us": 30000000 }
+      ],
+      "effects": [
+        { "change": "link", "link": "swinger", "from": "actor", "event": "began_to_swing" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "sat_down" }
+      ]
+    },
+    "get_off": {
+      "who": { "link": "swinger" },
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "swinger", "from": "actor", "event": "got_off_the_swing" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_up" }
+      ]
+    },
+    "push": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "who": { "type": "thing" } },
+      "needs": [{ "need": "within_reach", "point": { "arg": "who" } }, { "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "who" } },
+        { "step": "move", "move": "press", "toward": { "arg": "who" } }
+      ],
+      "effects": []
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:swings",
+    "shape": {"shapes":[{"kind":"cyl","at":[-1600,1215,-450],"r":70,"h":2535,"segments":6,"tint":"frame","pitch":20798},{"kind":"cyl","at":[-1600,1215,450],"r":70,"h":2535,"segments":6,"tint":"frame","pitch":20798,"yaw":180023},{"kind":"cyl","at":[1600,1215,-450],"r":70,"h":2535,"segments":6,"tint":"frame","pitch":20798},{"kind":"cyl","at":[1600,1215,450],"r":70,"h":2535,"segments":6,"tint":"frame","pitch":20798,"yaw":180023},{"kind":"cyl","at":[0,2400,0],"r":70,"h":3400,"segments":6,"tint":"frame","roll":90000},{"kind":"box","at":[-900,1500,0],"size":[20,1800,20],"round":0,"tint":"rope"},{"kind":"box","at":[-500,1500,0],"size":[20,1800,20],"round":0,"tint":"rope"},{"kind":"box","at":[-700,550,0],"size":[460,10,180],"round":0,"tint":"seat1"},{"kind":"box","at":[500,1500,0],"size":[20,1800,20],"round":0,"tint":"rope"},{"kind":"box","at":[900,1500,0],"size":[20,1800,20],"round":0,"tint":"rope"},{"kind":"box","at":[700,550,0],"size":[460,10,180],"round":0,"tint":"seat2"}],"palette":{"frame":"#7d8783","rope":"#d8d4c8","seat1":"#d9534f","seat2":"#3a8fd9"},"tags":["play","swings","playground","seat"],"round":20}
+  },
+  "text": {
+    "card": "A swing set with two swings: sit on one and swing, or push a friend.",
+    "playground": "playground",
+    "swing": "swing",
+    "swing_set": "swing set",
+    "play": "play",
+    "howto_swing": "Sit on a free swing and swing; get off when you are done."
+  },
+  "card": { "text": "card", "category": "playground", "synonyms": ["swing", "swing_set", "play"] },
+  "howtos": { "swing": { "text": "howto_swing", "steps": [{ "form": "swing" }, { "form": "get_off" }] } }
+}

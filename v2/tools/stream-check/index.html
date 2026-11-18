@@ -1,0 +1,84 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>stream check</title>
+<!-- Served by run.mjs (Engine v2 V1, #2710). Given one address, the stream's directory, it plays the stream with the
+     WASM library alone: the pointer once a second, each new part once, and a playback clock two seconds behind the
+     world. It fetches nothing else but the library; it posts what it did to /result for the harness. -->
+<script type="module">
+  const stream = new URL(new URLSearchParams(location.search).get('stream'), location.href);
+  const LAG_MS = 2000;
+  const out = { played: 0, next: 0, hashes: 0, hashEqual: 0, delays: [], arrivals: [], bytes: 0, retries: 0, errors: [] };
+  const report = () => {
+    const body = JSON.stringify(out);
+    out.delays = [];
+    out.arrivals = [];
+    return fetch('/result', { method: 'POST', body });
+  };
+  const get = async (url) => {
+    const res = await fetch(url, { cache: 'no-store' });
+    return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
+  };
+  try {
+    const r = await import('/pkg/replica.js');
+    await r.default();
+    let ptr = JSON.parse(r.readPointer(await get(new URL('pointer', stream))));
+    const header = await get(new URL(`../../../headers/${ptr.header}`, stream));
+    const player = new r.StreamPlayer(header);
+    const wallOf = (world) => ptr.anchorWallMs + (world - ptr.anchorWorld) / 1000;
+    const buffer = new Map();
+    let fetched = -1;
+    let busy = false;
+    const poll = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const b = await get(new URL('pointer', stream));
+        if (b) ptr = JSON.parse(r.readPointer(b));
+        while (ptr.newest !== null && fetched < ptr.newest) {
+          const n = fetched + 1;
+          const bytes = await get(new URL(String(n), stream));
+          if (!bytes) {
+            out.retries++;
+            break;
+          }
+          const meta = JSON.parse(r.readPart(bytes));
+          out.arrivals.push(Date.now() - wallOf(meta.to));
+          out.bytes += bytes.length;
+          buffer.set(n, { bytes, meta });
+          fetched = n;
+        }
+      } catch (error) {
+        out.errors.push(String(error));
+      }
+      busy = false;
+    };
+    const play = () => {
+      const now = ptr.anchorWorld + (Date.now() - LAG_MS - ptr.anchorWallMs) * 1000;
+      for (;;) {
+        const n = Number(player.next());
+        const part = buffer.get(n);
+        if (!part || part.meta.to > now) break;
+        buffer.delete(n);
+        try {
+          const p = JSON.parse(player.play(part.bytes));
+          out.delays.push(Date.now() - wallOf(p.to));
+          out.played++;
+          out.next = n + 1;
+          if (p.hash !== null) {
+            out.hashes++;
+            if (p.hash) out.hashEqual++;
+          }
+        } catch (error) {
+          out.errors.push(`part ${n}: ${error}`);
+        }
+      }
+    };
+    await poll();
+    setInterval(poll, 1000);
+    setInterval(play, 20);
+    setInterval(report, 2000);
+  } catch (error) {
+    out.errors.push(String(error?.stack ?? error));
+    await report();
+  }
+</script>

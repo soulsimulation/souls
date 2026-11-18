@@ -1,0 +1,76 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:wind_chime (from core-wind-chime@1 and the hand-rung @2, 2026-11-09). Anyone pulls the wooden pendant once ('Pull the chime pendant once'): the chimes ring a short chime heard 10 m away and the pendant swings back; each pull counts. @2's one rule, ring only while the count is under its limit of a thousand million, is kept; at the limit nothing raises it again, so the refusal names no fix.",
+ "cases": [
+  {
+   "name": "ring_every_need_met",
+   "act": {
+    "this": "w1",
+    "form": "ring"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "w1": {
+      "kind": "eden:wind_chime"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "ring_at_the_count_limit",
+   "act": {
+    "this": "w1",
+    "form": "ring"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "w1": {
+      "kind": "eden:wind_chime",
+      "fields": {
+       "rings": 1000000000
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "rings",
+     "found": 1000000000,
+     "wanted": {
+      "at_most": 999999999
+     }
+    }
+   }
+  }
+ ]
+}

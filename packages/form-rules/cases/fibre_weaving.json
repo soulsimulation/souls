@@ -1,0 +1,90 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:table_loom (from #1634) and the cloths it makes. The loom holds two portions of thread (thread, a count). With empty hands a Soul walks to its stand and weaves for ten seconds: a portion is used and one eden:striped_cloth or eden:checked_cloth is made on its out tray. Refused as the original refused, with its words: no thread left ('This loom has no supplied thread portion left.'), the tray taken ('Take the item off the output surface before weaving cloth.') and a hand holding something ('Put down what you are holding before weaving cloth.'). A cloth is taken with a free hand.",
+  "cases": [
+    {
+      "name": "loom_weave_stripes_every_need_met",
+      "act": {"this":"l1","form":"weave_stripes"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:table_loom"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "loom_weave_stripes_no_thread",
+      "act": {"this":"l1","form":"weave_stripes"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:table_loom","fields":{"thread":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"thread","found":0,"wanted":{"at_least":1}},"fix":null,"says":"no_thread"}
+    },
+    {
+      "name": "loom_weave_stripes_tray_taken",
+      "act": {"this":"l1","form":"weave_stripes"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:table_loom","slots":{"out":["c1"]}},"c1":{"kind":"eden:striped_cloth"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":1,"detail":{"node":"l1","slot":"out"},"fix":null,"says":"take_cloth_first"}
+    },
+    {
+      "name": "loom_weave_stripes_holding_something",
+      "act": {"this":"l1","form":"weave_stripes"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:table_loom"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "loom_weave_checks_every_need_met",
+      "act": {"this":"l1","form":"weave_checks"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:table_loom"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "loom_weave_checks_no_thread",
+      "act": {"this":"l1","form":"weave_checks"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:table_loom","fields":{"thread":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"thread","found":0,"wanted":{"at_least":1}},"fix":null,"says":"no_thread"}
+    },
+    {
+      "name": "loom_weave_checks_tray_taken",
+      "act": {"this":"l1","form":"weave_checks"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:table_loom","slots":{"out":["c1"]}},"c1":{"kind":"eden:striped_cloth"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":1,"detail":{"node":"l1","slot":"out"},"fix":null,"says":"take_cloth_first"}
+    },
+    {
+      "name": "loom_weave_checks_holding_something",
+      "act": {"this":"l1","form":"weave_checks"},
+      "state": {"actor":"b1","nodes":{"l1":{"kind":"eden:table_loom"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "striped_cloth_take_every_need_met",
+      "act": {"this":"c1","form":"take"},
+      "state": {"actor":"b1","nodes":{"c1":{"kind":"eden:striped_cloth"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "striped_cloth_take_hands_full",
+      "act": {"this":"c1","form":"take"},
+      "state": {"actor":"b1","nodes":{"c1":{"kind":"eden:striped_cloth"},"b1":{"hands":{"left":"x1","right":"x2"}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "checked_cloth_take_every_need_met",
+      "act": {"this":"c1","form":"take"},
+      "state": {"actor":"b1","nodes":{"c1":{"kind":"eden:checked_cloth"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "checked_cloth_take_hands_full",
+      "act": {"this":"c1","form":"take"},
+      "state": {"actor":"b1","nodes":{"c1":{"kind":"eden:checked_cloth"},"b1":{"hands":{"left":"x1","right":"x2"}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    }
+  ]
+}

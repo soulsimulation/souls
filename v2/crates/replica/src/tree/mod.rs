@@ -16,17 +16,21 @@
 //! - **All change goes through [`Tree::apply`]** (a viewer: no kinds) or [`Tree::commit`] (the writer: the same apply
 //!   plus T2's checks, per change). A part applies whole or not at all: each step records how to undo itself, and a
 //!   refusal undoes the steps before it. A freed slot is reused only once its part has committed.
+//! - **Each node keeps its hash** (K5, #2669; `seal`): every step that changes what a node's hash covers marks the
+//!   node and its ancestors, so a checkpoint hashes and writes only what changed.
 
 mod check;
+mod seal;
 
 pub use check::Rules;
+pub use seal::Sealed;
 
 use crate::effects::{
     Body, Change, Effect, Flight, Header, LinkState, NodeState, Part, Refusal, State, TimerRec,
     TimerState, TransferRec,
 };
 use crate::encode::{Name, Value};
-use crate::ids::{Id, Scope};
+use crate::ids::{Hash, Id, Scope};
 use crate::pose::{Frame, Owner, Pose, Quat, Support, Vec3};
 use crate::time::{Micros, TimeEffect};
 use crate::world_model::{Audience, DEPTH_LIMIT, End};
@@ -141,6 +145,8 @@ struct NodeRec {
     links: Vec<Entry>,
     fields: BTreeMap<u64, Value>,
     at: Where,
+    /// Its hash as last sealed (K5); `None` once changed. A node without one has no ancestor with one.
+    hash: Option<Hash>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -244,6 +250,11 @@ impl NodeRef<'_> {
         self.tree.place_of(self.rec)
     }
 
+    /// Its hash as last sealed (K5), covering its children's: none once changed and not sealed since (R5 reads it).
+    pub fn sealed(&self) -> Option<Hash> {
+        self.rec.hash
+    }
+
     /// The motion its last sample gave it, while it moves.
     pub fn moved(&self) -> Option<Moved> {
         match self.rec.at {
@@ -277,6 +288,10 @@ pub struct Tree {
     time: Vec<TimeEffect>,
     undo: Vec<Undo>,
     dead: Vec<u32>,
+    /// The gaps a view declared for the part being applied ([`Tree::apply_gaps`]), each `(first, count)`, and how many
+    /// were met. Empty between parts.
+    gaps: Vec<(u64, u64)>,
+    gaps_met: usize,
     node_reads: Reads,
     link_reads: Reads,
 }
@@ -312,6 +327,8 @@ impl Tree {
             time: Vec::new(),
             undo: Vec::new(),
             dead: Vec::new(),
+            gaps: Vec::new(),
+            gaps_met: 0,
             node_reads: Reads(Some(AtomicU64::new(0))),
             link_reads: Reads(Some(AtomicU64::new(0))),
         };
@@ -329,6 +346,7 @@ impl Tree {
             links: Vec::new(),
             fields: BTreeMap::new(),
             at: Where::Root,
+            hash: None,
         });
         t.by_id.insert(root, 0);
         t
@@ -430,9 +448,16 @@ impl Tree {
             time: self.time.clone(),
             undo: Vec::new(),
             dead: self.dead.clone(),
+            gaps: Vec::new(),
+            gaps_met: 0,
             node_reads: Reads(None),
             link_reads: Reads(None),
         }
+    }
+
+    /// The sequence the zone's next effect takes: how many effects the tree holds.
+    pub fn next(&self) -> u64 {
+        self.next
     }
 
     /// Nodes here (not in flight), and links.
@@ -447,6 +472,67 @@ impl Tree {
     /// The dense array of moving nodes. A free entry is `None`.
     pub fn moving(&self) -> &[Option<Moving>] {
         &self.moving
+    }
+
+    /// The pending timers by id (T6 rule 15), each with the node that owns it.
+    pub fn timers(&self) -> &BTreeMap<Id, TimerState> {
+        &self.timers
+    }
+
+    /// The time effects applied, in order (T5).
+    pub fn time(&self) -> &[TimeEffect] {
+        &self.time
+    }
+
+    /// A fork's view (K6, #2670; T8 rule 10), made in place and recorded nowhere, since a fork is a view of a
+    /// checkpoint and not a change: drops every node whose audience `seen` refuses, with its subtree and every link
+    /// with an end in them, then every link `seen` refuses, and the timers of nodes gone. The sequence stays.
+    pub fn keep_seen(&mut self, seen: &dyn Fn(Audience) -> bool) {
+        let unseen: Vec<u32> = (0..self.nodes.len() as u32)
+            .filter(|s| *s != self.root && !seen(self.nodes[*s as usize].audience))
+            .collect();
+        for s in unseen {
+            if self.nodes[s as usize].life != Life::Live {
+                continue; // free, in flight, or gone with an ancestor
+            }
+            let gone = self.subtree(s);
+            self.detach(s);
+            for g in &gone {
+                let ends: Vec<Id> = self.nodes[*g as usize]
+                    .links
+                    .iter()
+                    .map(|e| e.link)
+                    .collect();
+                for l in ends {
+                    self.link_take(l);
+                }
+            }
+            for g in gone {
+                self.kill(g);
+            }
+        }
+        let unseen: Vec<Id> = self
+            .links
+            .iter()
+            .filter(|(_, l)| !seen(l.audience))
+            .map(|(i, _)| *i)
+            .collect();
+        for l in unseen {
+            self.link_take(l);
+        }
+        let orphan: Vec<Id> = self
+            .timers
+            .iter()
+            .filter(|(_, t)| self.handle(t.node).is_none())
+            .map(|(i, _)| *i)
+            .collect();
+        for t in orphan {
+            self.timers.remove(&t);
+        }
+        self.undo.clear();
+        for slot in std::mem::take(&mut self.dead) {
+            self.release(slot);
+        }
     }
 
     fn place_of(&self, rec: &NodeRec) -> Option<Place> {
@@ -481,6 +567,22 @@ impl Tree {
         self.undo.push(Box::new(f));
     }
 
+    /// Marks a node changed, and its ancestors: up to the first already marked, whose ancestors are marked too. A
+    /// refused part leaves its marks; the next seal hashes those nodes again and finds what they were.
+    fn touch(&mut self, slot: u32) {
+        let mut s = slot;
+        while s != NONE && self.nodes[s as usize].hash.take().is_some() {
+            s = self.nodes[s as usize].parent;
+        }
+    }
+
+    /// Marks the node that owns a link, if it is a node here (its hash covers the links it owns).
+    fn touch_owner(&mut self, l: &LinkRec) {
+        if let Some(s) = self.by_id.get(&l.owning()).copied() {
+            self.touch(s);
+        }
+    }
+
     fn handle_of(&self, slot: u32) -> Handle {
         Handle {
             slot,
@@ -497,12 +599,14 @@ impl Tree {
             .partition_point(|h| self.nodes[h.slot as usize].id < id);
         let h = self.handle_of(c);
         self.nodes[p].children.insert(at, h);
+        self.touch(p as u32);
         self.log(move |t| t.unattach(c));
     }
 
     fn unattach(&mut self, c: u32) {
         let p = self.nodes[c as usize].parent as usize;
         self.nodes[p].children.retain(|h| h.slot != c);
+        self.touch(p as u32);
     }
 
     fn detach(&mut self, c: u32) {
@@ -565,6 +669,7 @@ impl Tree {
                 },
             );
         }
+        self.touch_owner(&l);
         self.links.insert(id, l);
         self.log(move |t| {
             t.links.remove(&id);
@@ -574,6 +679,7 @@ impl Tree {
     /// A link out of the table and the index at both ends.
     fn link_take(&mut self, id: Id) -> Option<LinkRec> {
         let l = self.links.remove(&id)?;
+        self.touch_owner(&l);
         self.entry_take(l.ends[0], id);
         self.entry_take(l.ends[1], id);
         let back = l.clone();
@@ -594,6 +700,7 @@ impl Tree {
     }
 
     fn set_parent(&mut self, slot: u32, parent: u32, s: Option<u64>) {
+        self.touch(slot);
         let rec = &mut self.nodes[slot as usize];
         let old = (rec.parent, rec.slot);
         (rec.parent, rec.slot) = (parent, s);
@@ -613,6 +720,7 @@ impl Tree {
     }
 
     fn set_field(&mut self, slot: u32, field: u64, to: Value) {
+        self.touch(slot);
         let old = self.nodes[slot as usize].fields.insert(field, to);
         self.log(move |t| {
             let f = &mut t.nodes[slot as usize].fields;
@@ -625,6 +733,7 @@ impl Tree {
 
     /// Where a node is: still at `place`, or moving with `moved` (in the dense array).
     fn set_at(&mut self, slot: u32, place: Place, moved: Option<Moved>) {
+        self.touch(slot);
         let old = self.nodes[slot as usize].at;
         let old_moving = match old {
             Where::Moving(ix) => self.moving[ix as usize],
@@ -783,6 +892,19 @@ impl Tree {
         self.transact(header, part, None)
     }
 
+    /// Applies a part of a view (T7 rule 4) as a viewer does: a view skips the entries it does not hold, and says which.
+    /// Each declared gap, `(first, count)` in sequence order, is the sequences `first..first + count` the view did not
+    /// hold; the entry after it must come at exactly `first + count`, every gap must be met, and any other jump is still
+    /// `sequence-gap`. All of it or none.
+    pub fn apply_gaps(&mut self, header: &Header, part: &Part, gaps: &[(u64, u64)]) -> R<()> {
+        self.gaps = gaps.to_vec();
+        self.gaps_met = 0;
+        let r = self.transact(header, part, None);
+        self.gaps.clear();
+        self.gaps_met = 0;
+        r
+    }
+
     /// Applies a part as the zone's writer commits it: the same apply, plus T2's checks on each change and the
     /// balance of amounts moved over the part ([`Rules`]). All of it or none.
     pub fn commit(&mut self, header: &Header, part: &Part, rules: &Rules) -> R<()> {
@@ -816,6 +938,12 @@ impl Tree {
         {
             result = rules.balanced(effects);
         }
+        if result.is_ok() && self.gaps_met != self.gaps.len() {
+            result = refuse(
+                "gap-unmet",
+                format!("{} declared gaps, {} met", self.gaps.len(), self.gaps_met),
+            );
+        }
         if result.is_err() {
             while let Some(u) = self.undo.pop() {
                 u(self);
@@ -832,6 +960,18 @@ impl Tree {
 
     fn entry(&mut self, header: &Header, e: &Effect, rules: Option<&Rules>) -> R<()> {
         let env = e.envelope;
+        if let Some(&(first, count)) = self.gaps.get(self.gaps_met)
+            && first == self.next
+            && first.checked_add(count) == Some(env.sequence)
+        {
+            // A gap the view declared (`apply_gaps`): the entries it did not hold.
+            self.gaps_met += 1;
+            self.next = env.sequence;
+            self.log(move |t| {
+                t.next = first;
+                t.gaps_met -= 1;
+            });
+        }
         if env.sequence != self.next {
             return refuse(
                 "sequence-gap",
@@ -966,6 +1106,7 @@ impl Tree {
                     links,
                     fields: fields.clone(),
                     at: Where::Still(Place::of(pose)),
+                    hash: None,
                 });
                 if !self.nodes[slot as usize].links.is_empty() {
                     let id = *node;

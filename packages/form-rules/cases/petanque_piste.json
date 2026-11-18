@@ -1,0 +1,437 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:petanque_piste. Up to six players stand in the circle (the required role); a player throws the jack, then boules toward it with a hand free, and the players gather them in.",
+  "cases": [
+    {
+      "name": "play_in_the_circle",
+      "act": {
+        "this": "t1",
+        "form": "play",
+        "args": {
+          "place": "circle"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "play_when_the_circle_is_full",
+      "act": {
+        "this": "t1",
+        "form": "play",
+        "args": {
+          "place": "circle"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "slots": {
+              "circle": [
+                "b2",
+                "b3",
+                "b4",
+                "b5",
+                "b6",
+                "b7"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "fix": null
+      }
+    },
+    {
+      "name": "leave",
+      "act": {
+        "this": "t1",
+        "form": "leave"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "slots": {
+              "circle": [
+                "b1"
+              ]
+            },
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "throw_the_jack",
+      "act": {
+        "this": "t1",
+        "form": "throw_jack"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "throw_the_jack_twice_is_fixed_by_gather",
+      "act": {
+        "this": "t1",
+        "form": "throw_jack"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "fields": {
+              "jack_out": true
+            },
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": null
+      }
+    },
+    {
+      "name": "throw_the_jack_with_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "throw_jack"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:toy_blocks"
+          },
+          "x2": {
+            "kind": "eden:toy_blocks"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "throw_a_boule",
+      "act": {
+        "this": "t1",
+        "form": "throw_boule"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "fields": {
+              "jack_out": true
+            },
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "throw_a_boule_before_the_jack",
+      "act": {
+        "this": "t1",
+        "form": "throw_boule"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": null
+      }
+    },
+    {
+      "name": "throw_a_boule_with_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "throw_boule"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "fields": {
+              "jack_out": true
+            },
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:toy_blocks"
+          },
+          "x2": {
+            "kind": "eden:toy_blocks"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "gather",
+      "act": {
+        "this": "t1",
+        "form": "gather"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "fields": {
+              "jack_out": true
+            },
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "gather_before_the_jack",
+      "act": {
+        "this": "t1",
+        "form": "gather"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:petanque_piste",
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": null
+      }
+    }
+  ]
+}
