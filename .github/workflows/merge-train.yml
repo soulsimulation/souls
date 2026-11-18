@@ -42,7 +42,8 @@
 #                        queue or waiting there through auto-merge is taken back out (a dequeue during the freeze does
 #                        not eject), and the run's summary names the freeze. The release owner sets it at the pin and
 #                        deletes it at dispatch, each followed by a dispatch of this workflow, which then picks as usual.
-#                        release.yml refuses to run while it is set to anything but main's HEAD
+#                        release.yml refuses to run while it is set to anything but main's HEAD. A pinned-sha release
+#                        (release.yml -f sha) needs no freeze: it reads only that commit, so the train keeps going
 #
 # Label flow
 #   merge:ready          the author (or an agent) adds it when the PR is done; the train takes the oldest eligible one
