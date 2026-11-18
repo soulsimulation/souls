@@ -15,7 +15,8 @@ node tools/entry/asks.mjs --json     # the same as one JSON line
 - Each request has one file, `<n>-<words>.json`, holding its words and the chain of forms that would satisfy it. Its
   words and group must match the frozen list, or the command fails.
 - The share is a measure, not a gate: the command fails only on a malformed or drifted file. Never tune a chain toward a
-  score. A chain may be corrected to name a form as it is published, never to drop or soften a request.
+  score. A chain may be corrected to name a form as it is published, or to start from the state a copy starts in (a tap
+  is turned on before washing, a bowl picked up before eating from it), never to drop or soften a request.
 
 ## A request's file (`souls-ask/1`)
 
@@ -38,7 +39,11 @@ node tools/entry/asks.mjs --json     # the same as one JSON line
   - a choice: `{"any": [[...], [...]]}`, for an open-ended request: expressible when any one chain is.
 - `when` (optional): when the owner wants it, in their words. Scheduling is the agent's client's business, so the chain
   is one occurrence.
-- `fields` (optional): what the request presumes of a thing, such as a class already running.
+- `given` (optional): the state the request's own words presume, as `{"<thing>": {"<field>": <value>}}`, set before
+  the chain runs. Every thing starts in a copy's default state, so "turn the lamp off" gives the lamp on and "join the
+  class" gives a class running. A given is written only for what the words presume, never to make a chain pass, and a
+  step the words ask for is never dropped instead: "wash your hands" presumes nothing of the tap, so its chain turns it on. A given field the kind does not
+  have is reported as missing, and a value its field cannot hold is refused.
 - `none` instead of `chain`: `{"why": ...}`, one of `home`, `animal`, `game`, `refused` (the list is in
   `tools/entry/asks.mjs`). A request with no chain is counted, never dropped.
 

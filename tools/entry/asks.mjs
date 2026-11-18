@@ -83,7 +83,7 @@ export function validate(ask, list) {
   wholeNumbers(ask, '', bad);
   const things = isObj(ask.things) ? ask.things : {};
   if (ask.things !== undefined && !isObj(ask.things)) bad('things', 'a map of name -> kind');
-  if (ask.fields !== undefined && !(isObj(ask.fields) && Object.entries(ask.fields).every(([k, v]) => k in things && isObj(v)))) bad('fields', 'a map of thing -> {field: value}: what the request presumes');
+  if (ask.given !== undefined && !(isObj(ask.given) && Object.entries(ask.given).every(([k, v]) => k in things && isObj(v)))) bad('given', 'a map of thing -> {field: value}: the state the request\'s own words presume');
   for (const [k, v] of Object.entries(things)) if (k === 'me' || k === 'here' || typeof v !== 'string' || !/^[a-z0-9_]+:[a-z0-9_]+$/.test(v)) bad(`things.${k}`, 'a kind, "namespace:name"; "me" is the acting body and "here" the place');
   if (('chain' in ask) === ('none' in ask)) bad('chain', 'exactly one of "chain" and "none"');
   if ('chain' in ask) steps(ask.chain, 'chain', things, bad);
@@ -147,11 +147,16 @@ function runChain(chain, ctx, state) {
       if (!r.ok) { refuse(i, `${r.code}: ${r.reason}`); continue; }
     }
     if (!form) continue;
-    // A slot the request does not name, described by a selector of this thing's free slots, is chosen as the engine
-    // chooses it (E2): everyone stands in one place, so the first free slot in the order the kind lists them.
-    for (const [name, a] of Object.entries(form.takes ?? {})) if (!(name in args) && a.select?.of === 'free_slots' && a.select.in === 'this') {
-      const pick = Object.keys(entry.slots ?? {}).find(k => (state.nodes[self]?.slots?.[k]?.length ?? 0) < entry.slots[k].most);
-      if (pick) args = {...args, [name]: pick};
+    // An argument the form does not take is refused, never dropped: "play a sad tune" on a form with no mood is no yes.
+    const untaken = Object.keys(args).filter(a => !Object.hasOwn(form.takes ?? {}, a));
+    if (untaken.length) { refuse(i, `not_taken: ${kind} ${s.form} takes no argument ${untaken.map(a => `"${a}"`).join(', ')}`); continue; }
+    // A slot argument the chain leaves out is chosen as the engine would choose it, by the form's selector: a free slot of
+    // this thing (the request stands everyone in one place, so the first free one in the kind's own order is the nearest).
+    // It is chosen before the hand is placed, so a reach for that slot starts there.
+    for (const [name, t] of Object.entries(form.takes ?? {})) {
+      if (name in args || t.type !== 'slot' || t.select?.of !== 'free_slots' || t.select?.in !== 'this') continue;
+      const free = Object.entries(entry.slots ?? {}).find(([slot, d]) => (state.nodes[self]?.slots?.[slot]?.length ?? 0) < d.most);
+      if (free) args = {...args, [name]: free[0]};
     }
     // The walk to the thing is taken as done: the hand starts at the point the form reaches for.
     const nodes = structuredClone(state.nodes);
@@ -171,16 +176,37 @@ function runChain(chain, ctx, state) {
   return {missing: [...new Set(missing)], refused, state};
 }
 
+/** Whether a given value is one its field can hold: a flag, a whole number in its bounds, one of an enum's values. */
+function holds(def, v) {
+  if (def.type === 'bool') return typeof v === 'boolean' || v === 0 || v === 1;
+  if (def.type === 'int') return Number.isSafeInteger(v) && (def.min === undefined || v >= def.min) && (def.max === undefined || v <= def.max);
+  if (def.type === 'enum') return def.values?.includes(v) ?? false;
+  return v !== undefined;
+}
+
 /** Whether one ask is expressible, and if not, why. */
 export function judge(ask, kinds, moves) {
   if (ask.none) return {n: ask.n, group: ask.group, ok: false, none: ask.none.why};
   const things = ask.things ?? {};
-  // Everyone and everything of the request stands loose in one place, as the request finds them; `fields` says what the
-  // request presumes of a thing (a class already running).
+  // Everyone and everything of the request stands loose in one place, in the state a copy starts in; `given` is the state
+  // the request's own words presume ("turn the lamp off": the lamp is on), set before the chain runs. A given field the
+  // kind does not have is missing; a value its field cannot hold is refused before the first step.
   const nodes = {here: {loose: ['me', ...Object.keys(things)]}, me: {kind: BODY, hands: {left: null, right: null}}};
-  for (const [id, kind] of Object.entries(things)) nodes[id] = ask.fields?.[id] ? {kind, fields: ask.fields[id]} : {kind};
-  const {missing, refused} = runChain(ask.chain, {kinds, things}, {actor: 'me', nodes, moves});
-  return {n: ask.n, group: ask.group, ok: !missing.length && !refused, missing, refused};
+  const missing = [];
+  let refused = null;
+  for (const [id, kind] of Object.entries(things)) {
+    nodes[id] = {kind};
+    for (const [field, value] of Object.entries(ask.given?.[id] ?? {})) {
+      const def = kinds[kind]?.state?.[field];
+      if (!kinds[kind]) continue;
+      if (!def) { missing.push(`field ${field} of ${kind}`); continue; }
+      if (!holds(def, value)) refused ??= {step: 'given', why: `given_value: ${id}.${field} cannot be ${JSON.stringify(value)}`};
+      (nodes[id].fields ??= {})[field] = value;
+    }
+  }
+  if (missing.length || refused) return {n: ask.n, group: ask.group, ok: false, missing, refused};
+  const r = runChain(ask.chain, {kinds, things}, {actor: 'me', nodes, moves});
+  return {n: ask.n, group: ask.group, ok: !r.missing.length && !r.refused, missing: r.missing, refused: r.refused};
 }
 
 const pct = (a, b) => b ? `${Math.floor((a * 100) / b)} %` : '-';

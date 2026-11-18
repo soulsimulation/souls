@@ -1,0 +1,2 @@
+65536 # the smallest four-byte argument
+1a00010000
