@@ -71,6 +71,24 @@ pub const THING_PITCH: i64 = 600;
 pub const THING_JITTER: i64 = 100;
 pub const THING_HALF: i64 = 150;
 pub const DOORWAY_CLEAR: i64 = 1_000;
+// The yard and the build site (B17, #3338): rack parts, sizes from `content/kinds/construction/` (today's catalog).
+pub const YARD_Z: i64 = -24_000;
+pub const YARD_X: i64 = 40_000;
+pub const SITE_X: i64 = 65_000;
+pub const YARD_WIDTH: i64 = 12_000;
+pub const YARD_DEPTH: i64 = 8_000;
+pub const SITE_SIDE: i64 = 6_000;
+pub const YARD_FRAMES: i64 = 2;
+pub const YARD_BEAMS: i64 = 4;
+pub const FRAME_HEIGHT: i64 = 2_438;
+pub const FRAME_COLUMNS: i64 = 1_144;
+pub const FRAME_COLUMN: i64 = 76;
+pub const STAND_SLOT_Y: i64 = 100;
+pub const STAND_SLOT_Z: i64 = 150;
+pub const BEAM_LENGTH: i64 = 2_743;
+pub const BEAM_HEIGHT: i64 = 102;
+pub const BEAM_DEPTH: i64 = 51;
+pub const BEAM_PITCH: i64 = 300;
 
 macro_rules! named {
     ($($c:ident $u:literal $w:literal;)*) => {
@@ -121,6 +139,23 @@ named! {
     THING_JITTER "mm" "a thing's seeded move off its lattice point, at most";
     THING_HALF "mm" "a thing's half size (a box)";
     DOORWAY_CLEAR "mm" "no thing this near a doorway, either side of its wall";
+    YARD_Z "mm" "the yard's and the site's centre, world z (east of the square, south of the ring)";
+    YARD_X "mm" "the yard's centre, world x";
+    SITE_X "mm" "the build site's centre, world x: 25 m east of the yard";
+    YARD_WIDTH "mm" "the yard, along x";
+    YARD_DEPTH "mm" "the yard, along z";
+    SITE_SIDE "mm" "the build site, a clear square";
+    YARD_FRAMES "frames" "8 ft rack frames standing on the yard's stand";
+    YARD_BEAMS "beams" "9 ft rack beams lying loose in the yard";
+    FRAME_HEIGHT "mm" "a frame's height (8 ft)";
+    FRAME_COLUMNS "mm" "a frame's column centre to column centre";
+    FRAME_COLUMN "mm" "a frame's column, square (3 in)";
+    STAND_SLOT_Y "mm" "a frame's foot above the ground, on the stand";
+    STAND_SLOT_Z "mm" "each stand slot off the stand's centre, stand frame z";
+    BEAM_LENGTH "mm" "a beam (9 ft), along its own z";
+    BEAM_HEIGHT "mm" "a beam's section, tall (4 in)";
+    BEAM_DEPTH "mm" "a beam's section, deep (2 in)";
+    BEAM_PITCH "mm" "beam to beam, lying side by side";
 }
 
 /// A rectangle in some frame, mm: x0 <= x1, z0 <= z1.
@@ -687,13 +722,16 @@ pub struct World {
 pub fn generate(seed: u64, things: usize) -> Result<World, String> {
     let mut rng = SplitMix(seed);
     let built = [building(), hall()];
-    let defs: [(&str, &str, &str); 6] = [
+    let defs: [(&str, &str, &str); 9] = [
         ("testworld-square@1", "testworld:square", "area"),
         ("testworld-hall@1", "testworld:hall", "point"),
         ("testworld-ring@1", "testworld:ring", "point"),
         ("testworld-building@1", "testworld:building", "point"),
         ("testworld-door@1", "testworld:door", "point"),
         ("testworld-box@1", "testworld:box", "point"),
+        ("testworld-frame-stand@1", "mars:frame_stand", "point"),
+        ("testworld-rack-upright@1", "mars:rack_upright", "point"),
+        ("testworld-rack-beam@1", "mars:rack_beam", "point"),
     ];
     let kinds = defs
         .iter()
@@ -1045,7 +1083,107 @@ pub fn generate(seed: u64, things: usize) -> Result<World, String> {
         *by_ref.entry("testworld-box@1").or_default() += 1;
     }
 
-    // Places: the square, the hall's aisles, the ring's walkway.
+    // The yard: a stand with two frames standing in its slots, four beams lying loose beside it; the site is clear.
+    let solid = |cx, cz, hx, hz, y0, y1| ints(&[cx, cz, hx, hz, 0, y0, y1, 5, 0]);
+    let stand_slots: Vec<Json> = (1..=YARD_FRAMES)
+        .map(|n| {
+            let z = if n == 1 { -STAND_SLOT_Z } else { STAND_SLOT_Z };
+            obj([
+                ("n", Json::Int(n)),
+                ("id", Json::Str(format!("frame_{n}"))),
+                ("kind", text("frame")),
+                ("at", ints(&[0, STAND_SLOT_Y, z])),
+                ("yaw", Json::Int(0)),
+                ("capacity", Json::Int(1)),
+            ])
+        })
+        .collect();
+    slots_n += stand_slots.len() as i64;
+    let stand_half = (FRAME_COLUMNS + FRAME_COLUMN) / 2 + 100;
+    out_things.push(thing(
+        "yard-stand",
+        "testworld-frame-stand@1",
+        None,
+        [YARD_X, 0, YARD_Z, 0],
+        vec![
+            ("name", text("the yard's frame stand")),
+            ("slots", Json::Arr(stand_slots.clone())),
+            (
+                "solids",
+                Json::Arr(vec![solid(0, 0, stand_half, 300, 0, STAND_SLOT_Y)]),
+            ),
+        ],
+    ));
+    // A frame: two columns and three braces, in its own frame (columns along x, faces +z and -z).
+    let (cx, ch) = (FRAME_COLUMNS / 2, FRAME_COLUMN / 2);
+    let frame = Json::Arr(vec![
+        solid(-cx, 0, ch, ch, 0, FRAME_HEIGHT),
+        solid(cx, 0, ch, ch, 0, FRAME_HEIGHT),
+        solid(0, 0, cx, ch / 2, 300, 300 + FRAME_COLUMN / 2),
+        solid(
+            0,
+            0,
+            cx,
+            ch / 2,
+            FRAME_HEIGHT / 2,
+            FRAME_HEIGHT / 2 + FRAME_COLUMN / 2,
+        ),
+        solid(
+            0,
+            0,
+            cx,
+            ch / 2,
+            FRAME_HEIGHT - 150,
+            FRAME_HEIGHT - 150 + FRAME_COLUMN / 2,
+        ),
+    ]);
+    for (k, sl) in stand_slots.iter().enumerate() {
+        let at: Vec<i64> = sl
+            .get("at")
+            .map(Json::arr)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(Json::int)
+            .collect();
+        out_things.push(thing(
+            &format!("yard-frame-{}", k + 1),
+            "testworld-rack-upright@1",
+            Some("yard-stand"),
+            [at[0], at[1], at[2], 0],
+            vec![
+                ("name", Json::Str(format!("rack frame {}", k + 1))),
+                ("slot", obj([("n", Json::Int(k as i64 + 1))])),
+                ("solids", frame.clone()),
+            ],
+        ));
+    }
+    let beam = Json::Arr(vec![solid(
+        0,
+        0,
+        BEAM_DEPTH / 2,
+        BEAM_LENGTH / 2,
+        0,
+        BEAM_HEIGHT,
+    )]);
+    for k in 0..YARD_BEAMS {
+        let x = YARD_X + 2_000 + k * BEAM_PITCH;
+        out_things.push(thing(
+            &format!("yard-beam-{}", k + 1),
+            "testworld-rack-beam@1",
+            None,
+            [x, 0, YARD_Z, 0],
+            vec![
+                ("name", Json::Str(format!("rack beam {}", k + 1))),
+                ("solids", beam.clone()),
+            ],
+        ));
+    }
+    solids_n += 1 + YARD_FRAMES * 5 + YARD_BEAMS;
+    *by_ref.entry("testworld-frame-stand@1").or_default() += 1;
+    *by_ref.entry("testworld-rack-upright@1").or_default() += YARD_FRAMES;
+    *by_ref.entry("testworld-rack-beam@1").or_default() += YARD_BEAMS;
+
+    // Places: the square, the hall's aisles, the ring's walkway, the yard and the build site.
     let mut places = vec![obj([
         ("id", text("square.area")),
         ("of", text("area")),
@@ -1063,6 +1201,27 @@ pub fn generate(seed: u64, things: usize) -> Result<World, String> {
             ("polygon", pts(&world.poly())),
         ]));
     }
+    let (yw, yd, ss) = (YARD_WIDTH / 2, YARD_DEPTH / 2, SITE_SIDE / 2);
+    places.push(obj([
+        ("id", text("yard")),
+        ("of", text("area")),
+        ("kind", text("yard")),
+        ("name", text("the yard")),
+        (
+            "polygon",
+            pts(&rect(YARD_X - yw, YARD_Z - yd, YARD_X + yw, YARD_Z + yd).poly()),
+        ),
+    ]));
+    places.push(obj([
+        ("id", text("site")),
+        ("of", text("area")),
+        ("kind", text("site")),
+        ("name", text("the build site")),
+        (
+            "polygon",
+            pts(&rect(SITE_X - ss, YARD_Z - ss, SITE_X + ss, YARD_Z + ss).poly()),
+        ),
+    ]));
     let c = m + RING_WALKWAY / 2;
     places.push(obj([
         ("id", text("ring.walkway")),

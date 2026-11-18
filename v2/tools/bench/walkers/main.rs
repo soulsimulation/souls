@@ -1048,6 +1048,18 @@ fn main() {
         r90 / 1000,
         rmax / 1000
     );
+    // Every walker's end: its node and position, in id order. Equal digests, equal walks (a speed-up changes none).
+    let mut end = Vec::new();
+    for b in runner.controller.bodies() {
+        for id in [b.id, node_of(b)] {
+            end.extend(id.scope().0);
+            end.extend(id.counter().to_le_bytes());
+        }
+        for v in [b.pose.position.x, b.pose.position.y, b.pose.position.z] {
+            end.extend(v.to_le_bytes());
+        }
+    }
+    println!("walkers: end digest {}", Hash::of(Purpose::Fixture, &end));
     println!(
         "walkers: longest without progress under a live order {} ms (walker {}); orders past 30 s by state {over:?}; rungs {rungs:?}",
         worst.0 / 1000,
