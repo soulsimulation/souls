@@ -44,7 +44,7 @@ use replica::tree::{Handle, Tree};
 use replica::world_model::{Audience, plain};
 
 use super::{Checkpoints, R, Root, refuse, restore};
-use crate::log::{FileStore, Log};
+use crate::log::{At, FileStore, HEADER_LEN, Log};
 
 /// The fork writer's first epoch (T11).
 pub const EPOCH: u64 = 1;
@@ -194,7 +194,14 @@ pub fn fork(parent: &Path, dir: &Path, req: Request) -> R<Forked> {
     // The parent's records, in memory: unchanged nodes keep their hashes, so their records are reused untouched, and
     // the writer keeps only those the fork's audiences reach.
     let mut checkpoints = Checkpoints::open(&dir.join("ckpt"), req.every, restored.blobs)?;
-    checkpoints.take(&mut tree, version, 0, &req.seed)?;
+    // Its log is new: the place before its first record, and its minter before its first mint (K4b).
+    let place = At {
+        record: 0,
+        offset: HEADER_LEN as u64,
+        crc: crate::log::Header::new(EPOCH).salt,
+    };
+    let fresh = Minter::new(req.scope);
+    checkpoints.take_at(&mut tree, version, 0, Some((place, &fresh)), &req.seed)?;
 
     // Rule 4: the time mapping, continuing the parent's line at the request's real time.
     let last = tree.time().iter().rev().find_map(|t| match t {
