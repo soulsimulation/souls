@@ -1,0 +1,55 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:gold_seam_station",
+  "owner": "thing",
+  "state": {
+    "condition": { "n": 1, "type": "enum", "values": ["cracked", "restored"], "default": "cracked", "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "work": { "role": "stand", "at_mm": [0, 0, 850], "yaw_mdeg": 180000 },
+    "crack": { "role": "contact", "at_mm": [0, 1200, 200] }
+  },
+  "geometry": { "bounds_mm": [600, 1280, 480] },
+  "forms": {
+    "restore": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "condition", "is": "cracked" },
+        { "need": "hand", "holds": "eden:lacquer_brush" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "work" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" }
+      ],
+      "effects": [{ "change": "set", "field": "condition", "to": "restored", "event": "restored" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:gold_seam_station",
+    "table": [
+      { "part": "fill", "field": "condition", "do": "show", "at": { "restored": 1, "cracked": 0 } },
+      { "part": "flip", "field": "condition", "do": "show", "at": { "restored": 0, "cracked": 1 } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,35,0],"size":[500,70,450],"tint":"wood"},{"kind":"box","at":[0,520,0],"size":[90,970,90],"tint":"wood"},{"kind":"box","at":[0,1000,0],"size":[600,60,480],"tint":"wood"},{"kind":"lathe","at":[0,1035,0],"profile":[[0,0],[80,0],[140,35],[200,160],[200,220],[180,220],[180,160],[120,55],[60,25],[0,25]],"segments":10,"tint":"ceramic"},{"kind":"sweep","at":[0,0,0],"path":[[0,1090,154],[18,1160,187],[-12,1220,204],[8,1255,204]],"r":6,"segments":4,"tint":"crack","role":"flip"},{"kind":"sweep","at":[0,0,0],"path":[[-12,1220,204],[-55,1240,196],[-80,1255,187]],"r":6,"segments":4,"tint":"crack","role":"flip"},{"kind":"sweep","at":[0,0,0],"path":[[0,1090,154],[18,1160,187],[-12,1220,204],[8,1255,204]],"r":6,"segments":4,"tint":"gold","role":"fill"},{"kind":"sweep","at":[0,0,0],"path":[[-12,1220,204],[-55,1240,196],[-80,1255,187]],"r":6,"segments":4,"tint":"gold","role":"fill"}],"palette":{"wood":"#76583d","ceramic":"#d9e5d8","crack":"#302a26","gold":"#e0ad3f"},"tags":["art","restoration","ceramic"]}
+  },
+  "text": {
+    "card": "A stand with a cracked ceramic bowl; restore it with golden lacquer by brush.",
+    "art": "art",
+    "restore": "restore",
+    "repair": "repair",
+    "kintsugi": "kintsugi",
+    "howto_restore": "Holding the lacquer brush, restore the bowl with six short dabs at the crack. The cracks stay traced in gold, and the brush stays in your hand."
+  },
+  "card": { "text": "card", "category": "art", "synonyms": ["restore", "repair", "kintsugi"] },
+  "howtos": {
+    "restore": { "text": "howto_restore", "steps": [{ "form": "restore" }] }
+  }
+}
