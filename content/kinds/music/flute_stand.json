@@ -1,0 +1,177 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:flute_stand",
+  "owner": "thing",
+  "state": {
+    "playing": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        600
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      460,
+      1280,
+      320
+    ]
+  },
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "playing",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": true,
+          "event": "began_phrase"
+        },
+        {
+          "change": "timer",
+          "form": "phrase_ends",
+          "after_us": 16000000,
+          "event": "phrase_will_end"
+        }
+      ]
+    },
+    "stop": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "playing",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": false,
+          "event": "stopped_playing"
+        }
+      ]
+    },
+    "phrase_ends": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        {
+          "need": "state",
+          "field": "playing",
+          "is": true
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": false,
+          "event": "phrase_ended"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:flute_stand",
+    "shape": {"round":0,"shapes":[
+        {"kind":"cyl","at":[0,15,0],"r":160,"h":30,"segments":10,"tint":"stand"},
+        {"kind":"cyl","at":[0,560,0],"r":18,"h":1080,"segments":6,"tint":"stand"},
+        {"kind":"box","at":[0,1120,0],"size":[460,320,30],"tint":"stand"},
+        {"kind":"box","at":[0,1130,18],"size":[400,250,5],"tint":"paper"},
+        {"kind":"box","at":[0,1060,23],"size":[290,4,3],"tint":"ink"},
+        {"kind":"box","at":[0,1100,23],"size":[290,4,3],"tint":"ink"},
+        {"kind":"box","at":[0,1140,23],"size":[290,4,3],"tint":"ink"},
+        {"kind":"box","at":[0,950,40],"size":[440,16,70],"tint":"stand"},
+        {"kind":"cyl","at":[0,972,55],"r":13,"h":440,"segments":8,"roll":90000,"tint":"silver","when":"!@playing"},
+        {"kind":"cyl","at":[-60,986,55],"r":5,"h":6,"segments":6,"tint":"ink","when":"!@playing"},
+        {"kind":"cyl","at":[-20,986,55],"r":5,"h":6,"segments":6,"tint":"ink","when":"!@playing"},
+        {"kind":"cyl","at":[20,986,55],"r":5,"h":6,"segments":6,"tint":"ink","when":"!@playing"},
+        {"kind":"cyl","at":[60,986,55],"r":5,"h":6,"segments":6,"tint":"ink","when":"!@playing"}
+      ],
+      "palette":{"stand":"#4d5260","paper":"#f5efd9","ink":"#313443","silver":"#d6d9de"},"tags":["music", "practice", "object"]},
+    "table": [
+      {
+        "do": "sound",
+        "sound": "tune",
+        "mood": "peaceful",
+        "mode": "loop",
+        "field": "playing",
+        "at": {
+          "true": 600,
+          "false": 0
+        },
+        "reach_mm": 15000
+      }
+    ]
+  },
+  "text": {
+    "card": "A flute practice stand: play a sixteen-second phrase here, or stop sooner.",
+    "instrument": "instrument",
+    "flute": "flute",
+    "music_stand": "music stand",
+    "howto_play": "Play a phrase; it ends by itself after sixteen seconds, or stop it sooner."
+  },
+  "card": {
+    "text": "card",
+    "category": "instrument",
+    "synonyms": [
+      "flute",
+      "music_stand"
+    ]
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "play"
+        },
+        {
+          "form": "stop"
+        }
+      ]
+    }
+  }
+}

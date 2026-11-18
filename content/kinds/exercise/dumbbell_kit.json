@@ -1,0 +1,168 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:dumbbell_kit",
+  "owner": "thing",
+  "state": {
+    "handles": { "n": 1, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
+    "plates": { "n": 2, "type": "int", "unit": "count", "default": 4, "min": 0, "max": 4, "audience": { "rule": "everyone" } },
+    "made": { "n": 3, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
+    "taken_apart": { "n": 4, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 600], "yaw_mdeg": 180000 },
+    "parts": { "role": "grip", "at_mm": [0, 110, 0] }
+  },
+  "geometry": { "bounds_mm": [420, 200, 340] },
+  "forms": {
+    "assemble_2kg": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "handles", "at_least": 1 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "parts" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "press", "at": "parts" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "handles", "by": -1, "event": "handle_used" },
+        { "change": "create", "kind": "eden:dumbbell_2kg", "into": "here", "event": "dumbbell_assembled" },
+        { "change": "set", "field": "made", "by": 1, "event": "made_counted" }
+      ]
+    },
+    "assemble_6kg": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "handles", "at_least": 1 },
+        { "need": "state", "field": "plates", "at_least": 2 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "parts" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "press", "at": "parts" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "handles", "by": -1, "event": "handle_used" },
+        { "change": "set", "field": "plates", "by": -2, "event": "plates_used" },
+        { "change": "create", "kind": "eden:dumbbell_6kg", "into": "here", "event": "dumbbell_assembled" },
+        { "change": "set", "field": "made", "by": 1, "event": "made_counted" }
+      ]
+    },
+    "assemble_10kg": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "handles", "at_least": 1 },
+        { "need": "state", "field": "plates", "at_least": 4 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "parts" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "press", "at": "parts" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "handles", "by": -1, "event": "handle_used" },
+        { "change": "set", "field": "plates", "by": -4, "event": "plates_used" },
+        { "change": "create", "kind": "eden:dumbbell_10kg", "into": "here", "event": "dumbbell_assembled" },
+        { "change": "set", "field": "made", "by": 1, "event": "made_counted" }
+      ]
+    },
+    "take_apart_2kg": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "dumbbell": { "type": "thing", "select": { "of": "things", "kind": "eden:dumbbell_2kg", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "state", "field": "handles", "at_most": 0 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": { "arg": "dumbbell" } }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "dumbbell" } },
+        { "step": "move", "move": "press", "toward": { "arg": "dumbbell" } },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "remove", "what": { "arg": "dumbbell" }, "event": "dumbbell_taken_apart" },
+        { "change": "set", "field": "handles", "by": 1, "event": "handle_returned" },
+        { "change": "set", "field": "taken_apart", "by": 1, "event": "taken_apart_counted" }
+      ]
+    },
+    "take_apart_6kg": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "dumbbell": { "type": "thing", "select": { "of": "things", "kind": "eden:dumbbell_6kg", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "state", "field": "handles", "at_most": 0 },
+        { "need": "state", "field": "plates", "at_most": 2 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": { "arg": "dumbbell" } }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "dumbbell" } },
+        { "step": "move", "move": "press", "toward": { "arg": "dumbbell" } },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "remove", "what": { "arg": "dumbbell" }, "event": "dumbbell_taken_apart" },
+        { "change": "set", "field": "handles", "by": 1, "event": "handle_returned" },
+        { "change": "set", "field": "plates", "by": 2, "event": "plates_returned" },
+        { "change": "set", "field": "taken_apart", "by": 1, "event": "taken_apart_counted" }
+      ]
+    },
+    "take_apart_10kg": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "dumbbell": { "type": "thing", "select": { "of": "things", "kind": "eden:dumbbell_10kg", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "state", "field": "handles", "at_most": 0 },
+        { "need": "state", "field": "plates", "at_most": 0 },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": { "arg": "dumbbell" } }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "dumbbell" } },
+        { "step": "move", "move": "press", "toward": { "arg": "dumbbell" } },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "remove", "what": { "arg": "dumbbell" }, "event": "dumbbell_taken_apart" },
+        { "change": "set", "field": "handles", "by": 1, "event": "handle_returned" },
+        { "change": "set", "field": "plates", "by": 4, "event": "plates_returned" },
+        { "change": "set", "field": "taken_apart", "by": 1, "event": "taken_apart_counted" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:dumbbell_kit",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,20,0],"size":[420,40,340],"tint":"rack"},{"kind":"cyl","at":[0,60,120],"r":15,"h":360,"tint":"steel","roll":90000},{"kind":"cyl","at":[0,90,-40],"r":90,"h":100,"tint":"plate","role":"fill","pivot":[0,40,-40]}],"palette":{"rack":"#70543a","steel":"#b7b8be","plate":"#3f5669"},"tags":["exercise","dumbbell","kit","tool"]},
+    "table": [
+      { "part": "fill", "field": "plates", "do": "scale", "axis": "y", "range": [0, 4], "to": [0, 1000] },
+      { "part": "fill", "field": "plates", "do": "show", "range": [0, 1], "to": [0, 1] }
+    ]
+  },
+  "text": {
+    "card": "A kit of one handle and four 2 kg plates: build a 2, 6 or 10 kg dumbbell.",
+    "exercise": "exercise",
+    "dumbbell": "dumbbell",
+    "weights": "weights",
+    "howto_build": "With your hands free, build a dumbbell of the load you want, lift with it, then take it apart here to build another."
+  },
+  "card": { "text": "card", "category": "exercise", "synonyms": ["dumbbell", "weights"] },
+  "howtos": { "build": { "text": "howto_build", "steps": [{ "form": "assemble_6kg" }, { "form": "take_apart_6kg" }] } }
+}

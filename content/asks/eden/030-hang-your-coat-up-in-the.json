@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":30,"group":"object","words":"hang your coat up in the wardrobe","obvious":2,"things":{"wardrobe":"eden:wardrobe"},"chain":[{"this":"wardrobe","form":"open"},{"this":"wardrobe","form":"hang_coat"}]}

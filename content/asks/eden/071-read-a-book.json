@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":71,"group":"object","words":"read a book","obvious":3,"things":{"bookshelf":"eden:bookshelf","book":"eden:book"},"chain":[{"this":"bookshelf","form":"take"},{"this":"book","form":"read"}]}

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":276,"group":"over-time","words":"meet me at the bridge in ten minutes","obvious":2,"when":"in ten minutes","things":{"bridge":"eden:bridge"},"chain":[{"this":"me","form":"wait_by","args":{"place":"bridge"}}]}

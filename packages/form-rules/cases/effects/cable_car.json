@@ -1,0 +1,167 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:cable_car (eden-cable-car@1, 1 placed, scenery today): two cabins of six between the valley and the mountain station.",
+ "cases": [
+  {
+   "name": "cable_car_board_then_set_off_then_nobody_gets_on",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "b2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:cable_car",
+      "fields": {
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "yellow_cabin"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rcable_car_bo0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "t1",
+         "slot": "yellow_cabin"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "ride",
+      "args": {
+       "seat": "red_cabin"
+      }
+     },
+     "receipt": "rcable_car_bo1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "red_cabin"
+        }
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "under_way",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:set_off",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "yellow_cabin"
+      }
+     },
+     "receipt": "rcable_car_bo2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:cable_car",
+     "fields": {
+      "under_way": 1
+     },
+     "slots": {
+      "yellow_cabin": [
+       "b2"
+      ],
+      "red_cabin": [
+       "b1"
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

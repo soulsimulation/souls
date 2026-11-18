@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":231,"group":"with-others","words":"give a speech to the crowd","obvious":2,"things":{"lectern":"eden:lectern"},"chain":[{"this":"me","form":"go_to","args":{"place":"lectern"}},{"say":"a speech"}]}

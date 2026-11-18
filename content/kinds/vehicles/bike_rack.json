@@ -1,0 +1,93 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bike_rack",
+  "owner": "thing",
+  "state": {},
+  "points": {"front":{"role":"stand","at_mm":[0,0,1200],"yaw_mdeg":180000}},
+  "slots": {
+    "stand_1": {
+      "admits": "thing",
+      "kinds": ["eden:bicycle"],
+      "most": 1,
+      "at_mm": [-800,0,0],
+      "stand": "front",
+      "row": "rack",
+      "place": 1,
+      "end": "first"
+    },
+    "stand_2": {
+      "admits": "thing",
+      "kinds": ["eden:bicycle"],
+      "most": 1,
+      "at_mm": [0,0,0],
+      "stand": "front",
+      "row": "rack",
+      "place": 2
+    },
+    "stand_3": {
+      "admits": "thing",
+      "kinds": ["eden:bicycle"],
+      "most": 1,
+      "at_mm": [800,0,0],
+      "stand": "front",
+      "row": "rack",
+      "place": 3,
+      "end": "last"
+    }
+  },
+  "geometry": {"bounds_mm":[2200,745,690]},
+  "forms": {
+    "park": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bike": {
+          "type": "thing",
+          "select": {"of":"things","kind":"eden:bicycle","in":"here","anchor":"me","order":"nearest","rank":1}
+        },
+        "stand": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"moves","thing":{"arg":"bike"},"by":"push"},{"need":"slot_free","slot":{"arg":"stand"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"stand"}},{"step":"put","slot":{"arg":"stand"}}],
+      "effects": [{"change":"reparent","what":{"arg":"bike"},"into":{"arg":"stand"},"event":"parked"}]
+    },
+    "take_out": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bike": {
+          "type": "thing",
+          "select": {"of":"things","kind":"eden:bicycle","in":"this","anchor":"me","order":"nearest","rank":1}
+        }
+      },
+      "needs": [{"need":"hand","free":true},{"need":"moves","thing":{"arg":"bike"},"by":"push"}],
+      "steps": [{"step":"walk_to","point":"front"},{"step":"take"}],
+      "effects": [{"change":"reparent","what":{"arg":"bike"},"into":"actor_hand","event":"took_out"}]
+    }
+  },
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:bike_rack",
+    "shape": {
+      "shapes": [
+        {"kind":"box","at":[0,20,0],"size":[2200,40,120],"round":0,"tint":"base"},
+        {"kind":"torus","at":[-800,400,0],"r":320,"r2":25,"segments":8,"tint":"steel","yaw":90000,"arc":180000},
+        {"kind":"torus","at":[0,400,0],"r":320,"r2":25,"segments":8,"tint":"steel","yaw":90000,"arc":180000},
+        {"kind":"torus","at":[800,400,0],"r":320,"r2":25,"segments":8,"tint":"steel","yaw":90000,"arc":180000}
+      ],
+      "round": 15,
+      "palette": {"base":"#5c625f","steel":"#7d8783"},
+      "tags": ["prop","street","bike","rack","transport"]
+    }
+  },
+  "text": {
+    "card": "A steel bike rack: wheel a bicycle into one of its three stands to leave it.",
+    "street": "street",
+    "bike_stand": "bike stand",
+    "cycle_rack": "cycle rack",
+    "howto_park": "Wheel the bicycle to the rack and park it in a free stand."
+  },
+  "card": {"text":"card","category":"street","synonyms":["bike_stand","cycle_rack"]},
+  "howtos": {"park":{"text":"howto_park","steps":[{"form":"park"}]}}
+}

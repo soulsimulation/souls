@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":94,"group":"object","words":"get on a bicycle and ride around the park","obvious":3,"things":{"bicycle":"eden:bicycle","path":"eden:footpath"},"chain":[{"this":"bicycle","form":"ride"},{"this":"bicycle","form":"steer","args":{"toward":"path"}}]}

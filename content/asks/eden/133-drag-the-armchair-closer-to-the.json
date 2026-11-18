@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":133,"group":"two-things","words":"drag the armchair closer to the lamp","obvious":2,"things":{"armchair":"eden:armchair","lamp":"eden:floor_lamp"},"chain":[{"this":"me","form":"push","push":"armchair","args":{"thing":"armchair"}},{"this":"me","form":"put","place":{"at":"next_to","thing":"armchair","anchor":"lamp"},"args":{"thing":"armchair"}}]}
