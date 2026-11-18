@@ -1,0 +1,109 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:hammock (SA-X24): lie or sleep in it and get up; swing it and it comes to rest by itself.",
+  "cases": [
+    {
+      "name": "hammock_sleep_get_up_lie",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:hammock" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sleep", "args": { "place": "sling" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "sling" } },
+              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" }
+            ],
+            "events": [
+              { "event": "eden:fell_asleep", "node": "t1", "changes": [0] },
+              { "event": "eden:lying_in", "node": "t1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sleep", "args": { "place": "sling" } },
+          "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "fix": null }
+        },
+        {
+          "act": { "this": "t1", "form": "get_up" },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "unlink", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" },
+              { "change": "reparent", "node": "b1", "to": { "node": "room" } }
+            ],
+            "events": [
+              { "event": "eden:got_up", "node": "t1", "changes": [0] },
+              { "event": "eden:stood_by", "node": "t1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "lie", "args": { "place": "sling" } },
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "sling" } },
+              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" }
+            ],
+            "events": [
+              { "event": "eden:lay_down", "node": "t1", "changes": [0] },
+              { "event": "eden:lying_in", "node": "t1", "changes": [1] }
+            ]
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:hammock", "slots": { "sling": ["b1"] }, "links": { "sleeper": ["b1"] } } }
+    },
+    {
+      "name": "hammock_swing_then_settle",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "t1"] },
+          "t1": { "kind": "eden:hammock" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "swing" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "swaying", "n": 1, "to": 1 }],
+            "events": [
+              { "event": "eden:swung", "node": "t1", "changes": [0] },
+              { "event": "eden:swing_slowing", "node": "t1", "changes": [] }
+            ],
+            "timers": [{ "node": "t1", "form": "settle", "after_us": 8000000, "event": 1 }]
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "settle" },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "swaying", "n": 1, "to": 0 }],
+            "events": [{ "event": "eden:came_to_rest", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:hammock", "fields": { "swaying": 0 } } }
+    }
+  ]
+}

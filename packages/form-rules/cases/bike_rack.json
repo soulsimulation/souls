@@ -1,0 +1,412 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:bike_rack (core/bike-rack@1, 4 placed): a bicycle is wheeled into a free stand and taken out again; a thing that is not wheeled is refused by how it moves.",
+ "cases": [
+  {
+   "name": "bike_rack_park_a_bicycle",
+   "act": {
+    "this": "t1",
+    "form": "park",
+    "args": {
+     "bike": "k1",
+     "stand": "stand_1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "k1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:bike_rack"
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "k1": {
+      "kind": "eden:bicycle"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bike_rack_park_a_chair_is_refused",
+   "act": {
+    "this": "t1",
+    "form": "park",
+    "args": {
+     "bike": "k1",
+     "stand": "stand_1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "k1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:bike_rack"
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "k1": {
+      "kind": "eden:chair"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "moves_by",
+    "need": 0,
+    "detail": {
+     "thing": "k1",
+     "by": "push",
+     "how": "two_hands"
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "bike_rack_park_stand_taken",
+   "act": {
+    "this": "t1",
+    "form": "park",
+    "args": {
+     "bike": "k1",
+     "stand": "stand_1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "k1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:bike_rack",
+      "slots": {
+       "stand_1": [
+        "k2"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "k1": {
+      "kind": "eden:bicycle"
+     },
+     "k2": {
+      "kind": "eden:bicycle"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "t1",
+     "slot": "stand_1"
+    },
+    "fix": {
+     "form": "park",
+     "args": {
+      "bike": "k1",
+      "stand": "stand_2"
+     }
+    }
+   }
+  },
+  {
+   "name": "bike_rack_take_out",
+   "act": {
+    "this": "t1",
+    "form": "take_out",
+    "args": {
+     "bike": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:bike_rack",
+      "slots": {
+       "stand_2": [
+        "k1"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "k1": {
+      "kind": "eden:bicycle"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bike_rack_take_out_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "take_out",
+    "args": {
+     "bike": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:bike_rack",
+      "slots": {
+       "stand_2": [
+        "k1"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": "c1",
+       "right": "c2"
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "k1": {
+      "kind": "eden:bicycle"
+     },
+     "c1": {
+      "kind": "eden:cup"
+     },
+     "c2": {
+      "kind": "eden:cup"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 0,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "bike_rack_take_out_a_chair_is_refused",
+   "act": {
+    "this": "t1",
+    "form": "take_out",
+    "args": {
+     "bike": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:bike_rack",
+      "slots": {
+       "stand_2": [
+        "k1"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "k1": {
+      "kind": "eden:chair"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "moves_by",
+    "need": 1,
+    "detail": {
+     "thing": "k1",
+     "by": "push",
+     "how": "two_hands"
+    },
+    "fix": null
+   }
+  }
+ ]
+}

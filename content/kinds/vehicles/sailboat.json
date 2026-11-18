@@ -2,110 +2,88 @@
   "format": "souls-entry/1",
   "kind": "eden:sailboat",
   "owner": "thing",
-  "state": {},
+  "state": {"under_way":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "points": {
-    "west_landing": {
-      "role": "stand",
-      "at_mm": [
-        -2500,
-        0,
-        0
-      ]
-    },
-    "east_landing": {
-      "role": "stand",
-      "at_mm": [
-        2500,
-        0,
-        0
-      ]
-    }
+    "west_landing": {"role":"stand","at_mm":[-2500,0,0],"yaw_mdeg":90000},
+    "east_landing": {"role":"stand","at_mm":[2500,0,0],"yaw_mdeg":-90000}
   },
   "slots": {
-    "port": {
-      "admits": "body",
-      "posture": "sit",
-      "most": 1,
-      "at_mm": [
-        -500,
-        450,
-        0
-      ]
-    },
-    "starboard": {
-      "admits": "body",
-      "posture": "sit",
-      "most": 1,
-      "at_mm": [
-        500,
-        450,
-        0
-      ]
-    }
+    "port": {"admits":"body","posture":"sit","most":1,"at_mm":[-500,750,-300],"stand":"west_landing"},
+    "starboard": {"admits":"body","posture":"sit","most":1,"at_mm":[500,750,-300],"stand":"east_landing"},
+    "port_aft": {"admits":"body","posture":"sit","most":1,"at_mm":[-500,750,-1500],"stand":"west_landing"},
+    "starboard_aft": {"admits":"body","posture":"sit","most":1,"at_mm":[500,750,-1500],"stand":"east_landing"}
   },
-  "geometry": {
-    "bounds_mm": [
-      2000,
-      4000,
-      5000
-    ]
-  },
+  "geometry": {"bounds_mm":[3000,6500,5000]},
   "forms": {
     "sail": {
       "who": "anyone",
       "starts": "act",
-      "needs": [
-        {
-          "need": "slot_free",
-          "slot": "port"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "west_landing"
-        },
-        {
-          "step": "sit",
-          "slot": "port"
-        }
-      ],
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"state","field":"under_way","is":false},{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
       "effects": [
-        {
-          "change": "reparent",
-          "what": "actor",
-          "into": "port",
-          "event": "boarded"
-        }
+        {"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"},
+        {"change":"set","field":"under_way","to":true,"event":"set_off"}
       ]
+    },
+    "board": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"state","field":"under_way","is":false},{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+      "effects": [{"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"}]
     }
   },
-  "motion": { "how": "two_souls" },
-  "loose": { "ever": true },
-  "text": {
-    "card": "A sailboat: it makes a set trip across the water and back; nobody steers.",
-    "getting_around": "transport",
-    "boat": "boat"
-  },
-  "card": {
-    "text": "card",
-    "category": "getting_around",
-    "synonyms": [
-      "boat"
-    ]
-  },
   "ride": {
-    "seats": [
-      "port",
-      "starboard"
-    ],
-    "stops": [
-      "west_landing",
-      "east_landing"
-    ],
+    "seats": ["port","starboard","port_aft","starboard_aft"],
+    "stops": ["west_landing","east_landing"],
     "returns": true,
     "start": "sail",
     "speed_mm_s": 2000,
     "ground": "deep_water"
-  }
+  },
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:sailboat",
+    "table": [
+      {
+        "part": "canopy",
+        "field": "under_way",
+        "do": "scale",
+        "axis": "y",
+        "at": {"false":350,"true":1000},
+        "over_us": 4000000
+      },
+      {"sound":"waves","field":"under_way","at":{"false":0,"true":400},"reach_mm":20000}
+    ],
+    "shape": {
+      "shapes": [
+        {"kind":"lathe","at":[0,0,0],"profile":[[0,0],[320,20],[460,420],[500,700],[450,700],[410,420],[280,154],[0,140]],"segments":12,"tint":"hull","scale":[1800,1000,5000]},
+        {"kind":"cyl","at":[0,700,0],"r":860,"h":60,"segments":12,"tint":"deck","scale":[1050,1000,2900]},
+        {"kind":"cyl","at":[0,3600,300],"r":60,"h":5800,"segments":6,"tint":"mast"},
+        {"kind":"cone","at":[0,3300,-600],"r":1500,"h":4800,"segments":3,"tint":"sail","scale":[30,1000,1000],"yaw":90000,"role":"canopy"},
+        {"kind":"cone","at":[0,2900,1500],"r":900,"h":3800,"segments":3,"tint":"jib","scale":[30,1000,1000],"yaw":90000,"role":"canopy"},
+        {"kind":"box","at":[0,1250,-800],"size":[50,50,2200],"round":0,"tint":"mast"}
+      ],
+      "round": 20,
+      "palette": {"hull":"#f2efe6","deck":"#a47a4c","mast":"#8a6a4a","sail":"#fbf8f0","jib":"#e9e2d0"},
+      "tags": ["transport","vehicle","boat","sail","water","moving"]
+    }
+  },
+  "text": {
+    "card": "A sailboat: sit aboard and it sails a set trip across the water and back.",
+    "getting_around": "transport",
+    "boat": "boat",
+    "yacht": "yacht",
+    "sailing_boat": "sailing boat",
+    "howto_sail": "Take a seat aboard while it is moored; it sets sail and brings you back."
+  },
+  "card": {"text":"card","category":"getting_around","synonyms":["boat","yacht","sailing_boat"]},
+  "howtos": {"sail":{"text":"howto_sail","steps":[{"form":"sail"}]}}
 }

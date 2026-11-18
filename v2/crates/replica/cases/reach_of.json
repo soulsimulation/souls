@@ -1,0 +1,39 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "R2 (#2685): within_reach of another thing's point (SA #3012), when that thing's pose is not in the input, or is in a copy that holds it at an index level only.",
+  "cases": [
+    {
+      "name": "cup_fill_with_no_pose_for_the_tap_is_unknown_to_everyone",
+      "act": { "this": "c1", "form": "fill", "args": { "tap": "t1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "c1": { "kind": "r2:cup" }, "t1": { "kind": "r2:tap" }, "b1": { "effector_mm": [0, 0, 0] } },
+        "moves": { "hold_under": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": "all" },
+      "expect": { "verdict": "unknown", "need": 0, "node": "t1", "field": "at_mm" }
+    },
+    {
+      "name": "cup_fill_under_a_tap_held_at_an_index_level_only_is_unknown",
+      "act": { "this": "c1", "form": "fill", "args": { "tap": "t1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "c1": { "kind": "r2:cup" }, "t1": { "kind": "r2:tap", "at_mm": [1000, 0, 0], "held": "index" }, "b1": { "effector_mm": [1000, 0, 100] } },
+        "moves": { "hold_under": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": "all" },
+      "expect": { "verdict": "unknown", "need": 0, "node": "t1", "field": "at_mm", "held": "index" }
+    },
+    {
+      "name": "cup_fill_out_of_reach_walks_to_the_taps_stand_point",
+      "act": { "this": "c1", "form": "fill", "args": { "tap": "t1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "c1": { "kind": "r2:cup" }, "t1": { "kind": "r2:tap", "at_mm": [1000, 0, 0] }, "b1": { "effector_mm": [1000, 0, 401] } },
+        "moves": { "hold_under": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": "all" },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 0, "detail": { "point": "outlet", "of": "t1", "move": "hold_under" }, "fix": { "step": "walk_to", "point": "stand", "thing": "t1" }, "read": [["b1/effector_mm", [1000, 0, 401]], ["move/hold_under/reach_mm", 300], ["t1/at_mm", [1000, 0, 0]]] }
+    }
+  ]
+}
