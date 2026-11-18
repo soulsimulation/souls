@@ -27,7 +27,7 @@
 //! Not here: other people (N7), the gaits' table (`crate::gaits`), the controller's resources (B1), facing (B1's
 //! separate input), drawing.
 
-use crate::ground::{Piece, SQUARE};
+use crate::ground::{Piece, SQUARE, Terrain};
 use replica::effects::{Refusal, TransferRec};
 use replica::ids::{Id, Scope};
 use replica::pose::{
@@ -80,6 +80,9 @@ pub struct Surface {
     tris: Vec<Vec<Tri>>,
     /// The pieces whose bounds meet each 16 m cell.
     cells: BTreeMap<(i64, i64), Vec<u32>>,
+    /// The terrain under the open ground (N11a, #2735), and per piece, per triangle, whether the triangle lies on it
+    /// (each corner at the terrain's height there): such a triangle's heights are the terrain's own.
+    terrain: Option<(std::sync::Arc<Terrain>, Vec<Vec<bool>>)>,
 }
 
 /// A body the mover owns: its pose and velocity (in its frame), and the piece and triangle it stands in.
@@ -153,7 +156,33 @@ impl Surface {
             pieces,
             tris,
             cells,
+            terrain: None,
         }
+    }
+
+    /// The same surface on terrain `t` (the open ground's, `crate::ground::OpenGround::terrain`): inside a triangle
+    /// whose corners all lie at the terrain's height, the height is the terrain's, read at the point; elsewhere (a
+    /// pier over water, a floor) it is the triangle's.
+    pub fn on_terrain(mut self, t: Terrain) -> Surface {
+        let mm = |um: i64| (um + if um < 0 { -500 } else { 500 }) / 1000;
+        let on = self
+            .tris
+            .iter()
+            .zip(&self.pieces)
+            .map(|(list, pc)| {
+                list.iter()
+                    .map(|(_, idx, _)| {
+                        idx.iter().all(|&k| {
+                            let v = pc.vertices[k as usize];
+                            let h = t.height_at(i64::from(v[0]) * 1000, i64::from(v[2]) * 1000);
+                            h.is_some_and(|h| mm(h) == i64::from(v[1]))
+                        })
+                    })
+                    .collect()
+            })
+            .collect();
+        self.terrain = Some((std::sync::Arc::new(t), on));
+        self
     }
 
     pub fn pieces(&self) -> &[Piece] {
@@ -182,6 +211,12 @@ impl Surface {
 
     /// The surface's height at `p` in triangle `t` of piece `q`, µm.
     fn height(&self, q: u32, t: u32, p: [i128; 2]) -> i64 {
+        if let Some((ground, on)) = &self.terrain
+            && on[q as usize][t as usize]
+            && let Some(h) = ground.height_at(p[0] as i64, p[1] as i64)
+        {
+            return h;
+        }
         let (v, idx, _) = &self.tris[q as usize][t as usize];
         let y = |k: usize| i128::from(self.pieces[q as usize].vertices[idx[k] as usize][1]) * 1000;
         let a = orient(v[0], v[1], v[2]);

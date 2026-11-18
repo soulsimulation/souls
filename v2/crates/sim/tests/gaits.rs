@@ -56,7 +56,8 @@ fn world(h: impl Fn(i32, i32) -> i32) -> Import {
 fn surface(im: &Import) -> Surface {
     let ground = im.nodes["ground"];
     let open = OpenGround::of(&im.tree, ground, HUMAN_RADIUS).expect("the open ground");
-    Surface::new(ground, open.cut_square(0, 0).pieces)
+    let t = open.terrain().expect("the terrain").clone();
+    Surface::new(ground, open.cut_square(0, 0).pieces).on_terrain(t)
 }
 
 fn place(s: &Surface, at: [i64; 2]) -> Option<Body> {
@@ -408,7 +409,7 @@ fn a1_eden_hills() {
         cut.as_millis(),
         t1.elapsed().as_millis()
     );
-    let s = Surface::new(ground, pieces);
+    let s = Surface::new(ground, pieces).on_terrain(terrain.clone());
     let mut spots = 0;
     'sq: for &(i, j) in &squares {
         for k in 0..16 {

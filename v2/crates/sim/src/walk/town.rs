@@ -82,7 +82,11 @@ impl Town {
         }
         let gh = tree.handle(ground).ok_or("no such ground")?;
         let gdoors = ground_doors(&tree, ground)?;
-        surfaces.insert(ground, Surface::new(ground, pieces));
+        let mut surface = Surface::new(ground, pieces);
+        if let Some(t) = open.terrain() {
+            surface = surface.on_terrain(t.clone());
+        }
+        surfaces.insert(ground, surface);
         let mut buildings = Vec::new();
         let mut stack = vec![gh];
         while let Some(h) = stack.pop() {
