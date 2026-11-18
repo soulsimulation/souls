@@ -12,6 +12,8 @@
 # queues behind a run in progress, cancels nothing, and does no heavy work if the head's newest run passed, so its ci-ok
 # repeats that result. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still runs a PR's path-scoped CI by hand, but its
 # checks don't count for the queue.
+# A pull_request run never runs the qualify legs ci-scope.mjs marks `heavy: true` (heavyInQueue): every change reaches
+# main through a merge_group run, which selects them by the same paths, so each change runs them once, in the queue.
 # A push to main of a commit whose merge_group run passed every qualify job (the queue fast-forwards main to it) does no
 # heavy work: `merge-group-covered` runs instead, and readers of main's CI take that job as full scope
 # (.github/scripts/ci-main.mjs, docs/testing.md#ci-window, CI on main). Any other push to main runs everything.
@@ -60,14 +62,16 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
       # A requested run queues behind any run already in its concurrency group; if that one passed at this head, the
-      # heavy work is done (never re-run a passing check on the same tree).
+      # heavy work is done (never re-run a passing check on the same tree). A requested run reads only requested runs:
+      # a pull_request run's pass covers no heavy leg (ci-scope.mjs heavyInQueue).
       - id: green
         name: Already green at this head
         if: github.event.action == 'labeled' || (github.event_name == 'workflow_dispatch' && inputs.pr != '')
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: echo "green=$(node .github/scripts/ci-scope.mjs green --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --self "$GITHUB_RUN_ID")" >> "$GITHUB_OUTPUT"
+          EVENTS: ${{ github.event_name == 'workflow_dispatch' && 'workflow_dispatch' || '' }}
+        run: echo "green=$(node .github/scripts/ci-scope.mjs green --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --self "$GITHUB_RUN_ID" --events "$EVENTS")" >> "$GITHUB_OUTPUT"
       # A push to main the merge queue already tested in full at this sha (ci-main.mjs) has no heavy work left.
       - id: queued
         name: Tested in full by the merge queue
@@ -341,7 +345,8 @@ jobs:
         run: echo "Every qualify job passed in merge_group run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN at $GITHUB_SHA; nothing heavy re-runs."
 
   # The one required check: passes when every selected job passed (or none was needed). A deferred run (CI window
-  # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing.
+  # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing. On a pull_request the `heavy: true`
+  # legs are never selected (the merge queue's run selects and requires them), so there it covers the jobs that ran.
   ci-ok:
     runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     needs: [scope, repo, qualify, smoke, merge-group-covered]

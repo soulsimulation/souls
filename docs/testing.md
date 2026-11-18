@@ -144,16 +144,24 @@ therefore **windowed**:
   The heavy jobs are skipped and `ci-ok` fails with "Full CI deferred". A deferred `ci-ok` is a real failure, so
   skipped heavy jobs never count toward merging, and branch protection still requires a green `ci-ok`. Docs or
   tools-only PRs select no heavy jobs and are never deferred.
+- **The `heavy: true` legs run once, in the merge queue.** A `pull_request` run never runs the `qualify` legs that
+  `ci-scope.mjs` marks `heavy: true` (`packages`, `launcher`, the server shards, `soul-actions`), even inside the window.
+  Every change reaches main through a merge-group run, which selects them by the same path map and must pass them, so
+  running them on the PR as well only doubled the load. On the PR, `ci-ok` passes when every job that ran passed: the
+  light legs the paths pick (`types-web`, `web`, `client-cli`, `native`, `latency`, `docs-reference`, `soul-tools`), the
+  smoke, `scope` and `repo`. A PR whose paths pick only heavy legs has nothing of its own to run and is never deferred.
+  The step summary lists the legs left to the queue. The decision is `heavyInQueue` in `.github/scripts/ci-scope.mjs`.
 - **To request full CI**, add `ci:run` (or `merge:ready`) to a ready PR. `ci.yml` takes the `labeled` event, so that starts
   a fresh `pull_request` run with the window open. The merge queue reads required checks from that event: a green dispatch
   doesn't clear a deferred `ci-ok`. The run queues behind a CI run already going for the same PR and cancels nothing, and it
   does no heavy work if that run passes at the same head, or if the head's newest run already passed. Once a PR is in
-  the window, its later pushes run in full as usual. A PR with conflicts gets no `pull_request` run until they are fixed.
+  the window, its later pushes run its jobs as usual. A PR with conflicts gets no `pull_request` run until they are fixed.
 - **Any other label starts the same run** (#2018). The merge queue reads only the newest `ci` run at a head, so a run
   without `ci-ok` would hide the real one. Like a window label's run, it queues behind the PR's running CI, cancels
   nothing, and does no heavy work when the head's newest run passed, so its `ci-ok` repeats that result.
 - **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
-  own `ci.yml`. It tells you the result, but it doesn't count for the queue.
+  own `ci.yml`. It runs the heavy legs, and reads only earlier requested runs as green at the head. It tells you the
+  result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
   which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
   `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, greenAtHead, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, greenAtHead, heavyInQueue, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -209,10 +209,11 @@ test('window CLI: the outputs ci.yml reads, for a PR push outside and inside the
   const server = ['--files', 'apps/server/src/world.ts'];
   const out = run(...server, '--event', 'pull_request', '--draft', 'false', '--labels', '["area:ci"]');
   assert.deepEqual([out.matrix, out.any, out.smoke, out.deferred], [[], 'false', 'false', 'true']);
-  assert.ok(out.selected.includes('server-0'), 'the deferred jobs are still reported');
+  assert.ok(out.selected.includes('latency'), 'the deferred jobs are still reported');
+  assert.ok(out.queued.includes('server-0'), 'and the heavy legs left to the merge queue');
   const inside = run(...server, '--event', 'pull_request', '--draft', 'false', '--labels', '["ci:run"]');
   assert.deepEqual([inside.any, inside.smoke, inside.deferred], ['true', 'true', 'false']);
-  assert.deepEqual(inside.matrix, names(['apps/server/src/world.ts']));
+  assert.deepEqual(inside.matrix, names(['apps/server/src/world.ts']).filter(n => !JOBS.find(j => j.name === n).heavy));
   const draft = run(...server, '--event', 'pull_request', '--draft', 'true', '--labels', '["merge:ready"]');
   assert.equal(draft.deferred, 'true');
   const requested = run(...server, '--event', 'request');
@@ -231,6 +232,59 @@ test('greenAtHead: the newest uncancelled ci run at the head passed, and none ne
   assert.equal(greenAtHead([r(1, 'completed', 'success'), r(2, 'completed', 'cancelled')]), true, 'cancelled says nothing');
   assert.equal(greenAtHead([r(1, 'completed', 'success'), r(2, 'in_progress')]), false, 'a newer run is still going');
   assert.equal(greenAtHead([r(1, 'completed', 'success'), r(2, 'in_progress')], 2), true, 'a run never counts itself');
+});
+
+// Gene, 18 Nov: the heavy legs run once per change, in the merge queue, never on the pull request too.
+const HEAVY = JOBS.filter(j => j.heavy).map(j => j.name);
+const SERVER = ['--files', 'apps/server/src/world.ts'];
+
+test('heavy legs: a pull_request run selects none; merge_group, push, manual and requested runs select them', () => {
+  assert.deepEqual(HEAVY, ['packages', 'launcher', ...Array.from({ length: JOBS.filter(j => j.kind === 'server').length }, (_, i) => `server-${i}`), 'soul-actions']);
+  assert.deepEqual(heavyInQueue(JOBS, 'pull_request').queued, HEAVY);
+  assert.equal(heavyInQueue(JOBS, 'pull_request').include.some(j => j.heavy), false);
+  for (const event of ['merge_group', 'push', 'workflow_dispatch', 'request']) assert.deepEqual(heavyInQueue(JOBS, event), { include: JOBS, queued: [] }, event);
+  const pr = run(...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["merge:ready"]');
+  assert.deepEqual(pr.matrix.filter(n => HEAVY.includes(n)), [], 'no heavy leg on the PR');
+  assert.deepEqual(pr.matrix, ['types-web', 'latency', 'docs-reference', 'soul-tools'], 'the light legs the paths pick still run');
+  assert.equal(pr.smoke, 'true', 'and the smoke');
+  assert.deepEqual(pr.queued, names(['apps/server/src/world.ts']).filter(n => HEAVY.includes(n)));
+  const group = run(...SERVER, '--event', 'merge_group');
+  assert.deepEqual(group.matrix, names(['apps/server/src/world.ts']), 'the queue runs every leg the paths pick');
+  assert.ok(HEAVY.filter(n => n.startsWith('server-')).every(n => group.matrix.includes(n)));
+  assert.deepEqual(group.queued, []);
+  for (const event of FULL_EVENTS) assert.deepEqual(run(...SERVER, '--event', event).matrix, JOBS.map(j => j.name), event);
+  // a PR whose paths pick only heavy legs has nothing of its own to run, so it is never deferred
+  const only = run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'pull_request', '--draft', 'true', '--labels', '[]');
+  assert.deepEqual([only.matrix, only.queued, only.deferred], [[], ['soul-actions'], 'false']);
+  assert.deepEqual(run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'merge_group').matrix, ['soul-actions']);
+});
+
+test('ci-ok: a ready pull_request with only light legs green passes; a failed leg or a deferred run still fails', () => {
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const ok = workflow.slice(workflow.indexOf('\n  ci-ok:'));
+  const script = ok.slice(ok.indexOf('        run: |\n', ok.indexOf('SCOPE:')) + 15).split('\n').filter(l => l.startsWith('          ')).map(l => l.slice(10)).join('\n');
+  assert.match(script, /test "\$SCOPE" = success/);
+  const verdict = env => { try { execFileSync('bash', ['-e', '-c', script], { env: { PATH: process.env.PATH, ...env }, stdio: 'ignore' }); return 'pass'; } catch { return 'fail'; } };
+  const pr = run(...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["ci:run"]');
+  assert.equal(pr.deferred, 'false', 'the deferral step does not run');
+  const needs = { SCOPE: 'success', REPO: 'success', QUALIFY: 'success', ANY: pr.any, SMOKE: 'success', SMOKE_SELECTED: pr.smoke, COVERED: 'skipped', COVERED_SELECTED: 'false' };
+  assert.equal(verdict(needs), 'pass');
+  assert.equal(verdict({ ...needs, QUALIFY: 'failure' }), 'fail', 'a light leg that failed');
+  assert.equal(verdict({ ...needs, SMOKE: 'failure' }), 'fail');
+  const none = run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'pull_request', '--draft', 'false', '--labels', '["ci:run"]');
+  assert.equal(verdict({ ...needs, ANY: none.any, QUALIFY: 'skipped', SMOKE_SELECTED: none.smoke, SMOKE: 'skipped' }), 'pass', 'nothing of its own to run');
+  assert.match(ok, /if: needs\.scope\.outputs\.deferred == 'true'[\s\S]*?exit 1/, 'outside the window a deferred run still fails');
+});
+
+test('green at head: a requested run reads only requested runs, since a pull_request pass covers no heavy leg', () => {
+  const r = (id, event, conclusion = 'success') => ({ id, event, status: 'completed', conclusion });
+  const runs = [r(1, 'workflow_dispatch', 'failure'), r(2, 'pull_request')];
+  assert.equal(greenAtHead(runs), true, 'a label run repeats the newest result');
+  assert.equal(greenAtHead(runs, null, ['workflow_dispatch']), false);
+  assert.equal(greenAtHead([r(1, 'workflow_dispatch'), r(2, 'pull_request', 'failure')], null, ['workflow_dispatch']), true);
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  assert.match(workflow, /EVENTS: \$\{\{ github\.event_name == 'workflow_dispatch' && 'workflow_dispatch' \|\| '' \}\}/);
+  assert.match(workflow, /--self "\$GITHUB_RUN_ID" --events "\$EVENTS"/);
 });
 
 test('ci.yml: every label starts a real pull_request run with ci-ok, queued in the PR group (#2018)', () => {
@@ -323,9 +377,10 @@ test('low-risk: an empty, missing or unreadable diff runs the full battery', () 
     assert.equal(smokeFor(files), true, String(files));
   }
   assert.equal(changedFiles('abc', 'def', () => { throw Error('bad object'); }), null);
-  for (const event of ['pull_request', 'merge_group']) {
+  const light = JOBS.filter(j => !j.heavy).map(j => j.name);
+  for (const [event, matrix] of [['pull_request', light], ['merge_group', JOBS.map(j => j.name)]]) {
     const empty = run('--files', '', '--event', event, '--labels', '["ci:run"]');
-    assert.deepEqual([empty.scope, empty.matrix, empty.smoke], ['full', JOBS.map(j => j.name), 'true'], event);
+    assert.deepEqual([empty.scope, empty.matrix, empty.smoke], ['full', matrix, 'true'], event);
   }
 });
 

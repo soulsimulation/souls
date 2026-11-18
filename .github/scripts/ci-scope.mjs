@@ -17,8 +17,10 @@
 // requested for it by hand (--event request: `gh workflow run ci.yml --ref <branch> -f pr=<n>`, scoped by the PR's paths
 // against main). Outside the window a run that selected heavy jobs is deferred: none run and ci-ok fails,
 // so a skipped job never reads as a pass. A run any label started (#2018), or a requested one, whose head already has a green
-// ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>]` prints whether the
-// head's newest ci run passed.
+// ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>] [--events a,b]` prints
+// whether the head's newest ci run (of those events, when given) passed.
+// A pull request run never runs the legs JOBS marks `heavy: true` (heavyInQueue): the merge queue's merge_group run
+// selects them by the same paths before the change reaches main, so each change runs them once, there.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -63,6 +65,17 @@ export function runnerFor(job, heavyRunner = '', lightRunner = '') {
   const pool = job.heavy ? heavyRunner : job.light ? lightRunner : '';
   if (!pool) return 'ubuntu-latest';
   return pool.startsWith('[') ? JSON.parse(pool) : pool;
+}
+
+/** Events whose runs leave the `heavy: true` legs to the merge queue. Every change reaches main through a merge_group
+ * run, which is not windowed and selects those legs by the same path map, so a pull request run repeating them would
+ * only run them twice (docs/testing.md#ci-window). Merge-group, push, manual and requested runs keep them. */
+export const QUEUE_HEAVY_EVENTS = ['pull_request'];
+
+/** The jobs a run of `event` does itself (`include`), and the names of the heavy legs it leaves to the merge queue. */
+export function heavyInQueue(include, event) {
+  if (!QUEUE_HEAVY_EVENTS.includes(event)) return { include, queued: [] };
+  return { include: include.filter(j => !j.heavy), queued: include.filter(j => j.heavy).map(j => j.name) };
 }
 
 /** The god-skill unit tests (every *.test.mjs under tools/god-skill), run by the job with `godSkill` (ci.yml). */
@@ -125,9 +138,12 @@ export function windowed({ include, smoke }, win, { greenAtHead = false } = {}) 
   return { include: [], smoke: false, deferred: true, why: win.why };
 }
 
-/** The head's newest ci run (other than `self`) concluded success, and no newer one is still running. */
-export function greenAtHead(runs = [], self = null) {
-  const others = runs.filter(r => String(r.id) !== String(self ?? '') && !['cancelled', 'skipped'].includes(r.conclusion)).sort((a, b) => b.id - a.id);
+/** The head's newest ci run (other than `self`, and of `events` when given) concluded success, and no newer one is
+ * still running. A requested run reads only other requested runs: a pull_request run at the head left its heavy legs
+ * to the merge queue (heavyInQueue), so its pass says nothing about them. */
+export function greenAtHead(runs = [], self = null, events = []) {
+  const others = runs.filter(r => String(r.id) !== String(self ?? '') && !['cancelled', 'skipped'].includes(r.conclusion)
+    && (!events.length || events.includes(r.event))).sort((a, b) => b.id - a.id);
   return others[0]?.status === 'completed' && others[0].conclusion === 'success';
 }
 
@@ -142,7 +158,7 @@ function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
   if (argv[0] === 'green') {
     const runs = JSON.parse(execFileSync('gh', ['api', `repos/${opt('--repo')}/actions/workflows/ci.yml/runs?head_sha=${opt('--sha')}&per_page=100`], { encoding: 'utf8' })).workflow_runs ?? [];
-    console.log(String(greenAtHead(runs, opt('--self'))));
+    console.log(String(greenAtHead(runs, opt('--self'), (opt('--events') ?? '').split(',').filter(Boolean))));
     return;
   }
   const event = opt('--event');
@@ -152,13 +168,15 @@ function main(argv) {
   let labels = [];
   try { const l = JSON.parse(opt('--labels') || '[]'); if (Array.isArray(l)) labels = l; } catch { /* unreadable labels: none */ }
   const win = windowFor({ event, draft: opt('--draft') === 'true', labels });
-  const plan = { ...full, ...windowed({ include: full.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
+  const own = heavyInQueue(full.include, event);
+  const plan = { ...full, ...windowed({ include: own.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
   const out = { matrix: JSON.stringify({ include: plan.include }), any: String(plan.include.length > 0), scope: plan.scope, smoke: String(plan.smoke), deferred: String(plan.deferred), window: plan.why };
-  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: full.include.map(j => j.name), diff: plan.diff }, null, 2));
+  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: own.include.map(j => j.name), queued: own.queued, diff: plan.diff }, null, 2));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(out).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     `### CI scope: ${plan.scope}\n\nJobs: ${plan.include.map(j => '`' + j.name + '`').join(', ') || 'none (docs/tools only)'}; local smoke: ${out.smoke}\n` +
-    (plan.deferred ? `\n**Full CI deferred** (${plan.why}): ${full.include.length} job(s) selected, none run. Add \`ci:run\` or \`merge:ready\` to a ready PR to run them (docs/testing.md#ci-window).\n` : ''));
+    (own.queued.length ? `\nLeft to the merge queue's run (heavy legs run once, there): ${own.queued.map(n => '`' + n + '`').join(', ')}\n` : '') +
+    (plan.deferred ? `\n**Full CI deferred** (${plan.why}): ${own.include.length} job(s) selected, none run. Add \`ci:run\` or \`merge:ready\` to a ready PR to run them (docs/testing.md#ci-window).\n` : ''));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2));
