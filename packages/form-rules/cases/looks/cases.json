@@ -12,6 +12,13 @@
     { "name": "chest_open", "kind": "looks:chest", "state": { "open": true }, "expect": { "drawer": { "slide_mm": [0, 0, 280] } } },
     { "name": "lamp_unlit", "kind": "looks:tablelamp", "state": { "lit": false }, "expect": { "light": { "glow_permille": 0, "tint": "#5d5a50" } } },
     { "name": "lamp_lit", "kind": "looks:tablelamp", "state": { "lit": true }, "expect": { "light": { "glow_permille": 1000, "tint": "#fff2b0" } } },
+    { "name": "piano_not_playing_is_silent", "kind": "looks:piano", "state": { "playing": false }, "expect": {} },
+    { "name": "piano_playing_plays_its_tune", "kind": "looks:piano", "state": { "playing": true }, "t_us": 4500000,
+      "expect": { "@self": { "sounds": [{ "sound": "tune", "loop": true, "volume_permille": 700, "reach_mm": 18000, "mood": "calm", "since_us": 4500000 }] } } },
+    { "name": "radio_dial_down_is_silent", "kind": "looks:radio", "state": { "volume": 0 }, "expect": {} },
+    { "name": "radio_dial_half_plays_at_half_of_its_loudest", "kind": "looks:radio", "state": { "volume": 500 },
+      "expect": { "speaker": { "sounds": [{ "sound": "tune", "loop": true, "volume_permille": 450, "reach_mm": 9000, "tune": "tune:sunday_stroll", "link": "link:broadcast" }] } } },
+    { "name": "an_event_sound_is_not_a_state_sound", "kind": "looks:gong", "state": { "swing": 0 }, "expect": { "disc": { "rotate_mdeg": [0, 0, 0] } } },
     { "name": "a_field_the_table_does_not_mention_moves_nothing", "kind": "looks:chest", "state": { "open": true, "colour": "red" }, "expect": { "drawer": { "slide_mm": [0, 0, 280] } } },
     { "name": "a_missing_field_moves_nothing", "kind": "looks:chest", "state": {}, "expect": {} },
     {
@@ -102,6 +109,13 @@
     { "name": "planter_fruiting", "kind": "looks:planter", "state": { "ripeness": 1000}, "expect": { "fill": { "growth_permille": 4000}}},
     { "name": "planter_past_the_last_stage_is_clamped", "kind": "looks:planter", "state": { "ripeness": 2250}, "expect": { "fill": { "growth_permille": 4000}}},
     { "name": "steam_follows_a_field_by_choice_not_by_name", "table": [{ "part": "vent", "field": "state", "do": "steam", "at": { "idle": 0, "venting": 800}}], "state": { "state": "venting"}, "expect": { "vent": { "steam_permille": 800}}},
-    { "name": "steam_eases_in_over_its_time", "table": [{ "part": "vent", "field": "heat", "do": "steam", "range": [0, 100], "to": [0, 1000], "over_us": 2000000}], "state": { "heat": 100}, "prev": { "heat": 0}, "t_us": 500000, "expect": { "vent": { "steam_permille": 250}}}
+    { "name": "steam_eases_in_over_its_time", "table": [{ "part": "vent", "field": "heat", "do": "steam", "range": [0, 100], "to": [0, 1000], "over_us": 2000000}], "state": { "heat": 100}, "prev": { "heat": 0}, "t_us": 500000, "expect": { "vent": { "steam_permille": 250}}},
+    { "name": "timed_kettle_level_as_set", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "now_us": 5000000, "expect": { "fill": { "show": false, "scale_permille": [1000, 1, 1000] } } },
+    { "name": "timed_kettle_level_30_s_later", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "now_us": 35000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 480, 1000] } } },
+    { "name": "timed_kettle_level_60_s_later", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "now_us": 65000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 960, 1000] } } },
+    { "name": "timed_kettle_level_held_at_its_max", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "now_us": 200000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 1000, 1000] } } },
+    { "name": "timed_kettle_emptying_falls", "kind": "looks:timed_kettle", "state": { "level": { "value": 1000, "per_s": -25, "set_us": 0 } }, "now_us": 20000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 500, 1000] } } },
+    { "name": "timed_kettle_without_world_time_is_not_drawn", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "expect": {} },
+    { "name": "timed_kettle_viewer_behind_its_set_time_draws_it_as_set", "kind": "looks:timed_kettle", "state": { "level": { "value": 400, "per_s": 16, "set_us": 5000000 } }, "now_us": 1000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 400, 1000] } } }
   ]
 }
