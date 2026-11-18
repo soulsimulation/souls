@@ -10,8 +10,8 @@
   },
   "geometry": { "bounds_mm": [700, 560, 600] },
   "forms": {},
-  "motion": {"how": "fixed"},
-  "loose": {"ever": true},
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:compost_bin",
     "table": [

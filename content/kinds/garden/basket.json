@@ -10,8 +10,8 @@
   },
   "geometry": { "bounds_mm": [300, 310, 220] },
   "forms": {},
-  "motion": {"how": "one_hand"},
-  "loose": {"ever": true},
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:basket",
     "table": [

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, greenAtHead, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, ciRunsAt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -77,14 +77,22 @@ test('routing: the server shards and the long legs go to CI_HEAVY_RUNNER; the sh
   assert.ok(jobsFor(['package.json']).include.some(j => j.heavy === true), 'the flag reaches the matrix');
 });
 
-test('routing fallback: with CI_HEAVY_RUNNER unset every job is hosted', () => {
-  for (const unset of ['', undefined]) for (const job of JOBS) assert.equal(runnerFor(job, unset), 'ubuntu-latest', job.name);
+test('routing: the short legs go to CI_LIGHT_RUNNER when set; native and latency keep their wall-time budgets hosted', () => {
+  const light = JOBS.filter(j => j.light).map(j => j.name).sort();
+  assert.deepEqual(light, ['client-cli', 'docs-reference', 'soul-tools', 'types-web', 'web']);
+  for (const job of JOBS) assert.deepEqual(runnerFor(job, 'souls-heavy', 'souls-light'), job.heavy ? 'souls-heavy' : job.light ? 'souls-light' : 'ubuntu-latest', job.name);
+  for (const kind of ['native', 'latency']) assert.equal(runnerFor(JOBS.find(j => j.kind === kind), 'souls-heavy', 'souls-light'), 'ubuntu-latest', kind);
+  assert.ok(jobsFor(['package.json']).include.some(j => j.light === true), 'the flag reaches the matrix');
+});
+
+test('routing fallback: with CI_HEAVY_RUNNER and CI_LIGHT_RUNNER unset every job is hosted', () => {
+  for (const unset of ['', undefined]) for (const job of JOBS) assert.equal(runnerFor(job, unset, unset), 'ubuntu-latest', job.name);
 });
 
 test('ci.yml: qualify runs-on reads the matrix flag, and smoke stays hosted (#1162)', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const runsOn = /^  qualify:[\s\S]*?^    runs-on: (.*)$/m.exec(workflow)?.[1] ?? '';
-  assert.equal(runsOn, "${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}");
+  assert.equal(runsOn, "${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || matrix.light && vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}");
   assert.equal(/^  smoke:[\s\S]*?^    runs-on: (.*)$/m.exec(workflow)?.[1], 'ubuntu-latest');
 });
 
@@ -100,6 +108,26 @@ test('the soul-tools job runs on its own paths, full scope included, and on noth
   for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'tools/edge-skill/client.mjs', 'tools/soul-actions/shared-crew.test.mjs']) assert.ok(!names([f]).includes('soul-tools'), f);
   assert.ok(names(['pnpm-lock.yaml']).includes('soul-tools'));
   assert.ok(!('paths' in jobsFor(['tools/soul-trace/x.test.mjs']).include.find(j => j.name === 'soul-tools')));
+});
+
+test('a v2/-only change runs the v2 job alone, scope none; v2 runs on nothing else (K15, #2637)', () => {
+  for (const files of [['v2/x.rs'], ['v2/crates/seed/src/lib.rs', 'v2/docs/TRUNK.md', 'v2/Cargo.lock']]) {
+    assert.deepEqual(names(files), ['v2'], files.join());
+    assert.equal(jobsFor(files).scope, 'none');
+    assert.equal(smokeFor(files), false);
+  }
+  for (const f of ['apps/server/src/world.ts', 'apps/web/src/App.tsx', 'docs/testing.md', 'tools/v2/x.mjs']) assert.ok(!names([f]).includes('v2'), f);
+  assert.ok(names(['pnpm-lock.yaml']).includes('v2'), 'full scope includes it');
+  assert.ok(!('paths' in jobsFor(['v2/x.rs']).include[0]));
+});
+
+test('ci.yml: the v2 job skips the pnpm install and runs v2/tools/ci.sh on the pinned toolchain', () => {
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const qualify = /^  qualify:[\s\S]*?(?=^  \S)/m.exec(workflow)?.[0] ?? '';
+  assert.match(qualify, /if: matrix\.kind != 'v2'\n\s+run: pnpm install --frozen-lockfile/);
+  assert.match(qualify, /^\s+v2\)\n.*\n\s+bash v2\/tools\/ci\.sh$/m);
+  assert.match(qualify, /rust-toolchain\.toml/);
+  assert.match(qualify, /key: v2-cargo-.*hashFiles\('v2\/rust-toolchain\.toml', 'v2\/Cargo\.lock'\)/);
 });
 
 test('unmapped paths (lockfile, .github, mars) run every job', () => {
@@ -132,17 +160,17 @@ test('owned music source selects web build, web tests and package checks', () =>
   assert.deepEqual(names.sort(), ['packages', 'types-web', 'web']);
 });
 
-test('pushes to main and manual runs check everything; pull request runs stay scoped', () => {
+test('the daily run and manual runs check everything; pull request, merge group and push runs stay scoped', () => {
   const script = fileURLToPath(new URL('./ci-scope.mjs', import.meta.url));
   const plan = event => JSON.parse(execFileSync(process.execPath, [script, '--files', 'docs/a.md', '--event', event], { encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: '', GITHUB_STEP_SUMMARY: '' } }));
-  assert.deepEqual(FULL_EVENTS, ['push', 'workflow_dispatch']);
+  assert.deepEqual(FULL_EVENTS, ['schedule', 'workflow_dispatch']);
   for (const event of FULL_EVENTS) {
     const p = plan(event);
     assert.equal(p.scope, 'full', event);
     assert.deepEqual(p.matrix, JOBS.map(j => j.name), event);
     assert.equal(p.smoke, 'true', event);
   }
-  for (const event of ['pull_request', 'merge_group']) {
+  for (const event of ['pull_request', 'merge_group', 'push']) {
     const p = plan(event);
     assert.equal(p.scope, 'none', event);
     assert.deepEqual(p.matrix, [], event);
@@ -201,10 +229,11 @@ test('window CLI: the outputs ci.yml reads, for a PR push outside and inside the
   const server = ['--files', 'apps/server/src/world.ts'];
   const out = run(...server, '--event', 'pull_request', '--draft', 'false', '--labels', '["area:ci"]');
   assert.deepEqual([out.matrix, out.any, out.smoke, out.deferred], [[], 'false', 'false', 'true']);
-  assert.ok(out.selected.includes('server-0'), 'the deferred jobs are still reported');
+  assert.ok(out.selected.includes('latency'), 'the deferred jobs are still reported');
+  assert.ok(out.daily.includes('server-0'), 'and the heavy legs left to after the merge');
   const inside = run(...server, '--event', 'pull_request', '--draft', 'false', '--labels', '["ci:run"]');
   assert.deepEqual([inside.any, inside.smoke, inside.deferred], ['true', 'true', 'false']);
-  assert.deepEqual(inside.matrix, names(['apps/server/src/world.ts']));
+  assert.deepEqual(inside.matrix, names(['apps/server/src/world.ts']).filter(n => !JOBS.find(j => j.name === n).heavy));
   const draft = run(...server, '--event', 'pull_request', '--draft', 'true', '--labels', '["merge:ready"]');
   assert.equal(draft.deferred, 'true');
   const requested = run(...server, '--event', 'request');
@@ -225,18 +254,78 @@ test('greenAtHead: the newest uncancelled ci run at the head passed, and none ne
   assert.equal(greenAtHead([r(1, 'completed', 'success'), r(2, 'in_progress')], 2), true, 'a run never counts itself');
 });
 
+// Gene, 18 Nov (startup mode): the heavy legs run in the daily full run on main and before a release, not per change.
+const HEAVY = JOBS.filter(j => j.heavy).map(j => j.name);
+const SERVER = ['--files', 'apps/server/src/world.ts'];
+
+test('heavy legs: pull_request, merge_group and push runs select none; the daily, manual and requested runs select them', () => {
+  assert.deepEqual(HEAVY, ['packages', 'launcher', ...Array.from({ length: JOBS.filter(j => j.kind === 'server').length }, (_, i) => `server-${i}`), 'soul-actions']);
+  for (const event of ['pull_request', 'merge_group', 'push']) {
+    assert.deepEqual(lightOnly(JOBS, event).daily, HEAVY, event);
+    assert.equal(lightOnly(JOBS, event).include.some(j => j.heavy), false, event);
+  }
+  for (const event of ['schedule', 'workflow_dispatch', 'request']) assert.deepEqual(lightOnly(JOBS, event), { include: JOBS, daily: [] }, event);
+  const light = ['types-web', 'latency', 'docs-reference', 'soul-tools'];
+  const pr = run(...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["merge:ready"]');
+  assert.deepEqual(pr.matrix, light, 'the light legs the paths pick still run on the PR');
+  assert.equal(pr.smoke, 'true', 'and the smoke');
+  assert.deepEqual(pr.daily, names(['apps/server/src/world.ts']).filter(n => HEAVY.includes(n)));
+  const group = run(...SERVER, '--event', 'merge_group');
+  assert.deepEqual([group.matrix, group.smoke, group.deferred], [light, 'true', 'false'], 'the queue runs the same light legs and the smoke');
+  assert.deepEqual(group.daily, pr.daily);
+  const push = run(...SERVER, '--event', 'push');
+  assert.deepEqual([push.matrix, push.smoke, push.daily], [light, 'true', pr.daily], 'a push to main runs the same light set as its merge group');
+  for (const event of FULL_EVENTS) {
+    const main = run(...SERVER, '--event', event);
+    assert.deepEqual([main.matrix, main.daily], [JOBS.map(j => j.name), []], `${event}: every heavy leg runs`);
+  }
+  // a change whose paths pick only heavy legs has nothing of its own to run, so it is never deferred
+  const only = run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'pull_request', '--draft', 'true', '--labels', '[]');
+  assert.deepEqual([only.matrix, only.daily, only.deferred], [[], ['soul-actions'], 'false']);
+  assert.deepEqual(run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'merge_group').matrix, []);
+});
+
+test('ci-ok: a ready pull_request with only light legs green passes; a failed leg or a deferred run still fails', () => {
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const ok = workflow.slice(workflow.indexOf('\n  ci-ok:'));
+  const script = ok.slice(ok.indexOf('        run: |\n', ok.indexOf('SCOPE:')) + 15).split('\n').filter(l => l.startsWith('          ')).map(l => l.slice(10)).join('\n');
+  assert.match(script, /test "\$SCOPE" = success/);
+  const verdict = env => { try { execFileSync('bash', ['-e', '-c', script], { env: { PATH: process.env.PATH, ...env }, stdio: 'ignore' }); return 'pass'; } catch { return 'fail'; } };
+  const pr = run(...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["ci:run"]');
+  assert.equal(pr.deferred, 'false', 'the deferral step does not run');
+  const needs = { SCOPE: 'success', REPO: 'success', QUALIFY: 'success', ANY: pr.any, SMOKE: 'success', SMOKE_SELECTED: pr.smoke };
+  assert.equal(verdict(needs), 'pass');
+  assert.equal(verdict({ ...needs, QUALIFY: 'failure' }), 'fail', 'a light leg that failed');
+  assert.equal(verdict({ ...needs, SMOKE: 'failure' }), 'fail');
+  const none = run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'pull_request', '--draft', 'false', '--labels', '["ci:run"]');
+  assert.equal(verdict({ ...needs, ANY: none.any, QUALIFY: 'skipped', SMOKE_SELECTED: none.smoke, SMOKE: 'skipped' }), 'pass', 'nothing of its own to run');
+  assert.match(ok, /if: needs\.scope\.outputs\.deferred == 'true'[\s\S]*?exit 1/, 'outside the window a deferred run still fails');
+});
+
+test('green at head: a requested run reads only requested runs, since a pull_request pass covers no heavy leg', () => {
+  const r = (id, event, conclusion = 'success') => ({ id, event, status: 'completed', conclusion });
+  const runs = [r(1, 'workflow_dispatch', 'failure'), r(2, 'pull_request')];
+  assert.equal(greenAtHead(runs), true, 'a label run repeats the newest result');
+  assert.equal(greenAtHead(runs, null, ['workflow_dispatch']), false);
+  assert.equal(greenAtHead([r(1, 'workflow_dispatch'), r(2, 'pull_request', 'failure')], null, ['workflow_dispatch']), true);
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  assert.match(workflow, /EVENTS: \$\{\{ github\.event_name == 'workflow_dispatch' && 'workflow_dispatch' \|\| '' \}\}/);
+  assert.match(workflow, /--self "\$GITHUB_RUN_ID" --events "\$EVENTS"/);
+});
+
 test('ci.yml: every label starts a real pull_request run with ci-ok, queued in the PR group (#2018)', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const job = name => workflow.slice(workflow.indexOf(`\n  ${name}:\n`) + 1).split(/\n  [a-z-]+:\n/)[0];
   // the queue reads only the newest ci run at a head: no label may leave one without a real ci-ok
   assert.doesNotMatch(workflow, /github\.event\.label\.name|other-label/);
-  for (const name of ['scope', 'repo']) assert.doesNotMatch(job(name), /^    if: /m, name);
+  assert.doesNotMatch(job('scope'), /^    if: /m);
+  assert.equal(job('repo').match(/^    if: (.*)$/m)[1], "needs.scope.outputs.green != 'true'", 'repo skips only on a green head');
   const ok = job('ci-ok');
   assert.doesNotMatch(ok, /^    name: /m, 'the job is always named ci-ok');
   assert.equal(ok.match(/^    if: (.*)$/m)[1], 'always()');
   // a label run queues behind the PR's running CI and never cancels it; a push still cancels
-  assert.equal(workflow.match(/^  group: (.*)$/m)[1], 'ci-${{ github.event.pull_request.number || inputs.pr || github.ref }}');
-  assert.match(workflow, /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' && github\.event\.action != 'labeled' \}\}/);
+  assert.match(workflow.match(/^  group: (.*)$/m)[1], /format\('ci-\{0\}', github\.event\.pull_request\.number \|\| inputs\.pr \|\| github\.ref\)/);
+  assert.match(workflow, /cancel-in-progress: \$\{\{ github\.event_name == 'push' \|\| \(github\.event_name == 'pull_request' && github\.event\.action != 'labeled'\) \}\}/);
   // a label on a green head does no heavy work, and the head is the PR's, not the merge commit
   assert.match(job('scope'), /if: github\.event\.action == 'labeled' \|\| \(github\.event_name == 'workflow_dispatch'/);
   assert.match(job('scope'), /green --repo "\$GITHUB_REPOSITORY" --sha "\$HEAD_SHA" --self/);
@@ -256,7 +345,7 @@ test('a window label opens the window on its own pull_request run, and green at 
   const heavy = { include: [{ name: 'server-0' }], smoke: true };
   const win = windowFor({ event: 'pull_request', labels: ['ci:run'] });
   assert.equal(win.open, true);
-  assert.deepEqual(windowed(heavy, win, { greenAtHead: true }), { include: [], smoke: false, deferred: false, why: 'a ci run at this head already passed' });
+  assert.deepEqual(windowed(heavy, win, { greenAtHead: true }), { include: [], smoke: false, deferred: false, green: true, why: 'a ci run at this head already passed' });
   assert.deepEqual(windowed(heavy, win).include, heavy.include);
   assert.equal(windowed(heavy, windowFor({ event: 'pull_request', draft: true, labels: ['ci:run'] })).deferred, true, 'a draft stays deferred');
 });
@@ -271,3 +360,109 @@ test('ci.yml: the window reaches the scope step, and a deferred run fails ci-ok'
   for (const l of WINDOW_LABELS) assert.match(labels, new RegExp(`name: "${l}"`));
 });
 
+// Low-risk paths (Gene, 17 Nov): a change confined to entry, content, form-rules, docs or changelog fragments runs no
+// server, smoke (e2e), walk (packages) or bundle (types-web) job; it keeps repo (always), the entry tests and the
+// form-rules tests (soul-tools).
+const SKIPPED = JOBS.filter(j => j.kind === 'server' || ['latency', 'packages', 'types-web', 'launcher', 'native', 'client-cli', 'soul-actions'].includes(j.name)).map(j => j.name);
+const LOW = ['tools/entry/check.mjs', 'content/kinds/seating/bench.json', 'content/asks/a.json', 'content/moves/a.json', 'packages/form-rules/cases/kettle.json', 'docs/testing.md', 'changes/a-fragment.md', 'README.md'];
+
+test('low-risk: a diff confined to the allowlist runs soul-tools only: no server, smoke, walk or bundle job', () => {
+  const plan = jobsFor(LOW);
+  assert.equal(plan.scope, 'low-risk');
+  assert.deepEqual(plan.include.map(j => j.name), ['soul-tools']);
+  for (const n of SKIPPED) assert.ok(!names(LOW).includes(n), n);
+  assert.equal(smokeFor(LOW), false);
+  for (const f of LOW) assert.deepEqual(names([f]).filter(n => SKIPPED.includes(n)), [], f);
+  assert.deepEqual(names(['changes/a.md']), [], 'a fragment alone runs no job');
+  assert.deepEqual(names(['docs/site/api.md']), ['docs-reference'], 'the reference pages still run their generator');
+  // the soul-tools job runs the entry tests, the form-rules tests and the launcher test that reads content/kinds
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const tools = workflow.slice(workflow.indexOf('            soul-tools)'), workflow.indexOf('            server)'));
+  for (const t of ['tools/entry/*.test.mjs', 'packages/form-rules/src/*.test.ts', 'tools/world-launcher/soul/card-search.test.mjs']) assert.ok(tools.includes(t), t);
+});
+
+test('low-risk: form-rules source keeps the web jobs, because apps/web imports it', () => {
+  assert.deepEqual(names(['packages/form-rules/src/looks.ts']).sort(), ['soul-tools', 'types-web', 'web']);
+  const importer = readFileSync(fileURLToPath(new URL('../../apps/web/src/gen-mesh/vocab-look.ts', import.meta.url)), 'utf8');
+  assert.match(importer, /packages\/form-rules\/src\/looks\.ts/);
+});
+
+test('low-risk: exact prefixes; one file outside the allowlist runs the full battery', () => {
+  for (const f of ['content/other/a.json', 'contents/kinds/a.json', 'tools/entryx/a.mjs', 'packages/form-rules-x/a.ts', 'AGENTS.md', 'CLAUDE.md', 'apps/docs/a.md'])
+    assert.notEqual(jobsFor([...LOW, f]).scope, 'low-risk', f);
+  // a PR carries a changelog fragment, which the path map does not name: beside any outside file, every job runs
+  for (const f of ['apps/server/src/world.ts', 'tools/proof/tier.mjs', 'AGENTS.md', 'pnpm-lock.yaml', '.github/workflows/ci.yml'])
+    assert.deepEqual(names([...LOW, f]), JOBS.map(j => j.name), f);
+  assert.deepEqual(names(['tools/entry/check.mjs', 'mars/viewer/x.js']), JOBS.map(j => j.name), 'an unmapped path, no fragment');
+  assert.equal(smokeFor([...LOW, 'apps/server/src/world.ts']), true);
+});
+
+test('low-risk: an empty, missing or unreadable diff runs the full battery', () => {
+  for (const files of [[], null, undefined]) {
+    assert.equal(jobsFor(files).scope, 'full', String(files));
+    assert.deepEqual(names(files), JOBS.map(j => j.name), String(files));
+    assert.equal(smokeFor(files), true, String(files));
+  }
+  assert.equal(changedFiles('abc', 'def', () => { throw Error('bad object'); }), null);
+  const light = JOBS.filter(j => !j.heavy).map(j => j.name);
+  for (const [event, matrix] of [['pull_request', light], ['merge_group', light], ['push', light], ['schedule', JOBS.map(j => j.name)]]) {
+    const empty = run('--files', '', '--event', event, '--labels', '["ci:run"]');
+    assert.deepEqual([empty.scope, empty.matrix, empty.smoke], ['full', matrix, 'true'], event);
+  }
+});
+
+test('low-risk: a merge group of two allowlist PRs is scoped; one with a server PR in it runs every light leg', () => {
+  const a = ['tools/entry/format.mjs', 'changes/sa-f6c.md'], b = ['content/kinds/kitchen/kettle.json', 'packages/form-rules/cases/kettle.json', 'changes/sa-d3.md'];
+  const group = run('--files', [...a, ...b].join(','), '--event', 'merge_group');
+  assert.deepEqual([group.scope, group.matrix, group.smoke, group.deferred, group.any], ['low-risk', ['soul-tools'], 'false', 'false', 'true']);
+  const mixed = run('--files', [...a, ...b, 'apps/server/src/world.ts', 'changes/server.md'].join(','), '--event', 'merge_group');
+  assert.deepEqual([mixed.scope, mixed.matrix, mixed.smoke], ['full', JOBS.filter(j => !j.heavy).map(j => j.name), 'true']);
+});
+
+
+// A label run at a head whose newest ci run passed: only scope and ci-ok run (18 Nov). The green step used the gh CLI,
+// which the light self-hosted runners lack, so it always answered nothing and every label re-ran the light legs.
+test('green at head: read with fetch and GH_TOKEN, no gh CLI; a failed read is not green', async () => {
+  const runs = [{ id: 1, event: 'pull_request', status: 'completed', conclusion: 'success' }, { id: 2, event: 'pull_request', status: 'in_progress', conclusion: null }];
+  let seen;
+  const get = async (url, init) => { seen = { url, auth: init.headers.authorization }; return { ok: true, json: async () => ({ workflow_runs: runs }) }; };
+  assert.deepEqual(await ciRunsAt('o/r', 'abc', { token: 't', api: 'https://api.example', fetch: get }), runs);
+  assert.deepEqual(seen, { url: 'https://api.example/repos/o/r/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100', auth: 'Bearer t' });
+  assert.equal(await greenCommand({ repo: 'o/r', sha: 'abc', self: 2 }, { token: 't', fetch: get }), 'true', 'the label run itself never counts');
+  assert.equal(await greenCommand({ repo: 'o/r', sha: 'abc', self: 9 }, { token: 't', fetch: get }), 'false', 'a newer run still going');
+  const warn = console.error; console.error = () => {};
+  try {
+    assert.equal(await greenCommand({ repo: 'o/r', sha: 'abc' }, { fetch: async () => ({ ok: false, status: 403 }) }), 'false');
+    assert.equal(await greenCommand({ repo: 'o/r', sha: 'abc' }, { fetch: async () => { throw new Error('offline'); } }), 'false');
+  } finally { console.error = warn; }
+  assert.doesNotMatch(readFileSync(fileURLToPath(new URL('./ci-scope.mjs', import.meta.url)), 'utf8'), /execFileSync\('gh'/);
+});
+
+test('green at head: a label run selects nothing and outputs green; a push, a closed window or a red head runs as today', () => {
+  const ready = [...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["merge:ready","approved:maintainer"]'];
+  const green = run(...ready, '--green-at-head', 'true');
+  assert.deepEqual([green.matrix, green.any, green.smoke, green.deferred, green.green], [[], 'false', 'false', 'false', 'true']);
+  const red = run(...ready, '--green-at-head', 'false');
+  assert.deepEqual([red.any, red.smoke, red.green], ['true', 'true', 'false'], 'a head that was not green runs its jobs');
+  const closed = run(...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["area:ci"]', '--green-at-head', 'true');
+  assert.deepEqual([closed.deferred, closed.green], ['true', 'false'], 'an earlier green never opens a closed window');
+  for (const event of ['merge_group', 'push']) assert.equal(run(...SERVER, '--event', event).green, 'false', event);
+  // ci.yml only asks on a label or a requested run: a synchronize, a merge group and a push never read green at head
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  assert.match(workflow, /- id: green\n        name: Already green at this head\n        if: github\.event\.action == 'labeled' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.pr != ''\)\n/);
+  assert.match(workflow, /^      green: \$\{\{ steps\.scope\.outputs\.green \}\}$/m);
+});
+
+test('ci-ok: on a green head it passes with repo, qualify and smoke skipped; a skipped repo fails anywhere else', () => {
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const ok = workflow.slice(workflow.indexOf('\n  ci-ok:'));
+  assert.match(ok, /GREEN: \$\{\{ needs\.scope\.outputs\.green \}\}/);
+  const script = ok.slice(ok.indexOf('        run: |\n', ok.indexOf('SCOPE:')) + 15).split('\n').filter(l => l.startsWith('          ')).map(l => l.slice(10)).join('\n');
+  const verdict = env => { try { execFileSync('bash', ['-e', '-c', script], { env: { PATH: process.env.PATH, ...env }, stdio: 'ignore' }); return 'pass'; } catch { return 'fail'; } };
+  const g = run(...SERVER, '--event', 'pull_request', '--draft', 'false', '--labels', '["merge:ready"]', '--green-at-head', 'true');
+  const skipped = { SCOPE: 'success', REPO: 'skipped', QUALIFY: 'skipped', ANY: g.any, SMOKE: 'skipped', SMOKE_SELECTED: g.smoke, GREEN: g.green };
+  assert.equal(verdict(skipped), 'pass');
+  assert.equal(verdict({ ...skipped, GREEN: 'false' }), 'fail', 'repo skipped without a green head');
+  assert.equal(verdict({ ...skipped, SCOPE: 'failure' }), 'fail');
+  assert.equal(verdict({ ...skipped, REPO: 'success', GREEN: '' }), 'pass', 'an ordinary run, green unset');
+});
