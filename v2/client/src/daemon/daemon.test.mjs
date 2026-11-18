@@ -205,7 +205,7 @@ test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says
   const { answered } = await waitFor(async () => { const s = await status(); return s.connected && s; });
   const act = await ask({ op: 'act', verb: 'eden:wave' });
   await waitFor(async () => (await status()).answered > answered);
-  for (const req of [{ op: 'status' }, { op: 'look' }, { op: 'find', words: 'cup' }, { op: 'wait', seconds: 0 }, { op: 'read' }, { op: 'stats' }, { op: 'nonsense' }]) {
+  for (const req of [{ op: 'status' }, { op: 'look' }, { op: 'find', words: 'item' }, { op: 'wait', seconds: 0 }, { op: 'read' }, { op: 'stats' }, { op: 'nonsense' }]) {
     const a = await ask(req);
     assert.equal(typeof a.age, 'number', `${req.op}: ${JSON.stringify(a).slice(0, 200)}`);
   }
@@ -256,11 +256,11 @@ test('R8 A3, A4: checked on the copy and at send time; only a current copy refus
   const ask = async (req) => { const a = await request(rt.socket, req, 10_000); outputs.push(JSON.stringify(a)); return a; };
   // A kind entry for the stand-in's things: field 1 named, and a form that needs it unset.
   mkdirSync(join(home, 'kinds'), { recursive: true });
-  writeFileSync(join(home, 'kinds', 'stand-in.json'), JSON.stringify({ format: 'souls-entry/1', kind: 'souls:cup', owner: 'thing',
+  writeFileSync(join(home, 'kinds', 'stand-in.json'), JSON.stringify({ format: 'souls-entry/1', kind: 'souls:item', owner: 'thing',
     state: { mark: { n: 1, type: 'int', default: 0, audience: { rule: 'everyone' } } },
     forms: { fresh: { who: 'anyone', starts: 'act', needs: [{ need: 'state', field: 'mark', is: 0 }], effects: [] } } }));
   await waitFor(async () => (await status()).connected);
-  const { found } = await ask({ op: 'find', words: 'cup', limit: 50 });
+  const { found } = await ask({ op: 'find', words: 'item', limit: 50 });
   const verdicts = [];
   for (const f of found) verdicts.push({ id: f.id, ...(await ask({ op: 'can', intent: { verb: 'eden:wave', this: f.id, form: 'fresh' } })) });
   const marked = verdicts.find((v) => v.can === 'no'), unmarked = verdicts.find((v) => v.can === 'yes');
