@@ -569,7 +569,7 @@ pub fn within(ring: &[Xz], p: Xz, r: i64) -> bool {
 /// The first body standing where `part` would be with the pose `place`, `turn` in the frame `to` (N19, #3341): a
 /// node `body` says is one (by its kind), whose centre, read in the frame of `ground`, lies within `radius` mm of a
 /// box of the part whose height span meets the body's ([`BODY_LOW`] to [`BODY_HIGH`] above its feet). The seating
-/// refuses such a seat before the lift (`seat.occupied`), as G2 refuses an edit that would bury a Soul.
+/// refuses such a seat before the lift (`site.occupied`), as G2 refuses an edit that would bury a Soul.
 #[allow(clippy::too_many_arguments)]
 pub fn stands_in(
     tree: &Tree,

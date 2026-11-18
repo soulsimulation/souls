@@ -380,7 +380,7 @@ fn n19_a3_seating_a_part_where_a_body_stands_is_refused_before_the_lift() {
                 e.0,
                 e.1
             );
-            assert_eq!(e.0, "seat.occupied");
+            assert_eq!(e.0, "site.occupied");
         } else {
             r.expect("a body 1 m off the frame refuses nothing");
             println!(

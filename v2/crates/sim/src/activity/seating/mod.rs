@@ -20,7 +20,7 @@
 //!   with B5's leave, which B18 refuses by name until the part stands.
 //! - **Refused before anyone moves** ([`Seating::check`]): `crew.size`, `slot.occupied` (another part in the slot),
 //!   `reach.too-high` (the slot's height above the crew's standing reach), and B18's refusals of the seating as it
-//!   would be committed, and `seat.occupied` when a body stands where the part would be (N19, #3341). Every commit
+//!   would be committed, and `site.occupied` when a body stands where the part would be (N19, #3341). Every commit
 //!   here goes through [`Seating::write`], the structure rule's guarded write, which asks for G3's rebuild of the
 //!   ground when one is kept ([`Seating::rebuild`]): a seated part is fixed geometry to walkers.
 //!
@@ -220,7 +220,7 @@ impl Seating {
     }
 
     /// The refusals before anyone moves, for `part` to go to `target` with `activity`'s crew, whose standing reach is
-    /// `reach` µm: `crew.size`, `slot.occupied`, `reach.too-high`, `seat.occupied` (a body stands where the part would
+    /// `reach` µm: `crew.size`, `slot.occupied`, `reach.too-high`, `site.occupied` (a body stands where the part would
     /// be, N19), then B18's on the seating as it would be committed.
     #[allow(clippy::too_many_arguments)]
     pub fn check(
@@ -279,7 +279,7 @@ impl Seating {
         );
         if let Some(who) = r.or_else(|e| refuse("seating.unread", e))? {
             return refuse(
-                "seat.occupied",
+                "site.occupied",
                 format!("{} stands where {} would be", show(who), show(part)),
             );
         }
