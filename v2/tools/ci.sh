@@ -132,6 +132,10 @@ step rules-equal node --input-type=module -e '
   const got = r.rules_run(readFileSync("target/tmp/rules/run.json", "utf8")), want = readFileSync("target/tmp/rules/native.txt", "utf8");
   console.log(`rules-equal: ${want.split("\n").length - 1} cases, WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} native`);
   if (got !== want) process.exit(1);'
+# The fact sheet (V10, #2720): a 20 s recording's live and history sheets and one factsAt record, the same bytes
+# from the same WASM build in Node as natively (tools/facts/wasm.mjs).
+step facts-wasm bash -c 'cargo run -p facts --release --locked --quiet -- vectors target/facts-vectors &&
+  node tools/facts/wasm.mjs target/wasm-load/pkg target/facts-vectors'
 # The code hatch (F8, #2823): the world's 1,000 chess-move cases (crates/sim/tests/hatch.rs, in the tests step) through
 # the same WASM build in Node, the daemon's runtime, and in a headless browser, each giving the world's table exactly.
 step hatch-three-hosts bash -c 'node --test client/src/hatch/ && node web/src/hatch/hatch.browser.mjs'
