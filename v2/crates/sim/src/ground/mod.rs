@@ -37,6 +37,9 @@
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
 
+// The repeat rule (K12, v2/clippy.toml): the patch map is a lookup, never iterated, so its order reaches nothing.
+#![allow(clippy::disallowed_types)]
+
 pub mod exits;
 pub mod scene;
 

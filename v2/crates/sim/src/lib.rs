@@ -12,6 +12,8 @@ pub mod host;
 pub mod links;
 pub mod log;
 pub mod mover;
+pub mod random;
+pub mod recorder;
 pub mod routes;
 pub mod timers;
 pub mod unit;

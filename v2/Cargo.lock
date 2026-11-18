@@ -507,6 +507,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "replay-compare"
+version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
+]
+
+[[package]]
 name = "replica"
 version = "0.0.0"
 dependencies = [
