@@ -185,6 +185,18 @@ pub const AUDIENCE_KIND: &str = "souls:audience";
 /// The kind of a facet: a child holding the fields of a kind whose audience differs from its node's (rule 3).
 pub const FACET_KIND: &str = "souls:facet";
 
+/// The one owner relation (rule 2): the `owner` audience rule reads it, and a kind's own `owner` link (the entry
+/// format's, which who may reads as `{"link": "owner"}`, F6) is this type on the tree, not `<namespace>:owner`.
+pub const OWNS: &str = "souls:owns";
+
+/// The tree's type of a kind's link `t`: [`OWNS`] for its `owner`, and `<the kind's namespace>:t` for any other.
+pub fn link_type(kind: &str, t: &str) -> String {
+    match t {
+        "owner" => OWNS.to_owned(),
+        _ => format!("{}:{t}", kind.split(':').next().unwrap_or_default()),
+    }
+}
+
 /// SA-F8's four rules (#2947), the one closed list a kind's field or link type names its audience by.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Rule {
@@ -205,7 +217,7 @@ fn group(state: &State, audience: Id) -> Option<(Id, u64, String)> {
         return None;
     }
     let (rule, ty) = match n.fields.get(&1) {
-        Some(Value::Uint(1)) => (1, "souls:owns".to_owned()),
+        Some(Value::Uint(1)) => (1, OWNS.to_owned()),
         Some(Value::Uint(2)) => match n.fields.get(&2) {
             Some(Value::Text(t)) => (2, t.as_str().to_owned()),
             _ => return None,
@@ -250,6 +262,11 @@ fn wanted(state: &State, anchor: Id, ty: &str) -> BTreeSet<Id> {
         .collect()
 }
 
+/// The principals the `owner` rule names at a thing as the log stands: the Souls at the far end of its [`OWNS`] links.
+pub fn owners(anchor: Id, state: &State) -> BTreeSet<Id> {
+    wanted(state, anchor, OWNS)
+}
+
 /// The one resolver (rule 2): the audience a rule names for a thing, as the log stands. `everyone` is everyone; the
 /// creator is the world's creator's own principal id; `owner` and `linked` are the thing's audience node for that
 /// rule whose members are exactly the principals the rule names now. When there is none (no node yet, or the members
@@ -258,7 +275,7 @@ pub fn resolve(rule: &Rule, anchor: Id, state: &State, creator: Id) -> R<Audienc
     let (n, ty) = match rule {
         Rule::Everyone => return Ok(Audience::Everyone),
         Rule::Creator => return Ok(Audience::Of(creator)),
-        Rule::Owner => (1, "souls:owns".to_owned()),
+        Rule::Owner => (1, OWNS.to_owned()),
         Rule::Linked(t) => (2, t.as_str().to_owned()),
     };
     let want = wanted(state, anchor, &ty);
