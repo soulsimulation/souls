@@ -226,7 +226,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   signClosed?: (id: string, soulId: string) => boolean;
   /** #1214: a faculty whose world change happens during an act's steps says what became of it when they end: 'done', why
    * not, or null to leave the receipt to the programme. `finished`: the steps ran to their end. */
-  actOutcome?: (capability: string, entityId: string, finished: boolean) => 'done' | {code: string; reason: string} | null;
+  actOutcome?: (capability: string, entityId: string, finished: boolean) => 'done' | {code: string; reason: string; /** SA-C3: an entry form's verdict */ decided?: unknown} | null;
   /** World-engine easels only; installed alongside the existing art media routes. */
   painting?: PaintingService;
   contactActuator?: ContactActuatorService;
@@ -234,6 +234,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
   concealedThing?: (id: string) => boolean;
   /** #1751: a built thing's acts as the catalog publishes them (its def's own action list), or null; set by the engine bridge. */
   thingActs?: (id: string) => {acts: import('../../god/actuators.ts').CatalogKindAct[]; state: Record<string, unknown>} | null;
+  /** SA-C3: a thing loaded from an entry, as the catalog publishes it (its kind and the entry), or null; set by the engine bridge. */
+  thingEntry?: (id: string) => {kind: string; body: unknown} | null;
   /** #1751: every built thing whose acted-on state differs from its def's defaults, with only the fields that differ. */
   thingStates?: () => ReadonlyMap<string, Record<string, unknown>>;
   /** #1095 A5: what a built thing's author said about it; set by the engine bridge. */
@@ -844,7 +846,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // PC05: a shared operation's programme ended; every member's receipt ends with it
     if (this.together.sharedProgramEnded(r.receipt_id, ev)) return;
     const actor = this.host.minds.get(r.soul_id)?.entityId, told = actor ? this.actOutcome?.(r.capability, actor, ev.kind === 'completed') : null;
-    if (told) { this.update(r.receipt_id, told === 'done' ? {phase: 'completed'} : {phase: 'failed', code: told.code, reason: told.reason}); return; }
+    if (told) { if (told !== 'done' && told.decided) this.setDetail(r.receipt_id, {decided: told.decided}); this.update(r.receipt_id, told === 'done' ? {phase: 'completed'} : {phase: 'failed', code: told.code, reason: told.reason}); return; }
     if (ev.kind === 'completed') {
       const unsupported = this.nativeUseRefusal?.(r.capability);
       if (unsupported) { this.update(r.receipt_id, {phase: 'failed', code: unsupported.code, reason: unsupported.reason}); return; }
@@ -2374,13 +2376,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (invited !== undefined && cap.action !== 'join') return {...refuse('capability.params', 'with (inviting others) works with a ride\'s join, activities and walks.'), ...resolved};
       const prepared=this.comms.objects.prepareAct(cap.object,soul,{action:cap.action,params:objParams});
       const before=prepared.before;
-      const out = prepared.result as {accepted: boolean; code?: string; reason?: string; result?: unknown;object?:{id:string;version:number}};
+      const out = prepared.result as {accepted: boolean; code?: string; reason?: string; decided?: unknown; result?: unknown;object?:{id:string;version:number}};
       if (!out.accepted) {
         // Keep legacy independent clock advances for non-body objects.
         if(!prepared.movesBody)this.comms.objects.act?.(cap.object,soul,{action:cap.action,params:objParams});
         // Out of reach: point at the walk that gets there.
         const placeId = out.code === 'object.out-of-reach' ? this.comms.objects.all().find(o => o.id === cap.object)?.placeId : undefined, go = placeId ? caps.find(c => c.id === 'walk:' + placeId) ?? this.bindOne(soul, 'walk:' + placeId)?.cap : undefined;
-        return {...refuse(out.code ?? 'object.refused', out.reason ?? 'The object refused that action.'), ...(go ? {did_you_mean: [{id: go.id, label: go.label}]} : {}), ...resolved};
+        return {...refuse(out.code ?? 'object.refused', out.reason ?? 'The object refused that action.'), ...(out.decided ? {decided: out.decided} : {}), ...(go ? {did_you_mean: [{id: go.id, label: go.label}]} : {}), ...resolved};
       }
       const contact=this.contactActuator?.prepare(soul,cap.object,cap.action,objParams)??null;
       const effects=out.object?confirmedObjectEffects(before,prepared.after,cap.action,out.object.version):{};
@@ -3912,9 +3914,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
 }
 
 /** Receipt detail (Core-A): channel (body | attention | none), chosen (what an intent picked), endedAt (terminal). */
-function detailOf(r: Row): {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown; stopped?: string; firstMotionTick?: number} {
+function detailOf(r: Row): {decided?: unknown; channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown; stopped?: string; firstMotionTick?: number} {
   if (!r.detail) return {};
-  try {const d = JSON.parse(r.detail) as {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown; stopped?: string; firstMotionTick?: unknown}; return {...(Number.isSafeInteger(d.firstMotionTick) ? {firstMotionTick: d.firstMotionTick as number} : {}), ...(typeof d.stopped === 'string' ? {stopped: d.stopped} : {}), ...(d.channel ? {channel: d.channel} : {}), ...(d.chosen ? {chosen: d.chosen} : {}), ...(d.endedAt ? {endedAt: d.endedAt} : {}), ...(d.alternatives ? {alternatives: d.alternatives} : {}), ...(d.meal ? {meal: d.meal} : {}), ...(d.approach ? {approach: d.approach} : {})};}
+  try {const d = JSON.parse(r.detail) as {channel?: string; chosen?: unknown; endedAt?: unknown; alternatives?: unknown; meal?: unknown; approach?: unknown; stopped?: string; firstMotionTick?: unknown; decided?: unknown}; return {...(d.decided ? {decided: d.decided} : {}), ...(Number.isSafeInteger(d.firstMotionTick) ? {firstMotionTick: d.firstMotionTick as number} : {}), ...(typeof d.stopped === 'string' ? {stopped: d.stopped} : {}), ...(d.channel ? {channel: d.channel} : {}), ...(d.chosen ? {chosen: d.chosen} : {}), ...(d.endedAt ? {endedAt: d.endedAt} : {}), ...(d.alternatives ? {alternatives: d.alternatives} : {}), ...(d.meal ? {meal: d.meal} : {}), ...(d.approach ? {approach: d.approach} : {})};}
   catch {return {};}
 }
 
