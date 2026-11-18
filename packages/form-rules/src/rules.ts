@@ -44,6 +44,8 @@ export type Need = {
   at_most?: number;
   slot?: Ref;
   point?: Ref;
+  /** `within_reach`: the thing whose point it is, given as a form argument; omitted means this thing. */
+  of?: { arg: string };
   link?: string;
   free?: boolean;
   holds?: string;
@@ -52,7 +54,7 @@ export type Form = {
   who?: unknown;
   starts?: string;
   needs?: Need[];
-  steps?: { step: string; move?: string; at?: Ref }[];
+  steps?: { step: string; move?: string; at?: Ref; toward?: Ref }[];
   effects?: Effect[];
 };
 /** An effect as an entry writes it. `transfer` moves an amount of one field from one node to another (SA-F2b). */
@@ -259,9 +261,26 @@ export function decide(input: Input): Verdict {
     within_reach(n, i) {
       const name = resolve(n.point, args);
       if (name === null) return { ok: false, no: bad(i, 'argument_missing', { arg: (n.point as { arg: string })?.arg ?? null }) };
-      const place = has(entry.points, name) ? entry.points![name].at_mm : has(entry.slots, name) ? entry.slots![name].at_mm : undefined;
+      // `of` names another thing by a form argument: its point is in its own frame, placed by its `at_mm` in the input.
+      let owner = entry;
+      let ownerId: string | null = null;
+      let origin: number[] | null = null;
+      if (n.of !== undefined) {
+        const argName = (n.of as { arg?: unknown } | null)?.arg;
+        if (typeof argName !== 'string') return { ok: false, no: bad(i, 'malformed_need') };
+        if (!has(args, argName)) return { ok: false, no: bad(i, 'argument_missing', { arg: argName }) };
+        ownerId = typeof args[argName] === 'string' ? (args[argName] as string) : null;
+        const other = ownerId !== null && has(nodes, ownerId) ? nodes[ownerId] : undefined;
+        const otherKind = other?.kind && has(kinds, other.kind) ? kinds[other.kind] : undefined;
+        if (!other || !otherKind) return { ok: false, no: bad(i, 'no_such_node', { node: ownerId }) };
+        owner = otherKind;
+        origin = Array.isArray(other.at_mm) && other.at_mm.length === 3 && other.at_mm.every(whole) ? other.at_mm : null;
+      }
+      const place = has(owner.points, name) ? owner.points![name].at_mm : has(owner.slots, name) ? owner.slots![name].at_mm : undefined;
       if (!Array.isArray(place) || place.length !== 3 || !place.every(whole)) return { ok: false, no: bad(i, 'no_such_point', { point: name }) };
-      const step = (form.steps ?? []).find((s) => s.step === 'move' && resolve(s.at, args) === name);
+      if (ownerId !== null && !origin) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: ownerId, field: 'at_mm', read } };
+      const same = (s: { at?: Ref; toward?: Ref }) => (ownerId === null ? resolve(s.at, args) === name : (s.toward as { arg?: string } | undefined)?.arg === (n.of as { arg: string }).arg);
+      const step = (form.steps ?? []).find((s) => s.step === 'move' && same(s));
       if (!step || typeof step.move !== 'string') return { ok: false, no: bad(i, 'no_move_at_point', { point: name }) };
       const move = has(state.moves, step.move) ? state.moves![step.move] : undefined;
       if (!move || !whole(move.reach_mm) || move.reach_mm < 0) return { ok: false, no: bad(i, 'no_move_reach', { move: step.move }) };
@@ -270,13 +289,14 @@ export function decide(input: Input): Verdict {
       read.push([`${state.actor}/effector_mm`, from]);
       read.push([`move/${step.move}/reach_mm`, move.reach_mm]);
       let distanceSq = 0n;
+      if (ownerId !== null) read.push([`${ownerId}/at_mm`, origin]);
       for (let k = 0; k < 3; k++) {
-        const d = BigInt(from[k]) - BigInt(place[k]);
+        const d = BigInt(from[k]) - BigInt(place[k]) - BigInt(origin ? origin[k] : 0);
         distanceSq += d * d;
       }
       const reach = BigInt(move.reach_mm);
       if (distanceSq <= reach * reach) return { ok: true };
-      return { ok: false, no: { verdict: 'no', reason: 'out_of_reach', need: i, detail: { point: name, move: step.move }, fix: { step: 'walk_to', point: name }, read } };
+      return { ok: false, no: { verdict: 'no', reason: 'out_of_reach', need: i, detail: ownerId === null ? { point: name, move: step.move } : { point: name, of: ownerId, move: step.move }, fix: ownerId === null ? { step: 'walk_to', point: name } : { step: 'walk_to', point: has(owner.points, 'stand') ? 'stand' : name, thing: ownerId }, read } };
     },
 
     hand(n, i) {

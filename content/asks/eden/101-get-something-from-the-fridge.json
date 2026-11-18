@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":101,"group":"object","words":"get something from the fridge","obvious":3,"things":{"fridge":"eden:fridge"},"chain":[{"this":"fridge","form":"open"},{"this":"fridge","form":"take"}]}

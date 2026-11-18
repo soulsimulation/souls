@@ -189,7 +189,10 @@ export function validateEntry(entry) {
   places(entry, points, slots, err);
   if (entry.geometry !== undefined) {
     if (!isObj(entry.geometry)) err('geometry', 'an object');
-    else { only(entry.geometry, ['bounds_mm'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true); }
+    else {
+      only(entry.geometry, ['bounds_mm', 'front'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true);
+      if (entry.geometry.front !== undefined && !FRONTS.includes(entry.geometry.front)) err('geometry.front', `one of ${FRONTS.join(', ')}: "z" is the front the frame names, "none" a thing with no front (a round table)`);
+    }
   }
 
   const ctx = {text, state, links, points, slots, forms, areas: isObj(entry.areas) ? entry.areas : {}};
@@ -797,7 +800,13 @@ function form(f, path, ctx, err) {
       if (s.at !== undefined) place(s.at, `${p}.at`);
       if (s.toward !== undefined && !isArg(s.toward)) err(`${p}.toward`, 'an argument');
       else if (s.toward !== undefined) arg(s.toward, `${p}.toward`, ['thing', 'slot', 'part']);
-    } else if (s.step === 'take' || s.step === 'put') { only(s, ['step', 'slot'], p, err); if (s.slot !== undefined) slot(s.slot, `${p}.slot`); }
+    } else if (s.step === 'take') { only(s, ['step', 'slot'], p, err); if (s.slot !== undefined) slot(s.slot, `${p}.slot`); }
+    else if (s.step === 'put') {
+      only(s, ['step', 'slot', 'place'], p, err);
+      if (s.slot !== undefined && s.place !== undefined) err(p, 'a slot or a place, not both');
+      if (s.slot !== undefined) slot(s.slot, `${p}.slot`);
+      if (s.place !== undefined) placement(s.place, `${p}.place`, arg, err);
+    }
     else if (s.step === 'settle') { only(s, ['step', 'posture'], p, err); if (!POSTURES.includes(s.posture)) err(`${p}.posture`, `a ground posture taken where the body stands, one of ${POSTURES.join(', ')}`); }
     else if (s.step === 'wait') { only(s, ['step', 'us'], p, err); if (!(isInt(s.us) && s.us > 0)) err(`${p}.us`, 'a pause of a stated length, whole microseconds above zero; never a wait for a time or a condition'); }
     else only(s, ['step'], p, err);
@@ -911,6 +920,58 @@ function list(arr, path, tag, kinds, err, each) {
     else if (!kinds.includes(x[tag])) err(`${p}.${tag}`, path.startsWith('forms.') && WHEN_NAME.test(x[tag]) ? `${WHEN_REASON} ("${x[tag]}" is not a ${tag})` : `"${x[tag]}" is not in the closed list (${kinds.join(', ')}); the task that needs a new one adds it`);
     else each(x, p);
   });
+}
+
+/** Where a thing is put down (SA-F11, #2883): one closed list in `packages/form-rules/placements.json`, shared with Engine v2 E2
+ *  (#2709) and E4 (#2772). A placement is `{at, anchor, facing}`: `at` one of the words, `anchor` the thing it is by (an argument
+ *  of type thing, which may carry a selector), `facing` how it ends up. With `at: "facing"` the thing turns where it stands. */
+export const PLACEMENTS = JSON.parse(readFileSync(new URL('../../packages/form-rules/placements.json', import.meta.url), 'utf8'));
+export const PLACE_WORDS = Object.freeze(Object.keys(PLACEMENTS.words));
+export const FACINGS = Object.freeze(Object.keys(PLACEMENTS.facings));
+export const FRONTS = Object.freeze(['z', 'none']);
+function placement(pl, path, arg, err) {
+  if (!isObj(pl)) { err(path, 'an object: {"at", "anchor", "facing"}'); return; }
+  only(pl, ['at', 'anchor', 'facing'], path, err);
+  const w = PLACEMENTS.words[pl.at];
+  if (!w) { err(`${path}.at`, `"${pl.at}" is not a placement word; one of ${PLACE_WORDS.join(', ')}`); return; }
+  const anchored = (v, p) => { if (!isArg(v)) err(p, 'an argument of type thing (named, or described by a selector)'); else arg(v, p, ['thing']); };
+  if (w.anchor) { if (pl.anchor === undefined) err(`${path}.anchor`, `"${pl.at}" is by something: name its anchor`); else anchored(pl.anchor, `${path}.anchor`); }
+  else if (pl.anchor !== undefined) err(`${path}.anchor`, `"${pl.at}" is by nothing; leave the anchor out`);
+  if (pl.facing === undefined) return;
+  if (w.turns_only) { err(`${path}.facing`, `"${pl.at}" already says which way; leave facing out`); return; }
+  const f = typeof pl.facing === 'string' ? pl.facing : isObj(pl.facing) && Object.keys(pl.facing).length === 1 ? Object.keys(pl.facing)[0] : undefined;
+  if (!(f in PLACEMENTS.facings)) err(`${path}.facing`, `one of ${FACINGS.join(', ')} ("toward" is {"toward": argument})`);
+  else if (PLACEMENTS.facings[f].anchor) { if (!isObj(pl.facing)) err(`${path}.facing`, `"${f}" is by something: {"${f}": argument}`); else anchored(pl.facing[f], `${path}.facing.${f}`); }
+  else if (typeof pl.facing !== 'string') err(`${path}.facing`, `"${f}" is by nothing: write it as a word`);
+}
+
+/** Whether a thing may be put down as a placement says, from plain data (SA-F11, #2883): the thing may be moved, the anchor
+ *  is named, a front exists where the word needs one. `thing` and `anchor` are entries. Whether the spot is free and legal is
+ *  the world's answer, never this one's. Returns the placement in full: the word, the anchor, how it will face, and whether
+ *  it moves at all (a turn does not). */
+export function place(thing, pl, {anchor, facingAnchor} = {}) {
+  const no = (code, reason) => ({ok: false, code, reason});
+  const w = PLACEMENTS.words[pl?.at];
+  if (!w) return no('unknown_word', `"${pl?.at}" is not a placement word; one of ${PLACE_WORDS.join(', ')}`);
+  const how = thing?.motion?.how;
+  if (!MOTIONS.includes(how)) return no('unsaid', `${thing?.kind} does not say how it moves`);
+  if (how === 'fixed') return no('fixed', `${thing.kind} is fixed: it is not put anywhere`);
+  const hasFront = e => e?.geometry?.front !== 'none';
+  if (w.anchor && !anchor) return no('no_anchor', `"${pl.at}" is by something: name its anchor`);
+  if (w.anchor && anchor === thing) return no('self', `${thing.kind} cannot be put ${pl.at} itself`);
+  if (w.front_of_anchor && !hasFront(anchor)) return no('no_front', `"${pl.at}" needs a front; ${anchor.kind} has none`);
+  if (w.front_of_thing && !hasFront(thing)) return no('no_front', `"${pl.at}" turns a front; ${thing.kind} has none`);
+  let facing = {kind: 'as_it_was'};
+  if (pl.at === 'facing') facing = {kind: 'toward', anchor: anchor.kind};
+  else if (pl.facing !== undefined) {
+    const f = typeof pl.facing === 'string' ? pl.facing : Object.keys(pl.facing)[0];
+    const fw = PLACEMENTS.facings[f];
+    if (!fw) return no('unknown_facing', `"${f}" is not a facing; one of ${FACINGS.join(', ')}`);
+    if (fw.anchor && !facingAnchor) return no('no_anchor', `"${f}" is by something: name what it faces`);
+    if (fw.front_of_thing && !hasFront(thing)) return no('no_front', `"${f}" turns a front; ${thing.kind} has none`);
+    facing = fw.anchor ? {kind: f, anchor: facingAnchor.kind} : {kind: f};
+  }
+  return {ok: true, at: pl.at, anchor: anchor?.kind ?? null, facing, moves: !w.turns_only};
 }
 
 function select(s, path, err) {

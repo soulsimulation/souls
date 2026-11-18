@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":262,"group":"over-time","words":"check the postbox every day","obvious":2,"when":"every day","things":{"postbox":"eden:postbox"},"chain":[{"this":"postbox","form":"open"},{"read":"postbox","field":"stock"}]}

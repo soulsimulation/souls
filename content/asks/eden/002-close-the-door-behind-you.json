@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":2,"group":"object","words":"close the door behind you","obvious":3,"things":{"door":"eden:door"},"chain":[{"this":"door","form":"go_through"},{"this":"door","form":"close"}]}
