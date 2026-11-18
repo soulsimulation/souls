@@ -54,7 +54,7 @@
         { "need": "state", "field": "sand", "is": "bottom" },
         { "need": "hand", "empty": true, "says": "put_down_first" }
       ],
-      "steps": [{ "step": "move", "move": "press", "at": "frame" }],
+      "steps": [{ "step": "move", "move": "turn", "at": "frame" }],
       "effects": [{ "change": "set", "field": "sand", "to": "top", "event": "flipped" }]
     }
   },

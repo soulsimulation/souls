@@ -1,0 +1,11 @@
+[package]
+name = "supervisor"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Engine v2 O1 (#2730): a world's launcher (its pinned build), its restart record and its health record."
+
+[dependencies]
+replica = { path = "../replica" }
+# The world's record and its pin (W8, #2729), from the object store or this machine's cached copy.
+directoryd = { path = "../directoryd" }
