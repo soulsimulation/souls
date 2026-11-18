@@ -261,6 +261,7 @@ test('mainCiState: a later narrow green run does not clear a failure; a full-sco
   assert.deepEqual(mainCiState([run(5, 'success'), run(8, 'success'), run(10, 'success')], isFull), { conclusion: 'success', since: null });
   assert.deepEqual(mainCiState([], isFull), { conclusion: 'unproven', since: 'unproven' });
   assert.equal(fullScope(run(3, 'success', { event: 'workflow_dispatch' }), []), true);
+  assert.equal(fullScope(run(3, 'success', { event: 'schedule' }), []), true, 'the daily run is full scope');
   assert.equal(fullScope(run(3, 'success'), ALL_JOBS), true);
   assert.equal(fullScope(run(3, 'success'), ALL_JOBS.slice(1)), false);
   assert.equal(fullScope(run(3, 'success'), ALL_JOBS.map((j, i) => i ? j : { ...j, conclusion: 'skipped' })), false);
@@ -275,6 +276,9 @@ test('mainCiState: a later narrow green run does not clear a failure; a full-sco
   assert.equal(n.mode_why, 'main CI unproven');
   assert.equal(narrow.comments.length, 1);
   assert.match(narrow.comments[0].body, /is unproven/);
+  // 18 Nov: pushes run light, so the daily run is what proves main; a red light push after it still counts.
+  assert.equal(train({ files: ['docs/a.md'], mainRuns: [run(11, 'success'), run(10, 'success', { event: 'schedule' }), run(9, 'failure')], full: [] }).run().mode, 'nonstrict');
+  assert.equal(train({ files: ['docs/a.md'], mainRuns: [run(11, 'failure'), run(10, 'success', { event: 'schedule' })], full: [] }).run().mode, 'strict');
   // A manual run after the failure is full scope and clears it.
   assert.equal(train({ files: ['docs/a.md'], mainRuns: [run(11, 'success', { event: 'workflow_dispatch' }), run(10, 'success'), run(9, 'failure')], full: [] }).run().mode, 'nonstrict');
 });
@@ -409,36 +413,40 @@ test('queue: a queued PR is skipped, so the self-dispatch ends', () => {
   assert.equal(queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: state[20] } }).run().pr, 21);
 });
 
-test('queue: mixed cap: with 4 mixed PRs queued, a 5th mixed PR waits and a low-risk one is enqueued', () => {
-  assert.equal(MIXED_CAP, 4);
+// 18 Nov: merge groups run no heavy leg, so the cap is 8. PRs 20.. are numbered in pick order.
+const ids = (n, from = 20) => Array.from({ length: n }, (_, i) => from + i);
+const inQueue = list => Object.fromEntries(list.map((n, i) => [n, i % 2 ? { autoMergeRequest: { enabledAt: 'x' } } : { isInMergeQueue: true }]));
+const prsOf = list => Object.fromEntries(list.map(n => [n, {}]));
+
+test('queue: mixed cap: with 8 mixed PRs queued, a 9th mixed PR waits and a low-risk one is enqueued', () => {
+  assert.equal(MIXED_CAP, 8);
   const mixed = ['apps/server/src/x.ts'], low = ['tools/entry/a.mjs', 'changes/a.md'];
-  const state = { 20: { isInMergeQueue: true }, 21: { autoMergeRequest: { enabledAt: 'x' } }, 22: { isInMergeQueue: true }, 23: { autoMergeRequest: { enabledAt: 'x' } }, 24: { isInMergeQueue: true } };
-  // 20-23 are mixed and queued, 24 is low-risk and queued (it does not count), 25 is mixed, 26 low-risk.
-  const t = queueTrain({ prs: { 20: {}, 21: {}, 22: {}, 23: {}, 24: {}, 25: {}, 26: {} }, state, files: mixed, filesFor: { 24: low, 26: low } });
+  // 20-27 are mixed and queued, 28 is low-risk and queued (it does not count), 29 is mixed, 30 low-risk.
+  const state = inQueue(ids(9));
+  const t = queueTrain({ prs: prsOf(ids(11)), state, files: mixed, filesFor: { 28: low, 30: low } });
   const r = t.run();
-  assert.deepEqual([r.pr, r.mode], [26, 'queue']);
-  assert.deepEqual(r.skipped.at(-1), { pr: 25, tier: r.skipped.at(-1).tier, why: 'mixed-cap', mixed_queued: 4 });
+  assert.deepEqual([r.pr, r.mode], [30, 'queue']);
+  assert.deepEqual(r.skipped.at(-1), { pr: 29, tier: r.skipped.at(-1).tier, why: 'mixed-cap', mixed_queued: 8 });
   assert.deepEqual([t.reads.held, t.reads.comments], [[], []], 'held back: not taken out of anything, not ejected, no comment');
-  // The waiting PR keeps merge:ready and goes on a later pass, once one of the four has left the queue.
-  const after = queueTrain({ prs: { 21: {}, 22: {}, 23: {}, 25: {} }, state, files: mixed }).run();
-  assert.deepEqual([after.pr, after.mode], [25, 'queue']);
+  // The waiting PR keeps merge:ready and goes on a later pass, once one of the eight has left the queue.
+  const after = queueTrain({ prs: prsOf([...ids(7, 21), 29]), state, files: mixed }).run();
+  assert.deepEqual([after.pr, after.mode], [29, 'queue']);
 });
 
-test('queue: mixed cap: with 3 mixed PRs queued, a 4th mixed PR is enqueued', () => {
-  const state = { 20: { isInMergeQueue: true }, 21: { autoMergeRequest: { enabledAt: 'x' } }, 22: { isInMergeQueue: true } };
-  const r = queueTrain({ prs: { 20: {}, 21: {}, 22: {}, 23: {} }, state, files: ['apps/web/src/x.ts'] }).run();
-  assert.deepEqual([r.pr, r.mode], [23, 'queue']);
+test('queue: mixed cap: with 7 mixed PRs queued, an 8th mixed PR is enqueued', () => {
+  const r = queueTrain({ prs: prsOf(ids(8)), state: inQueue(ids(7)), files: ['apps/web/src/x.ts'] }).run();
+  assert.deepEqual([r.pr, r.mode], [27, 'queue']);
 });
 
 test('queue: mixed cap: a PR whose file list cannot be read counts as not low-risk', () => {
-  const state = { 20: { isInMergeQueue: true }, 21: { isInMergeQueue: true }, 22: { isInMergeQueue: true }, 23: { isInMergeQueue: true } };
-  // 20-22 are mixed; 23 is queued but its files cannot be read, so it is the fourth mixed one and 24 waits.
-  const t = queueTrain({ prs: { 20: {}, 21: {}, 22: {}, 23: {}, 24: {} }, state, files: ['apps/server/src/x.ts'], filesFor: { 23: 'unreadable' } });
+  const state = Object.fromEntries(ids(8).map(n => [n, { isInMergeQueue: true }]));
+  // 20-26 are mixed; 27 is queued but its files cannot be read, so it is the eighth mixed one and 28 waits.
+  const t = queueTrain({ prs: prsOf(ids(9)), state, files: ['apps/server/src/x.ts'], filesFor: { 27: 'unreadable' } });
   const r = t.run();
   assert.equal(r.pr, '');
-  assert.deepEqual(r.skipped.map(s => [s.pr, s.why]), [[20, 'queued'], [21, 'queued'], [22, 'queued'], [23, 'files-unreadable'], [24, 'mixed-cap']]);
-  // With 23 readable and low-risk, only three mixed PRs are queued and 24 goes.
-  assert.equal(queueTrain({ prs: { 20: {}, 21: {}, 22: {}, 23: {}, 24: {} }, state, files: ['apps/server/src/x.ts'], filesFor: { 23: ['docs/a.md'] } }).run().pr, 24);
+  assert.deepEqual(r.skipped.map(s => [s.pr, s.why]), [...ids(7).map(n => [n, 'queued']), [27, 'files-unreadable'], [28, 'mixed-cap']]);
+  // With 27 readable and low-risk, only seven mixed PRs are queued and 28 goes.
+  assert.equal(queueTrain({ prs: prsOf(ids(9)), state, files: ['apps/server/src/x.ts'], filesFor: { 27: ['docs/a.md'] } }).run().pr, 28);
   // A candidate whose own files cannot be read waits too: not picked, not ejected.
   const own = queueTrain({ prs: { 20: {} }, filesFor: { 20: 'unreadable' } }).run();
   assert.deepEqual([own.pr, own.skipped], ['', [{ pr: 20, why: 'files-unreadable' }]]);
