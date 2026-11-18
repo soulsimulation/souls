@@ -9,6 +9,7 @@ pub mod links;
 pub mod log;
 pub mod mover;
 pub mod routes;
+pub mod text;
 pub mod unit;
 pub mod unstick;
 pub mod walk;

@@ -3,7 +3,8 @@
 Engine v2 T8 (#2662), contract T8 in [TRUNK.md](TRUNK.md). It fixes who may see a record, keeps every word out of
 the log, and makes words removable from a history that is never rewritten. Code: `v2/crates/replica/src/audience.rs`.
 Fixtures: `v2/crates/replica/fixtures/audience/` (a header and a log). Checks: `crates/replica/tests/audience.rs`.
-The store that keeps the words (K16), signing in (W1), removal end to end (W7) and who may act (F6) are not here.
+The store that keeps the words and the redaction list is K16's (`v2/crates/sim/src/text/mod.rs`); signing in (W1),
+removal end to end (W7) and who may act (F6) are not here.
 
 ## Who may see a record
 
