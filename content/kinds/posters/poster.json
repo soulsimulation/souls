@@ -74,6 +74,8 @@
       "effects": [{ "change": "set", "field": "out_of_date", "to": true, "event": "went_out_of_date" }]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:poster",
     "table": [

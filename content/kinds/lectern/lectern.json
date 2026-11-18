@@ -9,6 +9,8 @@
     "front": { "role": "stand", "at_mm": [0, 0, 550], "yaw_mdeg": 180000 }
   },
   "geometry": { "bounds_mm": [560, 1250, 460] },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:lectern",
     "shape": {"round":8,"shapes":[{"kind":"box","at":[0,20,0],"size":[420,40,380],"tint":"wood"},{"kind":"box","at":[0,560,0],"size":[90,1060,90],"tint":"wood"},{"kind":"box","at":[0,1120,20],"size":[540,40,400],"tint":"wood","pitch":17000},{"kind":"box","at":[0,1160,25],"size":[500,30,340],"tint":"cover","pitch":17000},{"kind":"box","at":[-122,1185,25],"size":[236,30,320],"tint":"page","pitch":17000},{"kind":"box","at":[122,1185,25],"size":[236,30,320],"tint":"page","pitch":17000}],"palette":{"wood":"#6b4a2e","page":"#f4eedc","cover":"#2f4a6b"},"tags":["lectern","book","object"]}

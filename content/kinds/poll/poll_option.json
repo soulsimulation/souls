@@ -38,6 +38,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:poll_option",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[-200,50,3],"size":[400,60,2],"tint":"label"},{"kind":"box","at":[220,50,3],"size":[300,60,2],"tint":"tally"}],"palette":{"label":"#d9d4c5","tally":"#f6f7f4"},"tags":["board","object"]}

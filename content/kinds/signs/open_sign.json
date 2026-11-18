@@ -34,6 +34,8 @@
       "effects": [{ "change": "set", "field": "open", "to": false, "event": "turned_to_closed" }]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:open_sign",
     "table": [

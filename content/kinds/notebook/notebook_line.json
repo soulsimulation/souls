@@ -41,6 +41,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:notebook_line",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,1,0],"size":[380,2,30],"tint":"page"},{"kind":"box","at":[-60,3,0],"size":[240,2,4],"tint":"ink"}],"palette":{"page":"#f4eedc","ink":"#23305c"},"tags":["page","object"]}
