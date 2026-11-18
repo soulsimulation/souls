@@ -1,0 +1,290 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:locomotive (core/locomotive@1, 1 placed): a ride on rails. Its fire is lit and put out at the regulator; it sets off only with the fire lit, and the fire is not put out while it is under way.",
+ "cases": [
+  {
+   "name": "locomotive_fire_up_board_and_drive",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "b2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": false,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1500,
+       -1700
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "drive",
+      "args": {
+       "seat": "driver"
+      }
+     },
+     "receipt": "rlocomotive_f0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "light_fire"
+     },
+     "receipt": "rlocomotive_f1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "fire",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fire_lit",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "fireman"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rlocomotive_f2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "t1",
+         "slot": "fireman"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "drive",
+      "args": {
+       "seat": "driver"
+      }
+     },
+     "receipt": "rlocomotive_f3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "driver"
+        }
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "under_way",
+        "n": 2,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:set_off",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "put_out_fire"
+     },
+     "receipt": "rlocomotive_f4",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:locomotive",
+     "fields": {
+      "fire": 1,
+      "under_way": 1
+     },
+     "slots": {
+      "fireman": [
+       "b2"
+      ],
+      "driver": [
+       "b1"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "locomotive_put_out_the_fire_standing",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1500,
+       -1700
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "put_out_fire"
+     },
+     "receipt": "rlocomotive_p0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "fire",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fire_out",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:locomotive",
+     "fields": {
+      "fire": 0,
+      "under_way": false
+     }
+    }
+   }
+  }
+ ]
+}

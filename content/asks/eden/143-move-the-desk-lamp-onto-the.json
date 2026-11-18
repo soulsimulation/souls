@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":143,"group":"two-things","words":"move the desk lamp onto the desk","obvious":3,"things":{"lamp":"eden:desk_lamp","desk":"eden:desk"},"chain":[{"this":"me","form":"pick_up","carry":"lamp","args":{"thing":"lamp"}},{"this":"me","form":"put","place":{"at":"on","thing":"lamp","anchor":"desk"},"args":{"thing":"lamp"}}]}

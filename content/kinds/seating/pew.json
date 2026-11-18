@@ -1,0 +1,96 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pew",
+  "owner": "thing",
+  "state": { "kneeler_down": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "points": {
+    "seat_1_front": { "role": "stand", "at_mm": [-750, 0, 682], "yaw_mdeg": 180000 },
+    "seat_2_front": { "role": "stand", "at_mm": [0, 0, 682], "yaw_mdeg": 180000 },
+    "seat_3_front": { "role": "stand", "at_mm": [750, 0, 682], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "seat_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-750, 470, 50], "stand": "seat_1_front" },
+    "seat_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 470, 50], "stand": "seat_2_front" },
+    "seat_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [750, 470, 50], "stand": "seat_3_front" }
+  },
+  "geometry": { "bounds_mm": [2460, 1111, 765] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    },
+    "raise_kneeler": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "kneeler_down", "is": true }],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "kneeler_down", "to": false, "event": "kneeler_raised" }]
+    },
+    "lower_kneeler": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "kneeler_down", "is": false }],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "kneeler_down", "to": true, "event": "kneeler_lowered" }]
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:pew",
+    "shape": {
+      "shapes": [
+        { "kind": "box", "at": [0, 440, 50], "size": [2400, 60, 420], "round": 0, "tint": "wood" },
+        { "kind": "rbox", "at": [0, 800, -170], "size": [2400, 620, 50], "tint": "wood", "round": 30, "pitch": -5730 },
+        { "kind": "box", "at": [-1200, 500, 0], "size": [60, 1000, 550], "round": 0, "tint": "wood" },
+        { "kind": "box", "at": [1200, 500, 0], "size": [60, 1000, 550], "round": 0, "tint": "wood" },
+        { "kind": "box", "at": [0, 200, 0], "size": [2300, 40, 40], "round": 0, "tint": "wood" },
+        {
+          "kind": "box",
+          "at": [0, 140, 420],
+          "size": [2300, 80, 140],
+          "round": 0,
+          "tint": "cushion",
+          "role": "flip",
+          "pivot": [0, 140, 420]
+        },
+        { "kind": "box", "at": [0, 1080, -200], "size": [2400, 50, 100], "round": 0, "tint": "wood" }
+      ],
+      "palette": { "wood": "#5e3d27", "cushion": "#7a2f2f" },
+      "tags": ["furniture", "seat", "church"]
+    },
+    "table": [
+      {
+        "part": "flip",
+        "field": "kneeler_down",
+        "do": "rotate",
+        "axis": "x",
+        "at": { "true": 0, "false": 75000 },
+        "over_us": 600000
+      },
+      {
+        "part": "flip",
+        "field": "kneeler_down",
+        "do": "slide",
+        "axis": "y",
+        "at": { "true": 0, "false": 160 },
+        "over_us": 600000
+      }
+    ]
+  },
+  "text": {
+    "card": "A wooden pew with a high back that seats three, and a kneeler that folds up.",
+    "seat": "seat",
+    "bench": "bench"
+  },
+  "card": { "text": "card", "category": "seat", "synonyms": ["bench"] }
+}

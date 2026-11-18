@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":238,"group":"with-others","words":"row across the lake with him","obvious":2,"things":{"him":"eden:humanoid","boat":"eden:rowing_boat","lake":"eden:lake"},"chain":[{"this":"boat","form":"ride"},{"this":"boat","form":"steer","args":{"toward":"lake"}}]}

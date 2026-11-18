@@ -1,0 +1,53 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:trail_sign_site",
+  "owner": "thing",
+  "state": {
+    "timber": { "n": 1, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 1250] }
+  },
+  "slots": {
+    "out": { "admits": "thing", "kinds": ["eden:trail_sign"], "most": 1, "at_mm": [0, 0, 2000], "fits_mm": [1200, 1800, 400] }
+  },
+  "geometry": { "bounds_mm": [5800, 700, 4000] },
+  "forms": {
+    "assemble": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "timber", "at_least": 1, "says": "no_timber" },
+        { "need": "slot_free", "slot": "out", "says": "site_occupied" },
+        { "need": "hand", "empty": true, "says": "put_down_first" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "wait", "us": 10000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "timber", "by": -1, "event": "timber_used" },
+        { "change": "create", "kind": "eden:trail_sign", "into": "out", "event": "sign_assembled" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:trail_sign_site",
+    "table": [
+      { "part": "fill", "field": "timber", "do": "show", "range": [0, 1], "to": [0, 1] }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[-2700,280,0],"size":[60,560,60],"tint":"marker"},{"kind":"box","at":[-2700,550,0],"size":[380,150,50],"tint":"marker"},{"kind":"box","at":[-360,100,0],"size":[180,120,1000],"tint":"wood","role":"fill"},{"kind":"box","at":[-120,125,0],"size":[180,120,1000],"tint":"wood","role":"fill"},{"kind":"box","at":[120,150,0],"size":[180,120,1000],"tint":"wood","role":"fill"},{"kind":"box","at":[360,175,0],"size":[180,120,1000],"tint":"wood","role":"fill"},{"kind":"box","at":[0,3,2000],"size":[1200,6,400],"tint":"ground"}],"palette":{"marker":"#9b7951","wood":"#806045","ground":"#9c9078"},"tags":["camping","trail","sign","object"]}
+  },
+  "text": {
+    "card": "A trail worksite with timber for one sign: assemble it, then write on it.",
+    "field": "field",
+    "sign": "sign",
+    "assemble": "assemble",
+    "no_timber": "This site has no supplied timber left to arrange.",
+    "site_occupied": "The marked sign site is occupied; clear it before assembling a trail sign.",
+    "put_down_first": "Put down what you are holding before assembling the trail sign."
+  },
+  "card": { "text": "card", "category": "field", "synonyms": ["sign", "assemble"] }
+}
