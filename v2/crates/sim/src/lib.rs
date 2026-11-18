@@ -3,6 +3,7 @@
 
 pub mod clock;
 pub mod ground;
+pub mod host;
 pub mod links;
 pub mod mover;
 pub mod routes;

@@ -149,6 +149,7 @@ dependencies = [
  "i_triangle",
  "import-eden",
  "replica",
+ "skills",
  "testworld",
 ]
 
