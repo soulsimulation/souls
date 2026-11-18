@@ -40,8 +40,8 @@
 // worldd's real clock: the tick loop and world time read the machine's clocks until K7's ticker drives them.
 #![allow(clippy::disallowed_methods)]
 
-use crate::checkers::refusal::{STATE_LIMIT, repair};
 use crate::bodies::{self, Asked, Bodies};
+use crate::checkers::refusal::{STATE_LIMIT, repair};
 use crate::checkers::{self, Act, Candidate, Rules};
 use crate::measures::{self, Measures, Stamps};
 use replica::apply::Replica;
@@ -438,15 +438,36 @@ impl Clock {
         let value = intent.to_value();
         if has_words(&value) {
             let a = self.refusal(actor, sequence, "intent.text-not-stored");
-            return self.answered(key, sequence, None, None, a.to_value(), (vec![reply], stamps));
+            return self.answered(
+                key,
+                sequence,
+                None,
+                None,
+                a.to_value(),
+                (vec![reply], stamps),
+            );
         }
         if expired(intent.expiry, now) {
             let a = self.refusal(actor, sequence, "intent.expired");
-            return self.answered(key, sequence, None, Some(value), a.to_value(), (vec![reply], stamps));
+            return self.answered(
+                key,
+                sequence,
+                None,
+                Some(value),
+                a.to_value(),
+                (vec![reply], stamps),
+            );
         }
         let Some(id) = Id::new(self.lineage, self.next_intent) else {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
-            return self.answered(key, sequence, None, Some(value), a.to_value(), (vec![reply], stamps));
+            return self.answered(
+                key,
+                sequence,
+                None,
+                Some(value),
+                a.to_value(),
+                (vec![reply], stamps),
+            );
         };
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
@@ -461,7 +482,14 @@ impl Clock {
             Ok(t) => t,
             Err(reason) => {
                 let a = self.refusal(actor, sequence, reason);
-                return self.answered(key, sequence, None, Some(value), a.to_value(), (vec![reply], stamps));
+                return self.answered(
+                    key,
+                    sequence,
+                    None,
+                    Some(value),
+                    a.to_value(),
+                    (vec![reply], stamps),
+                );
             }
         };
         let body = match &taken {
