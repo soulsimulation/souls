@@ -345,11 +345,7 @@ fn a_logged_input_is_the_bytes_of_its_record_and_only_when_it_changed() {
                     0 => Gaze::Ahead,
                     1 => Gaze::Node(far),
                     2 => Gaze::Node(bodies[1]),
-                    _ => Gaze::Point(Vec3::new(
-                        -(draw(2) as i64) * 123_456_789,
-                        24,
-                        i64::MIN / 2,
-                    )),
+                    _ => Gaze::Point(Vec3::new(-(draw(2) as i64) * 123_456_789, 24, i64::MIN / 2)),
                 }),
             };
             c.set(*b, d, part).expect("held");
