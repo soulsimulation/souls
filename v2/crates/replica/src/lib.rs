@@ -20,6 +20,7 @@ pub mod pose;
 pub mod query;
 pub mod read;
 pub mod refusals;
+pub mod rules;
 pub mod time;
 pub mod tree;
 pub mod views;

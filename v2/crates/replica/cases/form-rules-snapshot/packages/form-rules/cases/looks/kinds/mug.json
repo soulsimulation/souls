@@ -1,0 +1,33 @@
+{
+  "format": "souls-entry/1",
+  "kind": "looks:mug",
+  "owner": "thing",
+  "state": {
+    "fullness": { "n": 1, "type": "int", "unit": "permille", "default": 0, "min": 0, "max": 1000, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [130, 100, 90] },
+  "looks": {
+    "model": "look:looks_mug",
+    "shape": {
+      "make": { "kind": "gen", "gen": "kit/2", "args": { "shapes": [
+        { "kind": "box", "at": [0, 0.005, 0], "size": [0.08, 0.01, 0.08], "round": 0, "tint": "ceramic", "material": "glass" },
+        { "kind": "box", "at": [0, 0.05, 0.036], "size": [0.08, 0.09, 0.008], "round": 0, "tint": "ceramic", "material": "glass" },
+        { "kind": "box", "at": [0, 0.05, -0.036], "size": [0.08, 0.09, 0.008], "round": 0, "tint": "ceramic", "material": "glass" },
+        { "kind": "box", "at": [-0.036, 0.05, 0], "size": [0.008, 0.09, 0.064], "round": 0, "tint": "ceramic", "material": "glass" },
+        { "kind": "box", "at": [0.036, 0.05, 0], "size": [0.008, 0.09, 0.064], "round": 0, "tint": "ceramic", "material": "glass" },
+        { "kind": "box", "at": [0.06, 0.05, 0], "size": [0.02, 0.05, 0.012], "round": 0, "tint": "ceramic", "material": "glass" },
+        { "kind": "box", "at": [0.05, 0.075, 0], "size": [0.03, 0.012, 0.012], "round": 0, "tint": "ceramic", "material": "glass" },
+        { "kind": "box", "at": [0.05, 0.03, 0], "size": [0.03, 0.012, 0.012], "round": 0, "tint": "ceramic", "material": "glass" },
+        { "kind": "box", "at": [0, 0.05, 0], "size": [0.064, 0.08, 0.064], "round": 0, "tint": "tea", "role": "fill", "pivot": [0, 0.01, 0] }
+      ] } },
+      "palette": { "ceramic": "#cfe3ea", "tea": "#a8602a" },
+      "tags": ["cup"]
+    },
+    "table": [
+      { "part": "fill", "field": "fullness", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "fill", "field": "fullness", "do": "scale", "axis": "y", "range": [0, 1000], "to": [1, 1000] }
+    ]
+  },
+  "text": { "card": "A glass whose tea rises and falls with how full it is." },
+  "card": { "text": "card" }
+}
