@@ -147,9 +147,12 @@ stairs or ladders; `deep_water`: water deep enough to swim in). Its size is `geo
 Getting on and off is only while it stands still, and only where the rider could stand (`level`, `shallow`) or swim
 (`deep_water`): `dismount(entry, {moving, spot})` answers with the code `moving` or `no_footing` and a reason naming the
 spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/vehicle.json`.
-`ride` is for a boat that is not rowed, a sail: `seats` (body slots), `stops` (two or more `stand` points in the order
-of the trip), `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
-`speed_mm_s` and `ground`. A kind is a vehicle or a ride, not both. Sections 13 and 14 are meaning, so covered by the hash.
+`ride` is for a boat that is not rowed, a sail, and for a ride on a track (a big wheel, a carousel, a balloon, a cable car):
+`seats` (body slots), `stops` (two or more `stand` points in the order of the trip; a round trip names its one stop twice),
+`returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
+`speed_mm_s` and `ground`, which for a ride may also be `air` (a cable or a flight: a rider gets on and off only at its
+stops). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
+(SA-X33, [#2923](https://github.com/soulsimulation/souls/issues/2923)). Sections 13 and 14 are meaning, so covered by the hash.
 
 **Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a
 wardrobe, a fridge or a stall is known to hold, made real when someone reaches for it. A stock is
@@ -180,9 +183,12 @@ body's family declares it.
 
 **Bounds and timed values.** `min` / `max`: whole bounds of an `int` field (or a timed value); an amount moved never
 takes it past them. A `transfer` fills to `max` and draws down to `min`. A `timed` field is a value that changes with
-time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit), and a default
+time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit: `count`, `mm`,
+`g`, `mg`, `mC` or `permille`), and a default
 of three whole numbers, `{"value", "per_s", "set_us"}`: the value in that unit, its rate in that unit per second, and the
-world time it was set, in microseconds. A range need reads it at the state's time; the arithmetic is
+world time it was set, in microseconds. A slow process takes a small unit so its rate stays a whole number a second:
+the planter's water (SA-V4a) is in mg and dries at 5 mg a second (18 g an hour), and its stages come from timers a
+world day apart. A range need reads it at the state's time; the arithmetic is
 `packages/form-rules/README.md` ("A timed value").
 
 A `list` field holds a short bounded list of small records: `most` (required, 1 to 100, so it stays in tens: it is set
@@ -481,7 +487,9 @@ the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`),
 `scale` (permille, one axis or all), `show` (1 or 0), `glow` (permille), `tint` (a colour) or `pick` (no part: which
 of several parts a choice shows). Three more kinds draw a thing's own moving picture from a field (SA-D2): `steam` (permille
 of a plume leaving the part, so a kettle steams only above the level its range states), `flame` (permille of a flame
-burning on the part, 0 is out) and `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting). The part
+burning on the part, 0 is out), `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting; a value with no
+amount draws no plants) and `wilt` (permille of how far those plants hang, 0 fresh to 1000 wilted; the planter's falls as its
+water runs out, `content/kinds/garden/planter.json`). The part
 is a role of the model (the closed list of roles of the shape language), not the thing's name. The amount comes from `at` (field value to amount, for a bool or enum) or from
 `range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
 `over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
@@ -534,7 +542,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 |---|---|---|
 | `exact` | a float or a count in ticks | yes |
 | `targets` | an argument whose selector picks the wrong list, or that nothing uses | partly (closed selector lists) |
-| `makes` | a `create` that pays for nothing in its own form | where it appears (`into`) |
+| `makes` | a `create` that pays for nothing in its own form (a stock's take is paid by its count, lowered by the engine) | where it appears (`into`) |
 | `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
 | `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |

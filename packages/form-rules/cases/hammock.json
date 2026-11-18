@@ -1,0 +1,141 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:hammock (SA-X24): lie or sleep in it and get up; swing it and it comes to rest by itself.",
+  "cases": [
+    {
+      "name": "hammock_lie_free",
+      "act": { "this": "t1", "form": "lie", "args": { "place": "sling" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:hammock", "slots": { "sling": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "hammock_lie_when_full",
+      "act": { "this": "t1", "form": "lie", "args": { "place": "sling" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:hammock", "slots": { "sling": ["o0"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "fix": null }
+    },
+    {
+      "name": "hammock_sleep_free",
+      "act": { "this": "t1", "form": "sleep", "args": { "place": "sling" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:hammock", "slots": { "sling": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "hammock_sleep_when_full",
+      "act": { "this": "t1", "form": "sleep", "args": { "place": "sling" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:hammock", "slots": { "sling": ["o0"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "fix": null }
+    },
+    {
+      "name": "hammock_get_up_lying_there",
+      "act": { "this": "t1", "form": "get_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:hammock", "slots": { "sling": ["b1"] }, "links": { "sleeper": ["b1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "hammock_get_up_when_nobody_lies_there",
+      "act": { "this": "t1", "form": "get_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:hammock", "slots": { "sling": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_linked", "need": 0, "detail": { "link": "sleeper", "count": 0 } }
+    },
+    {
+      "name": "hammock_swing_still",
+      "act": { "this": "t1", "form": "swing" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:hammock" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "hammock_swing_while_swaying",
+      "act": { "this": "t1", "form": "swing" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:hammock", "fields": { "swaying": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": null }
+    },
+    {
+      "name": "hammock_settle_by_its_timer",
+      "act": { "this": "t1", "form": "settle" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:hammock", "fields": { "swaying": true } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    }
+  ]
+}
