@@ -1,0 +1,13 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sofa",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [2000, 850, 900] },
+  "motion": { "how": "pushed_by_one" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:sofa" },
+  "text": {
+    "card": "A sofa, pushed by one Soul and never carried."
+  },
+  "card": { "text": "card" }
+}

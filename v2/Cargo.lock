@@ -27,6 +27,13 @@ name = "gatewayd"
 version = "0.0.0"
 
 [[package]]
+name = "import-eden"
+version = "0.0.0"
+dependencies = [
+ "replica",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -73,6 +80,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "testworld"
+version = "0.0.0"
+dependencies = [
+ "import-eden",
+ "replica",
 ]
 
 [[package]]

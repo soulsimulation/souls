@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":110,"group":"object","words":"write hello on the chalkboard","obvious":2,"things":{"chalkboard":"eden:chalkboard"},"chain":[{"this":"chalkboard","form":"write","args":{"words":"hello"}}]}

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":210,"group":"with-others","words":"help him carry that","obvious":2,"things":{"him":"eden:humanoid","crate":"eden:crate"},"chain":[{"this":"me","form":"carry_together","args":{"thing":"crate","with":"him"}}]}
