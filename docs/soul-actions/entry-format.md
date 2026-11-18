@@ -113,14 +113,9 @@ A row of places names the slots in it with `row` and `place` (1 at the first end
 back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are data (`tools/entry/cases/slots.json`).
 
 `looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
-<<<<<<< /private/tmp/claude-501/-Users-gene-Souls/7a5b0788-c615-4a87-8bc7-2b39f1024fc1/scratchpad/mf.o
-`tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
-`look.mjs` converts to metres only when it draws.
-=======
 `tags`, in whole millimetres (a polygon's points too), with an angle in whole millidegrees and a part's `scale` and
 `glow` in permille. The format has no floating-point number and `look.mjs` converts to metres and fractions only when it
 draws; a text, list or schedule field changes no part, so it is not drawn.
->>>>>>> /private/tmp/claude-501/-Users-gene-Souls/7a5b0788-c615-4a87-8bc7-2b39f1024fc1/scratchpad/mf.t
 
 ## A form
 
@@ -203,7 +198,6 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   anyone is in it, the form is refused and nothing changes.
   The example is `packages/form-rules/cases/kinds/test/talk.json`.
 
-<<<<<<< /private/tmp/claude-501/-Users-gene-Souls/7a5b0788-c615-4a87-8bc7-2b39f1024fc1/scratchpad/mf.o
 - **A standing activity** (proposed: a `standing` section; SA-G2, [#2874](https://github.com/soulsimulation/souls/issues/2874))
   outlasts a sitting: a course or a job. It names `members`, a link type for those who belong across days; `present`,
   a link type (a role with places) for those at the sitting now; `enough`, how many present start a sitting; and
@@ -222,7 +216,7 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   who is present cannot part (`still_present`). At its end date (its `ends` field, as above) its world form removes it,
   members or not: each member is unlinked first (event `released`) and no body moves. Nothing waits for a time: hours
   are a schedule (SA-F16). The example is `packages/form-rules/cases/kinds/test/class.json`.
-=======
+
 ## A move
 
 A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
@@ -248,7 +242,6 @@ arithmetic only (easing in permille; a position is rounded to the nearest millim
 rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
 move the thing's frame into the world's: the caller passes world positions.
 
->>>>>>> /private/tmp/claude-501/-Users-gene-Souls/7a5b0788-c615-4a87-8bc7-2b39f1024fc1/scratchpad/mf.t
 ## The looks table
 
 `looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
