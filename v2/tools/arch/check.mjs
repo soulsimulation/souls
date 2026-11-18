@@ -48,10 +48,10 @@ export const ALLOWED = {
   replica: ['wasm-bindgen'],
   // skills: the world wakes the form runner and steps the walk it starts (F1, #2766; K13a, #2676).
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld', 'skills'],
-  // skills: the world runs the built-in walk for a move intent; the test world in its tests (I4b, #3156).
   // rustix: the machine's steady clock (CLOCK_MONOTONIC) without unsafe, one clock for the world and its gateway
-  // across their local socket, so an act's stamps form one chain (O4, #2694).
-  worldd: ['replica', 'sim', 'skills', 'import-eden', 'testworld', 'rustix'],
+  // across their local socket, so an act's stamps form one chain (O4, #2694). skills: the world runs the built-in
+  // walk for a move intent; the test world in its tests (I4b, #3156).
+  worldd: ['replica', 'sim', 'rustix', 'skills', 'import-eden', 'testworld'],
   // Agents' sockets (I1, #2683): WebSocket on tokio through axum, a constant-time compare, the OS random source.
   gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util', 'rustix'],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
