@@ -150,6 +150,11 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - if: matrix.kind != 'v2'
         run: pnpm install --frozen-lockfile
+      # PRs do not carry a rebuilt eden.mjs (docs/testing.md#the-soul-client-file): every job tests the client built from
+      # this head's modules (soul/*.mjs, packages/form-rules/src/rules.ts), and a failure to inline fails the job
+      - name: Build eden.mjs from its modules
+        if: matrix.kind != 'v2'
+        run: node tools/world-launcher/soul/inline.mjs
       # Engine v2 (K15, #2637): the toolchain v2/rust-toolchain.toml pins, and a cargo cache keyed on it and the lockfile.
       - name: Install the pinned Rust toolchain
         if: matrix.kind == 'v2'

@@ -65,6 +65,12 @@
       "move": "lock",
       "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [150, 1000, 450] },
       "at_us": [[1999999, [0, 900, 300]], [2200000, [75, 950, 375]], [2400000, [150, 1000, 450]], [2600000, [75, 950, 375]], [2800000, [0, 900, 300]]]
+    },
+    {
+      "why": "a craft: a hand at work on a thing in front of the body, held for the working spell across a small span (60 mm forward) at one height; the other hand's record is this one mirrored; the repeated small strokes inside the span are the viewer's to draw",
+      "move": "craft",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [-60, 1000, 420], "to_mm": [-60, 1000, 480] },
+      "at_us": [[1999999, [0, 900, 300]], [2200000, [-30, 950, 360]], [2400000, [-60, 1000, 420]], [4400000, [-60, 1000, 450]], [6400000, [-60, 1000, 480]], [6600000, [-30, 950, 390]], [6800000, [0, 900, 300]]]
     }
   ],
   "consume": [

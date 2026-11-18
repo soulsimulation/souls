@@ -36,6 +36,27 @@ when you change `tools/body-authoring/robot/` or the humanoid renderer it fits.
 `--test-concurrency=1`. Prefer `node --test` on the files you touched while iterating; the full suite belongs to CI
 and the remote gate.
 
+### The Soul client file
+
+`tools/world-launcher/soul/eden.mjs` is served and copied as one file, so `inline.mjs` inlines the client's modules
+(the `MODULES` it lists: `soul/*.mjs` and `packages/form-rules/src/rules.ts`) into generated blocks of it. **A pull
+request does not carry the rebuilt file.** Edit the module (or eden.mjs's own code outside the blocks) and leave the
+blocks as they are, so two PRs that change form rules never collide on eden.mjs. Who builds it:
+
+- **CI**: every `qualify` job runs `node tools/world-launcher/soul/inline.mjs` before its checks, so PR, merge-group
+  and main runs test the client built from that head. A module that cannot be inlined fails the job, and the launcher
+  test `inline: inline.mjs builds eden.mjs from its modules` checks the same locally.
+- **Main**: `eden-sync.yml` runs after each push to main that touches a module. When the committed copy is stale it
+  opens one pull request carrying only the rebuilt file (branch `bot/eden-sync-<sha>`, labelled `merge:ready`), so
+  checkouts, tools and local worlds that read eden.mjs from git catch up within a queue cycle.
+- **Release**: `release-client.mjs stamp` rebuilds a stale copy into the stamp commit, so the client a world serves
+  (`/eden.mjs`, and `upgrade` on users' machines) always matches the rules the release runs.
+
+Locally, run `node tools/world-launcher/soul/inline.mjs` before running tests that load eden.mjs after a module
+change. Then leave the rebuilt blocks out of your commit: `git checkout tools/world-launcher/soul/eden.mjs` when you
+did not edit eden.mjs's own code, or `git add -p` it when you did. `inline.mjs --check` says whether a copy is
+current.
+
 ## Walk gate
 
 Walkability is a release invariant. `apps/server/src/god/walk-audit.ts` audits fixed fixture copies of several worlds,
