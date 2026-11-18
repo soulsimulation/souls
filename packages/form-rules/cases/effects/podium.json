@@ -1,0 +1,117 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:podium (SA-X34, #2924): step up to speak, one speaker at a time; step down.",
+  "cases": [
+    {
+      "name": "podium_one_speaker_at_a_time",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "b2"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:podium",
+            "links": {
+              "speaker": []
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "step_up"
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "speaker",
+                "n": 1,
+                "end": "b1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:took_the_podium",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "step_up"
+          },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "already_linked",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "step_down"
+          },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "speaker",
+                "n": 1,
+                "end": "b1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:left_the_podium",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:podium",
+          "links": {
+            "speaker": []
+          }
+        }
+      }
+    }
+  ]
+}

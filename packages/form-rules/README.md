@@ -22,12 +22,15 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 - `{verdict: "no", reason, need, detail, fix, read}`: the first unmet need, by its index in the form. `reason` is one
   of `REASONS`; `detail` says what is missing (the field, what was found and wanted; the slot; the point and move;
   the link and how many there are). `fix` is one act that would meet the need, taken only from data: a form of the
-  same thing that anyone, or its holder, may start and whose `set`, `link` or `unlink` effect meets it, or whose
+  same thing that anyone, or its holder, may start and whose `set` (with `by`: the value it adds up to, within the field's bounds, so a crank that adds
+  charge fixes too little charge), `link` or `unlink` effect meets it, or whose
   `transfer` into the thing would meet it at the field's `max` (out of it: at its `min`); the same form with another
   free slot; or a closed step (`walk_to` a point, `take`, `put`). Where the data offers none, `fix` is `null`.
 - `{verdict: "unknown", need, node, field | link, read}`: a need read a field or link outside the asker's audience
   and no need was definitely unmet. A definite "no" from another need wins over "unknown".
 - Malformed input never throws: it is `no` with reason `bad_input` and `detail.what`.
+- A need that names its refusal's words (`says`, a key of the entry's text table) adds `says` to its `no`, so a client
+  words the refusal as the kind's author did; a `bad_input` carries none.
 
 `read` lists what the verdict read, as `[address, value]`: `<node>/field/<n>` (by the field's number),
 `<node>/link/<n>` (how many links), `<node>/slot/<name>` (how many are in it), `<body>/hand/<name>`,
@@ -40,13 +43,18 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 there, compared as squares in big integers; reach to another thing is read in this order: of a `thing` argument the
 form walks to, met when the thing is in the actor's place, since the walk is taken as done; else `"of": {"arg": "tap"}`
 names the point of another thing given as a form argument, placed by that node's `at_mm` in the input, with no
-rotation, the fix a `walk_to` its `stand` point, SA-F2; else, an unknown pose, `unknown`), `hand` (`free: true` or
-`holds: <kind>`), `held_by_actor` (this thing, or a `thing` argument), `moves` (a `thing` argument moves `by` `carry`
+rotation, the fix a `walk_to` its `stand` point, SA-F2; else, an unknown pose, `unknown`), `hand` (`free: true`, `empty: true` (every hand holds nothing, else
+`hand_not_empty` with how many hold something) or `holds: <kind>`), `held_by_actor` (this thing, or a `thing` argument), `moves` (a `thing` argument moves `by` `carry`
 or `push`, read from its kind's `motion.how`: `moves_by`, `motion_unsaid`, `needs_souls`, or `no_free_hand` when
 carrying takes more hands), and `linked`
 / `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
-overflows). A need on a `timed` field reads its value at the state's `now_us` (below). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
+overflows) and `enough` (every amount they ask is there to give at the source, else `not_enough`, with the source, what
+it can give and the amount asked). A need on a `timed` field reads its value at the state's `now_us` (below). A `state`
+need with a `link` reads a field of the place at the end of that link (`from: "place"`, `most` 1): the place's kind
+says the field's number and audience, the read is `<place>/field/<n>`, an asker outside it gets `unknown` naming the
+place, and a refusal names the place in `detail.node` with no fix (nothing this thing does changes its place); with no
+place linked it is `not_linked`. The place is never read from the tree (Engine v2 T2: a parent is lifetime and frame). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
 the test kinds in `cases/kinds/test/`.
 
 ## A case
@@ -94,7 +102,10 @@ layers of Engine v2's contract T6:
 - `events`, one per effect the entry declares, in order: its name, the node, and the indexes of its changes. The name
   is `namespace:name`: the declaring kind's namespace before the plain name its entry writes (`poured` in an
   `eden:` kind is `eden:poured`).
-- `timers`: a `timer` effect is not a change to state; it is returned here with the index of its event.
+- `timers`: a `timer` effect is not a change to state; it is returned here with the index of its event. A timer is
+  named by the form it starts: if the node already has pending timers of that form (`timers` on the node in the state,
+  `{id, form, due_us}`, Engine v2 T6 rule 15), the new one carries `replaces`, their ids, which the engine clears, so
+  a crank lamp put out early and lit again goes dark at its new time and not at the earlier one.
 
 Every value in a result is one that Engine v2's encoding profile holds (T0, `v2/docs/encoding.md`): whole numbers and
 names, never a float, a boolean or `null`. A flag is 0 or 1 (an entry may still write `true` or `false`, and the

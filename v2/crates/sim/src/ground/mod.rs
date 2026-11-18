@@ -13,6 +13,10 @@
 //!   support, at the ground's height, T4 rule 6), crossing its edge is no hop and no transfer, and a named place
 //!   holds nobody (T2). Its thing's boxes (a pier's rails, a court's posts) are cut like any other. Its floor node
 //!   has no ground of its own (`ground-cover`).
+//! - **Steps.** A floor of a building on the open ground, whose outline's edge bounds a surface within [`STEP`] of the
+//!   ground (a shop's porch, 100 mm up), steps down there: each such edge is a doorway of no depth (`Doorway::step`),
+//!   taken from neither side, whose passage is cut like any doorway's. N4 makes it a link from the floor to the
+//!   ground where its passage meets both ([`crate::links::Kind::Step`]).
 //!   Boxes overlap and cross the floor's edge, so they are a union taken away, never a list of holes; a floor may
 //!   fall into several pieces, and each piece is cut into triangles that keep its edges (`i_triangle`, then
 //!   Delaunay flips).
@@ -25,14 +29,16 @@
 //!   it is on, its height and the width left for the centre at the doorway's middle. A shut door is the link's state
 //!   (N4, #2652), never an obstacle.
 //! - **Height.** Every vertex is `[x, y, z]` in whole millimetres in the node's frame (T4, #2644: never a 2D point on a
-//!   floor). A floor's vertices carry its surface's height. The open ground's carry 0: the tree holds no terrain yet
-//!   (N1, #2649, imports the waters' outlines and levels, not the 1 m heights), so slopes and steep cells wait for N11 (#2735).
+//!   floor). A floor's vertices carry its surface's height. The open ground's carry 0 still: the tree holds the 1 m
+//!   heights and classes (N1b, #3197; `scene::Terrain` reads them), but the cut does not use them until N11 (#2735)
+//!   brings slopes and steep cells.
 //! - **Where it lives.** Here in `sim`, native only. An agent's client never loads the ground: where a described spot
 //!   is a point, the server binds the legal standing spot (E2, #2709).
 //!
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
 
+pub mod exits;
 pub mod scene;
 
 use i_overlay::core::fill_rule::FillRule;
@@ -104,6 +110,8 @@ pub struct Meet {
     pub width_left: i64,
     /// The passage through the doorway is one piece, wider than nothing, reaching a piece of this patch on both sides.
     pub through: bool,
+    /// The doorway is a step off a low floor (`scene::Doorway::step`): a link of no tree.
+    pub step: bool,
 }
 
 /// The walkable ground of one node (or one square of the open ground) for one radius.
@@ -348,6 +356,7 @@ struct Door {
     /// Through the wall: from `n0` to `n1` mm along `across`.
     n0: i64,
     n1: i64,
+    step: bool,
 }
 
 impl Door {
@@ -449,7 +458,14 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             y: dw.y,
             n0: -DOOR_HALF_DEPTH,
             n1: DOOR_HALF_DEPTH,
+            step: dw.step,
         };
+        if dw.step {
+            // A step has no depth and is floor on one side and ground on the other: nothing is taken from either.
+            (door.n0, door.n1) = (0, 0);
+            doors.push(door);
+            continue;
+        }
         // Its depth is the wall's: the boxes either side of the opening, just past its edges.
         let flank = [
             door.point(-door.half - 50, 0),
@@ -637,6 +653,7 @@ fn meets(
                     b: [pb.x, ym, pb.y],
                     width_left,
                     through: false,
+                    step: door.step,
                 });
             }
         }
