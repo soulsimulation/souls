@@ -3,11 +3,19 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646. `timers`: K9, #2672."
 
 [[bin]]
 name = "tree"
 path = "src/tree.rs"
 
+[[bin]]
+name = "timers"
+path = "src/timers.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
+# The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
+sim = { path = "../../crates/sim" }
+testworld = { path = "../testworld" }
+import-eden = { path = "../import-eden" }
