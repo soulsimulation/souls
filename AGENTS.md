@@ -56,6 +56,10 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
   `packages/conformance/conformance/`, in the same change, with its reason. Never edit older supplements.
 - **Full gate:** the [remote gate](docs/testing/remote-gate.md) runs the complete suite for a release head: 0 new
   failures, 0 blockers, 0 unexpected skips. Don't re-run passing checks without a source change.
+- **Engine v2 (`v2/`):** a change only there is T1, runs CI's `v2` job alone (`v2/tools/ci.sh`) and no walk, bundle,
+  conformance or remote gate; the core's strict tiers switch on at the cut-over. Trunk and tranche rules:
+  [v2/docs/TRUNK.md](v2/docs/TRUNK.md), [v2/docs/tranche/FORMAT.md](v2/docs/tranche/FORMAT.md).
+  [docs/testing.md](docs/testing.md#ci-window)
 
 ## God mode build safety and seats
 
