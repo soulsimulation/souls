@@ -57,6 +57,11 @@ path = "src/forms.rs"
 name = "commit-cost"
 path = "commit-cost/main.rs"
 
+# I4, #2687: acts from arrival at the world process to answer, and the kill run.
+[[bin]]
+name = "act-latency"
+path = "act-latency/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
