@@ -730,6 +730,8 @@ export const SCOPE_RULES = [
   ['tools/body-authoring/', ['V5']],
   ['tools/', []],
   ['docs/', []],
+  // Engine v2 (#2635) never runs today's gate: CI's `v2` job (.github/scripts/ci-scope.mjs) is its check (K15, #2637)
+  ['v2/', []],
 ];
 const ROOT_DOCS = /^[^/]+\.md$|^LICENSE$/;
 export function scopeFor(files) {

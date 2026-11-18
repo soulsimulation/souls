@@ -83,8 +83,8 @@ test('A3: the lecture entry names no engine: all but its roles is the entry form
   for (const [name, role] of Object.entries(roles ?? {})) {
     assert.ok(entry.links && name in entry.links, `${name} is a link type of the kind`);
     assert.ok(ROLE_NEEDS.includes(role.need), `${name}.need`);
-    assert.ok(PLACES_IN.includes(role.places.in), `${name}.places.in`);
-    assert.deepEqual(Object.keys(role.places).filter((k) => !['in', 'slots', 'within_mm', 'posture'].includes(k)), [], `${name}.places`);
+    assert.ok(PLACES_IN.includes(role.places!.in), `${name}.places.in`);
+    assert.deepEqual(Object.keys(role.places!).filter((k) => !['in', 'slots', 'within_mm', 'posture'].includes(k)), [], `${name}.places`);
   }
   assert.doesNotMatch(JSON.stringify(entry), /engine|mars|rapier|three|tick|\.ts\b|\.mjs\b|apps\/|packages\//i);
 });
