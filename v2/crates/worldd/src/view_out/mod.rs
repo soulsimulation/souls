@@ -89,8 +89,8 @@ impl Writer {
     /// A writer of `key`'s stream under `root`: writes the bundle's header once and an empty pointer. `anchor` is a
     /// world time and the wall time, in ms since the Unix epoch, it fell at (rule 5).
     pub fn create(root: &Path, header: &Header, key: &Key, anchor: (Micros, u64)) -> R<Writer> {
-        let dir = root.join(stream::dir(header, key));
-        fs::create_dir_all(&dir).map_err(io)?;
+        // The header first, then the stream's folder: a writer killed between the two leaves no folder without its
+        // header (rule 4).
         let hp = root.join(stream::header_path(header));
         if let Some(parent) = hp.parent() {
             fs::create_dir_all(parent).map_err(io)?;
@@ -98,6 +98,8 @@ impl Writer {
         if !hp.exists() {
             write_whole(&hp, header.stored())?;
         }
+        let dir = root.join(stream::dir(header, key));
+        fs::create_dir_all(&dir).map_err(io)?;
         let w = Writer {
             dir,
             header: header.clone(),
