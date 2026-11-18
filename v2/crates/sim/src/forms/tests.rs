@@ -690,3 +690,118 @@ fn f3_a3_a_second_soul_asking_for_a_reserved_thing_is_refused_naming_the_holder_
     let again = b.ask(second, node, &entry, &form, limits, intent(second, 1));
     assert!(matches!(again, Ok(Asked::Started(_))), "{again:?}");
 }
+
+#[test]
+fn f6_commit_checks_who_may_before_a_run_starts() {
+    use replica::world_model::{Audience, Draft, End, FIXTURE_SCOPE_SOULS, Link, Node, plain};
+    // A kind of the runner's whose form's effect binds, that form made its owner's alone: the kind declares `owner`.
+    let (entry, form) = effecting();
+    let json::Value::Obj(mut e) = entry else {
+        panic!("an entry")
+    };
+    for (k, v) in &mut e {
+        if k == "forms"
+            && let json::Value::Obj(fs) = v
+            && let Some((_, json::Value::Obj(f))) = fs.iter_mut().find(|(n, _)| *n == form)
+        {
+            f.retain(|(k, _)| k != "who");
+            f.push(("who".into(), parse(r#"{"link":"owner"}"#).expect("JSON")));
+        }
+    }
+    let links = r#"{"owner":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}}"#;
+    e.push(("links".into(), parse(links).expect("JSON")));
+    let entry = json::Value::Obj(e);
+    let mut b = Bench::new();
+    let (owner, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    let (other, _) = b.add(&entry, Vec3::new(2_000_000, 0, 3_000_000), Vec3::ZERO);
+    let kind = entry
+        .get("kind")
+        .and_then(json::Value::str)
+        .expect("a kind");
+    let kinds = parse_kinds(&format!("{KINDS}\n{{1: \"{kind}\", 2: \"thing\"}}")).expect("kinds");
+    let full = |p: &str| {
+        kinds
+            .keys()
+            .find(|k| plain(k) == p)
+            .expect("a kind")
+            .clone()
+    };
+    let soul = Id::new(FIXTURE_SCOPE_SOULS, 100).expect("an id");
+    let mut mint = Minter::new(Scope([0xf6; 16]));
+    let node_of = |id, kind: String, parent| Node {
+        id,
+        kind,
+        parent,
+        slot: None,
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let link = |id, ty: String, ends, owner| Link {
+        id,
+        ty,
+        ends,
+        owner,
+        audience: Audience::Everyone,
+    };
+    let root = mint.mint().expect("id");
+    let ns = kind.split(':').next().expect("a namespace");
+    let draft = Draft {
+        kinds: kinds.clone(),
+        souls: [soul].into(),
+        audiences: BTreeMap::new(),
+        nodes: vec![
+            node_of(root, full("souls:place"), None),
+            node_of(node, full(kind), Some(root)),
+            node_of(owner, full("souls:body"), Some(root)),
+            node_of(other, full("souls:body"), Some(root)),
+        ],
+        links: vec![
+            link(
+                mint.mint().expect("id"),
+                "souls:body-of".into(),
+                [owner, soul],
+                End::First,
+            ),
+            link(
+                mint.mint().expect("id"),
+                format!("{ns}:owner"),
+                [soul, node],
+                End::Second,
+            ),
+        ],
+    };
+    let (tree, rules) = Tree::load(&draft).expect("loads");
+    b.tree = tree;
+    let names = |id| (id == soul).then(|| "Ana".to_owned());
+    let commit = |b: &mut Bench, body| {
+        b.look();
+        let now = b.now;
+        let (mut w, forms) = b.world();
+        let i = intent(body, 0);
+        let limits = Limits::default();
+        forms.commit(
+            &mut w,
+            &rules.audiences,
+            &names,
+            body,
+            node,
+            &entry,
+            &form,
+            i,
+            limits,
+            now,
+        )
+    };
+    let r = commit(&mut b, other).expect_err("refused");
+    println!("{}: {}", r.name, r.detail);
+    assert_eq!(
+        (r.name, r.detail.as_str()),
+        ("not-permitted", "who may: its owner, Ana")
+    );
+    assert!(
+        b.forms.is_empty() && b.forms.out.is_empty(),
+        "no run, no entry"
+    );
+    let ok = commit(&mut b, owner);
+    assert!(matches!(ok, Ok(Asked::Started(_))), "{ok:?}");
+}

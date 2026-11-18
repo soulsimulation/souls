@@ -37,7 +37,15 @@
 //!   ended `restart` and its thing freed; nothing is resumed).
 //! - **Every hold has a holder** ([`holders`]): the check the fault simulation (O5) runs, here after every stop.
 //!
-//! Not here: amounts, making and removing (F4), who may (F6), a walk across a link (the walk's crossings are not
+//! - **Who may** (F6, #2771). [`Forms::commit`] is a Soul's act's way in: it binds the form, checks who may at
+//!   commit ([`may`]) whatever the client said, and starts the run. The test is R2's ([`replica::who_may`]), one code
+//!   for the client and the world, read from the form's `who`: anyone, the holder, the world alone, or the ends of a
+//!   link of a type the thing's kind declares (its owner, a member, the Soul whose turn it is). On the tree, a kind's
+//!   link `t` is the type `<the kind's namespace>:t`, and a body is its Soul by `souls:body-of`. A refusal,
+//!   `not-permitted`, names who may: the rule, and the ends' names only when the asker is in the links' audience.
+//!   Ownership changing mid-form changes nothing: it is checked once, at commit.
+//!
+//! Not here: amounts, making and removing (F4), a walk across a link (the walk's crossings are not
 //! carried here yet), accepting the intent (I4), queueing for a reserved thing (B7), things for several users.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -51,6 +59,7 @@ use replica::ids::{Id, Minter};
 use replica::moves::Move;
 use replica::time::Micros;
 use replica::tree::Tree;
+use replica::who_may::{self, Answer, Who};
 use replica::world_model::{Audience, End, show};
 use skills::form_runner::{self, Limits, Next, Runner, Step, Woke};
 
@@ -515,6 +524,34 @@ impl Forms {
         Ok(Asked::Started(run))
     }
 
+    /// A Soul's act on `node`, at commit: form `form` of the thing's kind `entry` (a `souls-entry/1` entry) is bound,
+    /// who may is checked on the tree as it stands ([`may`], with `audiences` the members of each audience and `names`
+    /// the directory's names), and the run starts ([`Forms::start`]). A resend of an intent already accepted is not
+    /// checked again. Refused: the binder's refusals, `not-permitted` naming who may, and [`Forms::start`]'s.
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit<G: Geometry, R: Reach>(
+        &mut self,
+        w: &mut World<'_, G, R>,
+        audiences: &BTreeMap<Id, BTreeSet<Id>>,
+        names: &dyn Fn(Id) -> Option<String>,
+        body: Id,
+        node: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+        intent: Intent,
+        limits: Limits,
+        now: Micros,
+    ) -> Result<Asked, Refusal> {
+        let steps = form_runner::bind(entry, form)?;
+        let effects = form_runner::bind_effects(entry, form)?;
+        let known =
+            self.by_intent.contains_key(&intent.id) || self.applied.contains_key(&intent.id);
+        if !known {
+            may(w.tree, audiences, names, body, node, entry, form)?;
+        }
+        self.start(w, body, node, intent, steps, effects, limits, now)
+    }
+
     /// Writes run `run`'s effects at `at`, each one entry, but no key already written or waiting to be.
     fn emit(&mut self, run: RunId, at: Micros) {
         let Some(fr) = self.runs.get(&run) else {
@@ -759,6 +796,72 @@ impl Forms {
     }
 }
 
+/// The type of a body's link to its Soul (contract T2).
+const BODY_OF: &str = "souls:body-of";
+
+/// Who may, on the world's side (F6): whether `body` may do form `form` of `entry` at `node`, as the tree stands. The
+/// test is [`who_may::test`], the client's own. The actor's Soul is the far end of the body's `souls:body-of` link,
+/// and the asker is that Soul (or the body, with none). The thing's links of the rule's type are read whatever their
+/// audience; the refusal names their ends only when the asker is a member of every one's audience (`audiences`, as
+/// resolved when written), and otherwise names the group alone. A refusal never holds an account id: ends are Soul or
+/// body ids, named by `names` (the directory's names), else shown as ids. Refused: `form-unknown`, `who-unknown` (a
+/// `who` outside the closed list), `not-permitted` with the sentence.
+pub fn may(
+    tree: &Tree,
+    audiences: &BTreeMap<Id, BTreeSet<Id>>,
+    names: &dyn Fn(Id) -> Option<String>,
+    body: Id,
+    node: Id,
+    entry: &replica::rules::json::Value,
+    form: &str,
+) -> Result<(), Refusal> {
+    let refuse = |name, detail: String| Err(Refusal { name, detail });
+    let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
+        return refuse("form-unknown", form.to_owned());
+    };
+    let Some(who) = Who::read(f) else {
+        return refuse("who-unknown", form.to_owned());
+    };
+    let soul = tree
+        .links_at(body)
+        .iter()
+        .find(|e| tree.ty(e).as_str() == BODY_OF)
+        .map(|e| e.other);
+    let asker = soul.unwrap_or(body);
+    let thing = tree.handle(node).and_then(|h| tree.node(h));
+    let holds = thing.as_ref().and_then(|n| n.parent()) == Some(body);
+    let (ends, seen) = match (&who, &thing) {
+        (Who::Link(t), Some(n)) => {
+            let ns = n.kind().as_str().split(':').next().unwrap_or_default();
+            let ty = format!("{ns}:{t}");
+            let links: Vec<_> = tree
+                .links_at(node)
+                .iter()
+                .filter(|e| tree.ty(e).as_str() == ty)
+                .collect();
+            let seen = links.iter().all(|e| match e.audience {
+                Audience::Everyone => true,
+                Audience::Of(a) => {
+                    a == asker || audiences.get(&a).is_some_and(|m| m.contains(&asker))
+                }
+            });
+            (links.iter().map(|e| e.other).collect(), seen)
+        }
+        _ => (Vec::new(), false),
+    };
+    match who_may::test(&who, &body, soul.as_ref(), holds, Some(&ends)) {
+        Answer::Yes => Ok(()),
+        Answer::No | Answer::Unknown => {
+            let named: Vec<String> = ends
+                .iter()
+                .map(|e| names(*e).unwrap_or_else(|| show(*e)))
+                .collect();
+            let words = who_may::sentence(&who, seen.then_some(named.as_slice()));
+            refuse("not-permitted", format!("who may: {words}"))
+        }
+    }
+}
+
 /// One entry of run `o` at `at`: `changes`, and one event, `event`, that names them all.
 fn entry(
     o: &Open,
@@ -867,3 +970,5 @@ pub fn holders<'a>(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod who_tests;
