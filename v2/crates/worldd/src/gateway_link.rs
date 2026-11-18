@@ -5,10 +5,11 @@
 //! Each intent goes to the world (`worldd::answers`, I4 #2687): checked, committed at the next tick, logged, and
 //! answered after that tick's sync. A repeat gets the answer it had, across restarts too, since the world rebuilds
 //! its sequences from the log. The world here is I3's lamps world (`checkers::lamps`), `--rooms` rooms of `--bodies`
-//! bodies, each with a lamp; its log is `--log` (default: the socket's path and `.log`).
+//! bodies, each with a lamp; its log is `--log` (default: the socket's path and `.log`). With `--testworld` it also
+//! has bodies that move (I4b): N2's test world with one Soul and three chairs (`worldd::testbodies`, B10 #2688).
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
-//! [--arrivals <file>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the
+//! [--testworld] [--arrivals <file>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the
 //! order taken, so a bench can check each actor's order across restarts.
 
 use std::fs::OpenOptions;
@@ -31,7 +32,7 @@ pub fn run(args: &[String]) -> i32 {
     let usage = || {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
-             [--bodies <n>] [--arrivals <file>]"
+             [--bodies <n>] [--testworld] [--arrivals <file>]"
         );
         2
     };
@@ -47,6 +48,9 @@ pub fn run(args: &[String]) -> i32 {
     };
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
+    if args.iter().any(|a| a == "--testworld") {
+        cfg.bodies = Some(Box::new(worldd::testbodies::bodies));
+    }
     if let Some(p) = arg("--arrivals") {
         match OpenOptions::new().create(true).append(true).open(p) {
             Ok(f) => cfg.arrivals = Some(f),

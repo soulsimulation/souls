@@ -10,8 +10,7 @@ replica = { path = "../replica" }
 sim = { path = "../sim" }
 # The built-in walk, run behind the host for a move intent (I4b, #3156).
 skills = { path = "../skills" }
-
-[dev-dependencies]
-# N2's test world, where a scripted client walks, sits and rises (I4b, #3156).
+# N2's test world, where a scripted client walks, sits and rises (I4b, #3156), and where `gateway-link --testworld`
+# serves a Soul and three chairs (B10, #2688).
 import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }
