@@ -94,7 +94,9 @@ timer. The world writes each as `souls:said {1: {21: words}, 2: reach mm, 3: [he
 entry whose audience says who may read it ([audience.md](audience.md) rule 4, `replica::speech`). Its hearers are
 resolved when it is written and recorded (`sim::speech`): for ordinary talk, the Souls whose interest set (R4) holds
 the speaker, found from the bodies within the set's leave distance, never a scan. So a body walks, carries and talks
-at once, each under its own driver.
+at once, each under its own driver. Each tick the world brings the interest sets up to date after the controller's step and
+writes the utterances it started (`sim::speech::heard`, #3231); the view tier addresses each utterance's entry to the
+subscriptions that follow one of its recorded hearers, and to no other.
 
 ## Moves (B2)
 

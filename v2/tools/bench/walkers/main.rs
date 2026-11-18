@@ -53,6 +53,7 @@ use sim::ground::scene::{Xform, xform_to};
 use sim::host::Runner;
 use sim::links::Doors;
 use sim::mover::Body;
+use sim::speech::Hearing;
 use sim::unstick::{Ladder, Unstick};
 use sim::walk::town::{Spent, Town};
 use sim::walk::{World, node_of};
@@ -625,6 +626,8 @@ fn main() {
     let mut fault_kinds: BTreeMap<String, u64> = BTreeMap::new();
     let mut ended_names: BTreeMap<String, u64> = BTreeMap::new();
     let mut faulty_ticks = 0u64;
+    // #3231: the tick's hearing (`Hearing::update`, after the ladder's step), timed apart from the tick, ns.
+    let (mut hearing, mut hear_ns) = (Hearing::new(), Vec::with_capacity(ticks as usize));
     while ticker.next_tick() < ticks {
         let mut body = |tick: i64, start: Micros| {
             // The clock catches up after an overrun: never past the run's last tick.
@@ -730,6 +733,9 @@ fn main() {
             ];
             tick_us.push(total / 1000);
             phase_us.push(ph.map(|v| v / 1000));
+            let h0 = Instant::now();
+            hearing.update(runner.controller.near(), (0..n as u64).map(walker_id));
+            hear_ns.push(h0.elapsed().as_nanos() as i64);
             corner_parts.push([
                 (s2.clears - s0.clears) as i64,
                 ((s2.clear_ns - s0.clear_ns) / 1000) as i64,
@@ -892,6 +898,12 @@ fn main() {
     for l in &by_phase {
         println!("walkers: phase {l}");
     }
+    let h = &mut hear_ns;
+    let (hm, h99) = (pct(h, 50), pct(h, 99));
+    println!(
+        "walkers: hearing median {hm} ns, p99 {h99} ns, max {} ns",
+        h.last().unwrap_or(&0)
+    );
     println!(
         "walkers: clock: ticks {}, overruns {}, longest {} us, most lag {} us",
         s.ticks, s.overruns, s.max_tick_us, s.max_lag_us
