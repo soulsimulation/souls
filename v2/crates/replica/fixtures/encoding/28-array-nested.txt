@@ -1,0 +1,2 @@
+[1, [2, 3], h'', "x"] # an array holding an array, bytes and text
+8401820203406178
