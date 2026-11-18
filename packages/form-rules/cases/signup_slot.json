@@ -1,0 +1,441 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:signup_slot (from Soul Actions entry 25, landed in #493: core-signup-sheet@1). A sheet's slots are its children; a Soul signs a free slot with her own name (the signed link: the name is hers, not words) and only a signer crosses her name off ('Your name is not on this sheet; only a signer crosses their own name off.'), which the unlink refuses for anyone else (the effect case). 'The sheet is full' is every slot taken. Another Soul's name is refused by the need with the original's words.",
+ "cases": [
+  {
+   "name": "sign_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {}
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:signup_slot",
+      "links": {
+       "signed": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sign_already_taken",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {}
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:signup_slot",
+      "links": {
+       "signed": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 0,
+    "detail": {
+     "link": "signed",
+     "count": 1
+    }
+   }
+  },
+  {
+   "name": "sign_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {}
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:signup_slot",
+      "links": {
+       "signed": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       1500
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "fix": {
+     "step": "walk_to",
+     "point": "line"
+    }
+   }
+  },
+  {
+   "name": "cross_off_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "cross_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:signup_slot",
+      "links": {
+       "signed": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "cross_off_nothing_there",
+   "act": {
+    "this": "t1",
+    "form": "cross_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:signup_slot",
+      "links": {
+       "signed": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 0,
+    "detail": {
+     "link": "signed",
+     "count": 0
+    }
+   }
+  },
+  {
+   "name": "cross_off_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "cross_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:signup_slot",
+      "links": {
+       "signed": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       1500
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "fix": {
+     "step": "walk_to",
+     "point": "line"
+    }
+   }
+  },
+  {
+   "name": "cross_off_someone_elses",
+   "act": {
+    "this": "t1",
+    "form": "cross_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:signup_slot",
+      "links": {
+       "signed": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_linked",
+    "need": 0,
+    "detail": {
+     "link": "signed",
+     "count": 1
+    },
+    "fix": null,
+    "says": "not_your_name"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  }
+ ]
+}

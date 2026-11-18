@@ -548,3 +548,277 @@ fn a1_ten_thousand_routes_across_eden() {
         ),
     );
 }
+
+/// A thing's def (`name@version`), or empty.
+fn def_of(im: &Import, thing: Id) -> String {
+    match im
+        .tree
+        .node(im.tree.handle(thing).unwrap())
+        .unwrap()
+        .fields()
+        .get(&import_eden::F_DEF)
+    {
+        Some(replica::encode::Value::Bytes(d)) => String::from_utf8_lossy(d).into_owned(),
+        _ => String::new(),
+    }
+}
+
+/// Eden's bridges (#3224): each bridge thing with its floor node.
+fn bridge_floors(im: &Import) -> Vec<(Id, Id)> {
+    let mut out = Vec::new();
+    let mut stack = vec![im.tree.handle(im.nodes["ground"]).unwrap()];
+    while let Some(h) = stack.pop() {
+        let n = im.tree.node(h).unwrap();
+        let kids = im.tree.children(h).unwrap();
+        if def_of(im, n.id()).starts_with("core-bridge@") {
+            for &c in kids {
+                let f = im.tree.node(c).unwrap();
+                if f.kind().as_str().starts_with("eden:floor") {
+                    out.push((n.id(), f.id()));
+                }
+            }
+        }
+        stack.extend(kids.iter().copied());
+    }
+    out.sort();
+    out
+}
+
+/// The largest part of the map for a body with `has`, and each piece's part.
+fn largest_part(map: &Map, has: u8) -> (Vec<u32>, u32) {
+    let parts = map.parts(has);
+    let mut size: BTreeMap<u32, usize> = BTreeMap::new();
+    for &p in &parts {
+        *size.entry(p).or_default() += 1;
+    }
+    let main = size
+        .iter()
+        .max_by_key(|(k, n)| (**n, std::cmp::Reverse(**k)))
+        .map(|(k, _)| *k)
+        .unwrap();
+    (parts, main)
+}
+
+/// #3224's A1 and A2: each of Eden's bridges is one walk from the ground at one end to the ground at the other, its
+/// deck's every piece in the largest part of the map for a body with hands; and the floors with no piece in the
+/// largest part (a body with every ability, as A1 counts them), each named with the refusal of a route to it.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn bridges_eden_each_bridge_joins_the_ground_at_both_ends() {
+    let im = eden();
+    let ground = im.nodes["ground"];
+    let mut map = Map::build(&im.tree, ground, &|_| 0).expect("the map");
+    let (pieces, portals, links) = map.counts();
+    println!("Eden map: {pieces} pieces, {portals} portals, {links} links");
+    let (parts, main) = largest_part(&map, HANDS);
+    let mut cut_off = 0;
+    let mut joined = true;
+    for (thing, floor) in bridge_floors(&im) {
+        let qs: Vec<u32> = (0..pieces as u32)
+            .filter(|&q| map.patch_of(q).node == floor)
+            .collect();
+        let y = |q: u32| map.standing(q).first().map_or(0, |p| p[1]);
+        let mid = |q: u32| {
+            let st = map.standing(q);
+            map.world(q, st[st.len() / 2])
+        };
+        let in_main = qs.iter().filter(|&&q| parts[q as usize] == main).count();
+        cut_off += qs.len() - in_main;
+        // Its two ends: the lowest pieces farthest apart; the ground beyond each, along the bridge.
+        let low = qs.iter().map(|&q| y(q)).min().unwrap();
+        let ends: Vec<u32> = qs.iter().copied().filter(|&q| y(q) == low).collect();
+        let (mut a, mut b, mut far) = (ends[0], ends[0], -1);
+        for &p in &ends {
+            for &q in &ends {
+                let (u, v) = (mid(p), mid(q));
+                let d = (u[0] - v[0]).pow(2) + (u[2] - v[2]).pow(2);
+                if d > far {
+                    (a, b, far) = (p, q, d);
+                }
+            }
+        }
+        let (wa, wb) = (mid(a), mid(b));
+        let len = far.isqrt().max(1);
+        let beyond = |w: [i64; 3], sign: i64| {
+            (2_000..=6_000).step_by(500).find_map(|d| {
+                let p = Vec3::new(
+                    (w[0] + sign * (wa[0] - wb[0]) * d / len) * 1000,
+                    0,
+                    (w[2] + sign * (wa[2] - wb[2]) * d / len) * 1000,
+                );
+                map.spot(ground, p)
+            })
+        };
+        let (Some(ga), Some(gb)) = (beyond(wa, 1), beyond(wb, -1)) else {
+            panic!("no ground beyond {}'s ends", show(thing));
+        };
+        let top = *qs.iter().max_by_key(|&&q| (y(q), q)).unwrap();
+        let on_top = Spot {
+            piece: top,
+            at: map.standing(top)[0],
+        };
+        let over = |r: &Route| {
+            r.hops
+                .iter()
+                .filter(|h| matches!(h, Hop::Patch { at, .. } if at.node == floor))
+                .count()
+        };
+        let show_r = |r: Result<Route, replica::effects::Refusal>| match r {
+            Ok(r) => format!("{} m, {} hops on the deck", r.length / 1000, over(&r)),
+            Err(e) => format!("refused: {}: {}", e.name, e.detail),
+        };
+        println!(
+            "{} ({}) from ({}, {}) to ({}, {}) m: {} pieces at heights {:?} mm, {in_main} in the largest part",
+            show(thing),
+            def_of(&im, thing),
+            wa[0] / 1000,
+            wa[2] / 1000,
+            wb[0] / 1000,
+            wb[2] / 1000,
+            qs.len(),
+            qs.iter().map(|&q| y(q)).collect::<Vec<_>>()
+        );
+        let up = map.route(&im.tree, ga, on_top, HANDS);
+        let down = map.route(&im.tree, on_top, gb, HANDS);
+        joined &= up.is_ok() && down.is_ok();
+        println!("  ground to the top: {}", show_r(up));
+        println!("  the top to the ground beyond: {}", show_r(down));
+        println!(
+            "  ground to ground beyond: {}",
+            show_r(map.route(&im.tree, ga, gb, HANDS))
+        );
+    }
+    println!("bridge deck pieces outside the largest part: {cut_off}");
+    // A2: floors with no piece in the largest part for a body with every ability, each with why.
+    let (parts, main) = largest_part(&map, ALL);
+    let from = (0..pieces as u32)
+        .find(|&q| parts[q as usize] == main && map.patch_of(q).node == ground)
+        .map(|q| Spot {
+            piece: q,
+            at: map.standing(q)[0],
+        })
+        .unwrap();
+    let mut floors: BTreeMap<Id, bool> = BTreeMap::new();
+    for q in 0..pieces as u32 {
+        let n = map.patch_of(q).node;
+        if n != ground {
+            *floors.entry(n).or_default() |= parts[q as usize] == main;
+        }
+    }
+    let mut why: BTreeMap<(String, String), Vec<Id>> = BTreeMap::new();
+    for (&f, _) in floors.iter().filter(|(_, r)| !**r) {
+        let thing = im
+            .tree
+            .node(im.tree.handle(f).unwrap())
+            .unwrap()
+            .parent()
+            .unwrap();
+        let def = def_of(&im, thing);
+        let reason = match map.route(&im.tree, from, spot_on(&map, f), ALL) {
+            Ok(_) => "routed".to_owned(),
+            Err(e) => e.detail.split(": ").last().unwrap_or("").to_owned(),
+        };
+        why.entry((def.split('@').next().unwrap().to_owned(), reason))
+            .or_default()
+            .push(f);
+    }
+    println!(
+        "floors with no piece in the largest part: {} of {}",
+        why.values().map(Vec::len).sum::<usize>(),
+        floors.len()
+    );
+    for ((def, reason), fs) in &why {
+        println!(
+            "  {def}, {reason}: {} ({})",
+            fs.len(),
+            fs.iter().map(|f| show(*f)).collect::<Vec<_>>().join(" ")
+        );
+    }
+    assert!(joined, "every bridge joins the ground at both ends");
+    assert_eq!(cut_off, 0, "every piece of every bridge's deck is joined");
+}
+
+/// #3224's A3: N5's 10,000 Eden routes (A1's pairs: the same seed, drawn from the largest part) before and after a
+/// change. The first run writes each pair and its route to `.local/routes/a3-routes.tsv`; a later run reads the pairs
+/// from it, routes them again and counts the routes that changed, and of those, the ones that now cross a bridge.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn a3_eden_routes_before_and_after() {
+    let im = eden();
+    let ground = im.nodes["ground"];
+    let mut map = Map::build(&im.tree, ground, &|_| 0).expect("the map");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../.local/routes/a3-routes.tsv"
+    );
+    let line = |r: &Route| format!("{}\t{}", r.length, show_route(r));
+    let bridges: std::collections::BTreeSet<Id> =
+        bridge_floors(&im).into_iter().map(|(_, f)| f).collect();
+    let Ok(before) = std::fs::read_to_string(path) else {
+        let (pieces, ..) = map.counts();
+        let (parts, main) = largest_part(&map, ALL);
+        let among: Vec<u32> = (0..pieces as u32)
+            .filter(|&q| parts[q as usize] == main)
+            .collect();
+        let mut seed = Seed(2653);
+        let mut out = String::new();
+        for _ in 0..ROUTES {
+            let (a, b) = (
+                place(&map, &among, &mut seed),
+                place(&map, &among, &mut seed),
+            );
+            let r = map.route(&im.tree, a, b, ALL).expect("a route");
+            out.push_str(&format!(
+                "{}\t{:?}\t{}\t{:?}\t{}\n",
+                a.piece,
+                a.at,
+                b.piece,
+                b.at,
+                line(&r)
+            ));
+        }
+        std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+        std::fs::write(path, out).unwrap();
+        println!("A3: {ROUTES} routes written to .local/routes/a3-routes.tsv");
+        return;
+    };
+    let at = |s: &str| -> [i64; 3] {
+        let v: Vec<i64> = s
+            .trim_matches(['[', ']'])
+            .split(", ")
+            .map(|x| x.parse().unwrap())
+            .collect();
+        [v[0], v[1], v[2]]
+    };
+    let (mut same, mut changed, mut over_bridge, mut shorter) = (0, 0, 0, 0);
+    for row in before.lines() {
+        let f: Vec<&str> = row.splitn(6, '\t').collect();
+        let a = Spot {
+            piece: f[0].parse().unwrap(),
+            at: at(f[1]),
+        };
+        let b = Spot {
+            piece: f[2].parse().unwrap(),
+            at: at(f[3]),
+        };
+        let r = map.route(&im.tree, a, b, ALL).expect("a route");
+        if line(&r) == format!("{}\t{}", f[4], f[5]) {
+            same += 1;
+            continue;
+        }
+        changed += 1;
+        let bridge = r
+            .hops
+            .iter()
+            .any(|h| matches!(h, Hop::Patch { at, .. } if bridges.contains(&at.node)));
+        over_bridge += usize::from(bridge);
+        shorter += usize::from(r.length < f[4].parse::<u64>().unwrap());
+        if !bridge {
+            println!("  changed, not over a bridge: {row}\n    now {}", line(&r));
+        }
+    }
+    println!(
+        "A3: {same} routes unchanged, {changed} changed ({over_bridge} of them now over a bridge, {shorter} shorter)"
+    );
+    assert_eq!(changed, over_bridge, "routes change only over a bridge");
+}

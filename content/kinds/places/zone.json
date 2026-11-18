@@ -1,0 +1,50 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:zone",
+  "owner": "place",
+  "state": {
+    "use": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "residential",
+        "commercial",
+        "park",
+        "farm",
+        "civic",
+        "industrial",
+        "wild"
+      ],
+      "default": "residential",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      40000,
+      100,
+      40000
+    ]
+  },
+  "looks": {
+    "model": "look:zone"
+  },
+  "text": {
+    "card": "A district drawn on the map, and what its land is used for.",
+    "place": "place",
+    "district": "district",
+    "quarter": "quarter",
+    "land_use": "land use"
+  },
+  "card": {
+    "text": "card",
+    "category": "place",
+    "synonyms": [
+      "district",
+      "quarter",
+      "land_use"
+    ]
+  }
+}

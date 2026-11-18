@@ -1,0 +1,13 @@
+# Lowering onto a seat (Engine v2 B2, #2681; v2/crates/replica/src/moves.rs). Claims every locomotion resource; the
+# body reaches the seat's named point with itself. A new claim on locomotion (a walk) cancels it. Postures and seats
+# themselves are B3. Times in µs, reach in µm.
+{
+  1: "souls:sit", 2: 1,
+  3: [{1: 1, 2: 1}],                        # claims every locomotion resource
+  5: [1],                                   # a new claim on locomotion cancels it
+  6: [{1: "souls:start-up", 2: 600000},     # lowering; contact with the seat at its end
+      {1: "souls:settle", 2: 400000}],
+  7: {1: 1},                                # the body itself
+  8: 600000,
+  9: "souls:seat"
+}

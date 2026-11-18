@@ -1,0 +1,207 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:washbasin",
+  "owner": "thing",
+  "state": {
+    "water": {
+      "n": 1,
+      "type": "int",
+      "unit": "g",
+      "default": 1000000000,
+      "min": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "running": {
+      "n": 2,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "tap": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1010,
+        -60
+      ]
+    },
+    "outlet": {
+      "role": "outlet",
+      "at_mm": [
+        0,
+        1000,
+        -50
+      ]
+    },
+    "wash": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        550
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "slots": {
+    "rim": {
+      "admits": "thing",
+      "most": 2,
+      "at_mm": [
+        200,
+        880,
+        -100
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      560,
+      1805,
+      405
+    ]
+  },
+  "forms": {
+    "turn_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "running",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "tap"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tap"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "running",
+          "to": true,
+          "event": "tap_running"
+        }
+      ]
+    },
+    "turn_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "running",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "tap"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tap"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "running",
+          "to": false,
+          "event": "tap_off"
+        }
+      ]
+    },
+    "wash_hands": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "running",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "outlet"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "outlet"
+        },
+        {
+          "step": "wait",
+          "us": 5000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "water",
+          "by": -500,
+          "event": "hands_washed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:washbasin",
+    "table": [
+      {
+        "part": "fill",
+        "field": "running",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,400,-50],"r":90,"h":800,"segments":8,"r2":70,"tint":"porcelain"},{"kind":"extrude","at":[0,790,0],"polygon":[[-245,-180],[245,-180],[245,180],[-245,180]],"h":60,"tint":"porcelain"},{"kind":"box","at":[0,870,20],"size":[420,30,300],"round":0,"tint":"inside"},{"kind":"cyl","at":[0,950,-150],"r":18,"h":140,"segments":5,"tint":"chrome"},{"kind":"cyl","at":[0,1010,-100],"r":14,"h":100,"segments":4,"tint":"chrome","pitch":90000},{"kind":"box","at":[0,1450,-210],"size":[500,650,20],"round":0,"tint":"mirror"},{"kind":"box","at":[0,1450,-220],"size":[560,710,10],"round":0,"tint":"frame"},{"kind":"cyl","at":[0,935,-50],"r":14,"h":130,"segments":6,"tint":"water","role":"fill"}],"palette":{"porcelain":"#eef0ee","inside":"#dfe4e4","chrome":"#c9ccd0","mirror":"#b8ccd4","frame":"#5e3d27","water":"#3f8fd0"},"tags":["bath","washbasin","object"]}
+  },
+  "text": {
+    "card": "A pedestal washbasin with a tap and a mirror: run the water, wash your hands.",
+    "basin": "basin",
+    "hand_basin": "hand basin",
+    "wash_basin": "wash basin",
+    "water": "water"
+  },
+  "card": {
+    "text": "card",
+    "category": "water",
+    "synonyms": [
+      "basin",
+      "hand_basin",
+      "wash_basin"
+    ]
+  }
+}

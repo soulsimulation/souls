@@ -16,7 +16,10 @@
 //! - **Steps.** A floor of a building on the open ground, whose outline's edge bounds a surface within [`STEP`] of the
 //!   ground (a shop's porch, 100 mm up), steps down there: each such edge is a doorway of no depth (`Doorway::step`),
 //!   taken from neither side, whose passage is cut like any doorway's. N4 makes it a link from the floor to the
-//!   ground where its passage meets both ([`crate::links::Kind::Step`]).
+//!   ground where its passage meets both ([`crate::links::Kind::Step`]). Inside a floor, two surfaces that share a
+//!   stretch of edge and lie within [`STEP`] of each other in height (a bridge's deck, quads 100 to 145 mm apart) are
+//!   cut as two heights, each shrunk at that edge like any other; the stretch is a step too, at the height between
+//!   them, which N4 makes a link from the floor to itself (#3224). Surfaces further apart are joined only by a stair.
 //!   Boxes overlap and cross the floor's edge, so they are a union taken away, never a list of holes; a floor may
 //!   fall into several pieces, and each piece is cut into triangles that keep its edges (`i_triangle`, then
 //!   Delaunay flips).
@@ -55,6 +58,7 @@
 
 pub mod exits;
 pub mod scene;
+pub mod sizes;
 
 use crate::gaits::{Ground, WADE_DEPTH};
 use i_overlay::core::fill_rule::FillRule;
@@ -64,6 +68,7 @@ use i_overlay::i_float::int::point::IntPoint;
 use i_overlay::i_shape::int::shape::{IntShape, IntShapes};
 use i_triangle::int::triangulatable::IntTriangulatable;
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::{Quat, Vec3};
 use replica::tree::Tree;
 pub use scene::{Doorway, Scene, Solid, Surface, Terrain, Water};
@@ -84,8 +89,9 @@ pub const SQUARE: i64 = 16_000;
 pub const STEEP: i64 = 577_400;
 /// The terrain's cell, mm.
 const CELL: i32 = 1_000;
-/// Today's walking body, mm (`HUMAN_PROFILE`).
-pub const HUMAN_RADIUS: i64 = 280;
+/// Today's walking body, mm (`HUMAN_PROFILE`): the standard size class. Other bodies are cut for their own class
+/// (B12, `replica::kinds::sizes::Size`): one cut per class, kept by [`Cache`] per radius.
+pub const HUMAN_RADIUS: i64 = Size::Standard.radius_mm();
 /// A doorway's depth either side of its middle when no wall flanks it, mm.
 const DOOR_HALF_DEPTH: i64 = 100;
 /// How far the passage through a doorway runs past the grown wall, so that it overlaps the patch on each side, mm.

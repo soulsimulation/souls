@@ -1,0 +1,240 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sink",
+  "owner": "thing",
+  "state": {
+    "water": {
+      "n": 1,
+      "type": "int",
+      "unit": "g",
+      "default": 1000000000,
+      "min": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "running": {
+      "n": 2,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "tap": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1070,
+        -100
+      ]
+    },
+    "outlet": {
+      "role": "outlet",
+      "at_mm": [
+        0,
+        1060,
+        -90
+      ]
+    },
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      910,
+      1084,
+      612
+    ]
+  },
+  "forms": {
+    "turn_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "running",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "tap"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tap"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "running",
+          "to": true,
+          "event": "tap_running"
+        }
+      ]
+    },
+    "turn_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "running",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "tap"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "tap"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "running",
+          "to": false,
+          "event": "tap_off"
+        }
+      ]
+    },
+    "wash_hands": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "running",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "outlet"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "outlet"
+        },
+        {
+          "step": "wait",
+          "us": 5000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "water",
+          "by": -500,
+          "event": "hands_washed"
+        }
+      ]
+    },
+    "wash": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "thing"
+          }
+        },
+        {
+          "need": "state",
+          "field": "running",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "outlet"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "outlet"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "water",
+          "by": -1000,
+          "event": "washed_up"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:sink",
+    "table": [
+      {
+        "part": "fill",
+        "field": "running",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"extrude","at":[0,15,0],"polygon":[[-435,-285],[435,-285],[435,285],[-435,285]],"h":810,"tint":"cab"},{"kind":"extrude","at":[0,860,0],"polygon":[[-455,-305],[455,-305],[455,305],[-455,305]],"h":20,"tint":"top"},{"kind":"box","at":[0,860,40],"size":[560,50,380],"round":0,"tint":"basin"},{"kind":"box","at":[0,885,40],"size":[500,20,320],"round":0,"tint":"water","role":"fill"},{"kind":"cyl","at":[0,980,-220],"r":18,"h":200,"segments":6,"tint":"metal"},{"kind":"cyl","at":[0,1070,-160],"r":14,"h":140,"segments":5,"tint":"metal","pitch":90000},{"kind":"box","at":[-220,450,302],"size":[400,700,10],"round":0,"tint":"door"},{"kind":"box","at":[220,450,302],"size":[400,700,10],"round":0,"tint":"door"},{"kind":"cyl","at":[0,975,-90],"r":16,"h":180,"segments":6,"tint":"stream","role":"fill"}],"palette":{"cab":"#e9e4d8","top":"#9a6b43","basin":"#c9ced3","water":"#9fc3d6","metal":"#9aa0a6","door":"#ddd6c6","stream":"#3f8fd0"},"tags":["kitchen","sink","object"]}
+  },
+  "text": {
+    "card": "A kitchen sink with a tap: run the water, wash your hands or wash up a dish.",
+    "kitchen_sink": "kitchen sink",
+    "basin": "basin",
+    "tap": "tap",
+    "water": "water"
+  },
+  "card": {
+    "text": "card",
+    "category": "water",
+    "synonyms": [
+      "kitchen_sink",
+      "basin",
+      "tap"
+    ]
+  }
+}

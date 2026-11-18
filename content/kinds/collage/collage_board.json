@@ -1,0 +1,153 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:collage_board",
+  "owner": "thing",
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "slots": {
+    "patch_1": {
+      "admits": "thing",
+      "kinds": [
+        "eden:collage_paper"
+      ],
+      "most": 1,
+      "at_mm": [
+        -450,
+        1040,
+        -220
+      ],
+      "stand": "front",
+      "fits_mm": [
+        300,
+        20,
+        300
+      ]
+    },
+    "patch_2": {
+      "admits": "thing",
+      "kinds": [
+        "eden:collage_paper"
+      ],
+      "most": 1,
+      "at_mm": [
+        0,
+        1040,
+        -220
+      ],
+      "stand": "front",
+      "fits_mm": [
+        300,
+        20,
+        300
+      ]
+    },
+    "patch_3": {
+      "admits": "thing",
+      "kinds": [
+        "eden:collage_paper"
+      ],
+      "most": 1,
+      "at_mm": [
+        450,
+        1040,
+        -220
+      ],
+      "stand": "front",
+      "fits_mm": [
+        300,
+        20,
+        300
+      ]
+    },
+    "patch_4": {
+      "admits": "thing",
+      "kinds": [
+        "eden:collage_paper"
+      ],
+      "most": 1,
+      "at_mm": [
+        -450,
+        1040,
+        220
+      ],
+      "stand": "front",
+      "fits_mm": [
+        300,
+        20,
+        300
+      ]
+    },
+    "patch_5": {
+      "admits": "thing",
+      "kinds": [
+        "eden:collage_paper"
+      ],
+      "most": 1,
+      "at_mm": [
+        0,
+        1040,
+        220
+      ],
+      "stand": "front",
+      "fits_mm": [
+        300,
+        20,
+        300
+      ]
+    },
+    "patch_6": {
+      "admits": "thing",
+      "kinds": [
+        "eden:collage_paper"
+      ],
+      "most": 1,
+      "at_mm": [
+        450,
+        1040,
+        220
+      ],
+      "stand": "front",
+      "fits_mm": [
+        300,
+        20,
+        300
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1500,
+      1040,
+      1000
+    ]
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,1000,0],"size":[1500,80,1000],"tint":"backing"},{"kind":"box","at":[-650,480,-350],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[-650,480,350],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[650,480,-350],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[650,480,350],"size":[60,960,60],"tint":"wood"}],"palette":{"backing":"#efe2c3","wood":"#9c7952"},"tags":["art","collage","board","object"]},
+    "model": "look:collage_board"
+  },
+  "text": {
+    "card": "A collage board with six patches: mount pieces of collage paper on it.",
+    "art": "art",
+    "collage": "collage",
+    "board": "board"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "collage",
+      "board"
+    ]
+  }
+}
