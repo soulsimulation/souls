@@ -17,22 +17,32 @@
 //   so `apply` counts it, and nothing is made from nothing. An empty stock is refused `empty`, a closed container
 //   `closed` (the actor is not linked by the link its `closed` audience names), each before the rules are asked.
 // - A timer is not a change to state: it is returned beside the changes, with its event.
+// - Every value is one Engine v2's encoding profile holds (T0, v2/docs/encoding.md): whole numbers and names,
+//   never a float, a boolean or null. A flag is 0 or 1, text is a key by reference `{text: <key>}` (never
+//   words), and a value that is missing is left out: a `set` without `to` clears the field to its default.
+// - An event's name is `namespace:name`, the declaring kind's namespace before the name its entry writes.
 // No float decides anything; nothing here imports more than the rules.
 
-import { decide, measure, type Entry, type Input, type Node, type Verdict } from './rules.ts';
+import { decide, measure, type Entry, type DrawRow, type Input, type Node, type Verdict } from './rules.ts';
 
 export type Place = { node: string; slot: string } | { node: string; hand: string } | { node: string };
 export type Change =
-  | { change: 'set'; node: string; field: string; n: number; to: unknown; by?: number }
+  | { change: 'set'; node: string; field: string; n: number; to?: unknown; by?: number }
   | { change: 'link' | 'unlink'; node: string; link: string; n: number; end: string }
   | { change: 'reparent'; node: string; to: Place }
   | { change: 'create'; node: string; kind: string; to: Place; stock?: string; carries?: string[] }
   | { change: 'remove'; node: string };
 /** The generic changes, Engine v2 T6's list less the motion sample. */
 export const CHANGES = Object.freeze(['set', 'link', 'unlink', 'reparent', 'create', 'remove']);
-export type Event = { event: string; node: string; changes: number[] };
+/** `outcome` is set on the event of a draw: the name of the row the world drew. */
+export type Event = { event: string; node: string; changes: number[]; outcome?: string };
 export type Timer = { node: string; form: string; after_us: number; event: number };
 export type Done = { verdict: 'yes'; receipt: string; actor: string; changes: Change[]; events: Event[]; timers: Timer[] };
+/**
+ * A draw was asked and the world has not answered: the client's answer for the outcome. `could_be` is the whole table
+ * in order, each row with its weight now; `total` is their sum, and the world draws a whole number below it (SA-F13).
+ */
+export type Unknown = { verdict: 'unknown'; reason: 'draw'; effect: number; total: number; could_be: { outcome: string; weight: number; event: string }[] };
 /** Refused while working out the effects: `effect` is the index of the effect that could not be done. */
 export type Refused = { verdict: 'no'; reason: string; effect: number; detail: Record<string, unknown> };
 export type State = Input['state'] & { applied?: string[] };
@@ -70,8 +80,42 @@ export function stockList(kinds: Record<string, Entry>, state: Input['state'], n
   return sorted(all).map((name) => ({ stock: name, kind: all[name].kind, count: countOf(entry, n, all[name].count), carries: all[name].carries ?? [] }));
 }
 
+/** A field's value as it is stored: a flag 0 or 1, text a key by reference, and nothing (undefined) for a missing value. */
+function stored(def: { type?: string }, v: unknown): unknown {
+  if (v === null || v === undefined) return undefined;
+  if (def.type === 'bool' && typeof v === 'boolean') return Number(v);
+  if (def.type === 'text' && typeof v === 'string') return { text: v };
+  return v;
+}
+
+const NAME = /^[A-Za-z0-9_\-.:/@]*$/;
+const MAX_DEPTH = 32;
+/**
+ * Where a value leaves Engine v2's encoding profile (T0, v2/docs/encoding.md), with the profile's name for the
+ * refusal, or null when it is inside: `null`, `simple` (a boolean or undefined), `float`, `text-not-name` (a
+ * string or a key outside the name characters), `too-deep`; and two a JavaScript number adds, `unsafe-integer`
+ * (a whole number beyond 2^53, which only a BigInt holds) and `int-out-of-range`. Records here are keyed by
+ * names; an adapter numbers them.
+ */
+export function outsideProfile(v: unknown, at = '', depth = 0): { at: string; refused: string } | null {
+  const no = (refused: string) => ({ at, refused });
+  if (v === null) return no('null');
+  if (v === undefined || typeof v === 'boolean') return no('simple');
+  if (typeof v === 'number') return !Number.isInteger(v) ? no('float') : Number.isSafeInteger(v) ? null : no('unsafe-integer');
+  if (typeof v === 'bigint') return v >= -(2n ** 64n) && v < 2n ** 64n ? null : no('int-out-of-range');
+  if (typeof v === 'string') return NAME.test(v) ? null : no('text-not-name');
+  if (typeof v !== 'object') return no('not-a-value');
+  if (depth >= MAX_DEPTH) return no('too-deep');
+  for (const [k, item] of Object.entries(v)) {
+    if (!Array.isArray(v) && !NAME.test(k)) return { at: `${at}/${k}`, refused: 'text-not-name' };
+    const out = outsideProfile(item, `${at}/${k}`, depth + 1);
+    if (out) return out;
+  }
+  return null;
+}
+
 /** What `input.act` does, or why it is not done. The rules are asked as the world (every field seen). */
-export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done | Refused | Verdict {
+export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: number[] }): Done | Refused | Verdict | Unknown {
   const refuse = (effect: number, reason: string, detail: Record<string, unknown> = {}): Refused => ({ verdict: 'no', reason, effect, detail });
   if (!input || typeof input.receipt !== 'string' || !input.receipt) return refuse(-1, 'bad_input', { what: 'no_receipt' });
   const { kinds, act, state, receipt } = input;
@@ -81,9 +125,10 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
   if (verdict.verdict !== 'yes') return verdict;
   const self = act.this, actor = state.actor, args = act.args ?? {};
   const entry = kinds[state.nodes[self].kind!];
+  const namespace = entry.kind.slice(0, entry.kind.indexOf(':') + 1);
   const work: Record<string, Node> = structuredClone(state.nodes);
   const done: Done = { verdict: 'yes', receipt, actor, changes: [], events: [], timers: [] };
-  let made = 0;
+  let made = 0, drawn = 0;
 
   const freeHand = (): Place | null => {
     const hands = work[actor].hands ?? {};
@@ -119,11 +164,30 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
   for (let i = 0; i < effectList.length; i++) {
     const e = effectList[i];
     const out: Change[] = [];
+    let event: Event;
+    if (e && e.change === 'draw') {
+      // The world draws: a whole number below the table's total, passed in as data (one per draw, in order). No draw, no outcome.
+      const table = tableOf(e, work[self], entry);
+      if (typeof table === 'string') return refuse(i, 'bad_input', { what: table });
+      if (!input.draw || input.draw.length <= drawn) return { verdict: 'unknown', reason: 'draw', effect: i, total: table.total, could_be: table.rows.map((r) => ({ outcome: r.name, weight: r.weight, event: r.event })) };
+      const r = input.draw[drawn++];
+      if (!Number.isSafeInteger(r) || r < 0 || r >= table.total) return refuse(i, 'bad_input', { what: 'draw_out_of_range', draw: r, total: table.total });
+      let acc = 0;
+      const row = table.rows.find((x) => (acc += x.weight) > r)!;
+      for (const s of row.set) {
+        const def = has(entry.state, s?.field ?? '') ? entry.state![s.field] : undefined;
+        if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: s?.field ?? null });
+        const to = stored(def, s.to);
+        out.push({ change: 'set', node: self, field: s.field, n: def.n, ...(to === undefined ? {} : { to }) });
+      }
+      event = { event: row.event.includes(':') ? row.event : namespace + row.event, node: self, changes: [], outcome: row.name };
+    } else {
     if (!e || typeof e.event !== 'string') return refuse(i, 'bad_input', { what: 'no_event' });
     if (e.change === 'set') {
       const def = has(entry.state, e.field ?? '') ? entry.state![e.field!] : undefined;
       if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: e.field ?? null });
-      out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: arg(e.to, args) ?? null });
+      const to = stored(def, arg(e.to, args));
+      out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });
     } else if (e.change === 'transfer') {
       const m = measure(kinds, work, self, args, e);
       if ('bad' in m) return refuse(i, 'bad_input', { what: m.bad, ...m.detail });
@@ -165,7 +229,10 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
       done.timers.push({ node: self, form: e.form, after_us: e.after_us!, event: done.events.length });
     } else return refuse(i, 'bad_input', { what: 'unknown_change', change: e.change ?? null });
 
-    const event: Event = { event: e.event, node: self, changes: [] };
+    event = { event: e.event.includes(':') ? e.event : namespace + e.event, node: self, changes: [] };
+    }
+    const outside = outsideProfile({ out, event, timers: done.timers });
+    if (outside) return refuse(i, 'bad_input', { what: 'outside_profile', ...outside });
     for (const c of out) {
       const failed = applyChange(work, c);
       if (failed) return refuse(i, 'bad_input', { what: failed });
@@ -194,11 +261,21 @@ function stockRefusal(kinds: Record<string, Entry>, act: Input['act'], state: In
  * Apply a result of `effects` to plain state: every change or none, and once per receipt. A refusal changes
  * nothing; a receipt already applied changes nothing (`again: true`). Needs no kinds.
  */
-export function apply(state: State, result: Done | Refused | Verdict): { ok: true; state: State; again: boolean } | { ok: false; reason: string; change: number } {
+export function apply(
+  state: State,
+  result: Done | Refused | Verdict | Unknown,
+): { ok: true; state: State; again: boolean } | { ok: false; reason: string; change?: number; event?: number; at?: string } {
   if (result.verdict !== 'yes' || !('changes' in result)) return { ok: true, state, again: false };
   const applied = state.applied ?? [];
   if (applied.includes(result.receipt)) return { ok: true, state, again: true };
   const changes = Array.isArray(result.changes) ? result.changes : [];
+  // Only values inside Engine v2's encoding profile are accepted, named by the profile's refusal.
+  for (const [list, key] of [[changes, 'change'], [result.events ?? [], 'event']] as const) {
+    for (let k = 0; k < list.length; k++) {
+      const outside = outsideProfile(list[k]);
+      if (outside) return { ok: false, reason: outside.refused, [key]: k, at: outside.at };
+    }
+  }
   for (const event of result.events ?? []) {
     let sum = 0n;
     for (const k of event.changes) {
@@ -286,6 +363,8 @@ function applyChange(nodes: Record<string, Node>, c: Change): string | null {
       if (!node) return 'no_such_node';
       if (c.by !== undefined && !(Number.isSafeInteger(c.to) && (c.to as number) >= 0)) return 'not_whole_number';
       node.fields = { ...node.fields, [c.field]: c.to };
+      // A set without a value clears the field: it reads as its default again.
+      if (!has(c, 'to')) delete node.fields[c.field];
       return null;
     case 'link':
     case 'unlink': {
@@ -318,4 +397,27 @@ function applyChange(nodes: Record<string, Node>, c: Change): string | null {
     default:
       return 'unknown_change';
   }
+}
+
+/** A draw's table with its weights worked out now, or why it is malformed. A weight is a whole number or one whole-number field of the thing, and nothing else. */
+function tableOf(e: { outcomes?: DrawRow[] }, self: Node, entry: Entry): { rows: (DrawRow & { weight: number })[]; total: number } | string {
+  const rows = e.outcomes;
+  if (!Array.isArray(rows) || rows.length === 0) return 'empty_table';
+  const out: (DrawRow & { weight: number })[] = [];
+  let total = 0;
+  for (const o of rows) {
+    if (!o || typeof o.name !== 'string' || typeof o.event !== 'string' || !Array.isArray(o.set)) return 'malformed_outcome';
+    let w: unknown = o.weight;
+    if (w !== null && typeof w === 'object') {
+      const keys = Object.keys(w);
+      const field = (w as { field?: unknown }).field;
+      const def = typeof field === 'string' && has(entry.state, field) ? entry.state![field] : undefined;
+      if (keys.length !== 1 || !def || def.type !== 'int') return 'malformed_weight';
+      w = has(self.fields, field as string) ? self.fields![field as string] : def.default;
+    }
+    if (!Number.isSafeInteger(w) || (w as number) < 0) return 'malformed_weight';
+    total += w as number;
+    out.push({ ...o, weight: w as number });
+  }
+  return Number.isSafeInteger(total) && total > 0 ? { rows: out, total } : 'no_weight';
 }

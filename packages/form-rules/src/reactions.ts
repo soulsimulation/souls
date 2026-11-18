@@ -8,6 +8,8 @@
 // - `checkReactions` is the check gate's: it refuses a rule outside the lists, a rule that names a body, an offer or a
 //   draw, and a set of rules that could feed itself, naming the cycle, on the graph of kind, field and link type.
 // A rule never chooses and never draws. Only "set": setting a field to its own value is no change and starts nothing.
+// Results are in Engine v2's encoding profile, as `effects` writes them (#2977): a flag is 0 or 1 (a rule may still
+// write true or false, and compares them as 1 and 0), and an event's name is the rule's kind's namespace before it.
 // No float decides anything; nothing here imports more than the rules and the lists.
 
 import LISTS from './reactions.json' with { type: 'json' };
@@ -32,8 +34,9 @@ const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() :
 const whole = (v: unknown): v is number => Number.isSafeInteger(v);
 const scalar = (v: unknown) => v === null || typeof v === 'boolean' || typeof v === 'string' || whole(v);
 const triggerDef = (on: string) => (LISTS.triggers as Record<string, { takes: string[]; carries_value: boolean; fields?: string[] }>)[on];
-// A timed value's numbers may be big integers (SA-F5a): compared by value, a safe one equal to its number.
-const plain = (_k: string, x: unknown) => (typeof x === 'bigint' ? (x >= BigInt(Number.MIN_SAFE_INTEGER) && x <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(x) : { big: String(x) }) : x);
+// A timed value's numbers may be big integers (SA-F5a): compared by value, a safe one equal to its number. A flag
+// compares as 0 or 1, so a rule's or a default's true or false meets a stored flag.
+const plain = (_k: string, x: unknown) => (typeof x === 'boolean' ? Number(x) : typeof x === 'bigint' ? (x >= BigInt(Number.MIN_SAFE_INTEGER) && x <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(x) : { big: String(x) }) : x);
 const sameValue = (a: unknown, b: unknown) => JSON.stringify(a, plain) === JSON.stringify(b, plain);
 const isTriggerValue = (v: unknown) => !!v && typeof v === 'object' && sameValue(v, LISTS.trigger_value);
 
@@ -133,7 +136,10 @@ export function react(input: { kinds: Kinds; state: ReactState; cause: Cause; re
         if (!def) return bad('no_such_field', { node: t, field: e.field ?? null, rule: f.rule, effect: i });
         const old = now(t, e.field);
         let to: unknown;
-        if (e.change === 'set') to = isTriggerValue(e.to) ? f.value : e.to;
+        if (e.change === 'set') {
+          to = isTriggerValue(e.to) ? f.value : e.to;
+          if (def.type === 'bool' && typeof to === 'boolean') to = Number(to);
+        }
         else if (e.change === 'add') {
           if (!whole(old) || !whole(e.by)) return bad('not_whole_number', { node: t, field: e.field });
           let v = old + e.by;
@@ -151,7 +157,9 @@ export function react(input: { kinds: Kinds; state: ReactState; cause: Cause; re
         } else return bad('unknown_effect', { change: e.change ?? null, rule: f.rule });
         if (sameValue(old, to)) continue;
         (work[t] ??= {})[e.field] = to;
-        const event: Event = { event: e.event ?? f.rule, node: t, changes: [done.changes.length] };
+        const name = e.event ?? f.rule;
+        const kind = nodes[f.node].kind!;
+        const event: Event = { event: name.includes(':') ? name : kind.slice(0, kind.indexOf(':') + 1) + name, node: t, changes: [done.changes.length] };
         done.changes.push({ change: 'set', node: t, field: e.field, n: def.n, to });
         done.events.push(event);
       }

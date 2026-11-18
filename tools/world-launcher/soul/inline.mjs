@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Worlds serve eden.mjs as one file and many tools copy it alone, so the CLI's modules are inlined into a generated
-// block of it. Edit the module, then run this. `--check` changes nothing and fails on a stale block (the test does that).
+// block of it. Edit the module; CI, eden-sync.yml and the release stamp run this, and a PR does not carry the rebuilt file
+// (docs/testing.md#the-soul-client-file). `--check` changes nothing and fails on a stale block.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { stripTypeScriptTypes } from "node:module";
@@ -23,6 +24,8 @@ export const MODULES = [
   // SA-C3: the rules package as the world runs it (its TypeScript with the types taken out), then the client's own use of it
   ["../../../packages/form-rules/src/rules.ts", "formRules"],
   ["can-i.mjs", "soulCanI"],
+  ["how.mjs", "soulHow"],
+  ["room.mjs", "soulRoom"],
   ["net.mjs", "soulNet"],
   ["dashboard.mjs", "soulDashboard"],
   ["render.mjs", "soulRender"],
