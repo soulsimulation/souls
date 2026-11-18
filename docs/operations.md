@@ -60,7 +60,8 @@ world whose next event is at least 60 s away, then a world with no act and no vi
 one acted in longest ago first; a world someone is acting in or watching is never unloaded. When nothing can go the load
 waits up to 20 s for room, reading each world's still answer afresh every 5 s (#2367), and is then refused with
 `503 world.waking` and `Retry-After: 15`; the world stays `unloaded`, never `failed`, and `/__sim/healthz` carries the host problem code
-`worlds.capacity` for 10 minutes. Each world's `state` (`awake`, `still`, `unloaded`, `starting`, `failed`) is in
+`worlds.capacity` for 10 minutes. A load that finds no free port in the children's range is refused the same way, and
+a still world's alarm asks again on its next pass. Each world's `state` (`awake`, `still`, `unloaded`, `starting`, `failed`) is in
 `/__sim/worlds.json` beside the old `status`; the health page (`/__sim/health?json=1`) adds per world its ticks computed
 and jumped in the last hour (from the world's own counters, once it reports them), seconds in memory in 24 h, Pss and
 last load reason, and in total the worlds awake, still and unloaded and the memory used against the figure.

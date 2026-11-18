@@ -31,7 +31,7 @@
       ]
     }
   },
-  "motion": { "how": "one_hand" },
+  "motion": { "how": "pushed_by_one" },
   "loose": { "ever": true },
   "looks": {
     "model": "look:kindling_block",
