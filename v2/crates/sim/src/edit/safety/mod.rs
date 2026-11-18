@@ -23,7 +23,15 @@
 //!   whose door opens on a corridor whose last door is blocked passes N10's check of the body's own piece
 //!   (`tests.rs`), and so would a long thin pen whose pieces each reach a square's line.
 //! - **Who is judged.** Every body handed in, in the order given, at most one failure each (in use first, then bury,
-//!   then cut off); nothing stops at a count. A body in a slot is judged for what it uses only.
+//!   then cut off); nothing stops at a count.
+//! - **Seated or lying** (#3280): a body in a slot is judged for what it uses, and then for being shut in: it stands
+//!   up onto the ground nearest the thing it is in (within [`REACH`], at the thing's height on its floor or the open
+//!   ground), and is cut off when that ground had a way out before the change and has none after it, or there is no
+//!   ground left there to stand up onto.
+//! - **Partway across a link** (#3280): a body crossing a doorway, stair, ramp or ladder ([`Who::crossing`]) runs the
+//!   crossing to an end. A change that removes the link or newly blocks it (its passage filled, an end covered)
+//!   buries the body in it; one that leaves neither end's piece with a way out cuts it off.
+//! - **A zone with no open ground** (`ground` none): no ground is cut, so only what a body uses is judged.
 //!
 //! Not here: moving a Soul aside, today's same-batch repair of blocked approaches to empty places to sit, other body
 //! sizes (B12: the map is cut for today's walking body), who may pass a door (F6).
@@ -31,33 +39,48 @@
 #[cfg(test)]
 mod tests;
 
+use crate::ground::scene::xform_to;
 use crate::routes::{ALL, Map, Mask, Spot};
 use replica::edit::{BURIES, CUTS_OFF, IN_USE, Unsafe, Use};
 use replica::effects::{Actor, Body, Change, Header, Part, TransferRec};
 use replica::ids::Id;
-use replica::pose::{Pose, Support};
-use replica::tree::Tree;
+use replica::pose::{Pose, Support, Vec3};
+use replica::tree::{Handle, Tree};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// How far a body may stand off its piece and still be on it, mm (as a route's start, `crate::walk::town`).
 const AT_EDGE: i64 = 20;
+/// How far from the thing it sits or lies in a body may stand up onto the ground, mm: half the width of a thing to lie
+/// in and a body's radius, with room to spare.
+pub const REACH: i64 = 1_200;
 
-/// A Soul's body as the rule judges it: the Soul, its body's node, its pose, and its abilities (N5's bits).
+/// A Soul's body as the rule judges it: the Soul, its body's node, its pose, its abilities (N5's bits), and the link
+/// it is partway across, if it is crossing one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Who {
     pub soul: Id,
     pub body: Id,
     pub pose: Pose,
     pub has: Mask,
+    pub crossing: Option<Id>,
 }
 
-/// The ground on one side of the change: the route map, each ability mask's parts, and each mask's part with the most
-/// open ground.
+/// The ground on one side of the change: the route map, each ability mask's parts, each mask's part with the most
+/// open ground, and each link's blocking and the pieces its ends lie on.
 struct Side {
     map: Map,
     parts: Vec<Vec<u32>>,
     main: Vec<Option<u32>>,
+    links: BTreeMap<Id, (Option<&'static str>, Vec<u32>)>,
+}
+
+/// Both sides of the change, and where each thing stands before it: its floor or the open ground, and its origin
+/// there (µm).
+struct Sides {
+    before: Side,
+    after: Side,
+    places: BTreeMap<Id, (Id, Vec3)>,
 }
 
 /// Twice a piece's area, mm².
@@ -101,20 +124,59 @@ impl Side {
             );
             parts.push(p);
         }
-        Ok(Side { map, parts, main })
+        let links = map
+            .links()
+            .iter()
+            .enumerate()
+            .map(|(k, l)| (l.id, (l.blocked, map.link_pieces(k))))
+            .collect();
+        Ok(Side {
+            map,
+            parts,
+            main,
+            links,
+        })
     }
 
     /// Whether a body on `spot` with abilities `has` is in the part with the most open ground.
     fn out(&self, spot: Spot, has: Mask) -> bool {
-        let m = usize::from(has & ALL);
-        self.main[m] == Some(self.parts[m][spot.piece as usize])
+        self.out_piece(spot.piece, has)
     }
+
+    fn out_piece(&self, piece: u32, has: Mask) -> bool {
+        let m = usize::from(has & ALL);
+        self.main[m] == Some(self.parts[m][piece as usize])
+    }
+}
+
+/// Where each node under a floor or the open ground stands: the nearest such ancestor and the node's origin in its
+/// frame (µm).
+fn places(tree: &Tree, root: Id, ground: Id, map: &Map) -> BTreeMap<Id, (Id, Vec3)> {
+    let mut out = BTreeMap::new();
+    let mut stack: Vec<(Handle, Option<(Id, Handle)>)> =
+        tree.handle(root).into_iter().map(|h| (h, None)).collect();
+    while let Some((h, on)) = stack.pop() {
+        let Some(n) = tree.node(h) else { continue };
+        let id = n.id();
+        let on = if id == ground || map.is_floor(id) {
+            Some((id, h))
+        } else {
+            if let Some((p, ph)) = on
+                && let Ok(at) = xform_to(tree, h, ph).and_then(|x| x.point(Vec3::ZERO))
+            {
+                out.insert(id, (p, at));
+            }
+            on
+        };
+        stack.extend(tree.children(h).unwrap_or(&[]).iter().map(|&c| (c, on)));
+    }
+    out
 }
 
 /// What [`guard`] keeps of a change for its verdict, read from both sides of it.
 pub struct Guard {
-    before: Side,
-    after: Side,
+    /// None in a zone with no open ground.
+    sides: Option<Sides>,
     /// Nodes the change removes, each removed node's subtree whole.
     removed: BTreeSet<Id>,
     /// Nodes it removes, moves (subtrees whole) or sets.
@@ -137,8 +199,14 @@ fn subtree(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
 }
 
 /// Off the clock thread: the guard for the would-be change `part` on `before` (the frozen copy's tree; `header` is the
-/// zone's, `ground` its open ground). Refused with why when the part does not apply to the copy.
-pub fn guard(before: &Tree, header: &Header, ground: Id, part: &Part) -> Result<Guard, String> {
+/// zone's, `ground` its open ground, none in a zone without one). Refused with why when the part does not apply to
+/// the copy.
+pub fn guard(
+    before: &Tree,
+    header: &Header,
+    ground: Option<Id>,
+    part: &Part,
+) -> Result<Guard, String> {
     let mut after = before.frozen();
     after
         .apply(header, part)
@@ -177,9 +245,19 @@ pub fn guard(before: &Tree, header: &Header, ground: Id, part: &Part) -> Result<
             held.entry(p).or_default().push(t);
         }
     }
+    let sides = match ground {
+        Some(g) => {
+            let b = Side::of(before, g)?;
+            Some(Sides {
+                places: places(before, header.zone, g, &b.map),
+                before: b,
+                after: Side::of(&after, g)?,
+            })
+        }
+        None => None,
+    };
     Ok(Guard {
-        before: Side::of(before, ground)?,
-        after: Side::of(&after, ground)?,
+        sides,
         removed,
         touched,
         held,
@@ -219,17 +297,46 @@ impl Guard {
         {
             return fail(IN_USE, Some((*t, Use::Holds)));
         }
+        let s = self.sides.as_ref()?;
         if frame.slot.is_some() {
+            // Seated or lying: shut in when the ground it stands up onto loses its way out.
+            let &(patch, p) = s.places.get(&frame.node)?;
+            let b = s.before.map.spot_near(patch, p, REACH)?;
+            let a = s.after.map.spot_near(patch, p, REACH);
+            if s.before.out(b, w.has) && !a.is_some_and(|a| s.after.out(a, w.has)) {
+                return Some(Unsafe {
+                    name: CUTS_OFF,
+                    soul: w.soul,
+                    node: patch,
+                    at: p,
+                    thing: None,
+                });
+            }
             return None;
         }
         if self.removed.contains(&frame.node) {
             return fail(BURIES, None);
         }
-        let b = self.before.map.spot_near(frame.node, at, AT_EDGE)?;
-        let Some(a) = self.after.map.spot_near(frame.node, at, AT_EDGE) else {
+        if let Some(link) = w.crossing {
+            // Partway across a link: buried in it when it goes or is newly blocked, cut off when neither end is out.
+            let (was, ends) = s.before.links.get(&link)?;
+            let Some((now, after)) = s.after.links.get(&link) else {
+                return fail(BURIES, None);
+            };
+            if was.is_none() && now.is_some() {
+                return fail(BURIES, None);
+            }
+            let out = |side: &Side, ends: &[u32]| ends.iter().any(|&q| side.out_piece(q, w.has));
+            if out(&s.before, ends) && !out(&s.after, after) {
+                return fail(CUTS_OFF, None);
+            }
+            return None;
+        }
+        let b = s.before.map.spot_near(frame.node, at, AT_EDGE)?;
+        let Some(a) = s.after.map.spot_near(frame.node, at, AT_EDGE) else {
             return fail(BURIES, None);
         };
-        if self.before.out(b, w.has) && !self.after.out(a, w.has) {
+        if s.before.out(b, w.has) && !s.after.out(a, w.has) {
             return fail(CUTS_OFF, None);
         }
         None
@@ -240,7 +347,7 @@ impl Guard {
 pub fn check(
     before: &Tree,
     header: &Header,
-    ground: Id,
+    ground: Option<Id>,
     part: &Part,
     bodies: &[Who],
 ) -> Result<(Guard, Vec<Unsafe>), String> {

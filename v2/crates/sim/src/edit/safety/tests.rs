@@ -10,6 +10,7 @@ use super::{Guard, Who, check, guard};
 use crate::ground::exits;
 use crate::ground::scene::F_SOLIDS;
 use crate::ground::{HUMAN_RADIUS, Scene, Turn, cut_floor};
+use crate::links::{Building, F_STAIRS, Kind};
 use crate::routes::{CLIMB, HANDS};
 use replica::edit::{BURIES, CUTS_OFF, IN_USE, Unsafe, Use};
 use replica::effects::{
@@ -50,6 +51,8 @@ struct W {
     kind: Name,
     ground: Id,
     floor1: Id,
+    floor0: Id,
+    building: Id,
     next: u64,
     minted: u64,
 }
@@ -78,6 +81,8 @@ fn world() -> W {
         kind,
         ground: imp.nodes["ground"],
         floor1: imp.nodes["building/floor-1"],
+        floor0: imp.nodes["building/floor-0"],
+        building: imp.nodes["building"],
         tree: imp.tree,
         next,
         minted: 5_000,
@@ -119,6 +124,7 @@ fn standing(n: u64, node: Id, at: Vec3) -> Who {
         body: id(200 + n),
         pose: on(node, at, surface(node)),
         has: HANDS | CLIMB,
+        crossing: None,
     }
 }
 
@@ -264,11 +270,18 @@ impl W {
 
     /// The rule on `p`, after checking that each standing Soul of the fixture stands on ground before it.
     fn check_part(&self, p: &Part, bodies: &[Who]) -> (Guard, Vec<Unsafe>) {
-        let (g, v) = check(&self.tree, &self.header, self.ground, p, bodies).expect("checked");
+        let (g, v) =
+            check(&self.tree, &self.header, Some(self.ground), p, bodies).expect("checked");
         for w in bodies {
-            if w.pose.frame.slot.is_none() && w.pose.support == surface(w.pose.frame.node) {
+            if w.pose.frame.slot.is_none()
+                && w.crossing.is_none()
+                && w.pose.support == surface(w.pose.frame.node)
+            {
                 assert!(
-                    g.before
+                    g.sides
+                        .as_ref()
+                        .unwrap()
+                        .before
                         .map
                         .spot_near(w.pose.frame.node, w.pose.position, 20)
                         .is_some(),
@@ -490,7 +503,7 @@ fn a5_the_verdict_is_taken_on_the_commit_tick() {
     let (_, c) = w.crate_on_floor1([-2_000, 0], 300, 600);
     let p = w.part(creator(), vec![c]);
     // Checked off the clock while the Soul is on the landing: safe.
-    let g = guard(&w.tree, &w.header, w.ground, &p).expect("checked");
+    let g = guard(&w.tree, &w.header, Some(w.ground), &p).expect("checked");
     assert_eq!(g.judge(&[soul]), vec![]);
     // It walks into the south room above before the tick the edit would commit; judged then, the edit is refused.
     let walked = Who {
@@ -501,4 +514,102 @@ fn a5_the_verdict_is_taken_on_the_commit_tick() {
     print("A5 judged at commit", &v);
     assert_eq!(v.len(), 1);
     assert_eq!((v[0].name, v[0].soul), (CUTS_OFF, soul.soul));
+}
+
+// --- #3280: seated and lying bodies, and bodies partway across a link ----------------------------------------------
+
+impl W {
+    /// The link of `kind` whose line passes nearest `at` (mm, the building's frame).
+    fn link_near(&self, kind: Kind, at: [i64; 2]) -> Id {
+        let b = Building::read(&self.tree, self.building).expect("the building's links");
+        let d2 = |p: &Vec3| {
+            let (dx, dz) = (i128::from(p.x - at[0] * MM), i128::from(p.z - at[1] * MM));
+            dx * dx + dz * dz
+        };
+        b.links
+            .iter()
+            .filter(|l| l.kind == kind)
+            .min_by_key(|l| l.line.iter().map(d2).min().unwrap_or(i128::MAX))
+            .map(|l| l.id)
+            .expect("a link")
+    }
+}
+
+#[test]
+fn a2_a_seated_or_lying_soul_shut_in_a_room_is_refused() {
+    let mut w = world();
+    let f = w.floor1;
+    // A box to sit in and a long one to lie in, in the south room above, a Soul in each.
+    let (sat_in, c1) = w.crate_on_floor1([5_000, -3_000], 250, 250);
+    let (lain_in, c2) = w.crate_on_floor1([3_000, -4_500], 1_000, 450);
+    w.setup(vec![c1, c2]);
+    let sitter = Who {
+        pose: in_slot(sat_in, 1),
+        ..standing(1, f, Vec3::ZERO)
+    };
+    let lier = Who {
+        pose: in_slot(lain_in, 1),
+        ..standing(2, f, Vec3::ZERO)
+    };
+    // A crate in the corridor's narrow door, the room's last way out two rooms off: both are named.
+    let (_, c) = w.crate_on_floor1([-2_000, 0], 300, 600);
+    let (_, v) = w.check(creator(), vec![c], &[sitter, lier]);
+    print("A2 seated and lying, shut in", &v);
+    assert_eq!(
+        v.iter().map(|u| (u.name, u.soul)).collect::<Vec<_>>(),
+        vec![(CUTS_OFF, sitter.soul), (CUTS_OFF, lier.soul)]
+    );
+    assert!(v[0].text().contains("(5.00, -3.00) m"), "{}", v[0].text());
+    // The same crate on the landing, clear of the door, shuts nobody in.
+    let (_, c) = w.crate_on_floor1([-6_000, 4_000], 300, 600);
+    assert_eq!(w.check(creator(), vec![c], &[sitter, lier]).1, vec![]);
+}
+
+#[test]
+fn a2_a_body_partway_through_a_doorway_or_on_a_stair_is_refused() {
+    let mut w = world();
+    let f = w.floor1;
+    let to_b = w.link_near(Kind::Doorway, [1_000, -550]);
+    let stair = w.link_near(Kind::Stairs, [-5_000, 0]);
+    // Partway through the door to the south room above.
+    let in_door = Who {
+        crossing: Some(to_b),
+        ..standing(1, f, Vec3::new(1_000 * MM, FLOOR_1, -550 * MM))
+    };
+    // A crate set in that doorway buries it there.
+    let (_, c) = w.crate_on_floor1([1_000, -550], 700, 300);
+    let (_, v) = w.check(creator(), vec![c], &[in_door]);
+    print("A2 a crate in the doorway it is crossing", &v);
+    assert_eq!(v.len(), 1);
+    assert_eq!((v[0].name, v[0].soul), (BURIES, in_door.soul));
+    // A crate in the narrow door cuts off both the corridor and the room it is crossing between.
+    let (_, c) = w.crate_on_floor1([-2_000, 0], 300, 600);
+    let (_, v) = w.check(creator(), vec![c], &[in_door]);
+    print("A2 the doorway's both sides cut off", &v);
+    assert_eq!(v.len(), 1);
+    assert_eq!((v[0].name, v[0].soul), (CUTS_OFF, in_door.soul));
+    // Halfway up the stair: taking the stair away buries it there.
+    let on_stair = Who {
+        crossing: Some(stair),
+        ..standing(2, w.floor0, Vec3::new(-5_400 * MM, 1_500 * MM, 0))
+    };
+    let gone = Change::Set {
+        node: w.floor0,
+        field: F_STAIRS,
+        to: Value::Array(Vec::new()),
+        by: None,
+    };
+    let (_, v) = w.check(creator(), vec![gone.clone()], &[on_stair]);
+    print("A2 the stair it is on taken away", &v);
+    assert_eq!(v.len(), 1);
+    assert_eq!((v[0].name, v[0].soul), (BURIES, on_stair.soul));
+    // Taken away, the stair was the upper floor's one way down: the Soul in the doorway above is cut off by it.
+    let (_, v) = w.check(creator(), vec![gone.clone()], &[in_door]);
+    assert_eq!(v.len(), 1);
+    assert_eq!((v[0].name, v[0].soul), (CUTS_OFF, in_door.soul));
+    // A crate on the landing clear of both doors is safe for both; the stair taken away with nobody upstairs, too.
+    let (_, c) = w.crate_on_floor1([-6_000, 4_000], 300, 600);
+    assert_eq!(w.check(creator(), vec![c], &[in_door, on_stair]).1, vec![]);
+    let outside = standing(3, w.ground, Vec3::new(-5 * M, 0, -10 * M));
+    assert_eq!(w.check(creator(), vec![gone], &[outside]).1, vec![]);
 }
