@@ -16,18 +16,21 @@
 //! - **Logged when it changes.** A body's input enters the log only when it differs from the last one logged, so a
 //!   body walking a straight line adds no record ([`Logged`]). The log holds inputs, not motion: the mover's motion
 //!   samples are its own output.
+//! - **In a slot (B3).** [`Controller::seat`] hands a body from its surface into a slot and [`Controller::stand`]
+//!   back, for the driver holding its legs. A body in a slot is kept apart from those the tick steps, so it costs a
+//!   tick nothing; it is visited only to log an input that changed.
 //!
 //! Not here: moves themselves and cancel rules (B2), gateway intents (lane I), drawing (lane V), N7's walk, which
 //! still steps the mover itself until T9b (#3120) moves it behind the host.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::mover::{Body as Moved, Surface};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
 use replica::encode::{Name, Value, encode};
 use replica::ids::Id;
-use replica::pose::{ControllerInput, HandOff, Mode, Quat, Support, Vec3};
+use replica::pose::{ControllerInput, Frame, HandOff, Mode, Owner, Pose, Quat, Support, Vec3};
 use replica::time::Micros;
 
 type R<T> = Result<T, Refusal>;
@@ -153,20 +156,86 @@ struct Slot {
     moved: Moved,
     input: Input,
     logged: Option<Input>,
+    /// Whether the input may differ from the one logged: set by every change, so an unchanged body costs no compare.
+    touched: bool,
 }
 
 /// Every body's claims, input and mover state; the only way any of them is moved or posed.
 #[derive(Default)]
 pub struct Controller {
     bodies: BTreeMap<Id, Slot>,
+    /// Bodies in a slot (a seat, B3): no mover, so a tick never visits them, unless their input changed (`woken`).
+    rested: BTreeMap<Id, Slot>,
+    woken: BTreeSet<Id>,
     /// The last driver number given.
     drivers: Driver,
     log: Vec<Logged>,
 }
 
+/// Moves `body` from one of the controller's maps to the other, at rest in `pose`, for the driver steering it.
+fn hand(
+    from: &mut BTreeMap<Id, Slot>,
+    to: &mut BTreeMap<Id, Slot>,
+    body: Id,
+    driver: Driver,
+    at: Micros,
+    pose: Pose,
+) -> R<HandOff> {
+    let into_slot = pose.support == Support::Slot;
+    let Some(s) = from.get(&body) else {
+        let not = if into_slot {
+            "support-not-surface"
+        } else {
+            "support-not-slot"
+        };
+        return refuse(not, replica::world_model::show(body));
+    };
+    s.steers(driver)?;
+    let Some(mut s) = from.remove(&body) else {
+        unreachable!("found above")
+    };
+    s.moved.pose = pose;
+    s.moved.linear = Vec3::ZERO;
+    s.touched = true;
+    to.insert(body, s);
+    let (from, to) = if into_slot {
+        (Owner::Mover, Owner::Slot)
+    } else {
+        (Owner::Slot, Owner::Mover)
+    };
+    Ok(HandOff {
+        node: body,
+        at,
+        from,
+        to,
+        pose,
+        linear: Vec3::ZERO,
+        angular: Vec3::ZERO,
+    })
+}
+
 impl Slot {
+    /// Logs the input if it changed since it was last logged.
+    fn log(&mut self, id: Id, at: Micros, log: &mut Vec<Logged>) -> R<()> {
+        if self.touched && self.logged.as_ref() != Some(&self.input) {
+            let bytes = encode(&self.input.record(at, id)).map_err(|e| Refusal {
+                name: "encoding",
+                detail: e.to_string(),
+            })?;
+            log.push(Logged {
+                at,
+                body: id,
+                bytes,
+            });
+            self.logged = Some(self.input.clone());
+        }
+        self.touched = false;
+        Ok(())
+    }
+
     /// The parts `held` covered go back to neutral: locomotion to standing still, each resource's move to none.
     fn neutral(&mut self, held: &[Name]) {
+        self.touched = true;
         let family = self.claims.family();
         let locomotion = family
             .resources
@@ -218,7 +287,7 @@ impl Controller {
 
     /// Adds a body of `family`, standing as the mover placed it, with the neutral input facing as it faces.
     pub fn add(&mut self, family: Family, moved: Moved) -> R<()> {
-        if self.bodies.contains_key(&moved.id) {
+        if self.get(moved.id).is_some() {
             return refuse("body-duplicate", replica::world_model::show(moved.id));
         }
         let input = Input::neutral(moved.pose.orientation);
@@ -229,31 +298,73 @@ impl Controller {
                 moved,
                 input,
                 logged: None,
+                touched: true,
             },
         );
         Ok(())
     }
 
     fn slot(&mut self, body: Id) -> R<&mut Slot> {
+        if let Some(s) = self.rested.get_mut(&body) {
+            self.woken.insert(body);
+            return Ok(s);
+        }
         match self.bodies.get_mut(&body) {
             Some(s) => Ok(s),
             None => refuse("body-unknown", replica::world_model::show(body)),
         }
     }
 
-    /// The body as the mover last left it.
+    fn get(&self, body: Id) -> Option<&Slot> {
+        self.bodies.get(&body).or_else(|| self.rested.get(&body))
+    }
+
+    /// The body as the mover last left it, or as it sits in its slot.
     pub fn body(&self, body: Id) -> Option<&Moved> {
-        self.bodies.get(&body).map(|s| &s.moved)
+        self.get(body).map(|s| &s.moved)
     }
 
     /// The body's input now.
     pub fn input(&self, body: Id) -> Option<&Input> {
-        self.bodies.get(&body).map(|s| &s.input)
+        self.get(body).map(|s| &s.input)
     }
 
     /// The body's claims (T9's view: who holds what).
     pub fn claims(&self, body: Id) -> Option<&Claims> {
-        self.bodies.get(&body).map(|s| &s.claims)
+        self.get(body).map(|s| &s.claims)
+    }
+
+    /// Hands `body` from its surface into `frame`, a slot, at `at`, for the driver holding all its locomotion
+    /// (`resource-not-held`): its motion's owner becomes the slot (T4 rule 10), it is at the slot's point, and a tick
+    /// no longer steps it. `support-not-surface` when it is in a slot already.
+    pub fn seat(&mut self, body: Id, driver: Driver, frame: Frame, at: Micros) -> R<HandOff> {
+        let pose = Pose {
+            frame,
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::Slot,
+        };
+        let h = hand(&mut self.bodies, &mut self.rested, body, driver, at, pose)?;
+        self.woken.insert(body);
+        Ok(h)
+    }
+
+    /// The reverse of [`Controller::seat`]: hands `body` from its slot to `placed`, a surface's placement of it (its
+    /// seat's stand point), at rest. `support-not-slot` when it is in no slot.
+    pub fn stand(&mut self, body: Id, driver: Driver, placed: Moved, at: Micros) -> R<HandOff> {
+        let h = hand(
+            &mut self.rested,
+            &mut self.bodies,
+            body,
+            driver,
+            at,
+            placed.pose,
+        )?;
+        self.woken.remove(&body);
+        if let Some(s) = self.bodies.get_mut(&body) {
+            s.moved = placed;
+        }
+        Ok(h)
     }
 
     /// The input log, in order.
@@ -289,6 +400,7 @@ impl Controller {
     /// Sets one part of `body`'s input, if `driver` holds its resources (`resource-not-held`, `resource-missing`).
     pub fn set(&mut self, body: Id, driver: Driver, part: Part) -> R<()> {
         let s = self.slot(body)?;
+        s.touched = true;
         match part {
             Part::Velocity(v, mode) => {
                 s.steers(driver)?;
@@ -326,30 +438,22 @@ impl Controller {
         Ok(())
     }
 
-    /// One tick: each body, in id order, has its input logged if it changed, takes its facing, and is stepped by
-    /// the mover of the surface it stands on. A body refused here is listed and stays where it was; the others go on.
+    /// One tick: each body on a surface, in id order, has its input logged if it changed, takes its facing, and is
+    /// stepped by the mover of the surface it stands on. A body in a slot is visited only when its input changed, to
+    /// log it. A body refused here is listed and stays where it was; the others go on.
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {
         let mut out = Stepped::default();
+        for id in std::mem::take(&mut self.woken) {
+            if let Some(s) = self.rested.get_mut(&id)
+                && let Err(r) = s.log(id, at, &mut self.log)
+            {
+                out.refused.push((id, r));
+            }
+        }
         for (&id, s) in self.bodies.iter_mut() {
-            if s.logged.as_ref() != Some(&s.input) {
-                match encode(&s.input.record(at, id)) {
-                    Ok(bytes) => self.log.push(Logged {
-                        at,
-                        body: id,
-                        bytes,
-                    }),
-                    Err(e) => {
-                        out.refused.push((
-                            id,
-                            Refusal {
-                                name: "encoding",
-                                detail: e.to_string(),
-                            },
-                        ));
-                        continue;
-                    }
-                }
-                s.logged = Some(s.input.clone());
+            if let Err(r) = s.log(id, at, &mut self.log) {
+                out.refused.push((id, r));
+                continue;
             }
             s.moved.pose.orientation = s.input.facing;
             let Support::Surface { surface, .. } = s.moved.pose.support else {

@@ -3,7 +3,11 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671; `timers`: K9, #2672; `restart`: K5, #2669."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671; `timers`: K9, #2672; `restart`: K5, #2669; `moves`: B2, #2681; `seats`: B3, #2682."
+
+[[bin]]
+name = "seats"
+path = "src/seats.rs"
 
 [[bin]]
 name = "tree"
@@ -40,6 +44,9 @@ path = "act-latency/main.rs"
 [[bin]]
 name = "restart"
 path = "src/restart.rs"
+[[bin]]
+name = "moves"
+path = "src/moves.rs"
 
 [dependencies]
 replica = { path = "../../crates/replica" }
@@ -52,3 +59,5 @@ futures-util = { version = "0.3", default-features = false, features = ["sink"] 
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
 testworld = { path = "../testworld" }
 import-eden = { path = "../import-eden" }
+# The `moves` bench places its bodies with the script driver's helpers (B2, #2681).
+body-script = { path = "../body-script" }
