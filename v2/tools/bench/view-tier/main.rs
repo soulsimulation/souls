@@ -6,7 +6,8 @@
 //! - A1: the clock thread's mean tick time (building, committing to K2's tree, appending, handing over) with 1,000
 //!   subscribers is within 10 % of the paired run with none.
 //! - A2: frames encoded per tick equal the keys in use.
-//! - A4: frames ready within 20 ms of their tick's sync at the 99th percentile (with 1,000 subscribers).
+//! - A4: frames ready within 20 ms of their tick's sync at the 99th percentile (with 1,000 subscribers), over the
+//!   ticks whose sync time is known; the rest are printed as `sync unknown`.
 //!
 //! Run from `v2/`: `cargo run -p bench --release --bin view-tier -- [ticks] [repeats] [dir]` (400, 2,
 //! `target/view-tier`). The arms run interleaved: none, 1,000, none, 1,000.
@@ -356,13 +357,19 @@ fn run(subscribers: usize, ticks: usize, dir: &Path, arm: &str) -> Run {
         .sum();
     drop(log);
     assert_eq!(stats.fault, None);
+    let timed = worldd::views::Ready {
+        unknown: 0,
+        ..stats.ready.clone()
+    };
     Run {
         tick_us,
         frames: stats.frames - frames0,
         ticks: stats.ticks - ticks0,
         keys: keys.len(),
-        p99_us: stats.ready.quantile_us(990),
-        p50_us: stats.ready.quantile_us(500),
+        // Over the timed ticks only: a tick whose sync time is not known has no sample, and counting it as the
+        // latest put u64::MAX in the p99. Those ticks are printed apart, as `sync unknown`.
+        p99_us: timed.quantile_us(990),
+        p50_us: timed.quantile_us(500),
         unknown: stats.ready.unknown,
         snapshots: stats.snapshots,
         received,
