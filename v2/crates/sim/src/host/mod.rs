@@ -29,7 +29,12 @@
 //!   near (the controller's spatial index, N16 `crate::index`: the bodies as the mover left them at the last tick's
 //!   end), and reads of bodies and links.
 //!
-//! Not here: handing intents back after a restart (K13b #3119), entries to the log, timers (K9).
+//! - **After a restart** ([`restart`], K13b #3119): each order the log holds as accepted and not ended is handed to
+//!   its skill again, from where its body stands, or ended with a named reason.
+//!
+//! Not here: entries to the log, timers (K9).
+
+pub mod restart;
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};

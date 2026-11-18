@@ -33,7 +33,7 @@
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, Scene, exits};
+use crate::ground::{HUMAN_RADIUS, OpenGround, exits};
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
@@ -150,7 +150,7 @@ impl Town {
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
         let map = Map::build(&tree, ground, &|_| 0)?;
         let mut surfaces = BTreeMap::new();
-        let open = OpenGround::prepare(&Scene::of(&tree, ground)?, HUMAN_RADIUS)?;
+        let open = OpenGround::of(&tree, ground, HUMAN_RADIUS)?;
         let (mut pieces, mut meets) = (Vec::new(), Vec::new());
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
@@ -159,7 +159,12 @@ impl Town {
         }
         let gh = tree.handle(ground).ok_or("no such ground")?;
         let gdoors = ground_doors(&tree, ground)?;
-        surfaces.insert(ground, Surface::new(ground, pieces));
+        let on = open.on_terrain(&pieces);
+        let mut surface = Surface::new(ground, pieces);
+        if let Some(t) = open.terrain() {
+            surface = surface.on_terrain(t.clone(), on);
+        }
+        surfaces.insert(ground, surface);
         let mut buildings = Vec::new();
         let mut stack = vec![gh];
         while let Some(h) = stack.pop() {
