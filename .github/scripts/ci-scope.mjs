@@ -3,20 +3,24 @@
 //
 //   node .github/scripts/ci-scope.mjs --base <ref|sha> [--head <ref|sha>] [--event <name>]   (or --files a,b,c for tests)
 //
-// A push to main (ci.yml only takes pushes to main) and a manual run check everything, whatever changed: each merge then
-// leaves a full-scope run on main, which the merge train reads as proof that main is green (mainCiState in
-// merge-train.mjs). Pull request runs stay scoped to their paths.
-// Paths no rule names (root files, the lockfile, mars/, worlds/, vendor/, .github/ ...) run every job; docs and
-// tools-only changes run none (ci-ok still reports). Writes `matrix`, `any`, `scope` and `smoke` to $GITHUB_OUTPUT when set.
-// `smoke` (the browser local smoke, e2e/local-smoke.mjs) runs when apps/web, apps/server or e2e change, or with no base.
+// The daily scheduled run on main and a manual run check everything, whatever changed: those are the full-scope runs the
+// merge train reads as proof that main is green (mainCiState in merge-train.mjs). Pull request, merge_group and push
+// runs (ci.yml only takes pushes to main) stay scoped to their paths (a merge group's diff is every PR in it).
+// A diff confined to the low-risk paths (LOW_RISK: entry, content, form-rules, docs, changelog fragments) runs only
+// their own tests; any other diff goes through the path map, where paths no rule names (root files, the lockfile, mars/,
+// worlds/, vendor/, .github/, changes/ ...) run every job; docs and tools-only changes run none (ci-ok still reports).
+// No diff, an unreadable one or an empty one runs every job. Writes `matrix`, `any`, `scope` and `smoke` to $GITHUB_OUTPUT.
+// `smoke` (the browser local smoke, e2e/local-smoke.mjs) runs when apps/web, apps/server or e2e change, or with no diff.
 //
 // The CI window (docs/testing.md#ci-window): a pull request run does its heavy jobs (the qualify matrix and the smoke)
 // only when the PR is not a draft and carries merge:ready or ci:run (--draft, --labels from the event), or when CI was
 // requested for it by hand (--event request: `gh workflow run ci.yml --ref <branch> -f pr=<n>`, scoped by the PR's paths
 // against main). Outside the window a run that selected heavy jobs is deferred: none run and ci-ok fails,
 // so a skipped job never reads as a pass. A run any label started (#2018), or a requested one, whose head already has a green
-// ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>]` prints whether the
-// head's newest ci run passed.
+// ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>] [--events a,b]` prints
+// whether the head's newest ci run (of those events, when given) passed.
+// Pull request, merge_group and push runs never run the legs JOBS marks `heavy: true` (lightOnly): they run once a day
+// in the scheduled full run on main, on a manual run, and before a release in the remote gate, not per change.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -33,32 +37,48 @@ import { SERVER_SHARDS } from './server-test-files.mjs';
 // ubuntu-latest, so one run uses both pools at once (docs/testing.md#self-hosted-runners). `native` never is heavy (#1162).
 export const JOBS = [
   // paths: a baseline or budget change is tools-only, so no step selects it, and this job is what compares it (#1117).
-  { name: 'types-web', kind: 'types-web', assets: true, steps: ['V1-types', 'V2-build-root', 'V2-build-worlds', 'V3-bundle'], paths: /^tools\/test-harness\/bundle-budget\// },
+  { name: 'types-web', kind: 'types-web', light: true, assets: true, steps: ['V1-types', 'V2-build-root', 'V2-build-worlds', 'V3-bundle'], paths: /^tools\/test-harness\/bundle-budget\// },
   { name: 'packages', kind: 'packages', assets: true, heavy: true, steps: ['V3-packages', 'V3-walk'] },
-  { name: 'web', kind: 'web', assets: true, steps: ['V4-web'] },
+  { name: 'web', kind: 'web', light: true, assets: true, steps: ['V4-web'] },
   { name: 'launcher', kind: 'launcher', assets: true, heavy: true, steps: ['V3-launcher-unit'] },
-  { name: 'client-cli', kind: 'client-cli', assets: true, steps: ['V3-client-cli'] },
+  { name: 'client-cli', kind: 'client-cli', light: true, assets: true, steps: ['V3-client-cli'] },
   { name: 'native', kind: 'native', assets: true, steps: ['V3-mars-engine'] },
   { name: 'latency', kind: 'latency', assets: false, steps: ['V5-server-full'] },
   // #898: the generator of the reference pages (docs/site actions, api, mcp) still runs against the server's code. Server
   // and package changes can break it; so can the generator and the pages' own prose, which the gate's scope map leaves free
   // (docs and tools never gate on Modal), so `paths` adds the job for those in CI only.
-  { name: 'docs-reference', kind: 'docs-reference', assets: false, steps: ['V5-server-full', 'V3-walk'], paths: /^(?:tools\/docs\/|docs\/site\/(?:actions|api|mcp)\.md$)/ },
+  { name: 'docs-reference', kind: 'docs-reference', light: true, assets: false, steps: ['V5-server-full', 'V3-walk'], paths: /^(?:tools\/docs\/|docs\/site\/(?:actions|api|mcp)\.md$)/ },
   // the server inventory in SERVER_SHARDS duration-balanced shards (server-test-files.mjs). Shard 0 also runs every
   // god-skill unit test (GOD_SKILL_TESTS, the replay corpus among them; none needs a browser or a live server): about
   // 35 s, and some need the pulled media, so they ride on a leg that god paths already select (#918).
   ...Array.from({ length: SERVER_SHARDS }, (_, shard) => ({ name: `server-${shard}`, kind: 'server', shard, assets: true, heavy: true, ...(shard === 0 ? { godSkill: true } : {}), steps: ['V5-server-full', 'V6-'] })),
   // No gate step on purpose: picked by its own paths, so the gate's suite tree and cached baseline stay as they are (#1061).
   { name: 'soul-actions', kind: 'soul-actions', assets: false, heavy: true, steps: [], paths: /^(tools\/soul-actions|apps\/server|packages\/world-compiler|packages\/engine-[^/]+)\// },
-  // Also no gate step (#1111). soul-trace drives the thin CLI in tools/world-launcher/soul; soul-runtime's native client test uses the server's comms fixture.
-  { name: 'soul-tools', kind: 'soul-tools', assets: false, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|apps\/server)\// },
+  // Also no gate step (#1111). soul-trace drives the thin CLI in tools/world-launcher/soul; soul-runtime's native client test uses the server's comms fixture. tools/entry's format, check and look gate tests ride here too, picked by tools/entry, content and packages/form-rules.
+  { name: 'soul-tools', kind: 'soul-tools', light: true, assets: false, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|tools\/entry|content|packages\/form-rules|apps\/server)\// },
+  // Engine v2 (#2635, K15 #2637): no gate step (v2/ is scope `none`), picked by its own paths. It builds and tests the
+  // Rust workspace with v2/tools/ci.sh, on the toolchain v2/rust-toolchain.toml pins, without the pnpm install.
+  { name: 'v2', kind: 'v2', assets: false, steps: [], paths: /^v2\// },
 ];
 
 /** The runner a qualify job gets, as ci.yml's runs-on computes it: a heavy job goes to CI_HEAVY_RUNNER (one label, or a
- * JSON array of labels) when it is set; every other job, and every job when it is unset, goes to ubuntu-latest. */
-export function runnerFor(job, heavyRunner = '') {
-  if (!job.heavy || !heavyRunner) return 'ubuntu-latest';
-  return heavyRunner.startsWith('[') ? JSON.parse(heavyRunner) : heavyRunner;
+ * JSON array of labels) when it is set; a `light` job (short, no wall-time budget) goes to CI_LIGHT_RUNNER when that is
+ * set; every other job (native and latency keep their wall-time budgets on hosted runners) goes to ubuntu-latest. */
+export function runnerFor(job, heavyRunner = '', lightRunner = '') {
+  const pool = job.heavy ? heavyRunner : job.light ? lightRunner : '';
+  if (!pool) return 'ubuntu-latest';
+  return pool.startsWith('[') ? JSON.parse(pool) : pool;
+}
+
+/** Events whose runs leave the `heavy: true` legs to the daily full run (Gene, 18 Nov: startup mode, merge no slower than
+ * lanes implement). The scheduled run on main (06:23 UTC) and manual runs check every job (FULL_EVENTS), and the remote
+ * gate runs everything before a release (docs/testing.md#ci-window). Scheduled, manual and requested runs keep them. */
+export const LIGHT_EVENTS = ['pull_request', 'merge_group', 'push'];
+
+/** The jobs a run of `event` does itself (`include`), and the names of the heavy legs it leaves to the daily run. */
+export function lightOnly(include, event) {
+  if (!LIGHT_EVENTS.includes(event)) return { include, daily: [] };
+  return { include: include.filter(j => !j.heavy), daily: include.filter(j => j.heavy).map(j => j.name) };
 }
 
 /** The god-skill unit tests (every *.test.mjs under tools/god-skill), run by the job with `godSkill` (ci.yml). */
@@ -66,18 +86,41 @@ export const GOD_SKILL_TESTS = 'tools/god-skill/*.test.mjs tools/god-skill/lib/*
 
 const relevant = (job, steps) => job.steps.some(s => steps.some(step => s.endsWith('-') ? step.startsWith(s) : step === s));
 
-export function jobsFor(files) {
+const strip = ({ steps, paths, ...job }) => job;
+
+/** The low-risk paths: a change confined to them (every file) needs no server, browser smoke, walk or bundle job. Exact
+ * prefixes, plus Markdown at the root other than the agent rules. Nothing in apps/server, the packages the walk audits or
+ * the e2e reads them; the readers outside them are the entry and form-rules tests and card-search.test.mjs, which the
+ * soul-tools job runs (ci.yml), and apps/web, which imports packages/form-rules/src (LOW_RISK_WEB). */
+export const LOW_RISK = /^(?:tools\/entry|content\/(?:kinds|asks|moves)|packages\/form-rules|docs|changes)\//;
+const LOW_RISK_ROOT = file => /^[^/]+\.md$/.test(file) && !['AGENTS.md', 'CLAUDE.md'].includes(file);
+export const lowRisk = files => Array.isArray(files) && files.length > 0 && files.every(f => LOW_RISK.test(f) || LOW_RISK_ROOT(f));
+/** apps/web/src/gen-mesh/vocab-look.ts imports packages/form-rules/src/looks.ts: a change there keeps the web
+ * typecheck, build and bundle comparison (types-web) and the web unit suite. */
+export const LOW_RISK_WEB = /^packages\/form-rules\/src\//;
+
+/** The jobs a diff needs. No diff (null: no usable base, or an unreadable one) and an empty diff run every job. A diff
+ * confined to the low-risk paths runs only the jobs their own `paths` pick (soul-tools, docs-reference) and, for
+ * form-rules source, the web jobs; any other diff is picked by the release gate's path map, where an unmapped path (the
+ * lockfile, .github, changes/ beside other files ...) runs every job. */
+export function jobsFor(files, reason = files === null ? 'no usable base' : 'an empty diff') {
+  if (!files?.length) return { scope: 'full', steps: [...REQUIRED_STEPS], include: JOBS.map(strip), diff: { reason } };
+  if (lowRisk(files)) {
+    const web = files.some(f => LOW_RISK_WEB.test(f)) ? ['types-web', 'web'] : [];
+    const include = JOBS.filter(job => web.includes(job.name) || files.some(f => job.paths?.test(f))).map(strip);
+    return { scope: include.length ? 'low-risk' : 'none', steps: [], include, diff: { files: files.length, lowRisk: true } };
+  }
   const scope = scopeFor(files);
   const include = scope.resolved === 'full' ? JOBS : JOBS.filter(job => relevant(job, scope.steps) || files?.some(f => job.paths?.test(f)));
-  return { scope: scope.resolved, steps: scope.steps, include: include.map(({ steps, paths, ...job }) => job), diff: scope.diff };
+  return { scope: scope.resolved, steps: scope.steps, include: include.map(strip), diff: scope.diff };
 }
 
-/** The local smoke job: changes under apps/web, apps/server or e2e; null (no usable base) runs it too. */
+/** The local smoke job: changes under apps/web, apps/server or e2e; no diff or an empty one runs it too. */
 export const SMOKE_PATHS = /^(apps\/web|apps\/server|e2e)\//;
-export const smokeFor = files => files === null || files.some(f => SMOKE_PATHS.test(f));
+export const smokeFor = files => !files?.length || files.some(f => SMOKE_PATHS.test(f));
 
 /** Events whose runs check everything regardless of the changed paths. */
-export const FULL_EVENTS = ['push', 'workflow_dispatch'];
+export const FULL_EVENTS = ['schedule', 'workflow_dispatch'];
 
 /** Labels that open the CI window for a ready PR. */
 export const WINDOW_LABELS = ['merge:ready', 'ci:run'];
@@ -98,9 +141,12 @@ export function windowed({ include, smoke }, win, { greenAtHead = false } = {}) 
   return { include: [], smoke: false, deferred: true, why: win.why };
 }
 
-/** The head's newest ci run (other than `self`) concluded success, and no newer one is still running. */
-export function greenAtHead(runs = [], self = null) {
-  const others = runs.filter(r => String(r.id) !== String(self ?? '') && !['cancelled', 'skipped'].includes(r.conclusion)).sort((a, b) => b.id - a.id);
+/** The head's newest ci run (other than `self`, and of `events` when given) concluded success, and no newer one is
+ * still running. A requested run reads only other requested runs: a pull_request run at the head left its heavy legs
+ * to the daily run (lightOnly), so its pass says nothing about them. */
+export function greenAtHead(runs = [], self = null, events = []) {
+  const others = runs.filter(r => String(r.id) !== String(self ?? '') && !['cancelled', 'skipped'].includes(r.conclusion)
+    && (!events.length || events.includes(r.event))).sort((a, b) => b.id - a.id);
   return others[0]?.status === 'completed' && others[0].conclusion === 'success';
 }
 
@@ -115,23 +161,25 @@ function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
   if (argv[0] === 'green') {
     const runs = JSON.parse(execFileSync('gh', ['api', `repos/${opt('--repo')}/actions/workflows/ci.yml/runs?head_sha=${opt('--sha')}&per_page=100`], { encoding: 'utf8' })).workflow_runs ?? [];
-    console.log(String(greenAtHead(runs, opt('--self'))));
+    console.log(String(greenAtHead(runs, opt('--self'), (opt('--events') ?? '').split(',').filter(Boolean))));
     return;
   }
   const event = opt('--event');
   const files = FULL_EVENTS.includes(event) ? null
     : opt('--files') !== undefined ? opt('--files').split(',').filter(Boolean) : changedFiles(opt('--base'), opt('--head'));
-  const full = files ? jobsFor(files) : { scope: 'full', steps: REQUIRED_STEPS, include: JOBS.map(({ steps, ...job }) => job), diff: { reason: FULL_EVENTS.includes(event) ? `${event} runs check everything` : 'no usable base' } };
+  const full = FULL_EVENTS.includes(event) ? jobsFor(null, `${event} runs check everything`) : jobsFor(files);
   let labels = [];
   try { const l = JSON.parse(opt('--labels') || '[]'); if (Array.isArray(l)) labels = l; } catch { /* unreadable labels: none */ }
   const win = windowFor({ event, draft: opt('--draft') === 'true', labels });
-  const plan = { ...full, ...windowed({ include: full.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
+  const own = lightOnly(full.include, event);
+  const plan = { ...full, ...windowed({ include: own.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
   const out = { matrix: JSON.stringify({ include: plan.include }), any: String(plan.include.length > 0), scope: plan.scope, smoke: String(plan.smoke), deferred: String(plan.deferred), window: plan.why };
-  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: full.include.map(j => j.name), diff: plan.diff }, null, 2));
+  console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: own.include.map(j => j.name), daily: own.daily, diff: plan.diff }, null, 2));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(out).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     `### CI scope: ${plan.scope}\n\nJobs: ${plan.include.map(j => '`' + j.name + '`').join(', ') || 'none (docs/tools only)'}; local smoke: ${out.smoke}\n` +
-    (plan.deferred ? `\n**Full CI deferred** (${plan.why}): ${full.include.length} job(s) selected, none run. Add \`ci:run\` or \`merge:ready\` to a ready PR to run them (docs/testing.md#ci-window).\n` : ''));
+    (own.daily.length ? `\nLeft to the daily full run on main (06:23 UTC) and the release gate: ${own.daily.map(n => '`' + n + '`').join(', ')}\n` : '') +
+    (plan.deferred ? `\n**Full CI deferred** (${plan.why}): ${own.include.length} job(s) selected, none run. Add \`ci:run\` or \`merge:ready\` to a ready PR to run them (docs/testing.md#ci-window).\n` : ''));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2));

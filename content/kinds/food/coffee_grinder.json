@@ -178,6 +178,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:coffee_grinder",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,100,0],"size":[300,200,270],"tint":"wood"},{"kind":"box","at":[0,220,0],"size":[340,40,310],"tint":"metal"},{"kind":"box","at":[0,60,160],"size":[250,40,120],"tint":"metal"},{"kind":"box","at":[0,310,0],"size":[25,140,25],"tint":"metal"},{"kind":"box","at":[80,375,0],"size":[180,25,25],"tint":"metal"},{"kind":"box","at":[160,400,0],"size":[40,60,40],"tint":"wood"},{"kind":"box","at":[-90,265,-55],"size":[65,45,45],"tint":"beans","when":"@beans>=1"},{"kind":"box","at":[0,265,-55],"size":[65,45,45],"tint":"beans","when":"@beans>=2"},{"kind":"box","at":[90,265,-55],"size":[65,45,45],"tint":"beans","when":"@beans>=3"},{"kind":"box","at":[-90,265,35],"size":[65,45,45],"tint":"beans","when":"@beans>=4"},{"kind":"box","at":[0,265,35],"size":[65,45,45],"tint":"beans","when":"@beans>=5"},{"kind":"box","at":[90,265,35],"size":[65,45,45],"tint":"beans","when":"@beans>=6"},{"kind":"box","at":[-75,90,160],"size":[65,40,90],"tint":"grounds","when":"@grounds>=1"},{"kind":"box","at":[0,90,160],"size":[65,40,90],"tint":"grounds","when":"@grounds>=2"},{"kind":"box","at":[75,90,160],"size":[65,40,90],"tint":"grounds","when":"@grounds>=3"}],"palette":{"wood":"#996a3e","metal":"#4a5557","beans":"#704630","grounds":"#3c2417"},"tags":["kitchen","tool","coffee","object"]}

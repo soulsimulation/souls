@@ -17,6 +17,8 @@
   "children": {
     "slot": { "kind": "eden:signup_slot", "most": 20 }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "text": { "card": "A sheet with a fixed number of slots; a Soul signs a slot." },
   "card": { "text": "card" }
 }

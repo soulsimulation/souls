@@ -1,0 +1,131 @@
+{
+  "format": "souls-activity-steps/1",
+  "about": "test:class, a weekly class of five: its members are links that outlast a sitting, a sitting starts when three of them are present (checked as each arrives), all of them leaving leaves the class standing, and its end date removes it, members or not, with every member released and no body moved.",
+  "cases": [
+    {
+      "name": "three_present_start_a_sitting",
+      "activity": "c1",
+      "state": {
+        "nodes": {
+          "r1": { "loose": ["c1", "k1", "k2", "b1", "b2", "b3", "b4", "b5", "b6"] },
+          "c1": { "kind": "test:class", "at_mm": [0, 0, 0] },
+          "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000] },
+          "k2": { "kind": "eden:bench", "at_mm": [1000, 0, 3000] },
+          "b1": { "hands": {} },
+          "b2": { "hands": {} },
+          "b3": { "hands": {} },
+          "b4": { "hands": {} },
+          "b5": { "hands": {} },
+          "b6": { "hands": {} }
+        }
+      },
+      "steps": [
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": [], "stage": "idle", "ends_us": 2592000000000 } } },
+        { "do": "join", "actor": "b1", "form": "join", "receipt": "j1", "expect": { "verdict": "yes", "role": "member" } },
+        { "do": "join", "actor": "b2", "form": "join", "receipt": "j2", "expect": { "verdict": "yes", "role": "member" } },
+        { "do": "join", "actor": "b3", "form": "join", "receipt": "j3", "expect": { "verdict": "yes", "role": "member" } },
+        { "do": "join", "actor": "b4", "form": "join", "receipt": "j4", "expect": { "verdict": "yes", "role": "member" } },
+        { "do": "join", "actor": "b5", "form": "join", "receipt": "j5", "expect": { "verdict": "yes", "role": "member" } },
+        { "do": "join", "actor": "b6", "form": "join", "receipt": "j6", "expect": { "verdict": "no", "reason": "link_full", "detail": { "link": "member", "most": 5 } } },
+        { "do": "join", "actor": "b1", "form": "join", "receipt": "j7", "expect": { "verdict": "no", "reason": "already_linked" } },
+        { "do": "enter", "actor": "b6", "form": "arrive", "receipt": "a0", "expect": { "verdict": "no", "reason": "not_permitted" } },
+        { "do": "enter", "actor": "b1", "form": "arrive", "receipt": "a1", "expect": { "verdict": "yes", "role": "present", "place": { "node": "k1", "slot": "left" } } },
+        { "do": "enter", "actor": "b2", "form": "arrive", "receipt": "a2", "expect": { "verdict": "yes", "role": "present", "place": { "node": "k1", "slot": "right" } } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": ["b1", "b2"], "stage": "idle", "ends_us": 2592000000000 } } },
+        { "do": "enter", "actor": "b3", "form": "arrive", "receipt": "a3", "expect": { "verdict": "yes", "role": "present", "place": { "node": "k2", "slot": "left" } } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": ["b1", "b2", "b3"], "stage": "sitting", "ends_us": 2592000000000 } } },
+        { "do": "enter", "actor": "b4", "form": "arrive", "receipt": "a4", "expect": { "verdict": "yes", "role": "present", "place": { "node": "k2", "slot": "right" } } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": ["b1", "b2", "b3", "b4"], "stage": "sitting", "ends_us": 2592000000000 } } }
+      ],
+      "after": {
+        "c1": {
+          "kind": "test:class",
+          "at_mm": [0, 0, 0],
+          "fields": { "phase": "sitting" },
+          "links": { "member": ["b1", "b2", "b3", "b4", "b5"], "present": ["b1", "b2", "b3", "b4"] }
+        }
+      }
+    },
+    {
+      "name": "all_leave_and_the_class_remains",
+      "activity": "c1",
+      "state": {
+        "nodes": {
+          "r1": { "loose": ["c1", "k1", "k2", "b4", "b5"] },
+          "c1": {
+            "kind": "test:class",
+            "at_mm": [0, 0, 0],
+            "fields": { "phase": "sitting" },
+            "links": { "member": ["b1", "b2", "b3", "b4", "b5"], "present": ["b1", "b2", "b3"] }
+          },
+          "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000], "slots": { "left": ["b1"], "right": ["b2"] } },
+          "k2": { "kind": "eden:bench", "at_mm": [1000, 0, 3000], "slots": { "left": ["b3"] } },
+          "b1": { "hands": {} },
+          "b2": { "hands": {} },
+          "b3": { "hands": {} },
+          "b4": { "hands": {} },
+          "b5": { "hands": {} }
+        }
+      },
+      "steps": [
+        { "do": "leave", "actor": "b1", "form": "part", "receipt": "x0", "expect": { "verdict": "no", "reason": "still_present", "detail": { "link": "present" } } },
+        { "do": "leave", "actor": "b1", "form": "rise", "receipt": "x1", "expect": { "verdict": "yes", "role": "present", "ended": 0 } },
+        { "do": "leave", "actor": "b2", "form": "rise", "receipt": "x2", "expect": { "verdict": "yes", "role": "present", "ended": 0 } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": ["b3"], "stage": "sitting", "ends_us": 2592000000000 } } },
+        { "do": "leave", "actor": "b3", "form": "rise", "receipt": "x3", "expect": { "verdict": "yes", "role": "present", "ended": 0 } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": [], "stage": "idle", "ends_us": 2592000000000 } } },
+        { "do": "leave", "actor": "b1", "form": "part", "receipt": "p1", "expect": { "verdict": "yes", "role": "member", "ended": 0 } },
+        { "do": "leave", "actor": "b2", "form": "part", "receipt": "p2", "expect": { "verdict": "yes", "role": "member", "ended": 0 } },
+        { "do": "leave", "actor": "b3", "form": "part", "receipt": "p3", "expect": { "verdict": "yes", "role": "member", "ended": 0 } },
+        { "do": "leave", "actor": "b4", "form": "part", "receipt": "p4", "expect": { "verdict": "yes", "role": "member", "ended": 0 } },
+        { "do": "leave", "actor": "b5", "form": "part", "receipt": "p5", "expect": { "verdict": "yes", "role": "member", "ended": 0 } },
+        { "do": "leave", "actor": "b5", "form": "part", "receipt": "p6", "expect": { "verdict": "no", "reason": "not_permitted" } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": [], "stage": "idle", "ends_us": 2592000000000 } } },
+        { "do": "join", "actor": "b4", "form": "join", "receipt": "j9", "expect": { "verdict": "yes", "role": "member" } },
+        { "do": "enter", "actor": "b4", "form": "arrive", "receipt": "a9", "expect": { "verdict": "yes", "role": "present" } },
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": ["b4"], "stage": "idle", "ends_us": 2592000000000 } } }
+      ],
+      "after": {
+        "c1": {
+          "kind": "test:class",
+          "at_mm": [0, 0, 0],
+          "fields": { "phase": "idle" },
+          "links": { "member": ["b4"], "present": ["b4"] }
+        }
+      }
+    },
+    {
+      "name": "at_its_end_date_the_class_is_removed_members_released_bodies_kept",
+      "activity": "c1",
+      "state": {
+        "nodes": {
+          "w": {},
+          "r1": { "loose": ["c1", "k1", "b2", "b3", "b4", "b5"] },
+          "c1": {
+            "kind": "test:class",
+            "at_mm": [0, 0, 0],
+            "links": { "member": ["b1", "b2", "b3", "b4", "b5"], "present": ["b1"] }
+          },
+          "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000], "slots": { "left": ["b1"] } },
+          "b1": { "hands": {} },
+          "b2": { "hands": {} },
+          "b3": { "hands": {} },
+          "b4": { "hands": {} },
+          "b5": { "hands": {} }
+        }
+      },
+      "steps": [
+        { "do": "now", "expect": { "verdict": "yes", "now": { "floor": ["b1"], "stage": "idle", "ends_us": 2592000000000 } } },
+        { "do": "world", "actor": "w", "form": "lapse", "now_us": 2591999999999, "receipt": "w1", "expect": { "verdict": "no", "reason": "field_differs", "need": 0 } },
+        { "do": "world", "actor": "w", "form": "lapse", "now_us": 2592000000000, "receipt": "w2", "expect": { "verdict": "yes", "released": 6 } }
+      ],
+      "after": {
+        "w": {},
+        "r1": { "loose": ["k1", "b2", "b3", "b4", "b5"] },
+        "k1": { "kind": "eden:bench", "at_mm": [-1000, 0, 3000], "slots": { "left": ["b1"] } },
+        "b1": { "hands": {} }
+      },
+      "gone": ["c1"]
+    }
+  ]
+}

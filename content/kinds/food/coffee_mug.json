@@ -60,6 +60,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:coffee_mug",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,45,0],"size":[85,90,85],"tint":"glaze"},{"kind":"box","at":[55,50,0],"size":[20,50,14],"tint":"glaze"},{"kind":"box","at":[0,93,0],"size":[70,6,70],"tint":"grounds","when":"@grounds>=1"},{"kind":"box","at":[0,60,0],"size":[89,12,89],"tint":"stain","when":"@dirt>=1"}],"palette":{"glaze":"#e9e4da","grounds":"#3c2417","stain":"#8b6d4f"},"tags":["kitchen","mug","coffee","object"]}
