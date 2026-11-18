@@ -14,10 +14,18 @@ export type NodeRec = {
   rot: [number, number, number, number];
   /** The world time of its newest motion sample, when it has moved (a body). */
   at: number | null;
+  /** Today's id of an imported thing (import-eden's field 1), the key of V17's model table (V8). */
+  origin?: string;
   /** Solids `[cx, cz, hx, hz, yaw mdeg, y0, y1, tag, abs]` mm in its own frame (import-eden's field 12). */
   solids?: number[][];
   /** Slots `[n, x, y, z, yaw mdeg, capacity]` mm (field 13). */
   slots?: number[][];
+  /** An area's outline `[x, z]` mm, world (import-eden's field 11). */
+  outline?: number[][];
+  /** A floor's surfaces `[y, [[x, z] …]]` mm in its thing's frame (field 14). */
+  surfaces?: [number, number[][]][];
+  /** A water's level, mm (field 18). */
+  waterLevel?: number;
   /** Scale in parts per million (field 23). */
   scale?: number;
   /** The open ground's terrain tiles: side mm (field 24) and `[tx, tz, heights, classes]` (field 25). */
