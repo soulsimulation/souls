@@ -66,6 +66,7 @@ fn the_toy_walk_is_stepped_by_the_world_host_and_its_input_handed_on() {
     let to = Vec3::new(3_000_000, 0, 4_000_000);
     let mut runs = vec![Run {
         body: a,
+        driver: 1,
         skill: Box::new(Walk { to }),
     }];
     let staged = step(&tree, &Open, 50_000, 7, &mut minter(), &mut runs);
@@ -75,7 +76,7 @@ fn the_toy_walk_is_stepped_by_the_world_host_and_its_input_handed_on() {
     );
     assert_eq!(runs.len(), 1, "the walk is still going");
     assert!(staged.ended.is_empty());
-    let [(body, input)] = staged.controls.as_slice() else {
+    let [(body, _, input)] = staged.controls.as_slice() else {
         panic!("one input: {:?}", staged.controls)
     };
     assert_eq!(*body, a);
@@ -157,6 +158,7 @@ fn a5_an_emit_is_not_visible_to_another_skill_in_the_same_tick() {
     let mut runs = vec![
         Run {
             body: b,
+            driver: 1,
             skill: Box::new(Reader {
                 other: a,
                 log: log.clone(),
@@ -164,6 +166,7 @@ fn a5_an_emit_is_not_visible_to_another_skill_in_the_same_tick() {
         },
         Run {
             body: a,
+            driver: 2,
             skill: Box::new(Writer {
                 other: b,
                 log: log.clone(),

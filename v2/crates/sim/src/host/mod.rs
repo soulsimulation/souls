@@ -6,8 +6,11 @@
 //!   stood at the tick's start: the tree is borrowed read-only for the whole phase, so nothing a skill does can change
 //!   what another reads in the same tick (T1).
 //! - **Everything staged.** Controller inputs, entries, timers set and cleared are held in [`Staged`] until every
-//!   skill has stepped. The caller applies them after: inputs to the controller, entries to the log, timers to the
-//!   due list (K9 #2672). A skill does not see its own emits either.
+//!   skill has stepped. The caller applies them after: inputs through [`hand_on`] to the controller (B1 #2680),
+//!   entries to the log, timers to the due list (K9 #2672). A skill does not see its own emits either.
+//! - **One movement path.** A skill moves its body only by controller inputs, under the driver its run was given:
+//!   the controller refuses an input from a driver that does not hold the resources, and an emit of a motion change
+//!   on the skill's own body is refused (`motion-outside-controller`).
 //! - **Reads.** A node as [`Seen`]: kind, parent, position in its parent's frame and fields, by value. No reference
 //!   into the tree crosses the interface.
 //! - **Geometry** is asked of a [`Geometry`], the N lane's answers in integers (T9's closed list).
@@ -29,6 +32,8 @@ use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::End;
 
+use crate::controller::{Controller, Driver, Part};
+
 /// The N lane's answers to T9's closed list of geometry questions, asked for `body`.
 pub trait Geometry {
     fn ask(&self, body: Id, q: &Ask) -> Option<Answer>;
@@ -37,6 +42,8 @@ pub trait Geometry {
 /// A running skill on a body.
 pub struct Run {
     pub body: Id,
+    /// The driver the controller gave this run's claims ([`Controller::claim`]).
+    pub driver: Driver,
     pub skill: Box<dyn Skill>,
 }
 
@@ -61,8 +68,8 @@ pub struct Timer {
 /// What a tick's skills asked for, held until all of them have stepped.
 #[derive(Debug, Default)]
 pub struct Staged {
-    /// Controller inputs, in body order; a body's last input in the tick wins.
-    pub controls: Vec<(Id, ControllerInput)>,
+    /// Controller inputs with their run's driver, in body order; a run's last input in the tick wins.
+    pub controls: Vec<(Id, Driver, ControllerInput)>,
     pub emits: Vec<Emit>,
     pub timers: Vec<Timer>,
     /// Timers cleared: body and timer.
@@ -81,6 +88,7 @@ struct WorldHost<'a, G> {
     now: Micros,
     seed: u64,
     body: Id,
+    driver: Driver,
     minter: &'a mut Minter,
     staged: &'a mut Staged,
     /// Host calls, reads and questions included (they take `&self`).
@@ -130,6 +138,13 @@ impl<G: Geometry> WorldHost<'_, G> {
                     Some((_, ends, owner, _)) => check(&mine, owning(ends, owner))?,
                     None => return Err(outside(*link)),
                 },
+                // The controller is the body's only driver of motion (B1 #2680).
+                Change::Motion(h) if h.node == self.body => {
+                    return Err(Refusal {
+                        name: "motion-outside-controller",
+                        detail: replica::world_model::show(h.node),
+                    });
+                }
                 Change::Motion(h) => check(&mine, h.node)?,
             }
         }
@@ -199,8 +214,8 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
     fn control(&mut self, input: ControllerInput) {
         self.count();
         match self.staged.controls.last_mut() {
-            Some((b, last)) if *b == self.body => *last = input,
-            _ => self.staged.controls.push((self.body, input)),
+            Some((b, d, last)) if *b == self.body && *d == self.driver => *last = input,
+            _ => self.staged.controls.push((self.body, self.driver, input)),
         }
     }
 
@@ -235,6 +250,7 @@ pub fn step(
             now,
             seed,
             body: r.body,
+            driver: r.driver,
             minter: &mut *minter,
             staged: &mut staged,
             calls: Cell::new(0),
@@ -251,4 +267,17 @@ pub fn step(
         }
     });
     staged
+}
+
+/// Hands a tick's staged controller inputs to the controller, each under its run's driver: the one place a skill's
+/// inputs go on (B1 #2680). An input whose driver does not hold the body's locomotion is refused by the controller and
+/// changes nothing; the refusals are returned with their bodies.
+pub fn hand_on(staged: &Staged, controller: &mut Controller) -> Vec<(Id, Refusal)> {
+    let mut refused = Vec::new();
+    for &(body, driver, input) in &staged.controls {
+        if let Err(r) = controller.set(body, driver, Part::Velocity(input.velocity, input.mode)) {
+            refused.push((body, r));
+        }
+    }
+    refused
 }
