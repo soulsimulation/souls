@@ -534,7 +534,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 |---|---|---|
 | `exact` | a float or a count in ticks | yes |
 | `targets` | an argument whose selector picks the wrong list, or that nothing uses | partly (closed selector lists) |
-| `makes` | a `create` that pays for nothing in its own form | where it appears (`into`) |
+| `makes` | a `create` that pays for nothing in its own form (a stock's take is paid by its count, lowered by the engine) | where it appears (`into`) |
 | `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
 | `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
