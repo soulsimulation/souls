@@ -1,0 +1,21 @@
+{
+  "name": "v2-web",
+  "private": true,
+  "description": "Engine v2's page (V5, #2714): plays the viewer's stream (V1's numbered parts) with replica as WASM and draws it with three.js. Outside the root pnpm workspace; imports nothing from apps/ or packages/.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p . && vite build",
+    "test": "node --test src/clock/*.test.ts src/source/*.test.ts src/things/*.test.ts src/crowd/*.test.ts src/draw/*.test.ts"
+  },
+  "dependencies": {
+    "cborg": "6.2.1",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "@types/three": "0.187.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.5"
+  }
+}
