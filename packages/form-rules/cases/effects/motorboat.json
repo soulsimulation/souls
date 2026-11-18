@@ -1,0 +1,221 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:motorboat (core/motorboat@1, 1 placed): a vehicle with a motor, started and stopped at its key within touch, as today; it steers only while running.",
+ "cases": [
+  {
+   "name": "motorboat_take_the_helm_start_steer_stop",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "b2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:motorboat",
+      "fields": {
+       "running": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       350,
+       800,
+       650
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "ride"
+     },
+     "receipt": "rmotorboat_ta0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "helm"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:took_the_helm",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "steer",
+      "args": {
+       "toward": "b2"
+      }
+     },
+     "receipt": "rmotorboat_ta1",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "start_motor"
+     },
+     "receipt": "rmotorboat_ta2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "running",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:motor_started",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "steer",
+      "args": {
+       "toward": "b2"
+      }
+     },
+     "receipt": "rmotorboat_ta3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "stop_motor"
+     },
+     "receipt": "rmotorboat_ta4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "running",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:motor_stopped",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "front"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rmotorboat_ta5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "t1",
+         "slot": "front"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:motorboat",
+     "fields": {
+      "running": 0
+     },
+     "slots": {
+      "helm": [
+       "b1"
+      ],
+      "front": [
+       "b2"
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

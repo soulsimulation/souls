@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":275,"group":"over-time","words":"spend the day down at the harbour","obvious":3,"when":"all day","things":{"pier":"eden:pier","bench":"eden:bench"},"chain":[{"this":"me","form":"go_to","args":{"place":"pier"}},{"this":"bench","form":"sit","args":{"seat":"left"}}]}

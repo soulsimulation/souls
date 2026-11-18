@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":83,"group":"object","words":"sit at the desk and write something","obvious":3,"things":{"desk":"eden:desk"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"desk"}},{"this":"desk","form":"write"}]}

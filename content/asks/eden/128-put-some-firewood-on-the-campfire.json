@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":128,"group":"two-things","words":"put some firewood on the campfire","obvious":3,"things":{"firewood":"eden:firewood","campfire":"eden:campfire"},"chain":[{"this":"me","form":"pick_up","carry":"firewood","args":{"thing":"firewood"}},{"this":"campfire","form":"add_fuel"}]}

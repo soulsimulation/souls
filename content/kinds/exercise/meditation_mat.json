@@ -1,0 +1,41 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:meditation_mat",
+  "owner": "thing",
+  "state": {
+    "practices": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "centre": { "role": "stand", "at_mm": [0, 0, 0], "yaw_mdeg": 0 }
+  },
+  "geometry": { "bounds_mm": [1600, 50, 1600] },
+  "forms": {
+    "meditate": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "centre" },
+        { "step": "settle", "posture": "sit" },
+        { "step": "wait", "us": 30000000 },
+        { "step": "rise" }
+      ],
+      "effects": [{ "change": "set", "field": "practices", "by": 1, "event": "practice_completed" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:meditation_mat",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,7,0],"size":[1600,14,1600],"tint":"cloth","collide":false},{"kind":"box","at":[0,15,-700],"size":[1400,3,50],"tint":"trim","collide":false},{"kind":"box","at":[0,15,700],"size":[1400,3,50],"tint":"trim","collide":false}],"palette":{"cloth":"#537c78","trim":"#d4c79b"},"tags":["mat","exercise","practice"]}
+  },
+  "text": {
+    "card": "A woven mat: sit on it, still, for thirty seconds, then stand.",
+    "exercise": "exercise",
+    "meditation": "meditation",
+    "mat": "mat",
+    "howto_meditate": "Walk onto the mat with your hands free, sit for thirty seconds, then stand; only a whole practice counts."
+  },
+  "card": { "text": "card", "category": "exercise", "synonyms": ["meditation", "mat"] },
+  "howtos": { "meditate": { "text": "howto_meditate", "steps": [{ "form": "meditate" }] } }
+}
