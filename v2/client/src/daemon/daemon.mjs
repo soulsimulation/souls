@@ -23,6 +23,7 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
+import { Table } from '../reflex/reflex.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 const EVENTS_KEPT = 1000;
@@ -87,6 +88,7 @@ const save = () => { writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
+const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
 const note = (e) => { events.push(e); if (events.length > EVENTS_KEPT) events.shift(); };
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
@@ -173,6 +175,7 @@ function answer(req) {
       return { ok: true, sequence: state.sequence, sent: signedIn };
     }
     case 'read': return { ok: true, events: events.splice(0) };
+    case 'reflex': return reflexes.op(req, Date.now());
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
@@ -187,6 +190,8 @@ const server = createServer((c) => {
       buf = buf.slice(k + 1);
       let out;
       try { out = answer(JSON.parse(line)); } catch (e) { out = { ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }; }
+      const changed = reflexes.changed();
+      if (changed.length) out.changed = changed;
       c.write(JSON.stringify(out) + '\n');
     }
   });
