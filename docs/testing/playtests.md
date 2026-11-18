@@ -255,6 +255,17 @@ Raw Souls get no owner messages, and the report says how else they differ. Every
 
 `--souls` goes up to 500. `--shape uniform` is the paced loop. Any other shape of `tools/bench/capacity/profiles/shapes.mjs` (`everyday`, `event`) drives the raw Souls by its seeded schedule: arrivals and stays, each agent's act times and kinds, walks gathered near one named place. Without `--raw-from` a shape makes every Soul raw. The report prints what the schedule offered.
 
+**Engine v2 benches: `command=v2-bench`.** A v2 task's timing bar (a tick time against a paired arm, say) is measured
+on a timed runner rather than a loaded workstation. `args` is `--bin <name>`, a `[[bin]]` of the ref's
+`v2/tools/bench/Cargo.toml`, then optionally `--` and the bench's own arguments, plain tokens of letters, digits and
+`. _ = / -` only (at most 20). The job installs the toolchain `v2/rust-toolchain.toml` pins with rustup in its per-run
+directory, builds the bench in release (untimed), then runs `cargo run -p bench --release --locked --bin <name> -- <args>`
+from `v2/` once per repeat, on the runner's own cores as `walk` does. Each repeat's stdout (the bench's table) is in the
+job summary, and the artifact `timed-run-v2-bench-<run>` holds `v2-bench-build.log`, `v2-bench-r<k>.log` and
+`timed-run.json` (each repeat's exit code, wall time, CPU count and the 1- and 5-minute load at its start and end). To
+test a change to the workflow itself, dispatch with `--ref` set to its branch:
+`gh workflow run timed-run.yml -f ref=agent/2697-view-tier -f command=v2-bench -f args='--bin view-tier -- 400 2' -f repeats=2`.
+
 The runners use a dedicated, unprivileged account: the
 args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
 workstation.

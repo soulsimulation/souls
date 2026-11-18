@@ -25,16 +25,16 @@ export function eased(num, den) {
 const roundDiv = (n, d) => (n < 0 ? -Math.floor((-n * 2 + d) / (2 * d)) : Math.floor((n * 2 + d) / (2 * d)));
 const between = (a, b, k) => a.map((v, i) => v + roundDiv((b[i] - v) * k, PERMILLE));
 
-/** Each phase's time in microseconds after the start (`count` sips or bites each hold the mouth `consume_us`): contact is the instant, `end_us` the end of recovery. */
+/** Each phase's time in microseconds after the start (`count` sips, bites, blows or strokes each hold `consume_us`, `strike_us` or `pump_us`): contact is the instant, `end_us` the end of recovery. */
 export function timesOf(move, count = 1) {
-  const {start_up_us: up, slide_us: slide = 0, pour_us: pour = 0, consume_us: eat = 0, recovery_us: rec} = move.phases;
-  const hold = slide + pour + eat * count;
+  const {start_up_us: up, slide_us: slide = 0, pour_us: pour = 0, consume_us: eat = 0, strike_us: hit = 0, pump_us: stroke = 0, recovery_us: rec} = move.phases;
+  const hold = slide + pour + (eat + hit + stroke) * count;
   return {contact_us: up, slide_end_us: up + hold, end_us: up + hold + rec};
 }
 
 /** Where the hand must be for the move's effector to be at the contact point. A `held_point` effector is a point of the
  *  held thing (a spout): the record carries `effector_mm`, its offset from the hand in the world's axes at the pose it
- *  is held in, and the hand goes to the contact point minus that offset. A pour holds the hand there for `pour_us`; a consume (a cup's rim or a roll's bitten edge at the mouth point, `contact_mm`) for `consume_us` times the record's `count` (default 1). */
+ *  is held in, and the hand goes to the contact point minus that offset. A pour holds the hand there for `pour_us`; a consume (a cup's rim or a roll's bitten edge at the mouth point, `contact_mm`) for `consume_us` times the record's `count` (default 1). A strike (a hammer's head on the thing struck, `contact_mm`) holds the head there for `strike_us` per blow and a pump (the pump's head on its fitting) for `pump_us` per stroke, `count` of them. */
 export function handTarget(move, record) {
   const {contact_mm: at, effector_mm: off} = record;
   return move.effector === 'held_point' ? at.map((v, i) => v - off[i]) : [...at];

@@ -1,0 +1,21 @@
+# The header of the fixtures' bundle (Engine v2 T6, #2645, v2/docs/effects.md rule 7). Written once; each part names
+# it by its souls/header/1 hash. Ids are [scope, counter]: the world's scope is ee..ee.
+{
+  1: h'1220d5e599e4dfceeb1264d9d84cc4fa8a43ee032142d51baf93ea7fe9606cd26da8',   # the build: a stand-in (K14 names the real one)
+  2: h'12203b42be7ff1ce584936f5e3ae7b989d444eb16c66bdcaa214ee3b42776bca6b83', # the schema: effects.rs schema(), by hash
+  3: h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',                                         # the lineage: the world's (ids.md rule 8)
+  4: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0],                                    # the zone: its root node's id
+  5: 1,                                                                            # the writer's epoch
+  6: [                                                                             # the kinds, pinned (T2's fixture kinds)
+    "souls:place@1220374d8f4fcfd3c1899979a1dd1782aefe883f35fb0ca4d656ea300e4353c2a23f",
+    "souls:room@12201891c9af912d72fad5e13fc896373e2a41d9c45fd82f51e1d6c081c2d776796e",
+    "souls:body@1220ee1ad75a34f067112ef6d2a095fe5bd3e121a75611a1a95ba85198efcb131cb2",
+    "souls:cup@1220edc856b3ff9da87e27ffb6a4a1a7266bb4ef737f93e481f79545dee2578a6bea",
+    "souls:key@1220781d89e0ae5ff74f79e61f020201f2128268af10ffa77355868f6c8497442ae1",
+    "souls:crate@122090fbc4c3f786f2765b16b6014480381b4618c4ff6a429d4873ef92cf68440426",
+    "souls:sofa@1220ba382da5d5adb16814e51e585054b3b854edeb6a7bea85896209ed8a32ac0127"
+  ],
+  7: [                                                                             # the move revisions, pinned (T3 rule 16)
+    "souls:put-down@1220958612e3d51033da30c37a435882657bafdc773726c4f55ab24f3e9af9baf685"
+  ]
+}
