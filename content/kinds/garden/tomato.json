@@ -39,6 +39,8 @@
       "effects": [{ "change": "set", "field": "bites_left", "to": 0, "event": "eaten" }]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:tomato",
     "table": [

@@ -33,6 +33,8 @@
       ]
     }
   },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:harvest_basket",
     "table": [

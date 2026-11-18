@@ -3,10 +3,10 @@
   "kind": "test:sheet",
   "owner": "thing",
   "state": {
-    "open": { "n": 1, "type": "bool", "default": true, "audience": "public" }
+    "open": { "n": 1, "type": "bool", "default": true, "audience": {"rule": "everyone"} }
   },
   "links": {
-    "signed": { "n": 1, "from": "soul", "most": 2, "audience": "public" }
+    "signed": { "n": 1, "from": "soul", "most": 2, "audience": {"rule": "everyone"} }
   },
   "points": {
     "pad": { "role": "contact", "at_mm": [0, 1100, 0] }

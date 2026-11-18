@@ -23,7 +23,8 @@ export const ACT_SIGHT = 30;
 export const ACT_REACH = 1.6;
 
 /** W5 (water.ts): a def's own actions plus those its water role gives it (draw-water at a tank, water a planter). */
-export const actionsOf = (def: StoredDef): Action[] => { const w = waterActions(def), r = repairActions(def); return w.length || r.length ? [...def.actions, ...w, ...r] : def.actions; };
+/** SA-F3a (forms-adapter.ts): an entry thing's forms are offered as its actions, by its world's adapter (`forms`). */
+export const actionsOf = (def: StoredDef, forms?: (def: StoredDef) => Action[]): Action[] => { const w = waterActions(def), r = repairActions(def), f = forms?.(def) ?? []; return w.length || r.length || f.length ? [...def.actions, ...w, ...r, ...f] : def.actions; };
 
 /** The fields of an entity's state the def's actions read or write, with defaults filled (public: Souls see them). */
 /** Soul Actions entry 42: a thing kept inside a container that is shut (a bowl in a closed drawer): nobody sees it, walks to
@@ -78,6 +79,8 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 }
 
 export type ActuatorHost = {
+  /** SA-F3a: the actions this world's forms adapter offers for an entry thing's def. */
+  formActions?: (def: StoredDef) => Action[];
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   /** #2416: this world's day (posters date and age by it); absent: day 0. */
@@ -349,8 +352,8 @@ const ACTION_NAME = /^[a-z][a-z0-9_-]{0,39}$/;
 /** #1751 (soul-catalog): a def's acts as the catalog publishes them, from the same list kindActions offers: the verb, its
  *  label, the Soul-facing params, and the state it needs (`when`). A thing's act is sent as `object:<thing>:<verb>`. */
 export type CatalogKindAct = { verb: string; label: string; params?: ReturnType<typeof actionParams>; when?: { field: string; is?: unknown; not?: unknown }[] };
-export function catalogActs(def: StoredDef): CatalogKindAct[] {
-  return actionsOf(def).filter((a) => ACTION_NAME.test(a.name)).map((a) => {
+export function catalogActs(def: StoredDef, forms?: (def: StoredDef) => Action[]): CatalogKindAct[] {
+  return actionsOf(def, forms).filter((a) => ACTION_NAME.test(a.name)).map((a) => {
     const params = actionParams(a), when = a.when.map((w) => ({ field: w.field, ...(w.is !== undefined ? { is: w.is } : {}), ...(w.not !== undefined ? { not: w.not } : {}) }));
     return { verb: a.name, label: a.label, ...(Object.keys(params).length ? { params } : {}), ...(when.length ? { when } : {}) };
   });
@@ -392,7 +395,7 @@ export function stateDiff(e: Entity, def: StoredDef): Record<string, unknown> | 
 /** Object-kind actions for a def's actions (the `built` kind of things of that def). */
 export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: BuiltLike) => string) {
   const out: Record<string, any> = {};
-  for (const a of actionsOf(def)) {
+  for (const a of actionsOf(def, host.formActions)) {
     if (!ACTION_NAME.test(a.name)) continue;
     // #438: `params` (validate only) carries a picking act's named planter; availability checks without it
     const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
@@ -465,7 +468,7 @@ export type FarAct = { id: string; action: string; params: Record<string, unknow
 /** #1751: what became of a held far act when its receipt's steps ended: made now if the body stands at the thing and the
  *  thing still takes the act; refused with the reason otherwise. Nothing changes for an act that was stopped. */
 export function farOutcome(far: FarAct, finished: boolean, soul: EdgeSoul, find: (id: string) => { def: StoredDef; state: Record<string, unknown>; name: string } | null, host: ActuatorHost): 'done' | Refusal {
-  const t = find(far.id), a = t ? actionsOf(t.def).find((x) => x.name === far.action) : undefined;
+  const t = find(far.id), a = t ? actionsOf(t.def, host.formActions).find((x) => x.name === far.action) : undefined;
   if (!t || !a) return { code: 'object.gone', reason: 'It is not there any more; nothing changed.' };
   if (!finished) return { code: 'object.not-reached', reason: `Stopped before reaching ${t.name}; nothing changed.` };
   const me = host.bodyAt(soul), at = host.thingAt?.(far.id);
@@ -495,7 +498,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     // hold an act whose admission still rolls back
     const committed = (f: () => void) => { if (!db) return f(); try { afterCommit(db as never, f); } catch (e) { log(`far act on ${id}: not held or dropped (${(e as Error).message})`); } };
     if (host.deferFar) committed(() => host.deferFar!(soul, null));   // a newer act of this Soul's replaces a far act it held
-    const t = find(id), a = t ? actionsOf(t.def).find((x) => x.name === input.action) : undefined;
+    const t = find(id), a = t ? actionsOf(t.def, host.formActions).find((x) => x.name === input.action) : undefined;
     if (!t || !a) return out;
     if (host.deferContacts && isContactActuator(t.def, a)) return out;
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
