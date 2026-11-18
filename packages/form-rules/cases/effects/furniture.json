@@ -1100,7 +1100,16 @@
                 "to": {
                   "node": "b1",
                   "hand": "left"
-                }
+                },
+                "stock": "apples"
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "apples",
+                "n": 1,
+                "to": 23,
+                "by": -1
               }
             ],
             "events": [
@@ -1108,7 +1117,8 @@
                 "event": "eden:apple_taken",
                 "node": "t1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               }
             ],
@@ -1251,7 +1261,16 @@
                 "to": {
                   "node": "b1",
                   "hand": "left"
-                }
+                },
+                "stock": "apples"
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "apples",
+                "n": 1,
+                "to": 11,
+                "by": -1
               }
             ],
             "events": [
@@ -1259,7 +1278,8 @@
                 "event": "eden:apple_taken",
                 "node": "t1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               }
             ],
@@ -1282,7 +1302,16 @@
                 "to": {
                   "node": "b1",
                   "hand": "right"
-                }
+                },
+                "stock": "apples"
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "apples",
+                "n": 1,
+                "to": 10,
+                "by": -1
               }
             ],
             "events": [
@@ -1290,7 +1319,8 @@
                 "event": "eden:apple_taken",
                 "node": "t1",
                 "changes": [
-                  0
+                  0,
+                  1
                 ]
               }
             ],
