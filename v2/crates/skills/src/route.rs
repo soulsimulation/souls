@@ -15,6 +15,14 @@
 //! - **Along an edge.** The mover cuts a step at the ground's edge and does not slide. A step that left the body where
 //!   it was is tried next tick turned by 45 and then 70 degrees, either way (N7 tried them in the same tick on a copy;
 //!   through the host the skill sees each result a tick later, T1).
+//! - **N10's ladder** (T9c #3127) reaches the walk by fields the world sets on its body: [`F_SHOULDER`] (no body
+//!   pushes it), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
+//!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended. A route taken,
+//!   the walk leaves its count alone in [`F_ROUTE`] (`[count, []]`), so a read of the body copies no legs.
+//! - **Sent to a point** (N9, [`Route::sent`]). The world's spot tables grant the walker a standing spot near the
+//!   point and the world gives the route there as [`F_ROUTE`]; until then it stands. It arrives within [`AT_SPOT`] of
+//!   its spot, no body pushes it within [`CALM`] of it, and those standing on their own spots ([`F_SETTLED`]) do not
+//!   push it: it passes between them.
 //!
 //! Integers only: µm, µm a second, µs.
 
@@ -22,7 +30,8 @@ use replica::bodies::{Class, SkillShape, Want};
 use replica::effects::{Change, read_id};
 use replica::encode::{Name, Value};
 use replica::host::{
-    Answer, Ask, F_CROSSING, F_GRANTED, F_TURNS, F_WAITING, Host, Near, Progress, Skill,
+    Answer, Ask, F_CROSSING, F_GRANTED, F_HELD, F_ROUTE, F_SETTLED, F_SHOULDER, F_TURNS, F_WAITING,
+    Host, Near, Progress, Skill,
 };
 use replica::ids::Id;
 use replica::pose::{ControllerInput, Mode, Vec3};
@@ -44,6 +53,10 @@ pub const MARK: i64 = 3_000_000;
 pub const QUEUE: i64 = 1_200_000;
 /// A walker without leave stands behind a waiting body for the same link this near and nearer the end, µm.
 pub const BEHIND: i64 = 700_000;
+/// A granted standing spot is reached within this, µm (N9).
+pub const AT_SPOT: i64 = 50_000;
+/// Within this of its granted standing spot, µm, no body pushes a walker (N9).
+pub const CALM: i64 = 1_000_000;
 
 /// The turns a stalled step is tried at, in order: none, then 45 degrees either way, then 70 either way (cosine and
 /// sine in thousandths).
@@ -72,8 +85,10 @@ pub struct Route {
     pub tick: Micros,
     /// The leg walked now.
     pub leg: usize,
-    /// No body pushes it (N10's shoulder turn).
-    pub shoulder: bool,
+    /// The count of the last route the world gave it ([`F_ROUTE`]); 0 for the legs it started with.
+    route: u64,
+    /// Sent to a point (N9): its route, once given, ends at its own standing spot.
+    spot: bool,
     crossing: Option<Crossing>,
     /// The mark last set on the body.
     waiting: Option<(Id, i64)>,
@@ -88,10 +103,19 @@ impl Route {
             speed,
             tick,
             leg: 0,
-            shoulder: false,
+            route: 0,
+            spot: false,
             crossing: None,
             waiting: None,
             last: None,
+        }
+    }
+
+    /// A walk sent to a point (N9): it stands until the world gives it the route to its granted spot.
+    pub fn sent(speed: i64, tick: Micros) -> Route {
+        Route {
+            spot: true,
+            ..Route::new(Vec::new(), speed, tick)
         }
     }
 }
@@ -118,6 +142,35 @@ fn read_int(v: &Value) -> Option<i64> {
         Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
         _ => None,
     }
+}
+
+/// A route the world gave the body ([`F_ROUTE`]) after route `taken`: its count and legs.
+fn route_of(me: &replica::host::Seen, taken: u64) -> Option<(u64, Vec<Leg>)> {
+    let Value::Array(a) = me.fields.get(&F_ROUTE)? else {
+        return None;
+    };
+    let [Value::Uint(n), Value::Array(legs)] = a.as_slice() else {
+        return None;
+    };
+    if *n <= taken {
+        return None;
+    }
+    let mut out = Vec::new();
+    for l in legs {
+        let Value::Array(l) = l else { return None };
+        let (to, link) = l.split_at_checked(3)?;
+        let [x, y, z] = to else { return None };
+        let link = match link {
+            [] => None,
+            [k] => Some(read_id(k).ok()?),
+            _ => return None,
+        };
+        out.push(Leg {
+            to: Vec3::new(read_int(x)?, read_int(y)?, read_int(z)?),
+            link,
+        });
+    }
+    Some((*n, out))
 }
 
 /// A body's waiting mark, `[link, distance]`, or none.
@@ -230,7 +283,35 @@ impl Skill for Route {
         let Some(me) = host.read(body) else {
             return Progress::Failed(name("souls:body-gone"));
         };
+        // A new route from the world (N10's reroute): walked from its first leg.
+        if let Some((n, legs)) = route_of(&me, self.route) {
+            (self.route, self.legs, self.leg) = (n, legs, 0);
+            (self.crossing, self.last) = (None, None);
+            // Taken: the legs are the walk's own now. The field keeps the count alone, so a read of this body (each
+            // walker near it reads it every tick) does not copy the legs (#3213).
+            let taken = Value::Array(vec![Value::Uint(n), Value::Array(Vec::new())]);
+            let _ = host.emit(
+                vec![Change::Set {
+                    node: body,
+                    field: F_ROUTE,
+                    to: taken,
+                    by: None,
+                }],
+                None,
+            );
+        }
+        // Held while the world walks it out: it stands, unmarked.
+        if me.fields.contains_key(&F_HELD) {
+            self.mark(host, body, None);
+            return Progress::Going;
+        }
+        let shoulder = me.fields.contains_key(&F_SHOULDER);
         let Some(leg) = self.legs.get(self.leg).copied() else {
+            // Sent to a point: it stands until its route is given.
+            if self.spot && self.route == 0 {
+                walk(host, [0, 0]);
+                return Progress::Going;
+            }
             return Progress::Done;
         };
         // A crossing: carried until the world stands it on the far side.
@@ -303,7 +384,7 @@ impl Skill for Route {
                 self.crossing = Some(Crossing::Asked);
                 return Progress::Going;
             }
-            None if gap <= AT_GOAL => {
+            None if gap <= if self.spot { AT_SPOT } else { AT_GOAL } => {
                 walk(host, [0, 0]);
                 return Progress::Done;
             }
@@ -318,11 +399,18 @@ impl Skill for Route {
         }) else {
             return Progress::Failed(name("souls:no-way"));
         };
-        // Those waiting at a narrow place make way: they push only others waiting.
+        // Those waiting at a narrow place make way: they push only others waiting. The shoulder turn, or the last
+        // stretch to its own standing spot (N9): no body pushes it. Those standing on their own spots stand apart
+        // already: a walker to its spot passes between them.
+        let calm = self.spot && leg.link.is_none() && gap <= CALM;
         let mut pushers: Vec<(Near, i64)> = Vec::new();
-        if !self.shoulder {
+        if !shoulder && !calm {
             for n in &near {
-                if wait || mark_of(host, n.id).is_none() {
+                let settled = self.spot
+                    && host
+                        .read(n.id)
+                        .is_some_and(|s| s.fields.contains_key(&F_SETTLED));
+                if (wait || mark_of(host, n.id).is_none()) && !settled {
                     pushers.push((*n, dist(n)));
                 }
             }

@@ -3,7 +3,8 @@
 //! routes between them (N5) into one walk that passes each point without stopping (`walk::town::Town::plan_way`).
 //!
 //! - **Via.** Each place's point: a place node's middle (the middle of its outline's corners, or of its line's), or
-//!   a point given, moved onto walkable ground.
+//!   a point given, stood on: the open ground there, else a floor there (a bridge's deck, #3226), else the nearest
+//!   walkable open ground.
 //! - **Along** a path or shore: its line's points from the end nearer the body to the other. A line with a width
 //!   (a river's shore) is moved sideways to the body's side, past half its width. A closed outline is followed from
 //!   its corner nearest the body round to its corner nearest the walk's goal, the shorter way (all the way round
@@ -21,7 +22,7 @@ use crate::ground::scene::{F_LINE, F_LINE_WIDTH, F_OUTLINE};
 use replica::effects::Refusal;
 use replica::encode::Value;
 use replica::ids::Id;
-use replica::pose::Vec3;
+use replica::pose::{Quat, Vec3};
 use replica::tree::Tree;
 use replica::walk::{Shape, Stop, Way};
 use replica::world_model::show;
@@ -50,6 +51,9 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Points {
     pub points: Vec<Vec3>,
+    /// Where each point is stood on: the node (the open ground, or a floor such as a bridge's deck) and the point in
+    /// its frame, µm.
+    pub on: Vec<(Id, Vec3)>,
     /// Points of a line or outline that had no walkable ground near and were left out.
     pub dropped: u32,
     /// The route searches the way costs (I8): one per point.
@@ -189,12 +193,59 @@ fn nearest(points: &[[i64; 2]], to: [i64; 2]) -> usize {
 }
 
 impl Points {
-    fn push(&mut self, p: Option<[i64; 2]>) {
+    /// A point on the open ground `ground`, or one dropped.
+    fn push(&mut self, ground: Id, p: Option<[i64; 2]>) {
         match p {
-            Some(p) => self.points.push(Vec3::new(p[0], 0, p[1])),
+            Some(p) => {
+                let v = Vec3::new(p[0], 0, p[1]);
+                self.points.push(v);
+                self.on.push((ground, v));
+            }
             None => self.dropped += 1,
         }
     }
+}
+
+/// The floor holding `p` (µm, the open ground's frame) where the open ground does not: a bridge's deck (#3226) or a
+/// building's floor. Its node and `p` in that node's frame, µm; the lowest when floors stack.
+fn floor_at(map: &Map, ground: Id, p: [i64; 2]) -> Option<(Id, Vec3)> {
+    let mut best: Option<(i64, Id, Vec3)> = None;
+    for (q, rec) in map.pieces.iter().enumerate() {
+        let Some(y) = rec.piece.vertices.first().map(|v| i64::from(v[1])) else {
+            continue;
+        };
+        if rec.at.node == ground || best.is_some_and(|b| b.0 <= y) {
+            continue;
+        }
+        let x = &map.frames[rec.frame as usize];
+        let [w, a, b, c] = x.rot.parts();
+        let Some(local) = Quat::new(w, -a, -b, -c).ok().and_then(|back| {
+            back.rotate(Vec3::new(p[0], 0, p[1]).minus(x.pos).ok()?)
+                .ok()
+        }) else {
+            continue;
+        };
+        if map
+            .locate(q as u32, [super::mm(local.x), super::mm(local.z)], y)
+            .is_some()
+        {
+            best = Some((y, rec.at.node, Vec3::new(local.x, y * 1000, local.z)));
+        }
+    }
+    best.map(|(_, n, v)| (n, v))
+}
+
+/// Where a body stands for the stop `p` (µm, the open ground's frame): on the open ground there, else on a floor
+/// there, else on the nearest walkable open ground. The point in the ground's frame, and its node and point there.
+fn stand(map: &Map, ground: Id, p: [i64; 2]) -> Option<([i64; 2], (Id, Vec3))> {
+    if map.spot(ground, Vec3::new(p[0], 0, p[1])).is_some() {
+        return Some((p, (ground, Vec3::new(p[0], 0, p[1]))));
+    }
+    if let Some(f) = floor_at(map, ground, p) {
+        return Some((p, f));
+    }
+    let q = onto_ground(map, ground, p, [0, 0], 0)?;
+    Some((q, (ground, Vec3::new(q[0], 0, q[1]))))
 }
 
 /// The points of `way` for a body at `from` (µm, the open ground's frame), walking on to `goal` if the intent names
@@ -224,15 +275,15 @@ pub fn points(
             }
         }
     };
-    let on = |p: [i64; 2]| onto_ground(map, ground, p, [0, 0], 0);
     match &way.shape {
         Shape::Direct => {}
         Shape::Via(stops) => {
             for s in stops {
                 let p = stop(s)?;
-                let q = on(p)
+                let (q, at) = stand(map, ground, p)
                     .ok_or_else(|| refusal("way-off-ground", format!("({}, {}) µm", p[0], p[1])))?;
-                out.push(Some(q));
+                out.points.push(Vec3::new(q[0], 0, q[1]));
+                out.on.push(at);
             }
         }
         Shape::Along(id) => {
@@ -257,7 +308,10 @@ pub fn points(
                     (b..=a).rev().map(|k| line[k % n]).collect()
                 };
                 for p in thin(picked, POINTS_MOST) {
-                    out.push(onto_ground(map, ground, p, [p[0] - c[0], p[1] - c[1]], 1));
+                    out.push(
+                        ground,
+                        onto_ground(map, ground, p, [p[0] - c[0], p[1] - c[1]], 1),
+                    );
                 }
             } else {
                 if d2(line[line.len() - 1], here) < d2(line[0], here) {
@@ -277,13 +331,10 @@ pub fn points(
                     let (a, b) = (line[k.saturating_sub(1)], line[(k + 1).min(n - 1)]);
                     let normal = [-(b[1] - a[1]) * side, (b[0] - a[0]) * side];
                     let p = moved(line[k], normal, f.width / 2);
-                    out.push(onto_ground(
-                        map,
+                    out.push(
                         ground,
-                        p,
-                        normal,
-                        usize::from(f.width > WIDE),
-                    ));
+                        onto_ground(map, ground, p, normal, usize::from(f.width > WIDE)),
+                    );
                 }
             }
         }
@@ -312,22 +363,23 @@ pub fn points(
             let a = nearest(&ring, here);
             for _ in 0..*laps {
                 for k in 0..ring.len() {
-                    out.push(Some(ring[(a + k) % ring.len()]));
+                    out.push(ground, Some(ring[(a + k) % ring.len()]));
                 }
             }
-            out.push(Some(ring[a]));
+            out.push(ground, Some(ring[a]));
         }
         Shape::Between { ends, laps } => {
-            let mut e = [[0; 2]; 2];
-            for (k, s) in ends.iter().enumerate() {
+            let mut e = Vec::new();
+            for s in ends {
                 let p = stop(s)?;
-                e[k] = on(p)
+                let (q, at) = stand(map, ground, p)
                     .ok_or_else(|| refusal("way-off-ground", format!("({}, {}) µm", p[0], p[1])))?;
+                e.push((Vec3::new(q[0], 0, q[1]), at));
             }
-            out.push(Some(e[0]));
-            for _ in 0..*laps {
-                out.push(Some(e[1]));
-                out.push(Some(e[0]));
+            let order = std::iter::once(0).chain((0..*laps).flat_map(|_| [1, 0]));
+            for k in order {
+                out.points.push(e[k].0);
+                out.on.push(e[k].1);
             }
         }
     }

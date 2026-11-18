@@ -1,0 +1,433 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:zine",
+  "owner": "thing",
+  "state": {
+    "title": {
+      "n": 1,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "page_1": {
+      "n": 2,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "page_2": {
+      "n": 3,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "page_3": {
+      "n": 4,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "stage": {
+      "n": 5,
+      "type": "enum",
+      "values": [
+        "draft",
+        "bound"
+      ],
+      "default": "draft",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "binding": {
+      "n": 6,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "links": {
+    "author": {
+      "n": 1,
+      "from": "soul",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1150
+      ],
+      "yaw_mdeg": 180000
+    },
+    "page": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        40,
+        0
+      ]
+    },
+    "spine": {
+      "role": "contact",
+      "at_mm": [
+        -193,
+        28,
+        0
+      ]
+    },
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        30,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      400,
+      60,
+      290
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "write_title": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "words": {
+          "type": "text"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "draft",
+          "says": "bound_fixed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "page"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "title",
+          "to": {
+            "arg": "words"
+          },
+          "event": "title_written"
+        }
+      ]
+    },
+    "write_page_1": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "words": {
+          "type": "text"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "draft",
+          "says": "bound_fixed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "page"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "page_1",
+          "to": {
+            "arg": "words"
+          },
+          "event": "page_written"
+        }
+      ]
+    },
+    "write_page_2": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "words": {
+          "type": "text"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "draft",
+          "says": "bound_fixed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "page"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "page_2",
+          "to": {
+            "arg": "words"
+          },
+          "event": "page_written"
+        }
+      ]
+    },
+    "write_page_3": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "words": {
+          "type": "text"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "draft",
+          "says": "bound_fixed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "page"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "page_3",
+          "to": {
+            "arg": "words"
+          },
+          "event": "page_written"
+        }
+      ]
+    },
+    "bind": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "draft",
+          "says": "bound_fixed"
+        },
+        {
+          "need": "state",
+          "field": "binding",
+          "at_least": 1,
+          "says": "needs_all"
+        },
+        {
+          "need": "state",
+          "field": "title",
+          "not": null,
+          "says": "needs_all"
+        },
+        {
+          "need": "state",
+          "field": "page_1",
+          "not": null,
+          "says": "needs_all"
+        },
+        {
+          "need": "state",
+          "field": "page_2",
+          "not": null,
+          "says": "needs_all"
+        },
+        {
+          "need": "state",
+          "field": "page_3",
+          "not": null,
+          "says": "needs_all"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "spine"
+        },
+        {
+          "step": "wait",
+          "us": 6000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "bound",
+          "event": "zine_bound"
+        },
+        {
+          "change": "set",
+          "field": "binding",
+          "by": -1,
+          "event": "binding_used"
+        },
+        {
+          "change": "link",
+          "link": "author",
+          "from": "actor",
+          "event": "author_credited"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,7,0],"size":[380,14,270],"tint":"paper"},{"kind":"box","at":[8,19,0],"size":[360,10,250],"tint":"paper"},{"kind":"box","at":[15,30,0],"size":[340,10,230],"tint":"paper"},{"kind":"box","at":[0,44,0],"size":[400,14,290],"when":"@stage=bound","tint":"cover"},{"kind":"box","at":[-193,28,0],"size":[14,56,290],"when":"@stage=bound","tint":"spine"},{"kind":"box","at":[100,37,80],"size":[160,6,20],"when":"@binding>=1&@stage=draft","tint":"spine"}],"palette":{"paper":"#eee2c7","cover":"#416c7b","spine":"#b36a45"},"tags":["art","paper","booklet","object"]},
+    "model": "look:zine"
+  },
+  "text": {
+    "card": "A three-page zine kit: write a title and pages, then bind it; binding is final.",
+    "bound_fixed": "This zine is bound; title and pages are permanent.",
+    "needs_all": "Supply a title and all three nonempty pages; one unused binding is required.",
+    "empty_hands": "Empty your hands before authoring or binding the zine.",
+    "art": "art",
+    "zine": "zine",
+    "booklet": "booklet",
+    "howto_zine": "Write a title and the three pages, then bind for six seconds; the binder is credited as author."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "zine",
+      "booklet"
+    ]
+  },
+  "howtos": {
+    "zine": {
+      "text": "howto_zine",
+      "steps": [
+        {
+          "form": "write_title"
+        },
+        {
+          "form": "write_page_1"
+        },
+        {
+          "form": "bind"
+        }
+      ]
+    }
+  }
+}

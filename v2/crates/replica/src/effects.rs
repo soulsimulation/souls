@@ -1269,7 +1269,9 @@ impl State {
         Ok(())
     }
 
-    fn apply_entry(&mut self, header: &Header, e: &Effect) -> R<()> {
+    /// Applies one entry of a part already checked whole (R3's view tier keeps a state before and after each entry,
+    /// #2697). Unlike [`State::apply`] a refusal may leave the entry half applied.
+    pub fn apply_entry(&mut self, header: &Header, e: &Effect) -> R<()> {
         if e.envelope.sequence != self.next {
             return refuse(
                 "sequence-gap",

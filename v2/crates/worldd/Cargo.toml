@@ -3,8 +3,9 @@ name = "worldd"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "The world process (Engine v2, #2635): its clock and watchdog (K7, #2647)."
+description = "The world process (Engine v2, #2635): its clock and watchdog (K7, #2647); checkers (I3, #2686)."
 
 [dependencies]
 replica = { path = "../replica" }
+rustix = { version = "1", default-features = false, features = ["time", "std"] }
 sim = { path = "../sim" }

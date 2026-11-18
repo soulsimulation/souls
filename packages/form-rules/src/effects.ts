@@ -36,7 +36,7 @@ export type Change =
   | { change: 'set'; node: string; field: string; n: number; to?: unknown; by?: number }
   | { change: 'link' | 'unlink'; node: string; link: string; n: number; end: string }
   | { change: 'reparent'; node: string; to: Place }
-  | { change: 'create'; node: string; kind: string; to: Place; stock?: string; carries?: string[] }
+  | { change: 'create'; node: string; kind: string; to: Place; stock?: string; carries?: string[]; fields?: Record<string, unknown> }
   | { change: 'remove'; node: string };
 /** The generic changes, Engine v2 T6's list less the motion sample. */
 export const CHANGES = Object.freeze(['set', 'link', 'unlink', 'reparent', 'create', 'remove']);
@@ -196,23 +196,28 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     } else {
     if (!e || typeof e.event !== 'string') return refuse(i, 'bad_input', { what: 'no_event' });
     if (e.change === 'set') {
-      const def = has(entry.state, e.field ?? '') ? entry.state![e.field!] : undefined;
-      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: e.field ?? null });
+      // A field argument names one of the form's own fields (the rules refused any other choice); the change names the field.
+      const named = arg(e.field, args);
+      const field = typeof named === 'string' ? named : '';
+      const def = has(entry.state, field) ? entry.state![field] : undefined;
+      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: (named ?? null) as unknown });
       if (def.type === 'timed') {
         // a timed value is settled at the act's time and given its new rate: the three stored numbers are rewritten
-        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
         const now = valueAt(def, held, state.now_us);
-        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: e.field! });
-        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: { value: now, per_s: e.rate!, set_us: state.now_us! } });
+        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: field });
+        // a set may also give the value from now on (a planter watered full), else the value settles where it is
+        if (e.to !== undefined && !Number.isSafeInteger(e.to)) return refuse(i, 'bad_input', { what: 'malformed_value', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to: { value: e.to === undefined ? now : e.to as number, per_s: e.rate!, set_us: state.now_us! } });
       } else if (has(e, 'by')) {
         // a count or an amount used up (a sip): the field's value plus `by`, within its bounds; nothing balances it
-        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
         const to = Number.isSafeInteger(held) && Number.isSafeInteger(e.by) ? (held as number) + e.by! : null;
-        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: e.field! });
-        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to });
+        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to });
       } else {
       const to = stored(def, arg(e.to, args));
-      out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });
+      out.push({ change: 'set', node: self, field: field, n: def.n, ...(to === undefined ? {} : { to }) });
       }
     } else if (e.change === 'transfer') {
       const m = measure(kinds, work, self, args, e);
@@ -226,21 +231,35 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
       const ends = work[self].links?.[e.link!] ?? [];
       if (e.change === 'link' && ends.includes(actor)) return refuse(i, 'already_linked', { link: e.link });
       if (e.change === 'link' && ends.length >= def.most) return refuse(i, 'link_full', { link: e.link, most: def.most });
-      if (e.change === 'unlink' && !ends.includes(actor)) return refuse(i, 'not_linked', { link: e.link });
-      out.push({ change: e.change, node: self, link: e.link!, n: def.n, end: actor });
+      // `from: "all"` frees every end of the link on this thing, each its own unlink, all of them this thing's own links
+      // (Engine v2 T6: a link's node is its owning end). An empty link frees nothing.
+      if (e.change === 'unlink' && e.from === 'all') for (const end of [...ends].sort() as string[]) out.push({ change: 'unlink', node: self, link: e.link!, n: def.n, end });
+      else {
+        if (e.change === 'unlink' && !ends.includes(actor)) return refuse(i, 'not_linked', { link: e.link });
+        out.push({ change: e.change, node: self, link: e.link!, n: def.n, end: actor });
+      }
     } else if (e.change === 'reparent' || e.change === 'create') {
       const to = place(e.into);
       if (typeof to === 'string') return refuse(i, to === 'no_free_hand' || to === 'slot_taken' ? to : 'bad_input', { what: to });
       if (e.change === 'create') {
         if (typeof e.kind !== 'string' || !has(kinds, e.kind)) return refuse(i, 'bad_input', { what: 'no_such_kind', kind: e.kind ?? null });
+        // Fields of the made thing chosen at the bench (a candle's shape and colour): T6's create carries its fields.
+        const fields: Record<string, unknown> = {};
+        for (const x of Array.isArray(e.set) ? e.set : []) {
+          const def = has(kinds[e.kind].state, x?.field) ? kinds[e.kind].state![x.field] : undefined;
+          const v = arg(x?.to, args);
+          const ok = def && (def.type === 'bool' ? typeof v === 'boolean' : def.type === 'enum' ? (def as { values?: unknown[] }).values?.includes(v) : def.type === 'int' && Number.isSafeInteger(v));
+          if (!ok) return refuse(i, 'bad_input', { what: def ? 'not_a_value' : 'no_such_field', kind: e.kind, field: x?.field ?? null });
+          fields[x.field] = stored(def, v);
+        }
         const stock = stockOf(entry, act.form);
         if (stock && stock.kind === e.kind && e.into === 'actor_hand') {
           const def = entry.state?.[stock.count];
           const count = countOf(entry, work[self], stock.count);
           if (!def || !Number.isSafeInteger(count) || (count as number) < 1) return refuse(i, 'bad_input', { what: 'bad_stock', stock: stock.name });
-          out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to, stock: stock.name, ...(stock.carries?.length ? { carries: [...stock.carries] } : {}) });
+          out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to, stock: stock.name, ...(stock.carries?.length ? { carries: [...stock.carries] } : {}), ...(Object.keys(fields).length ? { fields } : {}) });
           out.push({ change: 'set', node: self, field: stock.count, n: def.n, to: (count as number) - 1, by: -1 });
-        } else out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to });
+        } else out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to, ...(Object.keys(fields).length ? { fields } : {}) });
       } else {
         const node = subject(e.what);
         if (!node) return refuse(i, 'bad_input', { what: 'malformed_subject' });
@@ -410,7 +429,7 @@ function applyChange(nodes: Record<string, Node>, c: Change): string | null {
     case 'create':
       if (node) return 'node_exists';
       if (typeof c.kind !== 'string') return 'malformed_change';
-      nodes[c.node] = { kind: c.kind };
+      nodes[c.node] = { kind: c.kind, ...(c.fields ? { fields: { ...c.fields } } : {}) };
       return attach(nodes, c.to, c.node);
     case 'remove': {
       if (!node) return 'no_such_node';

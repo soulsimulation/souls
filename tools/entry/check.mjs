@@ -156,8 +156,12 @@ function rules(entry) {
 function wayOut(entry, add) {
   const state = entry.state ?? {}, forms = entry.forms ?? {}, links = entry.links ?? {};
   const setters = {}, linkers = {};
+  // A field or value argument stands for each of its choices (the form's own closed list); any other argument for any value.
+  const choices = (f, v) => isArg(v) && Array.isArray(f.takes?.[v.arg]?.of) ? f.takes[v.arg].of : null;
+  const fieldsOf = (f, v) => choices(f, v) ?? [v];
+  const valuesOf = (f, v) => choices(f, v)?.map(x => JSON.stringify(x)) ?? [isArg(v) ? '*' : JSON.stringify(v)];
   for (const f of Object.values(forms)) for (const e of f.effects ?? []) {
-    if (e.change === 'set') (setters[e.field] ??= new Set()).add(isArg(e.to) ? '*' : JSON.stringify(e.to));
+    if (e.change === 'set') for (const x of fieldsOf(f, e.field)) for (const v of valuesOf(f, e.to)) (setters[x] ??= new Set()).add(v);
     if (e.change === 'link') linkers[e.link] = true;
   }
   const reach = {}, open = new Set();
@@ -168,24 +172,28 @@ function wayOut(entry, add) {
   }
   const linked = new Set(Object.keys(links).filter(l => !linkers[l]));
   const armed = new Set(), on = new Set();
-  const ok = n => {
+  // A timer form whose need is a timed field's crossing (SA-F5a) is armed by that crossing: the engine's timer runs it then (SA-G1b).
+  for (const [fn, f] of Object.entries(forms)) if (f.starts === 'timer' && (f.needs ?? []).some(n => n.need === 'state' && state[n.field]?.type === 'timed' && ('at_most' in n || 'at_least' in n))) armed.add(fn);
+  const ok = (n, f) => {
     if (n.need === 'state' && (n.link || n.of)) return true; // another node's field (its place, a named thing) is set from outside
-    if (n.need === 'state') {
-      if (open.has(n.field) || !reach[n.field]) return true;
+    if (n.need === 'state') return fieldsOf(f, n.field).some(field => {
+      if (open.has(field) || !reach[field]) return true;
       const v = 'is' in n ? n.is : n.not;
       if (isArg(v)) return true;
       const j = JSON.stringify(v);
-      return 'is' in n ? reach[n.field].has(j) : [...reach[n.field]].some(x => x !== j);
-    }
+      return 'is' in n ? reach[field].has(j) : [...reach[field]].some(x => x !== j);
+    });
+    // any of several fields differs from a value: one of them can be made something else
+    if (n.need === 'any') return (n.fields ?? []).some(field => open.has(field) || !reach[field] || [...reach[field]].some(x => x !== JSON.stringify(n.not)));
     return n.need === 'linked' ? linked.has(n.link) : true;
   };
   for (let changed = true; changed;) {
     changed = false;
     for (const [fn, f] of Object.entries(forms)) {
-      if (on.has(fn) || (f.starts === 'timer' && !armed.has(fn)) || (isObj(f.who) && !linked.has(f.who.link)) || !(f.needs ?? []).every(ok)) continue;
+      if (on.has(fn) || (f.starts === 'timer' && !armed.has(fn)) || (isObj(f.who) && !linked.has(f.who.link)) || !(f.needs ?? []).every(n => ok(n, f))) continue;
       on.add(fn); changed = true;
       for (const e of f.effects ?? []) {
-        if (e.change === 'set' && reach[e.field]) reach[e.field].add(isArg(e.to) ? '*' : JSON.stringify(e.to));
+        if (e.change === 'set') for (const x of fieldsOf(f, e.field)) if (reach[x]) for (const v of valuesOf(f, e.to)) reach[x].add(v);
         if (e.change === 'link') linked.add(e.link);
         if (e.change === 'timer') armed.add(e.form);
       }
@@ -193,10 +201,10 @@ function wayOut(entry, add) {
   }
   for (const [fn, f] of Object.entries(forms)) {
     if (on.has(fn)) continue;
-    const i = (f.needs ?? []).findIndex(n => !ok(n));
+    const i = (f.needs ?? []).findIndex(n => !ok(n, f));
     if (f.starts === 'timer' && !armed.has(fn)) add('way-out', `forms.${fn}`, 'a timer form that no reachable form arms', `add a timer effect for "${fn}" to a form that can be done`);
     else if (isObj(f.who) && !linked.has(f.who.link)) add('way-out', `forms.${fn}.who`, `needs the link "${f.who.link}" and nothing reachable makes it`, 'link it in a form that needs nothing');
-    else if (i >= 0) { const n = f.needs[i]; add('way-out', `forms.${fn}.needs.${i}`, `needs ${n.need} ${n.field ?? n.link ?? ''} that only forms stuck behind this need can bring about`, 'let a form that needs nothing bring it about, or make the default what the need asks'); }
+    else if (i >= 0) { const n = f.needs[i]; add('way-out', `forms.${fn}.needs.${i}`, `needs ${n.need} ${isArg(n.field) ? `{arg: ${n.field.arg}}` : n.field ?? n.fields?.join('|') ?? n.link ?? ''} that only forms stuck behind this need can bring about`, 'let a form that needs nothing bring it about, or make the default what the need asks'); }
   }
 }
 
@@ -222,6 +230,29 @@ export function checkText(text) {
   return {entry, findings};
 }
 
+/** A `create` that sets the made thing's fields: each is a field of the made kind, and each value (or each choice of a
+ *  value argument) a value of it. A text, list, schedule or timed field is set its own way, never at the bench. */
+export function madeFields(entry, loaded) {
+  const out = [];
+  for (const [fn, f] of Object.entries(entry.forms ?? {})) (f.effects ?? []).forEach((e, i) => {
+    if (e.change !== 'create' || !Array.isArray(e.set)) return;
+    const made = loaded.get(e.kind);
+    if (!made) return;
+    e.set.forEach((x, j) => {
+      const path = `forms.${fn}.effects.${i}.set.${j}`, def = made.state?.[x.field];
+      const add = reason => out.push({rule: 'refs', form: fn, field: x.field, path, reason, fix: `set a bool, enum or int field of ${e.kind} to one of its values`});
+      if (!def) return add(`"${x.field}" is not a state field of ${e.kind}`);
+      if (!['bool', 'enum', 'int'].includes(def.type)) return add(`"${x.field}" of ${e.kind} is ${def.type}; a bench sets a bool, enum or int field`);
+      const values = isObj(x.to) ? f.takes?.[x.to.arg]?.of ?? [] : [x.to];
+      for (const v of values) {
+        const ok = def.type === 'bool' ? typeof v === 'boolean' : def.type === 'enum' ? def.values?.includes(v) : Number.isSafeInteger(v) && (def.min === undefined || v >= def.min) && (def.max === undefined || v <= def.max);
+        if (!ok) add(`${JSON.stringify(v)} is not a value of "${x.field}" of ${e.kind}`);
+      }
+    });
+  });
+  return out;
+}
+
 /** Check files. Kinds an entry refers to are looked for among `all`, so one family can refer to another. */
 export function checkFiles(files, all = files) {
   const rows = files.map(file => ({file, ...checkText(readFileSync(file, 'utf8'))}));
@@ -233,6 +264,7 @@ export function checkFiles(files, all = files) {
   for (const r of rows) {
     if (!r.entry || r.findings.length) continue;
     for (const k of F.kindRefs(r.entry)) if (!loaded.has(k)) r.findings.push({rule: 'refs', form: null, field: 'kind', path: 'forms', reason: `refers to ${k}, which is not loaded`, fix: `add ${k} under content/kinds, or name a kind that exists`});
+    r.findings.push(...madeFields(r.entry, loaded));
   }
   try { F.hashKinds([...loaded.values()].filter(e => F.kindRefs(e).every(k => loaded.has(k)))); } catch (e) {
     const names = new Set(e.message.match(/[a-z][a-z0-9-]*:[a-z][a-z0-9_]*/g) ?? []);
@@ -246,6 +278,8 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 if (isMain && process.argv[2] === 'prove') import('./prove.mjs').then(m => { process.exitCode = m.main(process.argv.slice(3)); });
 // `entry run <family> --world <address>` drives a world from outside through the family's cases (run.mjs, SA-P3a).
 else if (isMain && process.argv[2] === 'run') import('./run.mjs').then(async m => { process.exitCode = await m.main(process.argv.slice(3)); });
+// `entry find <family> --goal "..."` gives a real model only a goal and reports what it found and did (find.mjs, SA-P7).
+else if (isMain && process.argv[2] === 'find') import('./find.mjs').then(async m => { process.exitCode = await m.main(process.argv.slice(3)); });
 else if (isMain) {
   const args = process.argv.slice(2).filter((a, i) => !(i === 0 && a === 'check'));
   const all = F.loadDir(KINDS_DIR);

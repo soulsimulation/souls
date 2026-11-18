@@ -8,125 +8,38 @@
 //! `cargo test -p sim --release --test way -- --ignored --nocapture`; it writes the canal route as a picture to
 //! `.local/e10/canal-route.svg`.
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use import_eden::Import;
-use replica::bodies::{Class, Family, Resource};
-use replica::effects::{Change, Header, schema_hash};
+use replica::effects::Change;
 use replica::encode::{Name, Value, encode};
-use replica::host::Skill as _;
-use replica::host::{Answer, Ask, F_CROSSING, F_WAITING, Seen};
-use replica::ids::{Hash, Id, Minter, Purpose, Scope};
-use replica::pose::{Frame, Quat, Vec3};
+use replica::ids::Id;
+use replica::pose::Vec3;
 use replica::time::Micros;
-use replica::tree::Tree;
 use replica::walk::{
     F_MANNER, LAPS_MOST, P_LAPS, P_VIA, Shape, Stop, VIA_MOST, Way, manner, set_manner,
 };
-use replica::world_model::{parse_kinds, parse_world};
-use sim::controller::Controller;
 use sim::gaits::{JOG, WALK, speed_of};
-use sim::host::{Geometry, Run, carry, hand_on, step};
-use sim::links::Doors;
+use sim::host::Runner;
 use sim::walk::town::Town;
-use sim::walk::{Mark, World, node_of};
-use skills::route::{AT_GOAL, Leg, Route};
+use skills::route::AT_GOAL;
+
+mod common;
 
 const TICK: Micros = 50_000;
 /// A slow tick this near a way's point is a stop at it, µm.
 const NEAR: i64 = 2_000_000;
 
 fn id(n: u64) -> Id {
-    Id::new(Scope([7; 16]), n).unwrap()
+    common::id(n)
 }
 
 fn name(t: &str) -> Name {
     Name::new(t).unwrap()
 }
 
-fn town_of(im: Import) -> (Town, BTreeMap<String, Id>) {
-    let Import {
-        tree, rules, nodes, ..
-    } = im;
-    let root = nodes["world"];
-    let v = Value::Map(BTreeMap::from([
-        (
-            1,
-            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/way-test/1").to_bytes()),
-        ),
-        (2, Value::Bytes(schema_hash().to_bytes())),
-        (3, Value::Bytes(root.scope().0.to_vec())),
-        (4, root.to_value()),
-        (5, Value::Uint(0)),
-        (6, Value::Array(Vec::new())),
-        (7, Value::Array(Vec::new())),
-    ]));
-    let header = Header::read(&encode(&v).unwrap()).unwrap();
-    let next = tree.to_state().next;
-    let ground = nodes["ground"];
-    let t = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
-    (t, nodes)
-}
-
 fn test_town() -> (Town, Id) {
-    let w = testworld::generate(1, 0).expect("the test world");
-    let (t, nodes) = town_of(import_eden::load(&w.text).expect("the test world loads"));
+    let (t, nodes) = common::town(b"souls/way-test/1");
     (t, nodes["ground"])
-}
-
-fn humanoid() -> Family {
-    let r = |n: &str| Resource {
-        name: name(n),
-        class: Class::Locomotion,
-        slot: None,
-    };
-    Family {
-        name: name("souls:humanoid"),
-        resources: vec![r("souls:leg-left"), r("souls:leg-right")],
-    }
-}
-
-/// An empty tree for the host's own reads: the walk reads bodies and links, which the world answers.
-fn empty() -> Tree {
-    let kinds = parse_kinds(include_str!(
-        "../../replica/fixtures/world-model/kinds.diag"
-    ))
-    .unwrap();
-    let draft = parse_world(
-        &kinds,
-        "{1: [], 2: {}, 3: [{1: 1, 2: \"souls:place\"}], 4: []}",
-    )
-    .unwrap();
-    Tree::load(&draft).unwrap().0
-}
-
-struct Here<'a> {
-    town: &'a RefCell<Town>,
-    bodies: &'a Controller,
-    fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
-}
-
-impl Geometry for Here<'_> {
-    fn ask(&self, body: Id, q: &Ask) -> Option<Answer> {
-        self.town.borrow_mut().answer(self.bodies, body, q)
-    }
-    fn read(&self, node: Id) -> Option<Seen> {
-        let Some(b) = self.bodies.body(node) else {
-            return self.town.borrow().read_link(node);
-        };
-        let mut fields = self.fields.get(&node).cloned().unwrap_or_default();
-        if let Some(l) = self.bodies.carrying(node) {
-            fields.insert(F_CROSSING, l.to_value());
-        }
-        Some(Seen {
-            id: node,
-            kind: name("souls:body"),
-            parent: Some(node_of(b)),
-            position: b.pose.position,
-            fields,
-        })
-    }
 }
 
 /// One walk, as it went.
@@ -144,61 +57,53 @@ struct Walked {
     /// Ticks between its first step and its end in which it moved under a tenth of its speed within [`NEAR`] of one
     /// of the way's points: a stop on its way.
     stops: u32,
-    /// Every such slow tick, anywhere (a step cut at a square's seam or an edge, N6 and N7's).
+    /// Every such slow tick, anywhere (a step cut at a square's seam or an edge, N6 and N7's), leaving out the ticks
+    /// of a link's crossing.
     slow: u32,
     /// The way's points.
     points: Vec<[i64; 2]>,
 }
 
-/// A world of one walker, its walks run a tick at a time through the host.
+/// A world of one walker, its walks run a tick at a time through the host by T9c's runner.
 struct World1 {
-    town: RefCell<Town>,
+    town: Town,
     ground: Id,
-    controller: Controller,
-    /// Each body's fields, as its own entries set them (its manner, its waiting mark).
-    fields: BTreeMap<Id, BTreeMap<u64, Value>>,
-    /// Every entry applied: the facts, in order.
+    runner: Runner,
+    /// Every entry applied by an act: the facts, in order.
     facts: Vec<Change>,
-    now: Micros,
-    tree: Tree,
-    minter: Minter,
 }
 
 impl World1 {
     fn new(town: Town, ground: Id) -> World1 {
         World1 {
-            town: RefCell::new(town),
+            town,
             ground,
-            controller: Controller::new(),
-            fields: BTreeMap::new(),
+            runner: Runner::new(TICK),
             facts: Vec::new(),
-            now: 0,
-            tree: empty(),
-            minter: Minter::new(Scope([0xe1; 16])),
         }
     }
 
     fn put(&mut self, who: Id, at: [i64; 2]) {
-        let body = self.town.borrow().surfaces[&self.ground]
-            .place(
-                who,
-                Frame {
-                    node: self.ground,
-                    slot: None,
-                },
-                Vec3::new(at[0], 0, at[1]),
-                Quat::IDENTITY,
-            )
-            .unwrap();
-        self.controller.add(humanoid(), body).unwrap();
+        let body = common::stand(&self.town, who, self.ground, Vec3::new(at[0], 0, at[1]));
+        self.runner.add_body(common::humanoid(), body).unwrap();
     }
 
-    fn apply(&mut self, c: Change) {
+    /// A body's own fields, as its entries set them (its manner among them).
+    fn fields(&self, who: Id) -> &BTreeMap<u64, Value> {
+        &self.runner.fields[&who]
+    }
+
+    /// A `souls:manner` act: its change is an entry of the body's own node.
+    fn manner(&mut self, who: Id, word: &str) {
+        let p = BTreeMap::from([(replica::walk::P_MANNER, Value::Text(name(word)))]);
+        let word = replica::walk::manner_word(&p).unwrap();
+        let c = set_manner(who, word);
         if let Change::Set {
             node, field, to, ..
         } = &c
         {
-            self.fields
+            self.runner
+                .fields
                 .entry(*node)
                 .or_default()
                 .insert(*field, to.clone());
@@ -206,65 +111,51 @@ impl World1 {
         self.facts.push(c);
     }
 
-    /// A `souls:manner` act: its change is an entry of the body's own node.
-    fn manner(&mut self, who: Id, word: &str) {
-        let p = BTreeMap::from([(replica::walk::P_MANNER, Value::Text(name(word)))]);
-        let word = replica::walk::manner_word(&p).unwrap();
-        self.apply(set_manner(who, word));
-    }
-
     fn walk(&mut self, who: Id, way: &Way, goal: Option<[i64; 2]>, most: u64) -> Walked {
-        let body = *self.controller.body(who).unwrap();
+        let body = *self.runner.controller.body(who).unwrap();
         let goal = goal.map(|g| Vec3::new(g[0], 0, g[1]));
         let (legs, pts) = self
             .town
-            .borrow_mut()
             .plan_way(&body, way, goal)
             .unwrap_or_else(|e| panic!("the way: {e:?}"));
-        let legs: Vec<Leg> = legs
-            .into_iter()
-            .map(|l| Leg {
-                to: l.to,
-                link: l.link,
-            })
-            .collect();
         let n = legs.len();
         // The manner on the body, read when the walk starts: a gait's speed, else a walk.
         let word = self
+            .runner
             .fields
             .get(&who)
             .and_then(manner)
             .map(|w| w.as_str().to_owned());
         let speed = speed_of(word.as_deref());
-        let skill = Route::new(legs, speed, TICK);
-        let driver = self.controller.claim(who, &skill.shape()).unwrap();
-        let mut runs = vec![Run {
-            body: who,
-            driver,
-            skill: Box::new(skill),
-        }];
-        let (mut track, mut ended, mut slowed, mut moving) = (Vec::new(), None, Vec::new(), false);
+        self.runner
+            .start(who, common::route(&legs, speed, TICK))
+            .unwrap();
+        let (mut track, mut ended, mut moving) = (Vec::new(), None, false);
+        // Per tick: whether it moved under a tenth of its speed, and whether the controller carried it across a link
+        // (a door, a stair, a bridge deck's step: it stands at the near end, then is carried).
+        let (mut slowly, mut carried) = (Vec::new(), Vec::new());
         let mut last = [body.pose.position.x, body.pose.position.z];
         let slow = speed * TICK / 1_000_000 / 10;
-        let start = self.now;
+        let start = self.runner.now;
         for _ in 0..most {
-            ended = self.tick(&mut runs);
-            let b = self.controller.body(who).unwrap();
+            self.runner
+                .tick(&mut self.town)
+                .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
+            assert!(self.runner.refused.is_empty(), "{:?}", self.runner.refused);
+            ended = self.runner.ended.get(&who).map(|(_, p)| format!("{p:?}"));
+            let b = self.runner.controller.body(who).unwrap();
             let p = [b.pose.position.x, b.pose.position.z];
             let d = (i128::from(p[0] - last[0]).pow(2) + i128::from(p[1] - last[1]).pow(2)).isqrt()
                 as i64;
+            track.push(p);
+            carried.push(self.runner.controller.carrying(who).is_some());
+            slowly.push(moving && d < slow && ended.is_none());
             if ended.is_some() {
-                track.push(p);
                 break;
             }
-            if moving && d < slow {
-                slowed.push(p);
-            }
             moving |= d > 0;
-            track.push(p);
             last = p;
         }
-        self.controller.release(who, driver).unwrap();
         let length: i64 = track
             .windows(2)
             .map(|w| {
@@ -272,8 +163,16 @@ impl World1 {
                     .isqrt() as i64
             })
             .sum();
-        let time = (self.now - start).max(1);
+        let time = (self.runner.now - start).max(1);
         let points: Vec<[i64; 2]> = pts.points.iter().map(|p| [p.x, p.z]).collect();
+        // A slow tick next to a crossing is the crossing's: it stands at the near end, is carried, and its walk sees the
+        // crossing end a tick later (T1) and steps off the tick after.
+        let crossing =
+            |k: usize| (k.saturating_sub(2)..=(k + 1).min(carried.len() - 1)).any(|j| carried[j]);
+        let slowed: Vec<[i64; 2]> = (0..track.len())
+            .filter(|&k| slowly[k] && !crossing(k))
+            .map(|k| track[k])
+            .collect();
         let stops = slowed
             .iter()
             .filter(|q| points.iter().any(|p| passed(&[**q], *p) <= NEAR))
@@ -290,46 +189,6 @@ impl World1 {
             slow: slowed.len() as u32,
             points,
         }
-    }
-
-    /// One tick; how the walk ended, if it did.
-    fn tick(&mut self, runs: &mut Vec<Run>) -> Option<String> {
-        let at = self.now + TICK;
-        let marks: Vec<Mark> = self
-            .controller
-            .bodies()
-            .map(|b| Mark {
-                who: b.id,
-                node: node_of(b),
-                at: b.pose.position,
-                waiting: None,
-                crossing: self.controller.carrying(b.id),
-                staying: false,
-                spot: None,
-            })
-            .collect();
-        self.town.get_mut().turns(&marks, at).unwrap();
-        let staged = {
-            let here = Here {
-                town: &self.town,
-                bodies: &self.controller,
-                fields: &self.fields,
-            };
-            step(&self.tree, &here, self.now, 1, &mut self.minter, runs)
-        };
-        assert!(hand_on(&staged, &mut self.controller).is_empty());
-        assert!(carry(&staged, &mut self.controller, self.town.get_mut(), at).is_empty());
-        for e in &staged.emits {
-            for c in &e.changes {
-                if matches!(c, Change::Set { field, .. } if *field == F_WAITING) {
-                    self.apply(c.clone());
-                }
-            }
-        }
-        let stepped = self.controller.step(&self.town.borrow().surfaces, TICK, at);
-        assert!(stepped.refused.is_empty(), "{:?}", stepped.refused);
-        self.now = at;
-        staged.ended.first().map(|(_, p)| format!("{p:?}"))
     }
 }
 
@@ -386,7 +245,7 @@ fn a1_a_manner_is_kept_applied_and_recorded() {
     report("tiptoe, back west", &b);
     assert_eq!((a.ended.as_str(), b.ended.as_str()), ("Done", "Done"));
     assert_eq!(
-        manner(&w.fields[&me]).map(Name::as_str),
+        manner(w.fields(me)).map(Name::as_str),
         Some("tiptoe"),
         "kept until changed"
     );
@@ -533,7 +392,10 @@ fn eden() -> (Town, BTreeMap<String, Id>) {
         "/../../../.local/import-eden/eden-2026.facts.json"
     );
     let text = std::fs::read_to_string(path).expect("run the exporter first");
-    town_of(import_eden::load(&text).expect("Eden loads"))
+    common::town_of(
+        import_eden::load(&text).expect("Eden loads"),
+        b"souls/way-test/1",
+    )
 }
 
 /// A place's outline or line as N1 stored it, µm.
@@ -681,12 +543,42 @@ fn a4_eden_six() {
         4_000,
     );
     report("4 via both allotments, back", &r4);
+    // And over both canal bridges and back: since #3226 a bridge's deck is walkable ground, so a via place on one
+    // is on the bridge itself, and the walk crosses the canal.
+    let bridges = w.walk(
+        me,
+        &Way {
+            shape: Shape::Via(vec![Stop::Node(south), Stop::Node(north)]),
+        },
+        Some(start),
+        4_000,
+    );
+    report("4b via both canal bridges, back", &bridges);
+    let canal_x = (133_000_000, 140_000_000);
+    for (k, p) in bridges.points.iter().enumerate() {
+        println!(
+            "  bridge point {}: ({}, {}) mm",
+            k + 1,
+            p[0] / 1000,
+            p[1] / 1000
+        );
+        assert!(
+            (canal_x.0..=canal_x.1).contains(&p[0]),
+            "the via point is on the bridge, over the canal"
+        );
+        assert!(passed(&bridges.track, *p) <= AT_GOAL);
+    }
+    assert!(
+        bridges.track.iter().any(|q| q[0] > canal_x.1),
+        "it crosses to the canal's east side"
+    );
+    assert_eq!((bridges.ended.as_str(), bridges.stops), ("Done", 0));
     draw(
         "canal-route.svg",
-        "E10: along the canal (blue), then via both allotments and back (red)",
+        "E10: along the canal (blue), via both allotments and back (red), via both bridges and back (green)",
         [80_000_000, -45_000_000, 190_000_000, 65_000_000],
         &figures,
-        &[(&r3, "#1c4587"), (&r4, "#cc0000")],
+        &[(&r3, "#1c4587"), (&r4, "#cc0000"), (&bridges, "#38761d")],
     );
     done.push(r3);
     done.push(r4);
@@ -736,7 +628,7 @@ fn a4_eden_six() {
             assert_eq!(r.speed, WALK.speed, "tiptoe is kept: no gait, so a walk");
         }
     }
-    assert_eq!(manner(&w.fields[&me]).map(Name::as_str), Some("tiptoe"));
+    assert_eq!(manner(w.fields(me)).map(Name::as_str), Some("tiptoe"));
     for p in &done[3].points {
         assert!(passed(&done[3].track, *p) <= AT_GOAL);
     }

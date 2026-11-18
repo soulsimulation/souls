@@ -9,8 +9,9 @@
 //!   open ground one of each square it crosses. A doorway to the open ground is such a link, one end on the
 //!   building's floor and the other on the ground's squares.
 //! - **Coarse.** A search (A*, the heuristic the straight distance in the ground's frame) over portals: within a
-//!   piece, from each portal to each other; across a link, from one end to the other. The distance between two
-//!   portals of one piece is its line inside the piece (below), computed on first use and cached with the piece.
+//!   piece, from each portal to each other; across a link, from one end to the other, never straight back across
+//!   the link just crossed. The distance between two portals of one piece is its line inside the piece (below),
+//!   computed on first use and cached with the piece.
 //! - **Fine.** Inside one piece, a search over its triangles and string pulling (the funnel), done as a walker
 //!   enters it. A route carries the first piece's line; the rest is cut as the body goes. String pulling treats the
 //!   body as a point, which is right here: the patch is the ground already shrunk by the body's radius.
@@ -728,7 +729,20 @@ impl Map {
                     .is_some_and(|v| i64::from(v[1]) == y)
             })
             .map(|&q| {
-                let (_, d2, near) = self.gap(q, p);
+                let (t, d2, mut near) = self.gap(q, p);
+                // Rounded onto the grid, the nearest point of a slanted edge may lie just off the piece: it is taken
+                // a millimetre at a time towards its triangle's middle until it stands on it.
+                for _ in 0..3 {
+                    if d2 == i64::MAX || self.locate(q, near, y).is_some() {
+                        break;
+                    }
+                    let [a, b, c] = self.tri(q, t);
+                    let m = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3];
+                    near = [
+                        near[0] + (m[0] - near[0]).signum(),
+                        near[1] + (m[1] - near[1]).signum(),
+                    ];
+                }
                 (d2, q, near)
             })
             .min()
@@ -1041,7 +1055,10 @@ impl Map {
                 }
             }
             let (l, side) = (self.portals[u as usize].link, self.portals[u as usize].side);
-            if l != NONE {
+            // Never straight back across the link just crossed: that lands on another portal of the end the body
+            // went in by, a doorway used as a bridge between two squares' pieces of the open ground, which no walk
+            // follows (#3187). Ground there is reached across the pieces.
+            if l != NONE && self.seen[u as usize].3 != LINK | l {
                 if let Some(why) = self.refuse(tree, l, has) {
                     let far = self.links[l as usize].ends[1 - side as usize]
                         .iter()

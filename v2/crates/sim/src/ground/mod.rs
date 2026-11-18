@@ -16,7 +16,10 @@
 //! - **Steps.** A floor of a building on the open ground, whose outline's edge bounds a surface within [`STEP`] of the
 //!   ground (a shop's porch, 100 mm up), steps down there: each such edge is a doorway of no depth (`Doorway::step`),
 //!   taken from neither side, whose passage is cut like any doorway's. N4 makes it a link from the floor to the
-//!   ground where its passage meets both ([`crate::links::Kind::Step`]).
+//!   ground where its passage meets both ([`crate::links::Kind::Step`]). Inside a floor, two surfaces that share a
+//!   stretch of edge and lie within [`STEP`] of each other in height (a bridge's deck, quads 100 to 145 mm apart) are
+//!   cut as two heights, each shrunk at that edge like any other; the stretch is a step too, at the height between
+//!   them, which N4 makes a link from the floor to itself (#3224). Surfaces further apart are joined only by a stair.
 //!   Boxes overlap and cross the floor's edge, so they are a union taken away, never a list of holes; a floor may
 //!   fall into several pieces, and each piece is cut into triangles that keep its edges (`i_triangle`, then
 //!   Delaunay flips).
