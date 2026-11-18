@@ -25,6 +25,7 @@ pub mod speech;
 pub mod spots;
 pub mod timed;
 pub mod timers;
+pub mod tracks;
 pub mod unit;
 pub mod unstick;
 pub mod walk;
