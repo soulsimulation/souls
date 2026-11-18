@@ -63,7 +63,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
 | 18 | `motion` | How a thing moves: `{"how"}`, one of `one_hand`, `two_hands`, `pushed_by_one`, `two_souls`, `wheeled`, `fixed` (below) |
 | 19 | `loose` | How long it lasts once nobody holds or owns it: `{"ever": true}` or `{"us": <microseconds>}` (below) |
-| 20 | `looks` | How it looks: `model` (a look id), and `table`, the looks table (below). `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
+| 20 | `looks` | How it looks: `model` (a look id), `table`, the looks table, and `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
@@ -288,7 +288,9 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   for `two_souls`; refused as `moves_by`, `motion_unsaid`, `needs_souls` or `no_free_hand`), `hand`
   (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
-  `transfer`). A range need also takes a `timed` field.
+  `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
+  `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
+  `timed` field.
   SA-F2 evaluates them. **Reach to another thing** is read in this order: (1) the walk, taken as done: entries store
   no position for a loose thing (Engine v2 holds poses, and today's adapter walks first), so `within_reach` of a
   `thing` argument that the form `walk_to`s is met when the thing is in the actor's place, and refused `out_of_reach`
