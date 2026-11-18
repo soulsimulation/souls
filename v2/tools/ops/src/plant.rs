@@ -17,6 +17,7 @@ use replica::rules::json::Value;
 use sim::log::FileStore;
 use worldd::answers::{self, Config, Event};
 use worldd::checkers::{Rules, toggles};
+use worldd::measures::Stamps;
 
 fn frame(s: &mut UnixStream) -> Option<Vec<u8>> {
     let mut len = [0u8; 4];
@@ -42,7 +43,14 @@ fn serve(world: Sender<Event>, mut stream: UnixStream) {
     });
     while let Some(bytes) = frame(&mut stream) {
         let reply = reply.clone();
-        if world.send(Event::Arrival { bytes, reply }).is_err() {
+        // Measures are off here: default stamps and key, as `Door` sends them then.
+        let arrival = Event::Arrival {
+            bytes,
+            reply,
+            stamps: Stamps::default(),
+            key: 0,
+        };
+        if world.send(arrival).is_err() {
             return;
         }
     }
