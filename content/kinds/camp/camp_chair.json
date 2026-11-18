@@ -11,6 +11,8 @@
   },
   "geometry": { "bounds_mm": [520, 900, 520] },
   "forms": {},
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:camp_chair",
     "shape": {"round":4,"shapes":[{"kind":"box","at":[-210,215,-210],"size":[45,430,45],"tint":"wood"},{"kind":"box","at":[210,215,-210],"size":[45,430,45],"tint":"wood"},{"kind":"box","at":[-210,215,210],"size":[45,430,45],"tint":"wood"},{"kind":"box","at":[210,215,210],"size":[45,430,45],"tint":"wood"},{"kind":"box","at":[0,440,0],"size":[480,30,480],"tint":"panel"},{"kind":"box","at":[0,470,20],"size":[420,30,400],"round":10,"tint":"cushion"},{"kind":"box","at":[-210,660,-215],"size":[45,420,40],"tint":"wood"},{"kind":"box","at":[210,660,-215],"size":[45,420,40],"tint":"wood"},{"kind":"box","at":[0,720,-220],"size":[460,260,25],"tint":"panel"}],"palette":{"wood":"#af8150","panel":"#c49a64","cushion":"#c96f4a"},"tags":["camping","chair","seat","object"]}

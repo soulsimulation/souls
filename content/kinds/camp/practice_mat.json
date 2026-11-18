@@ -58,6 +58,8 @@
       "effects": []
     }
   },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:practice_mat",
     "table": [

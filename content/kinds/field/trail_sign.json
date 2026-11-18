@@ -26,6 +26,8 @@
       "effects": [{ "change": "set", "field": "words", "to": { "arg": "words" }, "event": "written" }]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:trail_sign",
     "shape": {"round":4,"shapes":[{"kind":"box","at":[-450,800,0],"size":[80,1600,80],"tint":"post"},{"kind":"box","at":[450,800,0],"size":[80,1600,80],"tint":"post"},{"kind":"box","at":[0,1300,0],"size":[1050,600,40],"tint":"board"},{"kind":"box","at":[0,1620,0],"size":[1100,40,120],"tint":"post"}],"palette":{"post":"#806045","board":"#c9a878"},"tags":["trail","sign","board","object"]}

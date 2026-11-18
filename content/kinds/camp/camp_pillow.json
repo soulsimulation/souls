@@ -56,6 +56,8 @@
       "effects": [{ "change": "set", "field": "air", "to": 0, "event": "vented" }]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:camp_pillow",
     "table": [

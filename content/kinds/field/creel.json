@@ -10,6 +10,8 @@
   },
   "geometry": { "bounds_mm": [440, 330, 300] },
   "forms": {},
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:creel",
     "table": [

@@ -11,6 +11,8 @@
   },
   "geometry": { "bounds_mm": [300, 310, 240] },
   "forms": {},
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:pillow_repair_kit",
     "table": [
