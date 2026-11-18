@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":47,"group":"object","words":"go through the dresser","obvious":2,"things":{"dresser":"eden:dresser"},"chain":[{"this":"dresser","form":"open"},{"read":"dresser","field":"stock"}]}

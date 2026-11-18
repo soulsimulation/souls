@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":76,"group":"object","words":"lie down on the bench","obvious":3,"things":{"bench":"eden:bench"},"chain":[{"this":"me","form":"lie_down","args":{"spot":"bench"}}]}

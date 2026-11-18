@@ -568,6 +568,12 @@ impl View {
         true
     }
 
+    /// Takes the records written since the last take, oldest first; a counts view's open second stays (R3's tier sends
+    /// each record once, #2697).
+    pub fn take(&mut self) -> Vec<(Micros, Value)> {
+        std::mem::take(&mut self.out.records)
+    }
+
     /// The view so far (rule 2). A counts view's current second is its last record until a later second closes it.
     pub fn output(&self) -> Output {
         let mut out = self.out.clone();
