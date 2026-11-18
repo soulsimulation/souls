@@ -1,5 +1,7 @@
-# One production release of the current main head, by manual dispatch (#1402):
-#   preflight  required secrets/vars exist (fails fast, naming what is missing), the head is main, inputs are sane; when the
+# One production release of the current main head, or of a pinned sha on main (input sha), by manual dispatch (#1402):
+#   preflight  required secrets/vars exist (fails fast, naming what is missing), the head is main, inputs are sane; with
+#              sha, that commit (an ancestor of origin/main, newer than the last release tag; release-pin.mjs check) is
+#              the release head of every job, main keeps moving and RELEASE_FREEZE is not consulted; when the
 #              Soul client changed since the last release and is not stamped, a dry run stamps it, opens the stamp commit
 #              as a pull request (branch release/stamp-<version>, merged through the queue) and stops there (gate the head it
 #              merges as, then dispatch again), a real ship refuses; stamp.mjs --check must pass (#1969)
@@ -28,6 +30,7 @@
 #   node tools/test-harness/ship-receipt.mjs receipt.json v7-receipt.json --public release-receipt.json
 #   gh release create receipts-v0.123 --prerelease --title "receipts 0.123" release-receipt.json
 # Dry run:  gh workflow run release.yml --ref main -f version=<next version>            (dry_run defaults to true)
+# Pinned:   add -f sha=<full sha> to any dry run or ship: the gated commit ships while main keeps merging (no freeze)
 # Ship:     gh workflow run release.yml --ref main -f version=<v> -f dry_run=false [-f date=<the dry run's date>]
 #           [-f accept_host_codes=halted] [-f accept_exceptions=true] [-f unload_still=1]
 # Accepted exceptions (#2262): a gate blocked only by blockers the maintainer accepted ships when the receipts release also
@@ -47,12 +50,17 @@
 #          (default https://soul.game). The run's public artifact holds only result files that pass
 #          tools/proof/publication.mjs; ship.log (which can name the host) never leaves the runner.
 name: release
+# the pinned sha is in the run's title: eyes.mjs matches a run to the sha it ships by head_sha or by this title
+run-name: release ${{ inputs.version }}${{ inputs.sha && format(' at {0}', inputs.sha) || '' }}
 on:
   workflow_dispatch:
     inputs:
       version:
         description: Release version for the changelog and tag (e.g. 0.123 or 0.123.1)
         required: true
+      sha:
+        description: Pinned release head (full 40-hex sha), an ancestor of origin/main newer than the last release tag; main keeps moving and no RELEASE_FREEZE is needed. Empty = main's HEAD under the freeze, as before
+        required: false
       dry_run:
         description: ship.sh --no-switch (every step but the activation; the live build and the host's units stay as they are; no publish). false ships
         type: boolean
@@ -149,6 +157,7 @@ jobs:
           RECEIPTS_ONLY: ${{ inputs.receipts_only }}
           FEED_ONLY: ${{ inputs.feed_only }}
           EYES_ONLY: ${{ inputs.eyes_only }}
+          PIN: ${{ inputs.sha }}
           RELEASE_FREEZE: ${{ vars.RELEASE_FREEZE }}
           PR_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}   # as publish.yml: CI runs on the stamp pull request
         run: |
@@ -156,6 +165,7 @@ jobs:
           [ "$REF" = refs/heads/main ] || [ "$RECEIPTS_ONLY" = true ] || [ "$EYES_ONLY" = true ] || { echo "::error::Releases ship main only (got $REF)"; exit 1; }
           [ "$(echo "$RECEIPTS_ONLY $FEED_ONLY $EYES_ONLY" | grep -o true | wc -l)" -le 1 ] || { echo "::error::receipts_only, feed_only and eyes_only exclude each other"; exit 1; }
           [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || { echo "::error::version must look like 0.123 or 0.123.1 (got '$VERSION')"; exit 1; }
+          [ -z "$PIN" ] || [ "$FEED_ONLY$EYES_ONLY" = falsefalse ] || { echo "::error::sha does not apply to feed_only or eyes_only"; exit 1; }
           if [ "$FEED_ONLY" = true ] || [ "$EYES_ONLY" = true ]; then
             # feed_only posts the item of a release that shipped and was tagged; the feed job checks out that tag
             if [ "$FEED_ONLY" = true ]; then
@@ -166,9 +176,17 @@ jobs:
             echo "$([ "$FEED_ONLY" = true ] && echo "Feed item only for v$VERSION at ${SHA:0:12}" || echo "GPU-runner browser checks only, against the live build"): nothing ships" >> "$GITHUB_STEP_SUMMARY"; exit 0
           fi
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then echo "::error::tag v$VERSION already exists"; exit 1; fi
+          if [ -n "$PIN" ]; then
+            # A pinned sha: the gated commit is the release head of every job (they all read this job's sha output), so
+            # main keeps merging. On main, newer than the last release; the receipts bind this exact commit.
+            why=$(node tools/world-launcher/deploy/ship/release-pin.mjs check "$PIN" --main origin/main 2>&1) || { echo "::error::sha: $why"; exit 1; }
+            git checkout -q --detach "$PIN"
+            echo "Pinned head ${PIN:0:12} (${why#last=} is the last release; main is at $(git rev-parse --short origin/main)): no freeze needed" >> "$GITHUB_STEP_SUMMARY"
+          fi
           # #1838: the release freeze pins the head the release owner gated; main must still be exactly that commit.
+          # A pinned sha does not need it, so it is not consulted then.
           FROZEN=$(echo "$RELEASE_FREEZE" | awk '{print $1}')
-          if [ -n "$FROZEN" ] && [ "$RECEIPTS_ONLY" != true ] && [ "$(git rev-parse HEAD)" != "$(git rev-parse -q --verify "$FROZEN^{commit}" || echo "$FROZEN")" ]; then
+          if [ -z "$PIN" ] && [ -n "$FROZEN" ] && [ "$RECEIPTS_ONLY" != true ] && [ "$(git rev-parse HEAD)" != "$(git rev-parse -q --verify "$FROZEN^{commit}" || echo "$FROZEN")" ]; then
             echo "::error::release freeze: main's HEAD $(git rev-parse --short HEAD) is not the pinned $FROZEN (repo variable RELEASE_FREEZE). Something merged after the pin: gate the new head and pin it again, or revert it"; exit 1
           fi
           [[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "::error::accept_host_codes: comma-separated host codes, such as halted"; exit 1; }
@@ -199,7 +217,7 @@ jobs:
             ! git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null || { echo "::error::$branch already exists: merge or close its pull request, then dispatch again"; exit 1; }
             git push origin "HEAD:refs/heads/$branch"
             GH_TOKEN="$PR_TOKEN" gh pr create --base main --head "$branch" --label no-changelog --title "release: stamp the Soul client for $VERSION" \
-              --body "$(tail -1 "$stamp"): the client changed since the last release. Created by release.yml run $GITHUB_RUN_ID. Review and give it merge:ready; once it merges, gate main's head and dispatch the dry run again." \
+              --body "$(tail -1 "$stamp"): the client changed since the last release. Created by release.yml run $GITHUB_RUN_ID. Review and give it merge:ready; once it merges, gate main's head (or, for a pinned release, pin a commit at or after the stamp's merge and gate it) and dispatch the dry run again." \
               | tee -a "$GITHUB_STEP_SUMMARY"
             echo "stamped=1" >> "$GITHUB_OUTPUT"
             echo "Client stamp opened as a pull request (above); nothing else ran." >> "$GITHUB_STEP_SUMMARY"
@@ -711,10 +729,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Fold the fragments as of the shipped commit; fragments merged during the release wait for the next one.
+          # Fold the fragments as of the shipped commit; fragments merged during the release (or after a pinned sha) wait
+          # for the next one. Only those still on main: one a changelog pull request folded since the sha is not folded twice.
           shipped=$(git ls-tree --name-only "$SHA" changes/ | grep -vE '^changes/(README|_template)\.md$' | grep -E '\.md$' || true)
           tmp="$RUNNER_TEMP/changelog"; rm -rf "$tmp"; mkdir -p "$tmp/changes"
-          for f in $shipped; do git show "$SHA:$f" > "$tmp/$f"; done
+          kept=""; for f in $shipped; do [ -f "$f" ] || continue; git show "$SHA:$f" > "$tmp/$f"; kept="$kept $f"; done; shipped="$kept"
           if [ -f CHANGELOG.md ]; then cp CHANGELOG.md "$tmp/"; fi
           node tools/changelog/compile.mjs --root "$tmp" --version "$VERSION" --date "$DATE" --notes "$RUNNER_TEMP/notes.md"
           git tag -a "v$VERSION" "$SHA" -m "Souls $VERSION"
