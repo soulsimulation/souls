@@ -2,6 +2,9 @@
 //! through `commit`, then the memory it holds (A2) and the cost of listing children and links (A3), in that world
 //! and in one ten times larger. Run from `v2/`: `cargo run -p bench --release --bin tree`. Declared on #2646.
 
+// Times its own runs: the wall-clock rule (K7) binds the engine, not this bench.
+#![allow(clippy::disallowed_methods)]
+
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, schema_hash,
 };
