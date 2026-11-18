@@ -177,7 +177,7 @@
             "this": "l1",
             "form": "sit",
             "args": {
-              "seat": "left"
+              "seat": "seat_1"
             }
           },
           "receipt": "rl1",
@@ -189,7 +189,7 @@
                 "node": "b1",
                 "to": {
                   "node": "l1",
-                  "slot": "left"
+                  "slot": "seat_1"
                 }
               }
             ],
@@ -210,7 +210,7 @@
             "this": "l1",
             "form": "sit",
             "args": {
-              "seat": "right"
+              "seat": "seat_2"
             }
           },
           "actor": "b2",
@@ -223,7 +223,7 @@
                 "node": "b2",
                 "to": {
                   "node": "l1",
-                  "slot": "right"
+                  "slot": "seat_2"
                 }
               }
             ],
