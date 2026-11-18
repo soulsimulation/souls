@@ -48,7 +48,8 @@ import type { Entry, Form } from '../../../../packages/form-rules/src/rules.ts';
 type Vec2 = [number, number];
 type Vec3 = [number, number, number];
 type Step = { verb: string; params: Record<string, unknown> };
-type Refusal = { code: string; reason: string };
+/** A refusal; an entry's form adds `decided`, the rules library's own verdict (reason, detail, fix, read), for the client. */
+type Refusal = { code: string; reason: string; decided?: unknown };
 type Action = StoredDef['actions'][number];
 
 const ROOT = resolve(import.meta.dirname, '../../../..');
@@ -166,6 +167,10 @@ export function createFormsAdapter(h: FormsHost) {
     const kind = ref.split('@')[0];
     return kinds(kind)[kind] ?? null;
   }
+  /** The catalog's copy of an entry thing (SA-C3): its kind, from the def's `entry` param, and the entry itself; else null. */
+  function catalogEntry(def: StoredDef | undefined): { kind: string; body: Entry } | null {
+    const entry = entryOf(def); return entry ? { kind: entry.kind, body: entry } : null;
+  }
   /** The body's forms that change the parent of a thing argument named `thing` (its `put`), mapped here (SA-F4b). */
   function bodyForms(): [string, FormRef['form']][] {
     const body = kinds(BODY_KIND)[BODY_KIND]; if (!body) return [];
@@ -235,6 +240,8 @@ export function createFormsAdapter(h: FormsHost) {
     const input = { kinds, act: { this: f.body ? bodyId : id, form: action, args }, state: { actor: bodyId, nodes, moves: moves() } };
     return Object.assign(effects({ ...input, receipt }), { input });
   }
+  /** The rules' own verdict for a refusal's `decided` (SA-C3), without the input `ask` keeps beside it. */
+  const verdictOf = (r: any) => { const { input: _input, ...v } = r; return v; };
   const fieldsOf = (x: NonNullable<ReturnType<typeof thing>>) => { const f: Record<string, unknown> = {}; for (const [k, d] of Object.entries(x.entry.state ?? {})) f[k] = x.e.state?.[k] ?? d.default; return f; };
   /** Today's free places on top of a thing (not inside it, not hooks). */
   const freeTops = (eid: string) => { const w = world(); return surfaceSlotsOf(w, eid).filter((x) => !x.inside && !x.hang && !slotOccupant(w, x.owner, x.slot)); };
@@ -269,7 +276,7 @@ export function createFormsAdapter(h: FormsHost) {
     const form = f.form, body = all()[soul.entityId]; if (!body?.pose?.p) return null;
     // the needs as they stand now, with the hand where the form's move puts it (its walk meets within_reach)
     const mv = (form.steps ?? []).find((s) => s.step === 'move'), now = ask(t, id, f, action, soul.entityId, (mv && t.entry.points?.[mv.at as string]?.at_mm) ?? [0, 0, 0], 'plan');
-    if (now.verdict !== 'yes') return { code: `form.${now.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), now)}.` };
+    if (now.verdict !== 'yes') return { code: `form.${now.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), now)}.`, decided: verdictOf(now) };
     const wp = M().worldPose(t.e), level = h.levelAt(wp.x, wp.z, wp.y), points = t.entry.points ?? {};
     const steps: Step[] = [{ verb: 'stand', params: {} }];
     let at: Vec2 = [body.pose.p[0], body.pose.p[2]];
@@ -402,7 +409,7 @@ export function createFormsAdapter(h: FormsHost) {
       else { const dx = body.pose.p[0] - wp.x, dz = body.pose.p[2] - wp.z, c = Math.cos(wp.yaw), s = Math.sin(wp.yaw); effector = [Math.round((dx * c - dz * s) * 1000), 0, Math.round((dx * s + dz * c) * 1000)]; }
     }
     const r = ask(t, id, f, action, bodyId, effector, `${capability}@${h.engine.world.tick}`);
-    if (r.verdict !== 'yes') return { code: `form.${r.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), r)}; nothing changed.` };
+    if (r.verdict !== 'yes') return { code: `form.${r.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), r)}; nothing changed.`, decided: verdictOf(r) };
     // every set, on any thing it names, checked by the rules' own apply (whole, balanced) and committed as one edit
     const checked = apply(r.input.state, r);
     if (!checked.ok) return { code: `form.${checked.reason}`, reason: `${nameOf(id)}: the change could not be applied (${checked.reason.replace(/_/g, ' ')}); nothing changed.` };
@@ -424,7 +431,7 @@ export function createFormsAdapter(h: FormsHost) {
   const owns = (capability: string) => { const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability), t = m && thing(m[1]); return !!t && (!!t.entry.forms?.[m![2]] || bodyForms().some(([n]) => n === m![2])); };
   /** The act has started (the ledger's expect, right after the plan wrapAct made for it): keep that plan's answer. */
   const begun = (body: string, capability: string) => { const l = latest.get(body); if (l?.capability === capability) planned.set(`${body}|${capability}`, l.answer); };
-  return { plan, outcome, owns, begun, actions };
+  return { plan, outcome, owns, begun, actions, catalogEntry };
 }
 export type FormsAdapter = ReturnType<typeof createFormsAdapter>;
 
