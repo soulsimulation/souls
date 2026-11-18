@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646. `view-tier`: R3, #2697. `subscription`: R4, #2698. `replica-equal`: R1, #2684. `restart`: K5, #2669."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646. `view-tier`: R3, #2697. `subscription`: R4, #2698. `replica-equal`: R1, #2684. `restart`: K5, #2669. `gateway-restart`: I1, #2683."
 
 [[bin]]
 name = "tree"
@@ -26,7 +26,15 @@ path = "replica-equal/main.rs"
 name = "restart"
 path = "src/restart.rs"
 
+[[bin]]
+name = "gateway-restart"
+path = "gateway-restart/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 sim = { path = "../../crates/sim" }
 worldd = { path = "../../crates/worldd" }
+gatewayd = { path = "../../crates/gatewayd" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
