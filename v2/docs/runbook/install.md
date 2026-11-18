@@ -69,12 +69,13 @@ bash <bundle>/install.sh uninstall
    the configured origin mounts sign-in (`docs/operations/auth.md`), so the preview lives on the public name.
 2. Put any secrets in `/etc/souls/secrets.env`.
 3. Place the preview's proxy site file once, by hand; a release never writes the proxy's configuration. The shape,
-   for a path under the public name (the path is the owner's choice):
+   for a path under the public name (the path is the owner's choice; `<origin>` is the origin's loopback address
+   and port 7320):
 
    ```caddyfile
    handle_path /v2-preview/* {
      handle_path /s/* {
-       reverse_proxy 127.0.0.1:7320
+       reverse_proxy <origin>
      }
      root * /usr/local/lib/souls/web
      file_server

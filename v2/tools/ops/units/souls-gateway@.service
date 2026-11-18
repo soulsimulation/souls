@@ -1,6 +1,6 @@
 # One world's gateway (Engine v2 I1, #2683; installed by v2/tools/ops/install.sh, O17 #2810): agents' sockets in,
 # the world's local socket out. The instance is the world's name. Its arguments are the world's own file,
-# /etc/souls/gateway-<world>.env (GATEWAYD_ARGS=--listen 127.0.0.1:<port> --world <socket> --tokens <file>
+# /etc/souls/gateway-<world>.env (GATEWAYD_ARGS=--listen <loopback>:<port> --world <socket> --tokens <file>
 # --build <hex>), written when the world is placed (X5), never by the install. The install starts nothing.
 [Unit]
 Description=Souls gateway for world %i

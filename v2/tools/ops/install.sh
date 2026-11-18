@@ -128,15 +128,29 @@ ensure_tree() {
   done < <(cd "$R$dst" && find . -mindepth 1 | sed 's|^\./||' | sort -r)
 }
 
-DIRECTORY_ARGS="# Arguments for souls-directory.service (directoryd; v2/crates/directoryd/src/accounts/start.rs). Written once by
+DIRECTORY_PORT=7310 # on loopback; the origin's, 7320, is in souls-origin.service
+# The directory's arguments, written once. It listens on this machine's IPv4 loopback address, as localhost resolves
+# (directoryd takes an address, not a name).
+directory_args() {
+  local lo
+  lo=$(getent ahostsv4 localhost 2> /dev/null | awk 'NR == 1 {print $1}') || true
+  if [ -z "$lo" ]; then
+    [ "$MODE" = plan ] || die "localhost has no IPv4 address"
+    lo='<loopback>'
+  fi
+  cat << EOF
+# Arguments for souls-directory.service (directoryd; v2/crates/directoryd/src/accounts/start.rs). Written once by
 # the install, never overwritten. Add the sign-in provider (--issuer <https origin> --parties <origin,...>) before
 # starting it; only the configured origin mounts sign-in (docs/operations/auth.md).
-DIRECTORYD_ARGS=--listen 127.0.0.1:7310 --public-url https://soul.game --store $DATA/directory"
+DIRECTORYD_ARGS=--listen $lo:$DIRECTORY_PORT --public-url https://soul.game --store $DATA/directory
+EOF
+}
 SECRETS="# Secrets for Engine v2's programs, KEY=value lines (root only; systemd reads it before a unit drops to souls)."
 
 install_all() {
-  local from=$1 p u
+  local from=$1 p u args
   [ -d "$from" ] || die "--from <bundle> is a folder (bash install.sh bundle makes one)"
+  args=$(directory_args)
   from=$(cd "$from" && pwd)
   ensure_user
   ensure_dir "$ETC" 750 root "$ACCOUNT" "tree $ETC"
@@ -147,7 +161,7 @@ install_all() {
   ensure_tree "$from/web" "$LIB/web"
   ensure_dir "$DATA" 750 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
   for p in worlds directory views; do ensure_dir "$DATA/$p" 750 "$ACCOUNT" "$ACCOUNT"; done
-  ensure_once "$ETC/directory.args" 640 root "$ACCOUNT" "$DIRECTORY_ARGS"
+  ensure_once "$ETC/directory.args" 640 root "$ACCOUNT" "$args"
   ensure_once "$ETC/secrets.env" 600 root root "$SECRETS"
   for u in "${UNIT_FILES[@]}"; do
     record "file $UNITS/$u"
@@ -215,7 +229,8 @@ check() {
     awk '$1 == "would" && $2 ~ /^(dir|file)$/ {print "path " $3} $1 == "would" && $2 == "user" {print "user " $3}' "$tmp/plan"
     for u in "${UNIT_FILES[@]}"; do echo "unit ${u%%.*}"; done
     echo "unit ${DROPIN##*/}" | sed 's/\.service\.d$//'
-    cat "$HERE"/units/* "$0" | grep -oE '127\.0\.0\.1:[0-9]{2,5}|[0-9]{4,5} 127\.0\.0\.1' | grep -oE '[0-9]{4,5}' | sed 's/^/port /'
+    echo "port $DIRECTORY_PORT"
+    cat "$HERE"/units/* | grep -oE '[0-9]{4,5} localhost' | grep -oE '[0-9]{4,5}' | sed 's/^/port /'
   } | sort -u > "$ours"
   local files=("$today"/*.sh "$today"/*.service "$today"/*.timer "$today"/*.socket "$today"/caddy/*)
   {
