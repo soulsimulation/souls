@@ -169,6 +169,7 @@ function wayOut(entry, add) {
   const linked = new Set(Object.keys(links).filter(l => !linkers[l]));
   const armed = new Set(), on = new Set();
   const ok = n => {
+    if (n.need === 'state' && n.link) return true; // the place's field is set by its place, from outside
     if (n.need === 'state') {
       if (open.has(n.field) || !reach[n.field]) return true;
       const v = 'is' in n ? n.is : n.not;
@@ -243,6 +244,8 @@ export function checkFiles(files, all = files) {
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 // `entry prove <family>` runs every gate that needs no engine (prove.mjs, SA-P8).
 if (isMain && process.argv[2] === 'prove') import('./prove.mjs').then(m => { process.exitCode = m.main(process.argv.slice(3)); });
+// `entry run <family> --world <address>` drives a world from outside through the family's cases (run.mjs, SA-P3a).
+else if (isMain && process.argv[2] === 'run') import('./run.mjs').then(async m => { process.exitCode = await m.main(process.argv.slice(3)); });
 else if (isMain) {
   const args = process.argv.slice(2).filter((a, i) => !(i === 0 && a === 'check'));
   const all = F.loadDir(KINDS_DIR);

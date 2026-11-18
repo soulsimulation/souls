@@ -1,0 +1,2799 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "The field conversions of SA-X4 (#2899): angling (#1823), the trail sign (#1662) and the stone cairn (#1731). Each form has a case with every need met and one per unmet need; the refusal's own words are the need's `says`. Worked by hand from the entries and the originals' rules.",
+ "cases": [
+  {
+   "name": "catch_every_need_met",
+   "act": {
+    "this": "o1",
+    "form": "catch",
+    "args": {
+     "creel": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "o1": {
+      "kind": "eden:angling_pool",
+      "fields": {
+       "fish": 3,
+       "bait": 3
+      }
+     },
+     "c1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "catch_with_no_bait",
+   "act": {
+    "this": "o1",
+    "form": "catch",
+    "args": {
+     "creel": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "o1": {
+      "kind": "eden:angling_pool",
+      "fields": {
+       "fish": 3,
+       "bait": 0
+      }
+     },
+     "c1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "bait",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "no_fish_or_bait"
+   }
+  },
+  {
+   "name": "catch_from_an_empty_pool",
+   "act": {
+    "this": "o1",
+    "form": "catch",
+    "args": {
+     "creel": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "o1": {
+      "kind": "eden:angling_pool",
+      "fields": {
+       "fish": 0,
+       "bait": 2
+      }
+     },
+     "c1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "o1",
+     "field": "fish",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "no_fish_or_bait"
+   }
+  },
+  {
+   "name": "catch_into_a_full_creel",
+   "act": {
+    "this": "o1",
+    "form": "catch",
+    "args": {
+     "creel": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "o1": {
+      "kind": "eden:angling_pool",
+      "fields": {
+       "fish": 2,
+       "bait": 2
+      }
+     },
+     "c1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "c1",
+     "field": "fish",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "creel_full"
+   }
+  },
+  {
+   "name": "catch_holding_something",
+   "act": {
+    "this": "o1",
+    "form": "catch",
+    "args": {
+     "creel": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "o1": {
+      "kind": "eden:angling_pool",
+      "fields": {
+       "fish": 3,
+       "bait": 3
+      }
+     },
+     "c1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 3,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "release_every_need_met",
+   "act": {
+    "this": "o1",
+    "form": "release",
+    "args": {
+     "creel": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "o1": {
+      "kind": "eden:angling_pool",
+      "fields": {
+       "fish": 2,
+       "bait": 2
+      }
+     },
+     "c1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "release_from_an_empty_creel",
+   "act": {
+    "this": "o1",
+    "form": "release",
+    "args": {
+     "creel": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "o1": {
+      "kind": "eden:angling_pool",
+      "fields": {
+       "fish": 2,
+       "bait": 2
+      }
+     },
+     "c1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 0,
+    "detail": {
+     "node": "c1",
+     "field": "fish",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "nothing_to_release"
+   }
+  },
+  {
+   "name": "release_into_a_full_pool",
+   "act": {
+    "this": "o1",
+    "form": "release",
+    "args": {
+     "creel": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "o1": {
+      "kind": "eden:angling_pool",
+      "fields": {
+       "fish": 3,
+       "bait": 2
+      }
+     },
+     "c1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 1,
+    "detail": {
+     "node": "o1",
+     "field": "fish",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "stock_full"
+   }
+  },
+  {
+   "name": "release_holding_something",
+   "act": {
+    "this": "o1",
+    "form": "release",
+    "args": {
+     "creel": "c1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "o1": {
+      "kind": "eden:angling_pool",
+      "fields": {
+       "fish": 2,
+       "bait": 2
+      }
+     },
+     "c1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 1
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "assemble_sign_every_need_met",
+   "act": {
+    "this": "s1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "s1": {
+      "kind": "eden:trail_sign_site",
+      "fields": {
+       "timber": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "assemble_sign_with_no_timber",
+   "act": {
+    "this": "s1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "s1": {
+      "kind": "eden:trail_sign_site",
+      "fields": {
+       "timber": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "timber",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "no_timber"
+   }
+  },
+  {
+   "name": "assemble_sign_site_occupied",
+   "act": {
+    "this": "s1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "s1": {
+      "kind": "eden:trail_sign_site",
+      "fields": {
+       "timber": 1
+      },
+      "slots": {
+       "out": [
+        "g9"
+       ]
+      }
+     },
+     "g9": {
+      "kind": "eden:trail_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "s1",
+     "slot": "out"
+    },
+    "fix": null,
+    "says": "site_occupied"
+   }
+  },
+  {
+   "name": "assemble_sign_holding_something",
+   "act": {
+    "this": "s1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "s1": {
+      "kind": "eden:trail_sign_site",
+      "fields": {
+       "timber": 1
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "write_every_need_met",
+   "act": {
+    "this": "g1",
+    "form": "write",
+    "args": {
+     "words": "route_to_the_lake"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1300,
+       400
+      ]
+     },
+     "g1": {
+      "kind": "eden:trail_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "write_with_both_hands_full",
+   "act": {
+    "this": "g1",
+    "form": "write",
+    "args": {
+     "words": "route_to_the_lake"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       1300,
+       400
+      ]
+     },
+     "g1": {
+      "kind": "eden:trail_sign"
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 0,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    },
+    "says": "a_hand_to_write"
+   }
+  },
+  {
+   "name": "write_out_of_reach",
+   "act": {
+    "this": "g1",
+    "form": "write",
+    "args": {
+     "words": "route_to_the_lake"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1300,
+       2000
+      ]
+     },
+     "g1": {
+      "kind": "eden:trail_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "board",
+     "move": "slide"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "board"
+    }
+   }
+  },
+  {
+   "name": "lower_flat_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "lower_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "loose",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "lower_flat_already_so",
+   "act": {
+    "this": "c1",
+    "form": "lower_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lower",
+     "found": "flat",
+     "wanted": {
+      "not": "flat"
+     }
+    },
+    "fix": {
+     "form": "dismantle"
+    },
+    "says": "already_arranged"
+   }
+  },
+  {
+   "name": "lower_flat_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "lower_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "loose",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "lower_upright_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "lower_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "loose",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "lower_upright_already_so",
+   "act": {
+    "this": "c1",
+    "form": "lower_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "upright",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lower",
+     "found": "upright",
+     "wanted": {
+      "not": "upright"
+     }
+    },
+    "fix": {
+     "form": "dismantle"
+    },
+    "says": "already_arranged"
+   }
+  },
+  {
+   "name": "lower_upright_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "lower_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "loose",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "middle_flat_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "middle_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "middle_flat_before_the_tier_below",
+   "act": {
+    "this": "c1",
+    "form": "middle_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "loose",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lower",
+     "found": "loose",
+     "wanted": {
+      "not": "loose"
+     }
+    },
+    "fix": {
+     "form": "lower_flat"
+    },
+    "says": "lower_first"
+   }
+  },
+  {
+   "name": "middle_flat_already_so",
+   "act": {
+    "this": "c1",
+    "form": "middle_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "middle",
+     "found": "flat",
+     "wanted": {
+      "not": "flat"
+     }
+    },
+    "fix": {
+     "form": "dismantle"
+    },
+    "says": "already_arranged"
+   }
+  },
+  {
+   "name": "middle_flat_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "middle_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "middle_upright_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "middle_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "middle_upright_before_the_tier_below",
+   "act": {
+    "this": "c1",
+    "form": "middle_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "loose",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lower",
+     "found": "loose",
+     "wanted": {
+      "not": "loose"
+     }
+    },
+    "fix": {
+     "form": "lower_flat"
+    },
+    "says": "lower_first"
+   }
+  },
+  {
+   "name": "middle_upright_already_so",
+   "act": {
+    "this": "c1",
+    "form": "middle_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "upright",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "middle",
+     "found": "upright",
+     "wanted": {
+      "not": "upright"
+     }
+    },
+    "fix": {
+     "form": "dismantle"
+    },
+    "says": "already_arranged"
+   }
+  },
+  {
+   "name": "middle_upright_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "middle_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "upper_flat_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "upper_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "upper_flat_before_the_tier_below",
+   "act": {
+    "this": "c1",
+    "form": "upper_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "middle",
+     "found": "loose",
+     "wanted": {
+      "not": "loose"
+     }
+    },
+    "fix": {
+     "form": "middle_flat"
+    },
+    "says": "lower_first"
+   }
+  },
+  {
+   "name": "upper_flat_already_so",
+   "act": {
+    "this": "c1",
+    "form": "upper_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "flat"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "upper",
+     "found": "flat",
+     "wanted": {
+      "not": "flat"
+     }
+    },
+    "fix": {
+     "form": "dismantle"
+    },
+    "says": "already_arranged"
+   }
+  },
+  {
+   "name": "upper_flat_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "upper_flat"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "loose"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "upper_upright_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "upper_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "upper_upright_before_the_tier_below",
+   "act": {
+    "this": "c1",
+    "form": "upper_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "middle",
+     "found": "loose",
+     "wanted": {
+      "not": "loose"
+     }
+    },
+    "fix": {
+     "form": "middle_flat"
+    },
+    "says": "lower_first"
+   }
+  },
+  {
+   "name": "upper_upright_already_so",
+   "act": {
+    "this": "c1",
+    "form": "upper_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "upright"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "upper",
+     "found": "upright",
+     "wanted": {
+      "not": "upright"
+     }
+    },
+    "fix": {
+     "form": "dismantle"
+    },
+    "says": "already_arranged"
+   }
+  },
+  {
+   "name": "upper_upright_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "upper_upright"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "loose"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "undo_lower_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "undo_lower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "undo_lower_under_a_stone",
+   "act": {
+    "this": "c1",
+    "form": "undo_lower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "middle",
+     "found": "flat",
+     "wanted": {
+      "is": "loose"
+     }
+    },
+    "fix": {
+     "form": "dismantle"
+    },
+    "says": "take_top_first"
+   }
+  },
+  {
+   "name": "undo_lower_with_no_stone_there",
+   "act": {
+    "this": "c1",
+    "form": "undo_lower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "loose",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "lower",
+     "found": "loose",
+     "wanted": {
+      "not": "loose"
+     }
+    },
+    "fix": {
+     "form": "lower_flat"
+    },
+    "says": "all_recovered"
+   }
+  },
+  {
+   "name": "undo_lower_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "undo_lower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "undo_middle_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "undo_middle"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "undo_middle_under_a_stone",
+   "act": {
+    "this": "c1",
+    "form": "undo_middle"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "flat"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "upper",
+     "found": "flat",
+     "wanted": {
+      "is": "loose"
+     }
+    },
+    "fix": {
+     "form": "dismantle"
+    },
+    "says": "take_top_first"
+   }
+  },
+  {
+   "name": "undo_middle_with_no_stone_there",
+   "act": {
+    "this": "c1",
+    "form": "undo_middle"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "middle",
+     "found": "loose",
+     "wanted": {
+      "not": "loose"
+     }
+    },
+    "fix": {
+     "form": "middle_flat"
+    },
+    "says": "nothing_there"
+   }
+  },
+  {
+   "name": "undo_middle_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "undo_middle"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "loose"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "undo_upper_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "undo_upper"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "flat"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "undo_upper_with_no_stone_there",
+   "act": {
+    "this": "c1",
+    "form": "undo_upper"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "upper",
+     "found": "loose",
+     "wanted": {
+      "not": "loose"
+     }
+    },
+    "fix": {
+     "form": "upper_flat"
+    },
+    "says": "nothing_there"
+   }
+  },
+  {
+   "name": "undo_upper_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "undo_upper"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "flat",
+       "upper": "flat"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "dismantle_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "dismantle"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "upright",
+       "upper": "flat"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "dismantle_with_nothing_built",
+   "act": {
+    "this": "c1",
+    "form": "dismantle"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "loose",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lower",
+     "found": "loose",
+     "wanted": {
+      "not": "loose"
+     }
+    },
+    "fix": {
+     "form": "lower_flat"
+    },
+    "says": "all_recovered"
+   }
+  },
+  {
+   "name": "dismantle_holding_something",
+   "act": {
+    "this": "c1",
+    "form": "dismantle"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "c1": {
+      "kind": "eden:stone_cairn",
+      "fields": {
+       "lower": "flat",
+       "middle": "loose",
+       "upper": "loose"
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  }
+ ]
+}

@@ -48,7 +48,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
-| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing` or a kind), `most`, `most_per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
+| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
@@ -289,11 +289,19 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   or `{"thing": {"arg": ...}}`), `moves` (`{"thing": {"arg": ...}, "by": "carry" | "push"}`: the thing's kind moves
   that way by its section 18 `motion.how`; carrying takes as many free hands as it says, a push by one body is refused
   for `two_souls`; refused as `moves_by`, `motion_unsaid`, `needs_souls` or `no_free_hand`), `hand`
-  (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
+  (`{"free": true}`, one hand free; `{"empty": true}`, every hand empty; or `{"holds": "<namespace:name>"}`, a kind
+  the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
   `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
   `timed` field.
+  A `state` need with a `link` reads the **place the thing stands in**: `{"need": "state", "link": "place", "field":
+  "rain", "at_least": 101}`, where the link type is declared `{"from": "place", "most": 1}`. The field is the place
+  kind's, read by its number and only by its audience; the place is never read from the tree, since a parent means
+  lifetime and frame only (Engine v2 T2, `v2/docs/world-model.md`), and never from a global weather call. Who links a
+  thing to its place is outside the kind (Engine v2 E4, E6); a rain collector collects only while it rains there.
+  Any need may name its refusal's words with `says`, a key of the `text` table (words by reference, SA-F6b), so a
+  conversion keeps the original's wording: `{"need": "hand", "empty": true, "says": "put_down_first"}`.
   SA-F2 evaluates them. **Reach to another thing** is read in this order: (1) the walk, taken as done: entries store
   no position for a loose thing (Engine v2 holds poses, and today's adapter walks first), so `within_reach` of a
   `thing` argument that the form `walk_to`s is met when the thing is in the actor's place, and refused `out_of_reach`
@@ -306,6 +314,10 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
   SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
+- **A timer is named by the form it starts.** Starting a timer replaces the thing's pending timer for the same form
+  (Engine v2 T6 rule 15: the engine clears it, a clear being "fired or cancelled"; T5: it is due at a world time in
+  microseconds). A crank lamp put out early and lit again goes dark at its new time, not by the earlier timer. The
+  timer's form still checks its own needs when it fires.
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor, this thing or a
   `thing` argument, into a slot, the actor's hand or `here`, loose in the actor's place: holding is a change of
   parent), `link`, `unlink`, `create` (a kind, `here`, in a slot or in the hand), `remove` (the actor, this thing or a
