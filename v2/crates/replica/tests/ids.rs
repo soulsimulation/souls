@@ -3,8 +3,8 @@
 
 use replica::encode::to_hex;
 use replica::ids::{
-    FIXTURE_CUP, FIXTURE_KETTLE, FIXTURE_SCOPE_A, FIXTURE_SCOPE_B, Hash, Held, KindSource, Minter,
-    Purpose, Scope, arrive, fork_then_travel_back, ids_goldens, name_kinds, sha256,
+    FIXTURE_CUP, FIXTURE_KETTLE, FIXTURE_SCOPE_A, FIXTURE_SCOPE_B, Hash, Held, Id, KindSource,
+    Minter, Purpose, Scope, arrive, fork_then_travel_back, ids_goldens, name_kinds, sha256,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -340,4 +340,46 @@ fn kind_names_are_lower_case() {
         assert_eq!(refused.name(), "kind-source", "{bad}");
     }
     assert!(KindSource::parse("{1: \"mars-college:bench_2\"}").is_ok());
+}
+
+/// #3213: `Id`'s order is the order its derived byte-by-byte compare gave (scope bytes, then counter), on random ids,
+/// on scopes that share their first bytes (so each byte position decides some pairs), and on equal ones.
+#[test]
+fn id_order_is_the_bytes_order() {
+    let mut s = 0x2a_u64;
+    let mut next = || {
+        s = s.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = s;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    };
+    let mut ids = Vec::new();
+    for _ in 0..400 {
+        let mut b = [0u8; 16];
+        for c in b.chunks_mut(8) {
+            c.copy_from_slice(&next().to_le_bytes());
+        }
+        if next() % 2 == 0 {
+            let keep = (next() % 17) as usize;
+            for x in &mut b[keep..] {
+                *x = 0;
+            }
+        }
+        let counter = if next() % 3 == 0 {
+            next() % 4
+        } else {
+            next() % (1 << 53)
+        };
+        ids.push(Id::new(Scope(b), counter).unwrap());
+    }
+    ids.push(ids[0]);
+    let old = |a: &Id, b: &Id| (a.scope().0, a.counter()).cmp(&(b.scope().0, b.counter()));
+    for a in &ids {
+        for b in &ids {
+            assert_eq!(a.cmp(b), old(a, b), "{a:?} {b:?}");
+            assert_eq!(a.partial_cmp(b), Some(old(a, b)));
+            assert_eq!(a.scope().cmp(&b.scope()), a.scope().0.cmp(&b.scope().0));
+        }
+    }
 }

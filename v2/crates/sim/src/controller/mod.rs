@@ -46,7 +46,7 @@ use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
-use replica::encode::{Name, Value, encode};
+use replica::encode::{Name, Value};
 use replica::ids::Id;
 use replica::pose::{ControllerInput, Frame, HandOff, Mode, Owner, Pose, Quat, Support, Vec3};
 use replica::time::Micros;
@@ -173,6 +173,94 @@ impl Input {
             m.insert(8, self.gaze.record());
         }
         Value::Map(m)
+    }
+
+    /// The bytes of [`Input::record`] (T0's encoding), written straight from the input: the same bytes as
+    /// `encode(&self.record(at, body))`, without building the record a body a tick (#3213).
+    pub fn bytes(&self, at: Micros, body: Id) -> Vec<u8> {
+        // A gaze other than ahead (field 8, gaze and voice) is rare: the general encoder writes that record.
+        if self.gaze != Gaze::Ahead
+            && let Ok(bytes) = replica::encode::encode(&self.record(at, body))
+        {
+            return bytes;
+        }
+        let mut out = Vec::with_capacity(96);
+        head(&mut out, 5, if self.moves.is_empty() { 6 } else { 7 });
+        head(&mut out, 0, 1);
+        int_bytes(&mut out, at);
+        head(&mut out, 0, 2);
+        head(&mut out, 4, 2);
+        head(&mut out, 2, 16);
+        out.extend_from_slice(&body.scope().0);
+        head(&mut out, 0, body.counter());
+        head(&mut out, 0, 3);
+        head(&mut out, 4, 3);
+        let v = self.velocity;
+        for n in [v.x, v.y, v.z] {
+            int_bytes(&mut out, n);
+        }
+        head(&mut out, 0, 4);
+        head(&mut out, 4, 4);
+        for n in self.facing.parts() {
+            int_bytes(&mut out, n);
+        }
+        head(&mut out, 0, 5);
+        head(
+            &mut out,
+            0,
+            match self.mode {
+                Mode::Surface => 1,
+            },
+        );
+        head(&mut out, 0, 6);
+        head(
+            &mut out,
+            0,
+            match self.stance {
+                Stance::Stand => 1,
+                Stance::Sit => 2,
+                Stance::Lie => 3,
+            },
+        );
+        if !self.moves.is_empty() {
+            head(&mut out, 0, 7);
+            head(&mut out, 4, self.moves.len() as u64);
+            for (r, mv) in &self.moves {
+                head(&mut out, 4, 2);
+                for t in [r.as_str(), mv.as_str()] {
+                    head(&mut out, 3, t.len() as u64);
+                    out.extend_from_slice(t.as_bytes());
+                }
+            }
+        }
+        out
+    }
+}
+
+/// T0's head of an item: major type `major`, argument `arg`, in the shortest form (as `replica::encode` writes it).
+fn head(out: &mut Vec<u8>, major: u8, arg: u64) {
+    let m = major << 5;
+    if arg < 24 {
+        out.push(m | arg as u8);
+    } else if let Ok(a) = u8::try_from(arg) {
+        out.extend([m | 24, a]);
+    } else if let Ok(a) = u16::try_from(arg) {
+        out.push(m | 25);
+        out.extend(a.to_be_bytes());
+    } else if let Ok(a) = u32::try_from(arg) {
+        out.push(m | 26);
+        out.extend(a.to_be_bytes());
+    } else {
+        out.push(m | 27);
+        out.extend(arg.to_be_bytes());
+    }
+}
+
+/// An integer as [`int`] makes it, written.
+fn int_bytes(out: &mut Vec<u8>, n: i64) {
+    match u64::try_from(n) {
+        Ok(u) => head(out, 0, u),
+        Err(_) => head(out, 1, n.unsigned_abs() - 1),
     }
 }
 
@@ -372,22 +460,18 @@ impl Slot {
         }
     }
 
-    /// Logs the input if it changed since it was last logged.
-    fn log(&mut self, id: Id, at: Micros, log: &mut Vec<Logged>) -> R<()> {
+    /// Logs the input if it changed since it was last logged. A record of fixed shape and depth: written straight
+    /// (`Input::bytes`), it cannot be refused.
+    fn log(&mut self, id: Id, at: Micros, log: &mut Vec<Logged>) {
         if self.touched && self.logged.as_ref() != Some(&self.input) {
-            let bytes = encode(&self.input.record(at, id)).map_err(|e| Refusal {
-                name: "encoding",
-                detail: e.to_string(),
-            })?;
             log.push(Logged {
                 at,
                 body: id,
-                bytes,
+                bytes: self.input.bytes(at, id),
             });
             self.logged = Some(self.input.clone());
         }
         self.touched = false;
-        Ok(())
     }
 
     /// The parts `held` covered go back to neutral: locomotion to standing still, each resource's move to none.
@@ -641,6 +725,13 @@ impl Controller {
         Ok(())
     }
 
+    /// `body` as the mover last left it, and the link it is being carried across, if any: [`Controller::body`] and
+    /// [`Controller::carrying`] in one lookup.
+    pub fn seen(&self, body: Id) -> Option<(&Moved, Option<Id>)> {
+        let s = self.bodies.get(&body)?;
+        Some((&s.moved, s.track.as_ref().and_then(|t| t.link)))
+    }
+
     /// The link `body` is being carried across, if any.
     pub fn carrying(&self, body: Id) -> Option<Id> {
         self.bodies.get(&body)?.track.as_ref().and_then(|t| t.link)
@@ -706,6 +797,40 @@ impl Controller {
         Ok(())
     }
 
+    /// Sets each control's velocity and mode, as [`Controller::set`] with [`Part::Velocity`] does one at a time, and
+    /// returns the refusals with their bodies, in order. Controls in body id order (as a tick stages them) are matched
+    /// along the bodies in one walk, not looked up each (#3213); any other order is set one at a time.
+    pub fn set_velocities(
+        &mut self,
+        controls: &[(Id, Driver, ControllerInput)],
+    ) -> Vec<(Id, Refusal)> {
+        let mut refused = Vec::new();
+        if !controls.is_sorted_by_key(|c| c.0) {
+            for &(body, driver, input) in controls {
+                if let Err(r) = self.set(body, driver, Part::Velocity(input.velocity, input.mode)) {
+                    refused.push((body, r));
+                }
+            }
+            return refused;
+        }
+        let mut slots = self.bodies.iter_mut().peekable();
+        for &(body, driver, input) in controls {
+            while slots.next_if(|(id, _)| **id < body).is_some() {}
+            let set = match slots.peek_mut() {
+                Some((id, s)) if **id == body => s.steers(driver).map(|()| {
+                    s.input.velocity = input.velocity;
+                    s.input.mode = input.mode;
+                    s.touched = true;
+                }),
+                _ => refuse("body-unknown", replica::world_model::show(body)),
+            };
+            if let Err(r) = set {
+                refused.push((body, r));
+            }
+        }
+        refused
+    }
+
     /// Gives `body`'s voice an utterance, if `driver` holds a voice resource: with `replace` it ends the one under way
     /// and any waiting, and starts on the next step; else it waits behind them.
     pub fn say(&mut self, body: Id, driver: Driver, line: Line) -> R<()> {
@@ -738,18 +863,12 @@ impl Controller {
                     // A seated body's voice still carries or waits: visited again next tick (B11 in a slot).
                     self.woken.insert(id);
                 }
-                if let Err(r) = s.log(id, at, &mut self.log) {
-                    out.refused.push((id, r));
-                }
+                s.log(id, at, &mut self.log);
             }
         }
         for (&id, s) in self.bodies.iter_mut() {
             s.speak(id, at, &mut out.said);
-            if let Err(r) = s.log(id, at, &mut self.log) {
-                out.refused.push((id, r));
-                continue;
-            }
-            s.touched = false;
+            s.log(id, at, &mut self.log);
             s.moved.pose.orientation = s.input.facing;
             if let Some(t) = s.track.as_mut() {
                 match t.advance(&mut s.moved, surfaces, dt) {
@@ -806,5 +925,49 @@ impl Controller {
             self.near.put_moved(&s.moved);
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use replica::encode::encode;
+    use replica::ids::Scope;
+
+    /// #3213: the input log's bytes written straight are T0's encoding of its record, for every shape of input.
+    #[test]
+    fn bytes_are_the_records_encoding() {
+        let body = Id::new(Scope([0x9b; 16]), 70_000).expect("an id");
+        let name = |n: &str| Name::new(n).expect("a name");
+        let mut inputs = vec![Input::neutral(Quat::IDENTITY)];
+        for (v, stance) in [
+            (Vec3::new(1_400_000, 0, -23), Stance::Sit),
+            (Vec3::new(-1, 24, -70_000_000_000), Stance::Lie),
+            (Vec3::new(255, -256, 65_536), Stance::Stand),
+        ] {
+            let mut i = Input::neutral(Quat::IDENTITY);
+            (i.velocity, i.stance) = (v, stance);
+            inputs.push(i);
+        }
+        let mut held = Input::neutral(Quat::IDENTITY);
+        held.moves
+            .insert(name("souls:hand-left"), name("souls:wave"));
+        held.moves
+            .insert(name("souls:hand-right"), name("souls:hold"));
+        inputs.push(held);
+        for gaze in [
+            Gaze::Point(Vec3::new(3_000_000, 1_600_000, 0)),
+            Gaze::Node(body),
+        ] {
+            let mut i = Input::neutral(Quat::IDENTITY);
+            i.gaze = gaze;
+            inputs.push(i);
+        }
+        for at in [0, 23, 50_000, -7, 1 << 40] {
+            for i in &inputs {
+                let want = encode(&i.record(at, body)).expect("encodes");
+                assert_eq!(i.bytes(at, body), want, "{i:?} at {at}");
+            }
+        }
     }
 }
