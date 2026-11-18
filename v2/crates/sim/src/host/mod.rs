@@ -615,6 +615,13 @@ impl Runner {
         Ok(())
     }
 
+    /// Forgets the routes given to a body taken out of the controller, and drops it from the grid of bodies (a
+    /// retirement, K10 #2673).
+    pub fn forget(&mut self, body: Id) {
+        self.routes.remove(&body);
+        self.index();
+    }
+
     /// Adds a body of `family`, standing as the mover placed it, and runs `skill` on it.
     pub fn add(
         &mut self,
