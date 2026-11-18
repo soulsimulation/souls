@@ -1,0 +1,409 @@
+//! The walk skill and keeping apart (Engine v2 N7, #2655) on N2's test world.
+//!
+//! `cargo test -p sim --release --test walk -- --nocapture` runs the walker through three shut doors (A3, and step 0:
+//! one walker, door to door), the skill on a world of its own (A4) and the crossings of the square (A1, A2, A5): 400
+//! walkers, 100 from each side (the even arm, held to the bars), then the uneven arm declared here before the run, 160
+//! from the west, 120 from the east, 80 from the north and 40 from the south (reported, no bar); two repeats each.
+
+use import_eden::{F_DOORWAY, Import};
+use replica::effects::{Actor, Body as EffectBody, Cause, Header, Refusal, schema_hash};
+use replica::encode::{Value, encode};
+use replica::ids::{Hash, Id, Purpose, Scope};
+use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::time::Micros;
+use replica::world_model::show;
+use sim::links::{DOOR_OPENED, Doors, F_OPEN};
+use sim::mover::Body;
+use sim::walk::town::Town;
+use sim::walk::{Crowd, Leg, World};
+use std::collections::BTreeMap;
+
+const SPEED: i64 = 1_400_000; // µm a second: today's walking pace
+const TICK: i64 = 50_000; // µs: 20 ticks a second
+
+fn id(n: u64) -> Id {
+    Id::new(Scope([7; 16]), n).unwrap()
+}
+
+/// The test world as the walk skill reads it, with a door writer, and its named nodes.
+fn town() -> (Town, BTreeMap<String, Id>) {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let Import {
+        tree, rules, nodes, ..
+    } = import_eden::load(&w.text).expect("the test world loads");
+    let root = nodes["world"];
+    let v = Value::Map(BTreeMap::from([
+        (
+            1,
+            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/walk-test/1").to_bytes()),
+        ),
+        (2, Value::Bytes(schema_hash().to_bytes())),
+        (3, Value::Bytes(root.scope().0.to_vec())),
+        (4, root.to_value()),
+        (5, Value::Uint(0)),
+        (6, Value::Array(Vec::new())),
+        (7, Value::Array(Vec::new())),
+    ]));
+    let header = Header::read(&encode(&v).unwrap()).unwrap();
+    let next = tree.to_state().next;
+    let ground = nodes["ground"];
+    let t = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
+    (t, nodes)
+}
+
+fn stand(t: &Town, who: Id, node: Id, at: Vec3) -> Body {
+    let frame = Frame { node, slot: None };
+    t.surfaces[&node]
+        .place(who, frame, at, Quat::IDENTITY)
+        .unwrap_or_else(|e| panic!("{}: {}", e.name, e.detail))
+}
+
+fn run(t: &mut Town, c: &mut Crowd, ticks: u64) {
+    for _ in 0..ticks {
+        if c.done() {
+            break;
+        }
+        c.step(t)
+            .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
+    }
+}
+
+/// Step 0 and A3: one walker, from the south room of the ground floor to the north-east room upstairs, routed by N5
+/// through shut doors and the stair; each opening is in the effect stream.
+#[test]
+fn a3_a_walker_routed_through_three_shut_doors_arrives() {
+    let (mut t, nodes) = town();
+    let (f0, f1) = (nodes["building/floor-0"], nodes["building/floor-1"]);
+    let room = |k: &str| {
+        let h = t.tree.handle(nodes[k]).unwrap();
+        t.tree.node(h).unwrap().place().unwrap().position
+    };
+    let goal = room("building/r1d");
+    let me = stand(&t, id(1), f0, Vec3::new(0, 0, -3_000_000));
+    let mut c = Crowd::new(TICK);
+    c.add(&mut t, me, SPEED, id(1001), f1, goal)
+        .unwrap_or_else(|e| panic!("no plan: {}: {}", e.name, e.detail));
+    let legs = c.walkers[0].legs.clone();
+    println!("A3 legs:");
+    for l in &legs {
+        println!(
+            "  to ({}, {}, {}) mm{}",
+            l.to.x / 1000,
+            l.to.y / 1000,
+            l.to.z / 1000,
+            l.link
+                .map(|k| format!(", then cross {}", show(k)))
+                .unwrap_or_default()
+        );
+    }
+    let t0 = std::time::Instant::now();
+    run(&mut t, &mut c, 4_000);
+    let w = &c.walkers[0];
+    let arrived = w.arrived.expect("the walker arrives");
+    let p = w.body.pose.position;
+    println!(
+        "A3: arrived at {} ms of world time ({} ticks, {} us of run time), at ({}, {}, {}) mm on {}",
+        arrived / 1000,
+        arrived / TICK,
+        t0.elapsed().as_micros(),
+        p.x / 1000,
+        p.y / 1000,
+        p.z / 1000,
+        show(sim::walk::node_of(&w.body))
+    );
+    assert_eq!(sim::walk::node_of(&w.body), f1);
+    // Each door crossed opened once, by this walker's order, in the order crossed.
+    let doors: Vec<Id> = legs
+        .iter()
+        .filter_map(|l| l.link)
+        .filter(|k| {
+            t.buildings
+                .iter()
+                .any(|b| b.link(*k).is_some_and(|l| l.door.is_some()))
+        })
+        .collect();
+    println!("A3 effect stream:");
+    let mut opened = Vec::new();
+    for e in &t.doors.stream {
+        let ev = &e.events.as_ref().unwrap()[0];
+        let link = replica::effects::read_id(&ev.fields[&1]).unwrap();
+        let EffectBody::Changes(ch) = &e.body else {
+            panic!("changes")
+        };
+        println!(
+            "  #{} at {} us: {} on door {} of link {} ({} change, field {F_OPEN} to 1), the walker's order",
+            e.envelope.sequence,
+            e.envelope.at,
+            ev.name.as_str(),
+            show(e.envelope.node),
+            show(link),
+            ch.len(),
+        );
+        assert_eq!(ev.name.as_str(), DOOR_OPENED);
+        assert_eq!(e.envelope.cause, Cause::Intent(id(1001)));
+        assert_eq!(e.envelope.actor, Actor::Soul(id(1)));
+        opened.push(link);
+    }
+    assert_eq!(
+        opened, doors,
+        "one opening per shut door, in the order crossed"
+    );
+    assert_eq!(opened.len(), 3, "three shut doors on the way");
+    // Each door it crossed now stands open; the others stay shut.
+    for d in [
+        "door-building-a-b",
+        "door-building-narrow",
+        "door-building-to-d",
+    ] {
+        let h = t.tree.handle(nodes[d]).unwrap();
+        let n = t.tree.node(h).unwrap();
+        let link = replica::effects::read_id(n.fields().get(&F_DOORWAY).unwrap()).unwrap();
+        assert!(opened.contains(&link), "{d} crossed");
+        assert_eq!(n.fields().get(&F_OPEN), Some(&Value::Uint(1)), "{d} open");
+    }
+}
+
+/// A flat world of its own: one square plane, straight lines, no links. The skill runs on it unchanged.
+struct Plane {
+    half: i64,
+    plans: u32,
+}
+
+impl World for Plane {
+    fn plan(&mut self, _: &Body, _: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
+        self.plans += 1;
+        Ok(vec![Leg {
+            to: goal,
+            link: None,
+        }])
+    }
+    fn corner(&mut self, _: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
+        Ok([to.x, to.z])
+    }
+    fn step(&mut self, b: &mut Body, v: [i64; 2], dt: Micros, _: Micros) -> Result<(), Refusal> {
+        let p = b.pose.position;
+        let c = |a: i64, d: i64| (a + d * dt / 1_000_000).clamp(-self.half, self.half);
+        b.pose.position = Vec3::new(c(p.x, v[0]), 0, c(p.z, v[1]));
+        b.linear = Vec3::new(v[0], 0, v[1]);
+        Ok(())
+    }
+    fn cross(
+        &mut self,
+        _: &mut Body,
+        link: Id,
+        _: Id,
+        _: i64,
+        _: Micros,
+        _: Micros,
+    ) -> Result<bool, Refusal> {
+        Err(Refusal {
+            name: "link-missing",
+            detail: show(link),
+        })
+    }
+}
+
+/// A4: the skill reaches the world only through its trait: the same crowd code walks two bodies head-on across a
+/// plane that is no part of the engine, and they pass.
+#[test]
+fn a4_the_skill_runs_on_any_world_through_its_one_trait() {
+    let mut w = Plane {
+        half: 20_000_000,
+        plans: 0,
+    };
+    let node = id(500);
+    let body = |n: u64, x: i64| Body {
+        id: id(n),
+        pose: Pose {
+            frame: Frame { node, slot: None },
+            position: Vec3::new(x, 0, 0),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: node,
+                height: 0,
+            },
+        },
+        linear: Vec3::ZERO,
+        piece: 0,
+        tri: 0,
+    };
+    let mut c = Crowd::new(TICK);
+    c.add(
+        &mut w,
+        body(1, -10_000_000),
+        SPEED,
+        id(1001),
+        node,
+        Vec3::new(10_000_000, 0, 0),
+    )
+    .unwrap();
+    c.add(
+        &mut w,
+        body(2, 10_000_000),
+        SPEED,
+        id(1002),
+        node,
+        Vec3::new(-10_000_000, 0, 0),
+    )
+    .unwrap();
+    let mut nearest = i64::MAX;
+    for _ in 0..1_000 {
+        if c.done() {
+            break;
+        }
+        c.step(&mut w).unwrap();
+        let (a, b) = (
+            c.walkers[0].body.pose.position,
+            c.walkers[1].body.pose.position,
+        );
+        nearest = nearest
+            .min((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt() as i64);
+    }
+    println!(
+        "A4: two walkers head-on on a plane of their own: plans {}, arrived at {:?} ms, nearest {} mm, close walker-ticks {} of {}",
+        w.plans,
+        c.walkers
+            .iter()
+            .map(|w| w.arrived.map(|a| a / 1000))
+            .collect::<Vec<_>>(),
+        nearest / 1000,
+        c.close,
+        c.walked
+    );
+    assert!(c.done());
+    assert!(nearest >= sim::walk::CLOSE, "they pass apart");
+}
+
+/// The arms: walkers from each side, (west, east, north, south).
+const EVEN: [usize; 4] = [100, 100, 100, 100];
+const UNEVEN: [usize; 4] = [160, 120, 80, 40];
+
+/// Where a side's `k`-th walker starts and where it goes: rows of 25 at 2.4 m, 1.5 m apart, from 1.5 m outside the
+/// square's edge inwards; the goal is the same spot across the square.
+fn spots(side: usize, k: usize) -> (Vec3, Vec3) {
+    let along = -28_800_000 + (k % 25) as i64 * 2_400_000;
+    let out = 31_500_000 - (k / 25) as i64 * 1_500_000;
+    let (s, g) = match side {
+        0 => ([-out, along], [out, along]),
+        1 => ([out, along], [-out, along]),
+        2 => ([along, out], [along, -out]),
+        _ => ([along, -out], [along, out]),
+    };
+    (Vec3::new(s[0], 0, s[1]), Vec3::new(g[0], 0, g[1]))
+}
+
+struct Outcome {
+    /// Per walker, its speed over its crossing as a share of free speed, in thousandths.
+    shares: Vec<i64>,
+    arrived: usize,
+    close: u64,
+    walked: u64,
+    ns: u128,
+    ticks: u64,
+    fingerprint: Vec<(i64, i64)>,
+}
+
+fn crossing(arm: [usize; 4]) -> Outcome {
+    let (mut t, _) = town();
+    let ground = t.ground;
+    let mut c = Crowd::new(TICK);
+    let mut n = 0;
+    let mut trips = BTreeMap::new();
+    for (side, &count) in arm.iter().enumerate() {
+        for k in 0..count {
+            n += 1;
+            let (s, g) = spots(side, k);
+            let b = stand(&t, id(n), ground, s);
+            c.add(&mut t, b, SPEED, id(10_000 + n), ground, g)
+                .unwrap_or_else(|e| panic!("no plan: {}: {}", e.name, e.detail));
+            trips.insert(id(n), (s, g));
+        }
+    }
+    let cap = 3_000; // 150 s of world time
+    let t0 = std::time::Instant::now();
+    let mut ticks = 0;
+    while ticks < cap && !c.done() {
+        c.step(&mut t)
+            .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
+        ticks += 1;
+    }
+    let ns = t0.elapsed().as_nanos();
+    let flat = |a: Vec3, b: Vec3| {
+        (((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt() as i64
+    };
+    let mut shares = Vec::new();
+    let mut fingerprint = Vec::new();
+    for w in &c.walkers {
+        let (s, g) = trips[&w.body.id];
+        let whole = flat(s, g);
+        let share = match w.arrived {
+            Some(at) => {
+                (i128::from(whole) * 1_000_000_000 / (i128::from(at.max(1)) * i128::from(SPEED)))
+                    as i64
+            }
+            None => {
+                let gone = whole - flat(w.body.pose.position, g);
+                (i128::from(gone) * 1_000_000_000 / (i128::from(c.now) * i128::from(SPEED))) as i64
+            }
+        };
+        shares.push(share);
+        fingerprint.push((w.body.pose.position.x, w.body.pose.position.z));
+    }
+    Outcome {
+        arrived: c.walkers.iter().filter(|w| w.arrived.is_some()).count(),
+        shares,
+        close: c.close,
+        walked: c.walked,
+        ns,
+        ticks,
+        fingerprint,
+    }
+}
+
+fn pct(v: &[i64], p: usize) -> i64 {
+    let mut s = v.to_vec();
+    s.sort();
+    s[(s.len() - 1) * p / 100]
+}
+
+/// A1, A2 and A5: the crossings of the square, even and uneven, two repeats each.
+#[test]
+fn a1_a2_a5_four_hundred_walkers_cross_the_square() {
+    let mut even = Vec::new();
+    for (name, arm) in [("even", EVEN), ("uneven", UNEVEN)] {
+        for repeat in 1..=2 {
+            let o = crossing(arm);
+            println!(
+                "{name} {arm:?}, repeat {repeat}: {} of {} arrived in {} ticks; speed share median {}.{} %, 5th percentile {}.{} %; close walker-ticks {} of {} ({}.{:02} %); {} ns a walker-tick ({} ms in all)",
+                o.arrived,
+                o.shares.len(),
+                o.ticks,
+                pct(&o.shares, 50) / 10,
+                pct(&o.shares, 50) % 10,
+                pct(&o.shares, 5) / 10,
+                pct(&o.shares, 5) % 10,
+                o.close,
+                o.walked,
+                o.close * 100 / o.walked.max(1),
+                o.close * 10_000 / o.walked.max(1) % 100,
+                o.ns / u128::from(o.walked.max(1)),
+                o.ns / 1_000_000
+            );
+            if name == "even" {
+                even.push(o);
+            }
+        }
+    }
+    // The same seedless run twice gives the same walk (integers only).
+    assert_eq!(even[0].fingerprint, even[1].fingerprint);
+    for o in &even {
+        assert!(
+            pct(&o.shares, 50) >= 600,
+            "A1: median below 60 % of free speed"
+        );
+        assert!(
+            o.close * 50 < o.walked,
+            "A2: 2 % or more walker-ticks close"
+        );
+    }
+}
