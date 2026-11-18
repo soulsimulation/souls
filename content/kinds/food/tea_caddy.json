@@ -1,0 +1,324 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:tea_caddy",
+  "owner": "thing",
+  "state": {
+    "green": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 8,
+      "min": 0,
+      "max": 8,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "mint": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 8,
+      "min": 0,
+      "max": 8,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "well_green": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "well_mint": {
+      "n": 4,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "reserve_green": {
+      "n": 5,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 8,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "reserve_mint": {
+      "n": 6,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 8,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 80, 120]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 650]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [340, 220, 240]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "blend": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "green": {
+          "type": "count"
+        },
+        "mint": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "enough",
+          "says": "not_enough_leaves"
+        },
+        {
+          "need": "sum",
+          "fields": [
+            "well_green",
+            "well_mint"
+          ],
+          "at_most": 4,
+          "after_moves": true,
+          "says": "well_full"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "green",
+          "from": "this",
+          "into": "this",
+          "into_field": "well_green",
+          "amount": {
+            "arg": "green"
+          },
+          "event": "green_added"
+        },
+        {
+          "change": "transfer",
+          "field": "mint",
+          "from": "this",
+          "into": "this",
+          "into_field": "well_mint",
+          "amount": {
+            "arg": "mint"
+          },
+          "event": "mint_added"
+        }
+      ]
+    },
+    "recover": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "sum",
+          "fields": [
+            "well_green",
+            "well_mint"
+          ],
+          "at_least": 1,
+          "says": "recover_needs"
+        },
+        {
+          "need": "sum",
+          "fields": [
+            "reserve_green",
+            "reserve_mint"
+          ],
+          "at_most": 8,
+          "after_moves": true,
+          "says": "recover_needs"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "well_green",
+          "from": "this",
+          "into": "this",
+          "into_field": "reserve_green",
+          "amount": 4,
+          "event": "green_recovered"
+        },
+        {
+          "change": "transfer",
+          "field": "well_mint",
+          "from": "this",
+          "into": "this",
+          "into_field": "reserve_mint",
+          "amount": 4,
+          "event": "mint_recovered"
+        }
+      ]
+    },
+    "restore": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "sum",
+          "fields": [
+            "reserve_green",
+            "reserve_mint"
+          ],
+          "at_least": 1,
+          "says": "restore_needs"
+        },
+        {
+          "need": "sum",
+          "fields": [
+            "well_green",
+            "well_mint"
+          ],
+          "at_most": 4,
+          "after_moves": true,
+          "says": "restore_needs"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "reserve_green",
+          "from": "this",
+          "into": "this",
+          "into_field": "well_green",
+          "amount": 8,
+          "event": "green_restored"
+        },
+        {
+          "change": "transfer",
+          "field": "reserve_mint",
+          "from": "this",
+          "into": "this",
+          "into_field": "well_mint",
+          "amount": 8,
+          "event": "mint_restored"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:tea_caddy",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,40,0],"size":[340,80,220],"tint":"wood"},{"kind":"box","at":[-110,130,-40],"size":[100,100,100],"tint":"tin"},{"kind":"box","at":[110,130,-40],"size":[100,100,100],"tint":"tin"},{"kind":"box","at":[-110,185,-40],"size":[80,12,80],"tint":"green","when":"@green>=1"},{"kind":"box","at":[-110,160,-40],"size":[80,40,80],"tint":"green","when":"@green>=5"},{"kind":"box","at":[110,185,-40],"size":[80,12,80],"tint":"mint","when":"@mint>=1"},{"kind":"box","at":[110,160,-40],"size":[80,40,80],"tint":"mint","when":"@mint>=5"},{"kind":"box","at":[0,95,60],"size":[160,30,90],"tint":"tin"},{"kind":"box","at":[-35,115,60],"size":[70,14,70],"tint":"green","when":"@well_green>=1"},{"kind":"box","at":[35,115,60],"size":[70,14,70],"tint":"mint","when":"@well_mint>=1"},{"kind":"box","at":[0,90,-60],"size":[90,20,90],"tint":"glass"},{"kind":"box","at":[0,115,-60],"size":[70,30,70],"tint":"mixed","when":"@reserve_green>=1"},{"kind":"box","at":[0,140,-60],"size":[56,20,56],"tint":"mixed","when":"@reserve_mint>=1"}],"palette":{"wood":"#8a5f3c","tin":"#9aa3a0","green":"#4f6b2a","mint":"#8fc47a","glass":"#d6e4e0","mixed":"#6c8a45"},"tags":["kitchen","tea","caddy","object"]}
+  },
+  "text": {
+    "card": "A tea caddy: blend green tea and mint in its well, recover and restore the mix.",
+    "kitchen": "kitchen",
+    "tea": "tea",
+    "caddy": "caddy",
+    "put_down_first": "Put down held items before working the tea caddy.",
+    "not_enough_leaves": "The chosen additions exceed the actual remaining leaf stocks; choose smaller amounts.",
+    "well_full": "The mixing well holds four portions; recover its current mixture or choose fewer additions.",
+    "recover_needs": "Recovery needs a nonempty well and enough room in the eight-portion mixed reserve.",
+    "restore_needs": "Restore needs an actual mixed reserve that fits in the four-portion well.",
+    "howto_blend": "Choose whole portions of green tea and mint to add to the four-portion well; recover the mix to the reserve, restore it to blend again."
+  },
+  "card": {
+    "text": "card",
+    "category": "kitchen",
+    "synonyms": [
+      "tea",
+      "caddy"
+    ]
+  }
+}

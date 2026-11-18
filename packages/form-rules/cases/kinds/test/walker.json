@@ -1,0 +1,7 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:walker",
+  "owner": "family",
+  "text": { "card": "A test body's family for reactions: a body that walks from place to place." },
+  "card": { "text": "card" }
+}

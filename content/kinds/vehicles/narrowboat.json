@@ -1,0 +1,109 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:narrowboat",
+  "owner": "thing",
+  "state": {"open":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "points": {
+    "towpath": {"role":"stand","at_mm":[-1900,0,-5800],"yaw_mdeg":90000},
+    "hatch": {"role":"contact","at_mm":[0,1100,-5800]}
+  },
+  "slots": {
+    "stern": {"admits":"body","posture":"sit","most":1,"at_mm":[500,800,-6200],"stand":"towpath"},
+    "berth": {"admits":"body","posture":"lie","most":1,"at_mm":[0,600,-2500],"stand":"towpath"},
+    "galley": {"admits":"body","posture":"sit","most":1,"at_mm":[-500,600,1500],"stand":"towpath"}
+  },
+  "geometry": {"bounds_mm":[2120,2600,14020]},
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"open","is":false},{"need":"within_reach","point":"hatch"}],
+      "steps": [{"step":"move","move":"press","at":"hatch"}],
+      "effects": [{"change":"set","field":"open","to":true,"event":"opened"}]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"open","is":true},{"need":"within_reach","point":"hatch"}],
+      "steps": [{"step":"move","move":"press","at":"hatch"}],
+      "effects": [{"change":"set","field":"open","to":false,"event":"closed"}]
+    },
+    "ride": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"slot_free","slot":"stern"}],
+      "steps": [{"step":"walk_to","point":"stern"},{"step":"sit","slot":"stern"}],
+      "effects": [{"change":"reparent","what":"actor","into":"stern","event":"took_the_tiller"}]
+    },
+    "steer": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [],
+      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
+      "effects": []
+    },
+    "lie_down": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"open","is":true},{"need":"slot_free","slot":"berth"}],
+      "steps": [{"step":"walk_to","point":"berth"},{"step":"sit","slot":"berth"}],
+      "effects": [{"change":"reparent","what":"actor","into":"berth","event":"lay_down"}]
+    },
+    "sit_inside": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"open","is":true},{"need":"slot_free","slot":"galley"}],
+      "steps": [{"step":"walk_to","point":"galley"},{"step":"sit","slot":"galley"}],
+      "effects": [{"change":"reparent","what":"actor","into":"galley","event":"sat_down"}]
+    }
+  },
+  "vehicle": {"drive":"stern","steer":"steer","speed_mm_s":1500,"ground":"deep_water"},
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:narrowboat",
+    "table": [{"part":"door","field":"open","do":"rotate","axis":"y","at":{"false":0,"true":100000},"over_us":800000}],
+    "shape": {
+      "shapes": [
+        {"kind":"extrude","at":[0,-300,0],"polygon":[[-1050,-7000],[1050,-7000],[1050,5400],[378,6760],[0,7000],[-378,6760],[-1050,5400]],"h":1000,"tint":"hull"},
+        {"kind":"extrude","at":[0,550,0],"polygon":[[-1060,-7010],[1060,-7010],[1060,5410],[382,6770],[0,7010],[-382,6770],[-1060,5410]],"h":150,"tint":"trim"},
+        {"kind":"extrude","at":[0,655,-600],"polygon":[[-870,-5070],[870,-5070],[870,5070],[-870,5070]],"h":990,"tint":"paint"},
+        {"kind":"extrude","at":[0,1700,-600],"polygon":[[-920,-5170],[920,-5170],[920,5170],[-920,5170]],"h":20,"tint":"roof"},
+        {"kind":"sphere","at":[910,1300,-4500],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"sphere","at":[-910,1300,-4500],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"sphere","at":[910,1300,-2700],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"sphere","at":[-910,1300,-2700],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"sphere","at":[910,1300,-900],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"sphere","at":[-910,1300,-900],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"sphere","at":[910,1300,900],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"sphere","at":[-910,1300,900],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"sphere","at":[910,1300,2700],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"sphere","at":[-910,1300,2700],"r":130,"segments":6,"tint":"port","scale":[300,1000,1000]},
+        {"kind":"box","at":[0,1150,-600],"size":[1820,120,10000],"round":0,"tint":"band"},
+        {"kind":"cyl","at":[500,2000,2400],"r":70,"h":600,"segments":6,"tint":"iron"},
+        {"kind":"extrude","at":[-300,1780,-3500],"polygon":[[-220,-570],[220,-570],[220,570],[-220,570]],"h":140,"tint":"planter"},
+        {"kind":"extrude","at":[-300,1780,-1500],"polygon":[[-220,-570],[220,-570],[220,570],[-220,570]],"h":140,"tint":"planter"},
+        {"kind":"sphere","at":[-300,2050,-3300],"r":300,"segments":5,"tint":"plant","scale":[1000,600,1400]},
+        {"kind":"sphere","at":[-300,2050,-1700],"r":300,"segments":5,"tint":"plant","scale":[1000,600,1400]},
+        {"kind":"box","at":[0,1000,-5720],"size":[800,1000,50],"round":0,"tint":"door","role":"door","pivot":[300,1000,-5720]},
+        {"kind":"cyl","at":[0,1100,-6200],"r":40,"h":721,"segments":5,"tint":"wood","pitch":56322}
+      ],
+      "palette": {"hull":"#2a2725","trim":"#c23a2b","paint":"#2f5a4a","roof":"#a8321f","port":"#c9b26a","band":"#d9a63a","iron":"#3b3d40","planter":"#5e3d27","plant":"#5f7a45","door":"#a8321f","wood":"#9a6b43"},
+      "tags": ["vehicle","water","boat"]
+    }
+  },
+  "text": {
+    "card": "A narrowboat: a home afloat with a berth and a galley, steered from the stern.",
+    "getting_around": "transport",
+    "boat": "boat",
+    "canal_boat": "canal boat",
+    "barge": "barge",
+    "houseboat": "houseboat",
+    "howto_rest": "Open the hatch, then lie down in the berth."
+  },
+  "card": {"text":"card","category":"getting_around","synonyms":["boat","canal_boat","barge","houseboat"]},
+  "howtos": {"rest":{"text":"howto_rest","steps":[{"form":"open"},{"form":"lie_down"}]}}
+}

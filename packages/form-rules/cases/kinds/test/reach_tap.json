@@ -1,0 +1,12 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:reach_tap",
+  "owner": "thing",
+  "points": {
+    "outlet": { "role": "outlet", "at_mm": [0, 100, 0] },
+    "stand": { "role": "stand", "at_mm": [0, 0, -400] }
+  },
+  "geometry": { "bounds_mm": [100, 200, 100] },
+  "text": { "card": "A test tap with an outlet and a place to stand, for a form that needs a tap within reach." },
+  "card": { "text": "card" }
+}

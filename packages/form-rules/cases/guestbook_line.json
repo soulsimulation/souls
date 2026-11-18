@@ -1,0 +1,339 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:guestbook_line (from #1029, core-guestbook@1). A visitors' book keeps sixteen lines (eden:guestbook's children); a visitor signs a free line with her name (the signer link) and a few words by reference. There is no unsign: a line stays. Signing needs the line free and within reach. One signature per Soul per guestbook: most_per 1 counted among the book's lines (per parent), with the original's words.",
+ "cases": [
+  {
+   "name": "sign_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {
+     "words": "w_garden"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "sign_already_taken",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {
+     "words": "w_garden"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 0,
+    "detail": {
+     "link": "signer",
+     "count": 1
+    }
+   }
+  },
+  {
+   "name": "sign_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {
+     "words": "w_garden"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       1500
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "fix": {
+     "step": "walk_to",
+     "point": "line"
+    }
+   }
+  },
+  {
+   "name": "sign_already_signed_this_book",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {
+     "words": "w_garden"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "g1": {
+      "kind": "eden:guestbook",
+      "children": [
+       "t1",
+       "t2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "t2": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "already_linked",
+    "need": 2,
+    "detail": {
+     "link": "signer",
+     "most_per": 1,
+     "on": [
+      "t2"
+     ]
+    },
+    "fix": null,
+    "says": "already_signed"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  },
+  {
+   "name": "sign_signed_another_book",
+   "act": {
+    "this": "t1",
+    "form": "sign",
+    "args": {
+     "words": "w_garden"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "g1": {
+      "kind": "eden:guestbook",
+      "children": [
+       "t1"
+      ]
+     },
+     "g2": {
+      "kind": "eden:guestbook",
+      "children": [
+       "t2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "t2": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "expect": {
+    "verdict": "yes"
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   }
+  }
+ ]
+}

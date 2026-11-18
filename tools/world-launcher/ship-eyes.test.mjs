@@ -143,6 +143,18 @@ test('eyes end to end (stand-in tools): ready, then the checks after released, t
   assert.deepEqual(d.tools().trim().split('\n'), [`probe we-${SHA.slice(0, 12)}`, 'probe released', 'walk.mjs', 'walk.mjs', 'checks walks', 'poster.mjs', 'checks poster', 'stall.mjs', 'checks stall']);
 });
 
+test('a pinned-sha release (release.yml -f sha): the run is at main\'s head and names the sha in its title; eyes takes it, and refuses a title naming another sha', () => {
+  const pinned = { ...RUN, head_sha: 'b'.repeat(40), display_title: `release 0.131 at ${SHA}` };
+  const f = fakeGh([WAITING], pinned, st(CONTEXT.ship, 'success', 'run=77.1 released')), d = fakeDeploy(f.t);
+  let r = f.run(['--sha', SHA], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(posted(f), ['pending release/eyes run=77.1 ready', 'success release/eyes run=77.1 pass']);
+  const g = fakeGh([WAITING], { ...pinned, display_title: `release 0.131 at ${'c'.repeat(40)}` });
+  r = g.run(['--sha', SHA]);
+  assert.equal(r.status, 2, r.stdout + r.stderr); assert.match(r.stdout, /REFUSED: run 77 /);
+  assert.equal(g.posts(), '');
+});
+
 test('A6: a failing bar fails eyes, which posts failure naming it; a probe miss names the bar item', () => {
   let f = fakeGh([WAITING], RUN, st(CONTEXT.ship, 'success', 'run=77.1 released')), d = fakeDeploy(f.t);
   let r = f.run(['--sha', SHA], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR, FAKE_FAIL_CHECK: 'stall' });

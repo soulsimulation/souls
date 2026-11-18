@@ -1,0 +1,663 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:ash_hearth (from #1761). Four measures of spent ash (ash, a count, 0 to 4) and a place for one eden:ash_bucket. With the hearth out and empty hands a Soul clears an amount of ash into the bucket on it for four seconds: a transfer of ash, so a hearth without that much refuses with not_enough and a bucket without room with no_room. Light needs the ash all cleared and names clear_ash. The original's words, by key: 'Put out the hearth before clearing its ash.', 'The hearth has no supported ash to clear.', 'Put down what you hold before clearing ash.', 'The ash bucket is full or has unsupported contents.', 'The hearth is already lit; put it out before cleaning.', 'Clear the hearth ash into a supported bucket before lighting it.', 'The hearth is already out; clear ash before lighting it.'",
+ "cases": [
+  {
+   "name": "clear_ash_every_need_met",
+   "act": {
+    "this": "h1",
+    "form": "clear_ash",
+    "args": {
+     "bucket": "a1",
+     "amount": 4
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "clear_ash_while_lit_names_put_out",
+   "act": {
+    "this": "h1",
+    "form": "clear_ash",
+    "args": {
+     "bucket": "a1",
+     "amount": 4
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "fields": {
+       "lit": true
+      },
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lit",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "put_out"
+    },
+    "says": "put_out_first"
+   }
+  },
+  {
+   "name": "clear_ash_none_left",
+   "act": {
+    "this": "h1",
+    "form": "clear_ash",
+    "args": {
+     "bucket": "a1",
+     "amount": 1
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "fields": {
+       "ash": 0
+      },
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "ash",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "no_ash"
+   }
+  },
+  {
+   "name": "clear_ash_holding_something",
+   "act": {
+    "this": "h1",
+    "form": "clear_ash",
+    "args": {
+     "bucket": "a1",
+     "amount": 4
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "clear_ash_more_than_there_is",
+   "act": {
+    "this": "h1",
+    "form": "clear_ash",
+    "args": {
+     "bucket": "a1",
+     "amount": 3
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "fields": {
+       "ash": 2
+      },
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 3,
+    "detail": {
+     "node": "h1",
+     "field": "ash",
+     "has": 2,
+     "amount": 3
+    },
+    "fix": null,
+    "says": "no_ash"
+   }
+  },
+  {
+   "name": "clear_ash_bucket_without_room",
+   "act": {
+    "this": "h1",
+    "form": "clear_ash",
+    "args": {
+     "bucket": "a1",
+     "amount": 3
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket",
+      "fields": {
+       "ash": 2
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 4,
+    "detail": {
+     "node": "a1",
+     "field": "ash",
+     "room": 2,
+     "amount": 3
+    },
+    "fix": null,
+    "says": "bucket_full"
+   }
+  },
+  {
+   "name": "light_every_need_met",
+   "act": {
+    "this": "h1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "fields": {
+       "ash": 0
+      },
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "light_already_lit_names_put_out",
+   "act": {
+    "this": "h1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "fields": {
+       "ash": 0,
+       "lit": true
+      },
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lit",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "put_out"
+    },
+    "says": "already_lit"
+   }
+  },
+  {
+   "name": "light_ash_not_cleared_names_clear_ash",
+   "act": {
+    "this": "h1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "ash",
+     "found": 4,
+     "wanted": {
+      "at_most": 0
+     }
+    },
+    "fix": {
+     "form": "clear_ash"
+    },
+    "says": "clear_first"
+   }
+  },
+  {
+   "name": "light_hands_full",
+   "act": {
+    "this": "h1",
+    "form": "light"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "fields": {
+       "ash": 0
+      },
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 2,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "put_out_every_need_met",
+   "act": {
+    "this": "h1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "fields": {
+       "ash": 0,
+       "lit": true
+      },
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "put_out_already_out_names_light",
+   "act": {
+    "this": "h1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "fields": {
+       "ash": 0
+      },
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lit",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "light"
+    },
+    "says": "already_out"
+   }
+  },
+  {
+   "name": "put_out_hands_full",
+   "act": {
+    "this": "h1",
+    "form": "put_out"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "fields": {
+       "ash": 0,
+       "lit": true
+      },
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  }
+ ]
+}

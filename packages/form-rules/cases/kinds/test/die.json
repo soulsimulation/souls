@@ -1,0 +1,32 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:die",
+  "owner": "thing",
+  "state": {
+    "face": { "n": 1, "type": "int", "default": 1, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [16, 16, 16] },
+  "forms": {
+    "roll": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [{ "need": "held_by_actor" }],
+      "steps": [],
+      "effects": [
+        {
+          "change": "draw",
+          "outcomes": [
+            { "name": "one", "weight": 1, "event": "test:rolled_one", "set": [{ "field": "face", "to": 1 }] },
+            { "name": "two", "weight": 1, "event": "test:rolled_two", "set": [{ "field": "face", "to": 2 }] },
+            { "name": "three", "weight": 1, "event": "test:rolled_three", "set": [{ "field": "face", "to": 3 }] },
+            { "name": "four", "weight": 1, "event": "test:rolled_four", "set": [{ "field": "face", "to": 4 }] },
+            { "name": "five", "weight": 1, "event": "test:rolled_five", "set": [{ "field": "face", "to": 5 }] },
+            { "name": "six", "weight": 1, "event": "test:rolled_six", "set": [{ "field": "face", "to": 6 }] }
+          ]
+        }
+      ]
+    }
+  },
+  "text": { "card": "A test die: a roll lands on one of six faces, each as likely as the next." },
+  "card": { "text": "card" }
+}

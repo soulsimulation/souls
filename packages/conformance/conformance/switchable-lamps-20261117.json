@@ -1,0 +1,26 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-17 #2953 switchable floor lamps in furnished buildings. Two new immutable revisions, core-house@4 and core-church@4 (families/switchable-lamp-buildings.family.ts), each its every-doorway revision (every-doorway-20261115) with the floor lamps its contents place moved from core/floor-lamp@1 (no actions) to core/floor-lamp@2 (switch-on, switch-off): the house's living-lamp, bedroom-lamp and bedroom-2-lamp, the church's nave-lamp-l and nave-lamp-r. Make, params, rooms, doors and every other content are the revision before's; only the lamp refs and one description sentence differ, so the hash and the K=2 random samples change. A K=2 run of conformance.mjs --k 2 --filter <ref> placed, baked, furnished and rendered all 61 samples of each. The findings are gallery triangle budgets of the house at its largest width and one random sample, the kind already pinned for core-house@3; the church has none. They are pinned here by the new hashes. No budgets, samples or gap checks were relaxed.",
+  "findings": [
+    {
+      "def": "core-house@4",
+      "hash": "880e9d2d18be43c048ff0a21f77f150fd04df6fb21827d75ebfd94992e826faf",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6172 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-house@4",
+      "hash": "880e9d2d18be43c048ff0a21f77f150fd04df6fb21827d75ebfd94992e826faf",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6100 > 6000",
+      "fields": [
+        "random[0]"
+      ]
+    }
+  ]
+}
