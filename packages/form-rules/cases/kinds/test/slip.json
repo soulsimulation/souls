@@ -1,0 +1,17 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:slip",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [100, 2, 60] },
+  "forms": {
+    "discard": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [{ "need": "held_by_actor" }],
+      "steps": [{ "step": "use_held" }],
+      "effects": [{ "change": "remove", "what": "this", "event": "discarded" }]
+    }
+  },
+  "text": { "card": "A test slip of paper, torn off a sheet." },
+  "card": { "text": "card" }
+}

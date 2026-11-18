@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":229,"group":"with-others","words":"start a band","obvious":2,"things":{"drums":"eden:drum_kit","stage":"eden:stage"},"chain":[{"this":"me","form":"go_to","args":{"place":"stage"}},{"this":"drums","form":"play"}]}

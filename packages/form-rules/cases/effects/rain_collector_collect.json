@@ -1,0 +1,52 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "The rain collector's collect (from #1740), handed back by SA-X0 (#3024): while it rains on the place it is linked to, a barrel holding 2500 g gathers a litre (3500 g); a second collect is refused for want of room, with the original's words by key and the draw as its fix; where it does not rain (the place's field set from outside, as E6 sets weather), collect is refused with the rain's words.",
+  "cases": [
+    {
+      "name": "collect_while_it_rains_then_full_then_drawn_then_dry",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "o1": { "kind": "test:open_air", "fields": { "rain": 600 }, "loose": ["b1", "r1"] },
+          "r1": { "kind": "eden:rain_collector", "fields": { "covered": false, "water": 2500 }, "links": { "place": ["o1"] } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "r1", "form": "collect" }, "now_us": 0, "receipt": "rc1",
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "r1", "field": "water", "n": 1, "to": 3500 }], "events": [{ "event": "eden:rain_collected", "node": "r1", "changes": [0] }], "timers": [] }
+        },
+        {
+          "act": { "this": "r1", "form": "collect" }, "now_us": 5000000, "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "field_differs", "need": 2, "fix": { "form": "draw" }, "says": "no_room" }
+        }
+      ],
+      "after": {
+        "r1": { "kind": "eden:rain_collector", "fields": { "covered": false, "water": 3500 }, "links": { "place": ["o1"] } }
+      }
+    },
+    {
+      "name": "collect_refused_once_the_rain_stops",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "o1": { "kind": "test:open_air", "fields": { "rain": 0 }, "loose": ["b1", "r1"] },
+          "r1": { "kind": "eden:rain_collector", "fields": { "covered": false, "water": 1000 }, "links": { "place": ["o1"] } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "r1", "form": "collect" }, "now_us": 0, "receipt": "rd1",
+          "expect": { "verdict": "no", "reason": "field_differs", "need": 3, "detail": { "node": "o1", "field": "rain", "found": 0, "wanted": { "at_least": 101 } }, "says": "no_rain" }
+        }
+      ],
+      "after": {
+        "r1": { "kind": "eden:rain_collector", "fields": { "covered": false, "water": 1000 }, "links": { "place": ["o1"] } }
+      }
+    }
+  ]
+}

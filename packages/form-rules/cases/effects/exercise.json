@@ -1,0 +1,1137 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "The exercise family (SA-X10, #2905): only a whole practice, circuit, lap, interval, shuttle or set counts, as one more on the thing's own count; a loaded-carry weight stays in the hand; chair rises leave the chair empty; the dumbbell kit spends its handle and plates to make a real dumbbell and gets exactly those parts back when it is taken apart.",
+  "cases": [
+    {
+      "name": "meditate_twice_counts_two_practices",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "m1"
+            ]
+          },
+          "m1": {
+            "kind": "eden:meditation_mat"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "m1",
+            "form": "meditate"
+          },
+          "receipt": "me1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "m1",
+                "field": "practices",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:practice_completed",
+                "node": "m1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "m1",
+            "form": "meditate"
+          },
+          "receipt": "me2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "m1",
+                "field": "practices",
+                "n": 1,
+                "to": 2
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "m1": {
+          "kind": "eden:meditation_mat",
+          "fields": {
+            "practices": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "exercise_circuit_counts_a_round",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:exercise_circuit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "exercise"
+          },
+          "receipt": "ex1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "rounds",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:round_completed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "c1": {
+          "kind": "eden:exercise_circuit",
+          "fields": {
+            "rounds": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "walk_lap_counts_a_lap",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:lap_course"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "l1",
+            "form": "walk_lap"
+          },
+          "receipt": "lp1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "laps",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:lap_completed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "l1": {
+          "kind": "eden:lap_course",
+          "fields": {
+            "laps": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "interval_program_stretch_jacks_dance_counts_three_and_notes_the_last",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "s1": {
+            "kind": "eden:interval_station"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "s1",
+            "form": "stretch_interval"
+          },
+          "receipt": "iv1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "s1",
+                "field": "intervals",
+                "n": 1,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "s1",
+                "field": "last_move",
+                "n": 2,
+                "to": "stretch"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:interval_completed",
+                "node": "s1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:last_move_noted",
+                "node": "s1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "s1",
+            "form": "jacks_interval"
+          },
+          "receipt": "iv2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "s1",
+                "field": "intervals",
+                "n": 1,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "s1",
+                "field": "last_move",
+                "n": 2,
+                "to": "jacks"
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "s1",
+            "form": "dance_interval"
+          },
+          "receipt": "iv3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "s1",
+                "field": "intervals",
+                "n": 1,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "s1",
+                "field": "last_move",
+                "n": 2,
+                "to": "dance"
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "s1": {
+          "kind": "eden:interval_station",
+          "fields": {
+            "intervals": 3,
+            "last_move": "dance"
+          }
+        }
+      }
+    },
+    {
+      "name": "carry_shuttle_with_a_weight_counts_and_keeps_it_in_hand",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "k1"
+            ]
+          },
+          "k1": {
+            "kind": "eden:carry_course"
+          },
+          "w1": {
+            "kind": "eden:carry_weight"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "k1",
+            "form": "carry_shuttle"
+          },
+          "receipt": "cs1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "k1",
+                "field": "shuttles",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shuttle_completed",
+                "node": "k1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "k1": {
+          "kind": "eden:carry_course",
+          "fields": {
+            "shuttles": 1
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "w1",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "chair_rises_three_then_five_leave_the_chair_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "h1"
+            ]
+          },
+          "h1": {
+            "kind": "eden:exercise_chair"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "h1",
+            "form": "rises_3"
+          },
+          "receipt": "cr1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "h1",
+                "field": "sets",
+                "n": 1,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "h1",
+                "field": "rises",
+                "n": 2,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "h1",
+                "field": "last_set",
+                "n": 3,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:set_completed",
+                "node": "h1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:rises_counted",
+                "node": "h1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:last_set_noted",
+                "node": "h1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "h1",
+            "form": "rises_5"
+          },
+          "receipt": "cr2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "h1",
+                "field": "sets",
+                "n": 1,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "h1",
+                "field": "rises",
+                "n": 2,
+                "to": 8
+              },
+              {
+                "change": "set",
+                "node": "h1",
+                "field": "last_set",
+                "n": 3,
+                "to": 5
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "h1": {
+          "kind": "eden:exercise_chair",
+          "fields": {
+            "sets": 2,
+            "rises": 8,
+            "last_set": 5
+          }
+        },
+        "room": {
+          "loose": [
+            "b1",
+            "h1"
+          ]
+        }
+      }
+    },
+    {
+      "name": "dumbbell_kit_builds_2kg_then_takes_it_apart",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "assemble_2kg"
+          },
+          "receipt": "db2a",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "handles",
+                "n": 1,
+                "to": 0
+              },
+              {
+                "change": "create",
+                "node": "db2a.0",
+                "kind": "eden:dumbbell_2kg",
+                "to": {
+                  "node": "room"
+                }
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "made",
+                "n": 3,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:handle_used",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:dumbbell_assembled",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:made_counted",
+                "node": "t1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "assemble_2kg"
+          },
+          "receipt": "db2x",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "take_apart_2kg",
+            "args": {
+              "dumbbell": "db2a.0"
+            }
+          },
+          "receipt": "db2b",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "db2a.0"
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "handles",
+                "n": 1,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "taken_apart",
+                "n": 4,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dumbbell_taken_apart",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:handle_returned",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:taken_apart_counted",
+                "node": "t1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:dumbbell_kit",
+          "fields": {
+            "handles": 1,
+            "made": 1,
+            "taken_apart": 1
+          }
+        },
+        "db2a.0": null,
+        "room": {
+          "loose": [
+            "b1",
+            "t1"
+          ]
+        }
+      }
+    },
+    {
+      "name": "dumbbell_kit_builds_6kg_then_takes_it_apart",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "assemble_6kg"
+          },
+          "receipt": "db6a",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "handles",
+                "n": 1,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "plates",
+                "n": 2,
+                "to": 2
+              },
+              {
+                "change": "create",
+                "node": "db6a.0",
+                "kind": "eden:dumbbell_6kg",
+                "to": {
+                  "node": "room"
+                }
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "made",
+                "n": 3,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:handle_used",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:plates_used",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:dumbbell_assembled",
+                "node": "t1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:made_counted",
+                "node": "t1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "assemble_2kg"
+          },
+          "receipt": "db6x",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "take_apart_6kg",
+            "args": {
+              "dumbbell": "db6a.0"
+            }
+          },
+          "receipt": "db6b",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "db6a.0"
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "handles",
+                "n": 1,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "plates",
+                "n": 2,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "taken_apart",
+                "n": 4,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dumbbell_taken_apart",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:handle_returned",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:plates_returned",
+                "node": "t1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:taken_apart_counted",
+                "node": "t1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:dumbbell_kit",
+          "fields": {
+            "handles": 1,
+            "plates": 4,
+            "made": 1,
+            "taken_apart": 1
+          }
+        },
+        "db6a.0": null,
+        "room": {
+          "loose": [
+            "b1",
+            "t1"
+          ]
+        }
+      }
+    },
+    {
+      "name": "dumbbell_kit_builds_10kg_then_takes_it_apart",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:dumbbell_kit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              150,
+              250
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "assemble_10kg"
+          },
+          "receipt": "db10a",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "handles",
+                "n": 1,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "plates",
+                "n": 2,
+                "to": 0
+              },
+              {
+                "change": "create",
+                "node": "db10a.0",
+                "kind": "eden:dumbbell_10kg",
+                "to": {
+                  "node": "room"
+                }
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "made",
+                "n": 3,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:handle_used",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:plates_used",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:dumbbell_assembled",
+                "node": "t1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:made_counted",
+                "node": "t1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "assemble_2kg"
+          },
+          "receipt": "db10x",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "take_apart_10kg",
+            "args": {
+              "dumbbell": "db10a.0"
+            }
+          },
+          "receipt": "db10b",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "db10a.0"
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "handles",
+                "n": 1,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "plates",
+                "n": 2,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "taken_apart",
+                "n": 4,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dumbbell_taken_apart",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:handle_returned",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:plates_returned",
+                "node": "t1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:taken_apart_counted",
+                "node": "t1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:dumbbell_kit",
+          "fields": {
+            "handles": 1,
+            "plates": 4,
+            "made": 1,
+            "taken_apart": 1
+          }
+        },
+        "db10a.0": null,
+        "room": {
+          "loose": [
+            "b1",
+            "t1"
+          ]
+        }
+      }
+    }
+  ]
+}

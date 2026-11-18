@@ -1,0 +1,13 @@
+[package]
+name = "facts"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "The fact sheet: a recorded world's live parts and history bundles read into sheets and compared (Engine v2 V10, #2720)."
+
+[dependencies]
+replica = { path = "../../crates/replica" }
+# V1's stream writer (the live parts).
+worldd = { path = "../../crates/worldd" }
+# V3's bundler and its scripted world (the history bundles).
+archive = { path = "../archive" }

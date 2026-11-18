@@ -2,7 +2,7 @@
 // local copy, with no call to the world. Pure functions over the catalog the world publishes at /v1/edge/catalog. What
 // the agent loads into its context is what a question asks for and no more; every answer says what it left out.
 
-const STOP = new Set(["the", "a", "an", "to", "into", "onto", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
+const STOP = new Set(["something", "anything", "what", "can", "i", "my", "that", "with", "give", "have", "get", "make", "use", "the", "a", "an", "to", "into", "onto", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
 const SYNONYMS = { eat: ["eat", "picnic", "cook"], food: ["eat"], meal: ["eat"], drink: ["drink"], sleep: ["sleep", "nap", "hammock"], music: ["play-music", "play-piano", "sing"], exercise: ["pull-ups", "lift-weights", "bench-press", "dips", "yoga-class"], study: ["read", "write", "use-computer"], book: ["read", "book-club"] };
 export const tokensOf = (s) => String(s ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
 const stem = (w) => (w.length > 4 && w.endsWith("ies") ? w.slice(0, -3) + "y" : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
@@ -17,6 +17,9 @@ export const OWN_WORDS_NOTE = "A Soul's now and about are its own words about it
 
 /** The catalog with its lookups. Build once per catalog version. */
 export function indexCatalog(cat) {
+  // SA-C1: a card is one line of what a kind is for, a category and synonyms (`cat.cards`, by the kind a row names), or the
+  // card of the entry a row's kind names (`cat.entries`, SA-C3) when `cards` has none; each row keeps its own
+  for (const row of [...cat.places, ...cat.things]) { const c = cat.cards?.[row.kind] ?? entryCard(cat.entries?.[row.kind]); if (c) CARDS.set(row, c); }
   const places = new Map(cat.places.map((p) => [p.id, p])), byRef = new Map(cat.places.filter((p) => p.ref).map((p) => [p.ref, p]));
   const kids = new Map(), actsAt = new Map(), thingsAt = new Map(), things = new Map(cat.things.map((t) => [t.id, t])), acts = new Map(cat.acts.map((a) => [a.id, a]));
   const push = (m, k, v) => { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]); };
@@ -50,15 +53,30 @@ export function handActs(ix, t, states) {
     .map((a) => ({ id: `object:${t.id}:${a.verb}`, verb: a.verb, label: a.label, ...(a.params ? { params: a.params } : {}) }));
 }
 
-const WORDS = new WeakMap();
+const WORDS = new WeakMap(), CARDS = new WeakMap();
+/** SA-C3: an entry's card as a catalog card `{purpose, category?, synonyms?}`. The entry names each by a key of its text
+ *  table (docs/soul-actions/entry-format.md); a key with no text is taken as the words themselves. Null without a card. */
+export function entryCard(entry) {
+  const c = entry?.card; if (!c || typeof c !== "object") return null;
+  const t = (k) => (typeof entry.text?.[k] === "string" ? entry.text[k] : typeof k === "string" ? k : null);
+  const purpose = t(c.text); if (!purpose) return null;
+  return { purpose, ...(c.category ? { category: t(c.category) } : {}), ...(Array.isArray(c.synonyms) && c.synonyms.length ? { synonyms: c.synonyms.map(t).filter(Boolean) } : {}) };
+}
+/** A thing's or place's card, as `find` reads it, by its id; null when its kind has none. */
+export const cardOf = (ix, id) => { const row = ix.things.get(id) ?? ix.place(id); const c = row && CARDS.get(row); return c ? { ...c, ...(purposeOf(row) ? { purpose: purposeOf(row) } : {}) } : null; };
+/** SA-C1: a row's purpose line (80 characters at most), from its kind's card `{purpose, category?, synonyms?}`, or null. */
+export const CARD_PURPOSE_MAX = 80;
+const purposeOf = (row) => { const p = CARDS.get(row)?.purpose; return typeof p === "string" && p ? p.slice(0, CARD_PURPOSE_MAX) : null; };
+/** What a card adds to a row's words: its category as another kind, its synonyms as aliases, its purpose as what it is for. */
+const cardWords = (row) => { const c = CARDS.get(row); return { kind: tokensOf(c?.category), alias: (c?.synonyms ?? []).flatMap(tokensOf), what: tokensOf(purposeOf(row)) }; };
 const wordsOf = (row, make) => { let w = WORDS.get(row); if (!w) WORDS.set(row, (w = make(row))); return w; };
-const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokensOf(`${p.id} ${p.ref ?? ""}`), alias: (p.aliases ?? []).flatMap(tokensOf), kind: tokensOf(p.kind), what: tokensOf(p.what) }));
+const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokensOf(`${p.id} ${p.ref ?? ""}`), alias: [...(p.aliases ?? []).flatMap(tokensOf), ...cardWords(p).alias], kind: [...tokensOf(p.kind), ...cardWords(p).kind], what: [...tokensOf(p.what), ...cardWords(p).what] }));
 const actWords = (a) => wordsOf(a, () => ({ name: tokensOf(a.label), id: tokensOf(a.id), kind: tokensOf(a.verb) }));
 /** Where a row is, as a person would say it: the room and what it is in. */
 const whereOf = (ix, placeId) => ix.pathOf(placeId).slice(-2).reverse().join(", ") || null;
 /** #2312: a seat is found by the words for what it is for ("sit near the pond", "a seat"), as by its kind ("bench"). */
 const SEAT_WORDS = ["sit", "seat"];
-const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind), alias: [...(h?.acts ?? []).flatMap((a) => tokensOf(a.verb)), ...(t.seat ? SEAT_WORDS : [])] }));
+const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: [...tokensOf(t.kind), ...cardWords(t).kind], what: cardWords(t).what, alias: [...(h?.acts ?? []).flatMap((a) => tokensOf(a.verb)), ...(t.seat ? SEAT_WORDS : []), ...cardWords(t).alias] }));
 const RELATION = /^(.*?)\s+(near|by|beside|next to|close to|around|in|inside|at)\s+(?:the\s+)?(.+)$/i;
 /** How far "near <somewhere>" reaches, in metres. */
 export const NEAR_METRES = 80;
@@ -138,6 +156,14 @@ export function roomOf(ix, placeId) {
   for (let p = ix.place(placeId ?? ""), n = 0; p && n < 12; p = p.parent ? ix.places.get(p.parent) : null, n++) if (p.kind === "room" || p.doors?.length) return p.id;
   return "";
 }
+/** SA-C8: "any free seat here", as ids to try: the seats in the same room as `placeId` (the copy's best guess, as roomOf), nearest to
+ *  `at` first, never one in `exclude`. The copy cannot tell which are taken: the world decides, one try at a time. */
+export const FALLBACK_SEATS_MAX = 6;
+export function seatsHere(ix, placeId, at, exclude = [], limit = FALLBACK_SEATS_MAX) {
+  const room = roomOf(ix, placeId), skip = new Set(exclude);
+  return ix.cat.things.filter((t) => t.seat && roomOf(ix, t.place) === room && !skip.has(`sit:${t.id}`))
+    .map((t) => ({ id: `sit:${t.id}`, d: dist(at, t.at) ?? 1e9 })).sort((a, b) => a.d - b.d || (a.id < b.id ? -1 : 1)).slice(0, limit).map((x) => x.id);
+}
 /** #2477: an act that walks to where a Soul is: its place's walk when the catalog vouches for one, or else a walk to its point. */
 export function soulWalk(ix, x) {
   const p = ix.place(x?.place ?? ""), walk = p ? ix.walkId(p) : null;
@@ -190,7 +216,7 @@ export function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8
     const also = namesake(ix, p), here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
     // #2452: water's row walks to its bank, and says so: the world refuses a walk into the water itself
     const edge = waterEdge(ix, p), act = p.fixed ? null : ix.walkId(edge ?? p);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, ...(purposeOf(p) ? { purpose: purposeOf(p) } : {}), path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {
@@ -226,7 +252,7 @@ export function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8
     // the act the words name first ("open the chest" before "lock"), else the kind's own order
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
     const pick = [...offers].sort((a, b) => named(b) - named(a));
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, ...(purposeOf(t) ? { purpose: purposeOf(t) } : {}), in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));

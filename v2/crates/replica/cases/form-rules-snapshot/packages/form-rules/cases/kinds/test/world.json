@@ -1,0 +1,11 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:world",
+  "owner": "place",
+  "state": {
+    "light": { "n": 1, "type": "enum", "values": ["night", "dawn", "day", "dusk"], "default": "day", "audience": {"rule": "everyone"} },
+    "weather": { "n": 2, "type": "enum", "values": ["clear", "rain"], "default": "clear", "audience": {"rule": "everyone"} }
+  },
+  "text": { "card": "A test world node for reactions: its light and weather, which the world announces (Engine v2 E6)." },
+  "card": { "text": "card" }
+}
