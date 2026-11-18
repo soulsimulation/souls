@@ -1,0 +1,157 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sack",
+  "owner": "thing",
+  "state": {
+    "tied": {
+      "n": 1,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        675
+      ],
+      "yaw_mdeg": 180000
+    },
+    "neck": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        520,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      600,
+      660,
+      450
+    ]
+  },
+  "forms": {
+    "untie": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "tied",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "neck"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tied",
+          "to": false,
+          "event": "untied"
+        }
+      ]
+    },
+    "tie": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "tied",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "neck"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tied",
+          "to": true,
+          "event": "tied"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:sack",
+    "table": [
+      {
+        "part": "rope",
+        "field": "tied",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "neck",
+        "field": "tied",
+        "do": "scale",
+        "axis": "y",
+        "at": {
+          "true": 1000,
+          "false": 400
+        },
+        "over_us": 500000
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"sphere","at":[0,285,0],"r":300,"segments":8,"tint":"cloth","scale":[1000,950,750]},{"kind":"cone","at":[0,580,0],"r":140,"h":160,"segments":6,"tint":"cloth2","role":"neck"},{"kind":"cyl","at":[0,500,0],"r":100,"h":30,"segments":6,"tint":"tie","role":"rope"}],"palette":{"cloth":"#c9b38a","cloth2":"#bfa77c","tie":"#7a6a4a"},"tags":["prop","street","sack","item","market","farm"]}
+  },
+  "text": {
+    "card": "A tied grain sack: carry it in both hands, untie its neck, tie it again.",
+    "storage": "storage",
+    "bag": "bag",
+    "grain": "grain"
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "bag",
+      "grain"
+    ]
+  }
+}
