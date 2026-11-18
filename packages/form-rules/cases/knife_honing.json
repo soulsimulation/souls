@@ -1,0 +1,274 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:honing_stone and eden:camp_knife (from #1886). The stone holds three honings, each one portion of water and one of abrasive, always spent together; the knife's edge is how many honings it has had: 0 dull, 1 maintained, 2 keen, 3 fully maintained. Honing (three seconds, a hand free, beside the knife) moves one honing from the stone into the same knife, so nothing is made or lost. Refused: a spent stone ('This stone has no supplied wetting water or abrasive left; choose a stocked stone.'), a fully maintained knife ('This SAME knife is fully maintained; further honing is not needed.'), full hands ('Empty your hands ...'), a knife out of reach ('Keep both knife and stone within ordinary reach ...'). Handed back: both resting side by side on one fixed work table, and both hands empty.",
+ "cases": [
+  {
+   "name": "hone_knife_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "hone_knife",
+    "args": {
+     "knife": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:honing_stone"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "k1": {
+      "kind": "eden:camp_knife"
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "k1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "hone_knife_stone_spent",
+   "act": {
+    "this": "t1",
+    "form": "hone_knife",
+    "args": {
+     "knife": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:honing_stone",
+      "fields": {
+       "honings": 0
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "k1": {
+      "kind": "eden:camp_knife"
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "k1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 0,
+    "detail": {
+     "node": "t1",
+     "field": "honings",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "hone_knife_already_fully_maintained",
+   "act": {
+    "this": "t1",
+    "form": "hone_knife",
+    "args": {
+     "knife": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:honing_stone"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "k1": {
+      "kind": "eden:camp_knife",
+      "fields": {
+       "honings": 3
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "k1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 1,
+    "detail": {
+     "node": "k1",
+     "field": "honings",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "hone_knife_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "hone_knife",
+    "args": {
+     "knife": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:honing_stone"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "k1": {
+      "kind": "eden:camp_knife"
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "k1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 2,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "hone_knife_knife_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "hone_knife",
+    "args": {
+     "knife": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:honing_stone"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "k1": {
+      "kind": "eden:camp_knife"
+     },
+     "shed": {
+      "loose": [
+       "k1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 3,
+    "detail": {
+     "thing": "k1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "k1"
+    }
+   }
+  }
+ ]
+}

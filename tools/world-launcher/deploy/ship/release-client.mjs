@@ -2,7 +2,8 @@
 // Two ordinary release steps (#1969), run by release.yml from a checkout of the release head:
 //
 //   node release-client.mjs stamp --version <release> [--client <client version>]
-//     Before the gate. When eden.mjs or skill.md changed since the last release (the newest v* tag reachable from HEAD) and
+//     Before the gate. First rebuilds a stale eden.mjs from its modules (inline.mjs), which then counts as changed.
+//     When eden.mjs or skill.md changed since the last release (the newest v* tag reachable from HEAD) and
 //     the client still carries that release's version or no longer matches its stamp, stamps it (stamp.mjs <client>;
 //     default: the next patch) and commits the stamp. Then stamp.mjs --check; exit 1 on any disagreement. Prints
 //     `client=<version> stamped=<0|1>` as its last line.
@@ -13,7 +14,7 @@
 //     item with that link, it posts nothing. --port talks to a launcher on this machine; --ssh runs the same program on
 //     the production host against its live launcher (the route is loopback only). For a release already tagged, run it
 //     from a checkout of v<release> (release.yml feed_only=true).
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { problems } from '../../soul/stamp.mjs';
@@ -39,6 +40,15 @@ if (!['stamp', 'feed'].includes(cmd) || !/^[0-9]+(\.[0-9]+){1,2}$/.test(version 
 let last; try { last = git('describe', '--tags', '--abbrev=0', '--match', 'v*', '--exclude', `v${version}`, 'HEAD'); } catch { fail('no v* tag reachable from HEAD: no last release to compare with'); }
 
 if (cmd === 'stamp') {
+  // PRs do not carry a rebuilt eden.mjs (docs/testing.md#the-soul-client-file): when this head's copy is not what
+  // inline.mjs builds from its modules, it is rebuilt here and goes into the stamp commit, so a release never serves a
+  // stale client
+  const inline = `${ROOT}${SOUL}inline.mjs`;
+  const rebuilt = spawnSync(process.execPath, [inline, '--check'], { stdio: 'ignore' }).status !== 0;
+  if (rebuilt) {
+    try { execFileSync(process.execPath, [inline], { stdio: 'inherit' }); } catch { fail('inline.mjs could not build eden.mjs: the release stops'); }
+    console.log('eden.mjs was stale: rebuilt from its modules (inline.mjs) for the stamp commit');
+  }
   const lastClient = CLI_LINE.exec(at(last, `${SOUL}eden.mjs`) ?? '')?.[1], nowClient = CLI_LINE.exec(head(`${SOUL}eden.mjs`))?.[1];
   const changed = ['eden.mjs', 'skill.md'].some((f) => at(last, SOUL + f) !== head(SOUL + f));
   const off = problems((p) => { try { return readFileSync(ROOT + SOUL + p); } catch { return null; } });
@@ -51,6 +61,7 @@ if (cmd === 'stamp') {
     stamped = 1;
     console.log(`stamp commit ${git('rev-parse', 'HEAD')}: client ${lastClient} (${last}) -> ${client}`);
   } else console.log(changed ? `client ${nowClient} already stamped since ${last} (client ${lastClient})` : `client unchanged since ${last}`);
+  if (rebuilt && !stamped) fail('eden.mjs was rebuilt but no stamp commit carries it: the release stops');
   try { execFileSync(process.execPath, [`${ROOT}${SOUL}stamp.mjs`, '--check'], { stdio: 'inherit' }); } catch { fail('stamp.mjs --check failed: the release stops'); }
   console.log(`client=${client} stamped=${stamped}`);
 } else {

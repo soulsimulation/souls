@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":98,"group":"object","words":"lie in the hammock","obvious":3,"things":{"hammock":"eden:hammock"},"chain":[{"this":"me","form":"lie_down","args":{"spot":"hammock"}}]}

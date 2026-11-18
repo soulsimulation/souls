@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":100,"group":"object","words":"cook something","obvious":2,"things":{"stove":"eden:stove","pot":"eden:pot"},"chain":[{"this":"stove","form":"cook"}]}
