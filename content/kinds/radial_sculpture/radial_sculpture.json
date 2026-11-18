@@ -1,0 +1,798 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:radial_sculpture",
+  "owner": "thing",
+  "state": {
+    "band_1": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "band_2": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "band_3": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "band_4": {
+      "n": 4,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "band_5": {
+      "n": 5,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "band_6": {
+      "n": 6,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "band_7": {
+      "n": 7,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "band_8": {
+      "n": 8,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        15,
+        200
+      ]
+    },
+    "work": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1100
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      400,
+      520,
+      400
+    ]
+  },
+  "forms": {
+    "carve_band_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "band_1",
+          "at_least": 2
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "work"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "band_1",
+          "by": -1,
+          "event": "band_carved"
+        }
+      ]
+    },
+    "carve_band_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "band_2",
+          "at_least": 2
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "work"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "band_2",
+          "by": -1,
+          "event": "band_carved"
+        }
+      ]
+    },
+    "carve_band_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "band_3",
+          "at_least": 2
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "work"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "band_3",
+          "by": -1,
+          "event": "band_carved"
+        }
+      ]
+    },
+    "carve_band_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "band_4",
+          "at_least": 2
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "work"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "band_4",
+          "by": -1,
+          "event": "band_carved"
+        }
+      ]
+    },
+    "carve_band_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "band_5",
+          "at_least": 2
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "work"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "band_5",
+          "by": -1,
+          "event": "band_carved"
+        }
+      ]
+    },
+    "carve_band_6": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "band_6",
+          "at_least": 2
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "work"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "band_6",
+          "by": -1,
+          "event": "band_carved"
+        }
+      ]
+    },
+    "carve_band_7": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "band_7",
+          "at_least": 2
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "work"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "band_7",
+          "by": -1,
+          "event": "band_carved"
+        }
+      ]
+    },
+    "carve_band_8": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "band_8",
+          "at_least": 2
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "work"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "band_8",
+          "by": -1,
+          "event": "band_carved"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:radial_sculpture",
+    "table": [
+      {
+        "part": "leg.bl",
+        "field": "band_1",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "leg.bl",
+        "field": "band_1",
+        "do": "scale",
+        "axis": "z",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "leg.br",
+        "field": "band_2",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "leg.br",
+        "field": "band_2",
+        "do": "scale",
+        "axis": "z",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "leg.fl",
+        "field": "band_3",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "leg.fl",
+        "field": "band_3",
+        "do": "scale",
+        "axis": "z",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "leg.fr",
+        "field": "band_4",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "leg.fr",
+        "field": "band_4",
+        "do": "scale",
+        "axis": "z",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "ear.l",
+        "field": "band_5",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "ear.l",
+        "field": "band_5",
+        "do": "scale",
+        "axis": "z",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "ear.r",
+        "field": "band_6",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "ear.r",
+        "field": "band_6",
+        "do": "scale",
+        "axis": "z",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "eye.l",
+        "field": "band_7",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "eye.l",
+        "field": "band_7",
+        "do": "scale",
+        "axis": "z",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "eye.r",
+        "field": "band_8",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      },
+      {
+        "part": "eye.r",
+        "field": "band_8",
+        "do": "scale",
+        "axis": "z",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            15,
+            0
+          ],
+          "size": [
+            400,
+            30,
+            400
+          ],
+          "tint": "base"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            270,
+            0
+          ],
+          "r": 12,
+          "h": 480,
+          "segments": 8,
+          "tint": "core"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            60,
+            0
+          ],
+          "r": 85,
+          "h": 58,
+          "segments": 12,
+          "tint": "wood",
+          "role": "leg.bl"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            120,
+            0
+          ],
+          "r": 85,
+          "h": 58,
+          "segments": 12,
+          "tint": "grain",
+          "role": "leg.br"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            180,
+            0
+          ],
+          "r": 85,
+          "h": 58,
+          "segments": 12,
+          "tint": "wood",
+          "role": "leg.fl"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            240,
+            0
+          ],
+          "r": 85,
+          "h": 58,
+          "segments": 12,
+          "tint": "grain",
+          "role": "leg.fr"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            300,
+            0
+          ],
+          "r": 85,
+          "h": 58,
+          "segments": 12,
+          "tint": "wood",
+          "role": "ear.l"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            360,
+            0
+          ],
+          "r": 85,
+          "h": 58,
+          "segments": 12,
+          "tint": "grain",
+          "role": "ear.r"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            420,
+            0
+          ],
+          "r": 85,
+          "h": 58,
+          "segments": 12,
+          "tint": "wood",
+          "role": "eye.l"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            480,
+            0
+          ],
+          "r": 85,
+          "h": 58,
+          "segments": 12,
+          "tint": "grain",
+          "role": "eye.r"
+        }
+      ],
+      "palette": {
+        "base": "#71523c",
+        "wood": "#b78350",
+        "grain": "#a8743f",
+        "core": "#8c5f33"
+      },
+      "tags": [
+        "art",
+        "wood",
+        "item",
+        "sculpture",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A wooden post of eight bands: carve any band thinner, never back.",
+    "sculpture": "sculpture",
+    "carving": "carving",
+    "woodwork": "woodwork",
+    "howto_carve": "Carve a band, 1 at the bottom to 8 at the top: three seconds take it one radius thinner, from 4 down to 1; the core stays solid and removed wood never comes back."
+  },
+  "card": {
+    "text": "card",
+    "category": "sculpture",
+    "synonyms": [
+      "carving",
+      "woodwork"
+    ]
+  },
+  "howtos": {
+    "carve": {
+      "text": "howto_carve",
+      "steps": [
+        {
+          "form": "carve_band_3"
+        },
+        {
+          "form": "carve_band_3"
+        }
+      ]
+    }
+  }
+}
