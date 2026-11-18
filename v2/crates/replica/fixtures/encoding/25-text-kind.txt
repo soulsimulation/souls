@@ -1,0 +1,2 @@
+"souls:kettle@v1" # a name shaped like a kind, with : and @
+6f736f756c733a6b6574746c65407631

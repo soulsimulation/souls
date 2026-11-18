@@ -1,0 +1,9 @@
+{
+  "name": "encoding-vectors",
+  "private": true,
+  "description": "Runs replica's WASM build and one JavaScript CBOR library over the encoding vectors (Engine v2 T0, #2639). Outside the root pnpm workspace; only this check uses the library.",
+  "type": "module",
+  "dependencies": {
+    "cborg": "6.2.1"
+  }
+}

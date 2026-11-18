@@ -1,0 +1,19 @@
+# Zone A of the transfer fixture (Engine v2 T1, #2642, v2/docs/zones.md). Layout and kinds as in
+# fixtures/world-model/door.diag and kinds.diag. Soul 100's body stands in the hall and holds, in its right hand
+# (slot 2), a cup its Soul owns. A crate stands beside it. This zone's writer is the world's first, so it mints from
+# the world's scope, the scope of every counter here that is not a Soul.
+{
+  1: [100],
+  2: {},
+  3: [
+    {1: 1, 2: "souls:place"},
+    {1: 2, 2: "souls:room", 3: 1, 6: {1: "hall"}},
+    {1: 3, 2: "souls:body", 3: 2},
+    {1: 4, 2: "souls:cup", 3: 3, 4: 2, 6: {1: 20000}},    # field 1: how full, in thousandths
+    {1: 5, 2: "souls:crate", 3: 2}
+  ],
+  4: [
+    {1: 6, 2: "body-of", 3: [3, 100], 4: 0, 5: "everyone"},
+    {1: 7, 2: "owns", 3: [100, 4], 4: 1, 5: "everyone"}
+  ]
+}
