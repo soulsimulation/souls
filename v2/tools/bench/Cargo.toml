@@ -39,6 +39,11 @@ path = "src/moves.rs"
 name = "walkers"
 path = "walkers/main.rs"
 
+# F1, #2766: the form runner's steps in progress, by B2's measure.
+[[bin]]
+name = "forms"
+path = "src/forms.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).
@@ -46,6 +51,7 @@ sim = { path = "../../crates/sim" }
 testworld = { path = "../testworld" }
 worldd = { path = "../../crates/worldd" }
 import-eden = { path = "../import-eden" }
-skills = { path = "../../crates/skills" }
 # The `moves` bench places its bodies with the script driver's helpers (B2, #2681).
 body-script = { path = "../body-script" }
+# The `forms` bench binds the runner's kinds into steps (F1, #2766).
+skills = { path = "../../crates/skills" }
