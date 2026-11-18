@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":28,"group":"object","words":"hide in the wardrobe","obvious":2,"things":{"wardrobe":"eden:wardrobe"},"chain":[{"this":"wardrobe","form":"open"},{"this":"wardrobe","form":"hide_in"},{"this":"wardrobe","form":"close"}]}

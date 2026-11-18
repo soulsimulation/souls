@@ -93,7 +93,7 @@ state.
 is an instance that claims a set of resources, with rules for what it blocks and what cancels it; several run
 at once; a joint activity claims resources on several bodies. Reach is measured from an effector, which may be
 a held tool. Skills touch the world only through one narrow interface (read nodes, ask geometry, set timers,
-draw random numbers, emit controller inputs and effects), and the built-in skills use that same interface.
+draw random numbers, emit controller inputs and effects, ask to be carried across a link), and the built-in skills use that same interface.
 The escape hatch for behaviour that data cannot express is a pure, metered function named by its hash, with
 its reads declared; that is the shape a creator's own module will have later. No scripting language is
 embedded.

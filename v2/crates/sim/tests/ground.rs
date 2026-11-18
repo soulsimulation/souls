@@ -466,4 +466,126 @@ fn fields_are_the_importers() {
     assert_eq!(g::WINDOW, import_eden::WINDOW);
     assert_eq!(g::PLACE, import_eden::PLACE);
     assert_eq!(g::DOORWAY, import_eden::DOORWAY);
+    assert_eq!(g::F_TILE_SIZE, import_eden::F_TILE_SIZE);
+    assert_eq!(g::F_TILES, import_eden::F_TILES);
+}
+
+/// N1b (#3197): a 2 m tile of four 1 m cells, its heights rising 1 m a metre along x (-0.5 m at the far z row) and its
+/// classes 0 to 3, read back from the tree.
+#[test]
+fn terrain_reads_height_slope_and_class_from_the_tree() {
+    use sim::ground::scene::Terrain;
+    let text = r#"{"format": "souls/import-eden/1", "kinds": [], "things": [], "doors": [], "places": [],
+      "bake": {}, "byRef": {}, "ground": {"tileM": 2, "tiles": [{"tx": 0, "tz": 0,
+      "heights": "AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA", "classes": "AAECAw=="}]}}"#;
+    let im = import_eden::load(text).expect("loads");
+    let t = Terrain::of(&im.tree, im.nodes["ground"])
+        .unwrap()
+        .expect("a terrain");
+    assert_eq!((t.tiles(), t.side), (1, 2_000_000));
+    assert_eq!(t.height_at(0, 0), Some(0));
+    assert_eq!(t.height_at(500_000, 0), Some(500_000));
+    assert_eq!(
+        t.height_at(2_000_000, 2_000_000),
+        Some(1_500_000),
+        "the far corner"
+    );
+    // Halfway into the far cell: (1000 + 2000 + 500 + 1500) / 4 mm.
+    assert_eq!(t.height_at(1_500_000, 1_500_000), Some(1_250_000));
+    assert_eq!(t.slope_at(100, 100), Some(1_000_000), "1 m a metre along x");
+    assert_eq!(
+        [
+            (0, 0),
+            (1_500_000, 0),
+            (0, 1_500_000),
+            (1_999_999, 1_999_999)
+        ]
+        .map(|(x, z)| t.class_at(x, z)),
+        [Some(0), Some(1), Some(2), Some(3)]
+    );
+    assert_eq!(t.height_at(-1, 0), None, "off every tile");
+}
+
+/// N1b (#3197) A2: at 20 seeded points of Eden, the tree's height, slope and class are the export's: its heights
+/// sampled bilinearly as today's `Terrain.sample` does, its class bytes.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn a2_eden_terrain_matches_the_export_at_20_seeded_points() {
+    use import_eden::json::{self, Json};
+    use sim::ground::scene::Terrain;
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../.local/import-eden/eden-2026.facts.json"
+    );
+    let text = std::fs::read_to_string(path).expect("run the exporter first");
+    let im = import_eden::load(&text).expect("Eden loads");
+    let t = Terrain::of(&im.tree, im.nodes["ground"])
+        .unwrap()
+        .expect("Eden's terrain");
+    assert_eq!(t.tiles(), 256);
+    let f = json::parse(&text).unwrap();
+    let g = f.get("ground").unwrap();
+    let side = g.get("tileM").and_then(Json::int).unwrap() as f64;
+    // The export's own tile at (tx, tz): heights in mm and classes.
+    let tile = |tx: i64, tz: i64| {
+        let e = g
+            .get("tiles")
+            .unwrap()
+            .arr()
+            .iter()
+            .find(|e| {
+                e.get("tx").and_then(Json::int) == Some(tx)
+                    && e.get("tz").and_then(Json::int) == Some(tz)
+            })
+            .unwrap();
+        let b = |k: &str| import_eden::base64(e.get(k).and_then(Json::str).unwrap()).unwrap();
+        let h: Vec<f64> = b("heights")
+            .chunks_exact(4)
+            .map(|c| f64::from(i32::from_le_bytes([c[0], c[1], c[2], c[3]])))
+            .collect();
+        (h, b("classes"))
+    };
+    let mut seed = 3197u64;
+    let mut next = || {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        seed >> 33
+    };
+    let (mut worst_h, mut worst_s, mut steep) = (0f64, 0f64, 0);
+    for _ in 0..20 {
+        // A point to the millimetre anywhere in the 1 km square.
+        let x_mm = (next() % 1_000_000) as i64 - 500_000;
+        let z_mm = (next() % 1_000_000) as i64 - 500_000;
+        let (x, z) = (x_mm as f64 / 1000.0, z_mm as f64 / 1000.0);
+        let (tx, tz) = ((x / side).floor() as i64, (z / side).floor() as i64);
+        let (h, c) = tile(tx, tz);
+        let (fx, fz) = (x - tx as f64 * side, z - tz as f64 * side);
+        let (i, j) = (fx.floor() as usize, fz.floor() as usize);
+        let (u, v) = (fx - i as f64, fz - j as f64);
+        let n = side as usize + 1;
+        let at = |i: usize, j: usize| h[j * n + i];
+        let (a, b, cc, d) = (at(i, j), at(i + 1, j), at(i, j + 1), at(i + 1, j + 1));
+        let top = a + (b - a) * u;
+        let bot = cc + (d - cc) * u;
+        let want_h = top + (bot - top) * v; // mm
+        let gx = (b - a + d - cc) / 2.0;
+        let gz = (cc - a + d - b) / 2.0;
+        let want_s = (gx * gx + gz * gz).sqrt() * 1000.0; // mm a metre -> parts per million
+        let got_h = t.height_at(x_mm * 1000, z_mm * 1000).unwrap() as f64 / 1000.0;
+        let got_s = t.slope_at(x_mm * 1000, z_mm * 1000).unwrap() as f64;
+        let got_c = t.class_at(x_mm * 1000, z_mm * 1000).unwrap();
+        println!(
+            "({x:9.3}, {z:9.3}) m: height {got_h:9.3} mm (export {want_h:9.3}), slope {got_s:7.0} ppm (export {want_s:7.0}), class {got_c}"
+        );
+        assert_eq!(got_c, c[j * (n - 1) + i], "class at ({x}, {z})");
+        worst_h = worst_h.max((got_h - want_h).abs());
+        worst_s = worst_s.max((got_s - want_s).abs());
+        steep += usize::from(got_s > 0.0);
+    }
+    println!(
+        "worst height {worst_h:.4} mm, worst slope {worst_s:.1} ppm; {steep} of 20 points not flat"
+    );
+    assert!(worst_h < 1.0, "a height {worst_h} mm off the export");
+    assert!(worst_s <= 2.0, "a slope {worst_s} ppm off the export");
 }

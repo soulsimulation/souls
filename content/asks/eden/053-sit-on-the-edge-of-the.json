@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":53,"group":"object","words":"sit on the edge of the bed","obvious":3,"things":{"bed":"eden:bed"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"bed"}}]}

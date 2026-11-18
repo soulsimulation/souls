@@ -1,0 +1,112 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:door",
+  "owner": "thing",
+  "state": {
+    "open": { "n": 6, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "locked": { "n": 24, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": { "rule": "everyone" } },
+    "doorway": { "n": 7, "from": "thing", "most": 1, "most_per": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "handle": { "role": "grip", "at_mm": [380, 1040, 70] },
+    "keyhole": { "role": "contact", "at_mm": [380, 900, 40] },
+    "panel": { "role": "contact", "at_mm": [0, 1400, 30] },
+    "leaf": { "role": "contact", "at_mm": [-470, 1040, 200] }
+  },
+  "geometry": { "bounds_mm": [1160, 2330, 205] },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "open", "is": false },
+        { "need": "state", "field": "locked", "is": false, "says": "is_locked" },
+        { "need": "within_reach", "point": "handle" }
+      ],
+      "steps": [{ "step": "move", "move": "swing", "at": "handle" }],
+      "effects": [{ "change": "set", "field": "open", "to": true, "event": "door_opened" }]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "open", "is": true },
+        { "need": "within_reach", "point": "leaf" }
+      ],
+      "steps": [{ "step": "move", "move": "swing", "at": "leaf" }],
+      "effects": [{ "change": "set", "field": "open", "to": false, "event": "door_closed" }]
+    },
+    "knock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "open", "is": false, "says": "knock_when_shut" },
+        { "need": "within_reach", "point": "panel" }
+      ],
+      "steps": [{ "step": "move", "move": "knock", "at": "panel" }],
+      "effects": [{ "change": "set", "field": "open", "to": false, "event": "knocked" }]
+    },
+    "lock": {
+      "who": { "link": "owner" },
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "locked", "is": false },
+        { "need": "state", "field": "open", "is": false, "says": "shut_first" },
+        { "need": "within_reach", "point": "keyhole" }
+      ],
+      "steps": [{ "step": "move", "move": "lock", "at": "keyhole" }],
+      "effects": [{ "change": "set", "field": "locked", "to": true, "event": "door_locked" }]
+    },
+    "unlock": {
+      "who": { "link": "owner" },
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "locked", "is": true },
+        { "need": "within_reach", "point": "keyhole" }
+      ],
+      "steps": [{ "step": "move", "move": "lock", "at": "keyhole" }],
+      "effects": [{ "change": "set", "field": "locked", "to": false, "event": "door_unlocked" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:door",
+    "table": [
+      { "part": "door", "field": "open", "do": "rotate", "axis": "y", "at": { "true": -90000, "false": 0 }, "over_us": 900000 }
+    ],
+    "shape": {"round":0,"shapes":[
+      {"kind":"extrude","at":[-560,30,0],"polygon":[[-20,-60],[20,-60],[20,60],[-20,60]],"h":2200,"tint":"frame"},
+      {"kind":"extrude","at":[560,30,0],"polygon":[[-20,-60],[20,-60],[20,60],[-20,60]],"h":2200,"tint":"frame"},
+      {"kind":"extrude","at":[0,2270,0],"polygon":[[-580,-70],[580,-70],[580,70],[-580,70]],"h":60,"tint":"frame"},
+      {"kind":"box","at":[0,20,0],"size":[1020,40,200],"round":0,"tint":"frame"},
+      {"kind":"box","at":[0,1080,0],"size":[980,2100,60],"round":0,"tint":"leaf","role":"door","pivot":[-500,0,0]},
+      {"kind":"box","at":[0,1580,35],"size":[680,620,20],"round":0,"tint":"trim","role":"door","pivot":[-500,0,0]},
+      {"kind":"box","at":[0,600,35],"size":[680,780,20],"round":0,"tint":"trim","role":"door","pivot":[-500,0,0]},
+      {"kind":"sphere","at":[380,1040,70],"r":35,"segments":5,"tint":"brass","role":"door","pivot":[-500,0,0]},
+      {"kind":"sphere","at":[380,1040,-70],"r":35,"segments":5,"tint":"brass","role":"door","pivot":[-500,0,0]},
+      {"kind":"box","at":[380,900,34],"size":[45,85,8],"round":0,"tint":"brass","role":"door","pivot":[-500,0,0]},
+      {"kind":"box","at":[380,893,39],"size":[10,32,2],"round":0,"tint":"keyhole","role":"door","pivot":[-500,0,0]}
+    ],"palette":{"frame":"#f2ead8","leaf":"#3f6b5c","trim":"#36594d","brass":"#b8913f","keyhole":"#17140f"},"tags":["component","opening","door"]}
+  },
+  "text": {
+    "card": "A hinged door in its frame: open it, close it, knock; its owner locks it.",
+    "is_locked": "The door is locked. Knock, or ask its owner to unlock it.",
+    "knock_when_shut": "The door is open; there is nothing to knock on.",
+    "shut_first": "Close the door before locking it.",
+    "door": "door",
+    "front_door": "front door",
+    "doorway": "doorway",
+    "entrance": "entrance",
+    "howto_lock": "Close the door, then lock it with the key.",
+    "howto_come_in": "Knock, and wait for someone to open it."
+  },
+  "card": { "text": "card", "category": "door", "synonyms": ["front_door", "doorway", "entrance"] },
+  "howtos": {
+    "lock_up": { "text": "howto_lock", "steps": [{ "form": "close" }, { "form": "lock" }] },
+    "come_in": { "text": "howto_come_in", "steps": [{ "form": "knock" }] }
+  }
+}

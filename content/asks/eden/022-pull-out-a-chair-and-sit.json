@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":22,"group":"object","words":"pull out a chair and sit","obvious":3,"things":{"chair":"eden:chair","table":"eden:table"},"chain":[{"this":"chair","form":"pull_out"},{"this":"me","form":"sit_down","args":{"spot":"chair"}}]}

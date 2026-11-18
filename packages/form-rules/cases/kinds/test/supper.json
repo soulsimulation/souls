@@ -1,0 +1,49 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:supper",
+  "owner": "thing",
+  "state": {
+    "course": { "n": 1, "type": "enum", "values": ["laid", "served", "cleared"], "default": "laid", "audience": {"rule": "everyone"} }
+  },
+  "links": {
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"} },
+    "host": { "n": 2, "from": "body", "most": 1, "audience": {"rule": "everyone"} },
+    "diner": { "n": 3, "from": "body", "most": 11, "audience": {"rule": "everyone"} }
+  },
+  "roles": {
+    "host": { "need": "replaceable", "places": { "in": "here", "posture": "sit", "within_mm": 1500 } },
+    "diner": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 1500 } }
+  },
+  "forms": {
+    "host": {
+      "who": { "link": "owner" },
+      "starts": "act",
+      "takes": { "seat": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [
+        { "change": "link", "link": "host", "from": "actor", "event": "took_the_head" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }
+      ]
+    },
+    "join": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "seat": { "type": "slot" } },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [
+        { "change": "link", "link": "diner", "from": "actor", "event": "joined_the_table" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }
+      ]
+    }
+  },
+  "text": { "card": "A supper as an activity: its host and diners in the chairs around one table." },
+  "card": { "text": "card" }
+}

@@ -3,15 +3,11 @@
   "worldId": "mars-two",
   "source": {
     "template": "worlds/templates/mars-two.json",
-    "sha": "573dea2d9c57f2331bf7d2bb067eaffe7a132ad5fe2d227c01441f356f220924",
+    "sha": "057bb091dc2c9cd12d5ef97d0703ca3422bde7c7693126e920d6ebf805f78d7f",
     "provenance": [
       {
         "path": "worlds/templates/mars-two.json",
-        "sha": "266ea0eba0806956430ec22b464af1fb54a8325176ffb24574df232eebd1aa95"
-      },
-      {
-        "path": "worlds/patches/unified-affordances-20261027/mars-two.json",
-        "sha": "696ba06214955f231e03db29774a1cfe8567b720cc8730e61315d6ad1604dcec"
+        "sha": "057bb091dc2c9cd12d5ef97d0703ca3422bde7c7693126e920d6ebf805f78d7f"
       },
       {
         "path": "tools/mars-fidelity/patch.mjs",
@@ -1430,7 +1426,7 @@
     },
     "water-tank": {
       "title": "Campus Water Tank",
-      "what": "A storage tank serving the campus garden area. This is stored water infrastructure, distinct from the open swimming pond.",
+      "what": "A storage tank serving the campus garden area. This is stored water infrastructure.",
       "aliases": [
         "storage tank",
         "water storage"
@@ -1504,20 +1500,6 @@
       "role": "part",
       "salience": 0,
       "in": "mimos"
-    },
-    "campus-swimming-pond": {
-      "title": "Campus Swimming Pond",
-      "what": "A body of water beside the main campus, provided for swimming. Approach its bank before entering the water; it is distinct from the stored water tank.",
-      "aliases": [
-        "water",
-        "swimming pond",
-        "campus pond",
-        "lake",
-        "body of water"
-      ],
-      "kind": "pond",
-      "role": "landmark",
-      "salience": 3
     },
     "chiba": {
       "title": "Chiba",
@@ -1978,6 +1960,6 @@
   "worldAbout": {
     "title": "Mars College",
     "what": "A desert campus for shared study, art, making and communal life. Chiba hosts presentations; Mimos offers café, study and tea spaces; the kitchen, workshops and living compounds support everyday activity.",
-    "tour": "Begin with Chiba for an auditorium presentation or gallery visit, Mimos for coffee and a seated conversation, or the campus kitchen for the dining hall. Tool Camp combines workbenches and a reading corner; Freeside and CoLab form the living and workshop compound. The Dojo is for practice and movement. For a swim choose the Campus Swimming Pond, not the storage tank. The old tire track is an outdoor landmark beyond the main buildings."
+    "tour": "Begin with Chiba for an auditorium presentation or gallery visit, Mimos for coffee and a seated conversation, or the campus kitchen for the dining hall. Tool Camp combines workbenches and a reading corner; Freeside and CoLab form the living and workshop compound. The Dojo is for practice and movement. The old tire track is an outdoor landmark beyond the main buildings."
   }
 }

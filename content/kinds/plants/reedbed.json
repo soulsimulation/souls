@@ -1,0 +1,46 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:reedbed",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      4000,
+      2000,
+      3000
+    ]
+  },
+  "areas": {
+    "reeds": {
+      "at_mm": [
+        0,
+        0,
+        0
+      ],
+      "radius_mm": 1500,
+      "forbids": [
+        "sit",
+        "lie"
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:reedbed",
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[0,10,0],"size":[4000,20,3000],"round":0,"tint":"water"},{"kind":"cyl","at":[-1800,600,-1300],"r":15,"h":1200,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[-1800,1260,-1300],"r":30,"h":160,"segments":5,"tint":"head"},{"kind":"cyl","at":[-1181,680,-113],"r":15,"h":1360,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-562,760,1074],"r":15,"h":1520,"segments":4,"tint":"reed"},{"kind":"cyl","at":[57,840,-339],"r":15,"h":1680,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[676,920,848],"r":15,"h":1840,"segments":4,"tint":"reed"},{"kind":"cyl","at":[676,1900,848],"r":30,"h":160,"segments":5,"tint":"head"},{"kind":"cyl","at":[1295,600,-565],"r":15,"h":1200,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-1686,680,622],"r":15,"h":1360,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[-1067,760,-791],"r":15,"h":1520,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-448,840,396],"r":15,"h":1680,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-448,1740,396],"r":30,"h":160,"segments":5,"tint":"head"},{"kind":"cyl","at":[171,920,-1017],"r":15,"h":1840,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[790,600,170],"r":15,"h":1200,"segments":4,"tint":"reed"},{"kind":"cyl","at":[1409,680,-1243],"r":15,"h":1360,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-1572,760,-56],"r":15,"h":1520,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[-1572,1580,-56],"r":30,"h":160,"segments":5,"tint":"head"},{"kind":"cyl","at":[-953,840,1131],"r":15,"h":1680,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-334,920,-282],"r":15,"h":1840,"segments":4,"tint":"reed"},{"kind":"cyl","at":[285,600,905],"r":15,"h":1200,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[904,680,-508],"r":15,"h":1360,"segments":4,"tint":"reed"},{"kind":"cyl","at":[904,1420,-508],"r":30,"h":160,"segments":5,"tint":"head"},{"kind":"cyl","at":[1523,760,679],"r":15,"h":1520,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-1458,840,-734],"r":15,"h":1680,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[-839,920,453],"r":15,"h":1840,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-220,600,-960],"r":15,"h":1200,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-220,1260,-960],"r":30,"h":160,"segments":5,"tint":"head"},{"kind":"cyl","at":[399,680,227],"r":15,"h":1360,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[1018,760,-1186],"r":15,"h":1520,"segments":4,"tint":"reed"},{"kind":"cyl","at":[1637,840,1],"r":15,"h":1680,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-1344,920,1188],"r":15,"h":1840,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[-1344,1900,1188],"r":30,"h":160,"segments":5,"tint":"head"},{"kind":"cyl","at":[-725,600,-225],"r":15,"h":1200,"segments":4,"tint":"reed"},{"kind":"cyl","at":[-106,680,962],"r":15,"h":1360,"segments":4,"tint":"reed"},{"kind":"cyl","at":[513,760,-451],"r":15,"h":1520,"segments":4,"tint":"reed2"},{"kind":"cyl","at":[1132,840,736],"r":15,"h":1680,"segments":4,"tint":"reed"},{"kind":"cyl","at":[1132,1740,736],"r":30,"h":160,"segments":5,"tint":"head"},{"kind":"cyl","at":[1751,920,-677],"r":15,"h":1840,"segments":4,"tint":"reed"}],"palette":{"water":"#5f8fa8","reed":"#8a9a4a","reed2":"#a6a45a","head":"#6b4a2f"},"tags":["plant","reeds","water","area"]}
+  },
+  "text": {
+    "card": "Reeds and rushes standing in the shallows along a shore.",
+    "place": "place",
+    "reeds": "reeds",
+    "rushes": "rushes",
+    "shore": "shore"
+  },
+  "card": {
+    "text": "card",
+    "category": "place",
+    "synonyms": [
+      "reeds",
+      "rushes",
+      "shore"
+    ]
+  }
+}
