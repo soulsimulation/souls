@@ -1,0 +1,9 @@
+[package]
+name = "wasm-load"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Prints replica's load probe natively; node.mjs and browser.mjs compare the WASM build to it (K1, #2638)."
+
+[dependencies]
+replica = { path = "../../crates/replica" }
