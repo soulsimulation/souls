@@ -1,0 +1,23 @@
+# The viewers' origin (Engine v2 V2, #2711; installed by v2/tools/ops/install.sh, O17 #2810): a plain file server
+# over the folder the worlds' view tier writes, on loopback only; the proxy and caches sit in front of it. It only reads.
+[Unit]
+Description=Souls viewers' origin
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=souls
+Group=souls
+Slice=souls.slice
+ExecStart=/usr/bin/env node /usr/local/lib/souls/origin/origin.mjs /var/lib/souls/views 7320 127.0.0.1
+Restart=always
+RestartSec=1s
+MemoryMax=256M
+MemorySwapMax=0
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

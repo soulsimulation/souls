@@ -1,0 +1,10 @@
+# Every Engine v2 program on a machine shared with today's system (Engine v2 O17, #2810): the worlds (worldd@), the
+# gateways, the directory and the origin share this slice's memory, so the new system can never take today's.
+# O14 (v2/docs/machines.md): today's worlds may use at most 26 GB of a 31 GB machine; 3 GB here leaves them that.
+# A world's own limit (worldd@.service, 2 GB) holds inside it. No swap, as for a world.
+[Unit]
+Description=Souls Engine v2 programs
+
+[Slice]
+MemoryMax=3G
+MemorySwapMax=0

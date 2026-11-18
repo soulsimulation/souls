@@ -1,0 +1,82 @@
+# Installs Engine v2's programs beside today's system on the production machine (Engine v2 O17, #2810), through
+# v2/tools/ops/install.sh. A dry run by default: it prints the plan and changes nothing. Even an apply starts, enables
+# and restarts nothing, and never touches today's units, users, data, proxy, DNS or firewall.
+#   gh workflow run install-v2.yml --ref main                      (the dry run: the plan)
+#   gh workflow run install-v2.yml --ref main -f action=apply
+#   gh workflow run install-v2.yml --ref main -f action=uninstall
+# Runbook: v2/docs/runbook/install.md.
+name: install-v2
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: plan (the dry run, changes nothing), apply, or uninstall
+        type: choice
+        options: [plan, apply, uninstall]
+        default: plan
+permissions:
+  contents: read
+concurrency:
+  group: install-v2
+  cancel-in-progress: false
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    steps:
+      - name: Inputs
+        env:
+          REF: ${{ github.ref }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          [ -z "$SIM_DEPLOY_HOST" ] || echo "::add-mask::$SIM_DEPLOY_HOST"
+          [ -z "$SIM_DEPLOY_USER" ] || echo "::add-mask::$SIM_DEPLOY_USER"
+          [ "$REF" = refs/heads/main ] || { echo "::error::install-v2 runs from main only (got $REF)"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - name: The test (nothing it writes is today's system's)
+        run: bash v2/tools/ops/install.sh check
+      - name: Build the programs and the page's WASM
+        working-directory: v2
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --no-self-update --target wasm32-unknown-unknown
+          cargo build --release --locked -p supervisor -p worldd -p gatewayd -p directoryd
+          bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
+          cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
+          cargo build -p replica --release --target wasm32-unknown-unknown --locked
+          target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
+      - name: Build the page
+        working-directory: v2/web
+        run: npm ci && npm run build
+      - name: Bundle
+        run: bash v2/tools/ops/install.sh bundle "$RUNNER_TEMP/bundle" v2/target/release v2/web/dist
+      - name: SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SIM_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+          printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
+            "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
+      - name: install.sh
+        env:
+          INSTALL_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          ACTION: ${{ inputs.action }}
+        run: |
+          set +e
+          bash v2/tools/ops/install.sh remote "$ACTION" "$RUNNER_TEMP/bundle" 2>&1 | sed -u -E -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g' -e 's/\[[0-9a-fA-F:]*:[0-9a-fA-F:]+\]/<ip6>/g' | tee "$RUNNER_TEMP/install.txt"
+          status=${PIPESTATUS[0]}
+          { echo "install.sh $ACTION exit $status"; echo '```'; cat "$RUNNER_TEMP/install.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - name: Remove deploy credentials
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
