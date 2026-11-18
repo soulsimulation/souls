@@ -113,8 +113,9 @@ A row of places names the slots in it with `row` and `place` (1 at the first end
 back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are data (`tools/entry/cases/slots.json`).
 
 `looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
-`tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
-`look.mjs` converts to metres only when it draws.
+`tags`, in whole millimetres (a polygon's points too), with an angle in whole millidegrees and a part's `scale` and
+`glow` in permille. The format has no floating-point number and `look.mjs` converts to metres and fractions only when it
+draws; a text, list or schedule field changes no part, so it is not drawn.
 
 ## A form
 
@@ -206,7 +207,10 @@ classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_o
 `effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
 `start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
 includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
-point and then to a second one.
+point and then to a second one. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
+`held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
+contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
+the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free. `strike` and `pump` (SA-D5b, [#2859](https://github.com/soulsimulation/souls/issues/2859)) are the same shape with the effector at the tool's head (a hammer's face, a pump's nozzle): a window `strike_us` per blow or `pump_us` per stroke, `count` of them in the record, claiming the hand only.
 
 ```sh
 node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
