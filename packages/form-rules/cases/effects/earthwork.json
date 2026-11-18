@@ -1,0 +1,236 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Earthwork (from #1834): a tray of six columns, one portion each, and an empty pail beside it. A Soul with empty hands digs the back-left column into the pail (1 to 0, pail 0 to 1); digging the next column into the loaded pail is refused; it fills the front-right column (1 to 2, pail 1 to 0); filling it again from the empty pail is refused. Then it takes the empty pail into a hand. Six portions are conserved between the columns and the pail throughout.",
+  "cases": [
+    {
+      "name": "dig_fill_conserved",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "tr1",
+              "p1"
+            ]
+          },
+          "tr1": {
+            "kind": "eden:earthwork_tray",
+            "slots": {
+              "back_1": [
+                "c1"
+              ],
+              "back_2": [
+                "c2"
+              ],
+              "back_3": [
+                "c3"
+              ],
+              "front_1": [
+                "c4"
+              ],
+              "front_2": [
+                "c5"
+              ],
+              "front_3": [
+                "c6"
+              ]
+            }
+          },
+          "c1": {
+            "kind": "eden:earth_column"
+          },
+          "c2": {
+            "kind": "eden:earth_column"
+          },
+          "c3": {
+            "kind": "eden:earth_column"
+          },
+          "c4": {
+            "kind": "eden:earth_column"
+          },
+          "c5": {
+            "kind": "eden:earth_column"
+          },
+          "c6": {
+            "kind": "eden:earth_column"
+          },
+          "p1": {
+            "kind": "eden:soil_pail"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "dig",
+            "args": {
+              "pail": "p1"
+            }
+          },
+          "receipt": "re1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "soil",
+                "n": 1,
+                "to": 0,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "soil",
+                "n": 1,
+                "to": 1,
+                "by": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dug",
+                "node": "c1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c2",
+            "form": "dig",
+            "args": {
+              "pail": "p1"
+            }
+          },
+          "receipt": "re2",
+          "expect": {
+            "verdict": "no",
+            "reason": "no_room",
+            "need": 2
+          }
+        },
+        {
+          "act": {
+            "this": "c6",
+            "form": "fill",
+            "args": {
+              "pail": "p1"
+            }
+          },
+          "receipt": "re3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "soil",
+                "n": 1,
+                "to": 0,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "c6",
+                "field": "soil",
+                "n": 1,
+                "to": 2,
+                "by": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:filled",
+                "node": "c6",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c6",
+            "form": "fill",
+            "args": {
+              "pail": "p1"
+            }
+          },
+          "receipt": "re4",
+          "expect": {
+            "verdict": "no",
+            "reason": "not_enough",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "take"
+          },
+          "receipt": "re5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "p1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "c1": {
+          "kind": "eden:earth_column",
+          "fields": {
+            "soil": 0
+          }
+        },
+        "c2": {
+          "kind": "eden:earth_column"
+        },
+        "c6": {
+          "kind": "eden:earth_column",
+          "fields": {
+            "soil": 2
+          }
+        },
+        "p1": {
+          "kind": "eden:soil_pail",
+          "fields": {
+            "soil": 0
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "p1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}
