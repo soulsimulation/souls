@@ -1,0 +1,10 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:chair",
+  "owner": "thing",
+  "points": { "front": { "role": "stand", "at_mm": [0, 0, 450] } },
+  "slots": { "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 0], "stand": "front" } },
+  "geometry": { "bounds_mm": [500, 900, 500] },
+  "text": { "card": "One chair." },
+  "card": { "text": "card" }
+}

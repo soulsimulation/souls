@@ -1,0 +1,177 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "R2 (#2685): one hand-written case per reason a need gives, both causes of unknown, and a yes, on K3's lamp, seat and cup (kinds/). link_full comes from working out effects, not from a need, so no case here names it.",
+  "cases": [
+    {
+      "name": "lamp_switch_on_every_need_met",
+      "act": { "this": "l1", "form": "switch_on" },
+      "state": {
+        "actor": "b1",
+        "nodes": { "l1": { "kind": "r2:lamp", "fields": { "lit": false } }, "b1": { "effector_mm": [0, 300, 300] } },
+        "moves": { "press": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": ["owner"] },
+      "expect": { "verdict": "yes", "read": [["l1/field/1", false], ["l1/field/2", true], ["b1/effector_mm", [0, 300, 300]], ["move/press/reach_mm", 300]] }
+    },
+    {
+      "name": "lamp_switch_on_already_lit_is_fixed_by_switch_off",
+      "act": { "this": "l1", "form": "switch_on" },
+      "state": {
+        "actor": "b1",
+        "nodes": { "l1": { "kind": "r2:lamp", "fields": { "lit": 1 } }, "b1": { "effector_mm": [0, 0, 0] } },
+        "moves": { "press": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": ["owner"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "lit", "found": 1, "wanted": { "is": false } }, "fix": { "form": "switch_off" } }
+    },
+    {
+      "name": "lamp_switch_on_wiring_outside_the_audience_is_unknown",
+      "act": { "this": "l1", "form": "switch_on" },
+      "state": {
+        "actor": "b1",
+        "nodes": { "l1": { "kind": "r2:lamp", "fields": { "lit": false } }, "b1": { "effector_mm": [0, 0, 0] } },
+        "moves": { "press": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "unknown", "need": 1, "node": "l1", "field": "wired" }
+    },
+    {
+      "name": "lamp_switch_on_a_millimetre_out_of_reach",
+      "act": { "this": "l1", "form": "switch_on" },
+      "state": {
+        "actor": "b1",
+        "nodes": { "l1": { "kind": "r2:lamp" }, "b1": { "effector_mm": [0, 0, 601] } },
+        "moves": { "press": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": "all" },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 2, "detail": { "point": "switch", "move": "press" }, "fix": { "step": "walk_to", "point": "switch" } }
+    },
+    {
+      "name": "lamp_dim_above_its_range",
+      "act": { "this": "l1", "form": "dim" },
+      "state": { "actor": "b1", "nodes": { "l1": { "kind": "r2:lamp", "fields": { "level": 901 } }, "b1": {} } },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "level", "found": 901, "wanted": { "at_least": 1, "at_most": 900 } }, "fix": null }
+    },
+    {
+      "name": "lamp_unplug_when_not_plugged_is_fixed_by_plug_in",
+      "act": { "this": "l1", "form": "unplug" },
+      "state": { "actor": "b1", "nodes": { "l1": { "kind": "r2:lamp", "links": { "plugged": [] } }, "b1": {} } },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "not_linked", "need": 0, "detail": { "link": "plugged", "count": 0 }, "fix": { "form": "plug_in" } }
+    },
+    {
+      "name": "lamp_plug_in_when_plugged_is_fixed_by_unplug",
+      "act": { "this": "l1", "form": "plug_in" },
+      "state": { "actor": "b1", "nodes": { "l1": { "kind": "r2:lamp", "links": { "plugged": ["w1"] } }, "b1": {} } },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "already_linked", "need": 0, "detail": { "link": "plugged", "count": 1 }, "fix": { "form": "unplug" } }
+    },
+    {
+      "name": "lamp_unshare_a_link_outside_the_audience_is_unknown",
+      "act": { "this": "l1", "form": "unshare" },
+      "state": { "actor": "b1", "nodes": { "l1": { "kind": "r2:lamp", "links": { "shared": [] } }, "b1": {} } },
+      "asker": { "sees": ["owner"] },
+      "expect": { "verdict": "unknown", "need": 0, "node": "l1", "link": "shared" }
+    },
+    {
+      "name": "lamp_held_at_an_index_level_only_is_unknown",
+      "act": { "this": "l1", "form": "switch_on" },
+      "state": {
+        "actor": "b1",
+        "nodes": { "l1": { "kind": "r2:lamp", "held": "index" }, "b1": { "effector_mm": [0, 0, 300] } },
+        "moves": { "press": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": "all" },
+      "expect": { "verdict": "unknown", "need": 0, "node": "l1", "field": "lit", "held": "index" }
+    },
+    {
+      "name": "lamp_held_at_an_index_level_but_out_of_reach_is_a_definite_no",
+      "act": { "this": "l1", "form": "switch_on" },
+      "state": {
+        "actor": "b1",
+        "nodes": { "l1": { "kind": "r2:lamp", "held": "index" }, "b1": { "effector_mm": [0, 0, 5000] } },
+        "moves": { "press": { "reach_mm": 300 } }
+      },
+      "asker": { "sees": "all" },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 2 }
+    },
+    {
+      "name": "seat_sit_taken_is_fixed_by_the_other_place",
+      "act": { "this": "s1", "form": "sit", "args": { "seat": "left" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "s1": { "kind": "r2:seat", "slots": { "left": ["b2"], "right": [] } }, "b1": { "effector_mm": [-450, 450, 300] } },
+        "moves": { "lower": { "reach_mm": 500 } }
+      },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "detail": { "node": "s1", "slot": "left" }, "fix": { "form": "sit", "args": { "seat": "right" } }, "read": [["s1/slot/left", 1], ["s1/slot/right", 0]] }
+    },
+    {
+      "name": "seat_sit_free_and_within_reach",
+      "act": { "this": "s1", "form": "sit", "args": { "seat": "right" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "s1": { "kind": "r2:seat", "slots": { "left": ["b2"] } }, "b1": { "effector_mm": [750, 850, 0] } },
+        "moves": { "lower": { "reach_mm": 500 } }
+      },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "yes", "read": [["s1/slot/right", 0], ["b1/effector_mm", [750, 850, 0]], ["move/lower/reach_mm", 500]] }
+    },
+    {
+      "name": "seat_sit_without_its_argument_is_bad_input",
+      "act": { "this": "s1", "form": "sit" },
+      "state": { "actor": "b1", "nodes": { "s1": { "kind": "r2:seat" }, "b1": {} } },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "bad_input", "need": 0, "detail": { "what": "argument_missing", "arg": "seat" }, "fix": null }
+    },
+    {
+      "name": "seat_shelf_held_at_an_index_level_only_is_unknown",
+      "act": { "this": "s1", "form": "stow" },
+      "state": { "actor": "b1", "nodes": { "s1": { "kind": "r2:seat", "held": "index" }, "b1": {} } },
+      "asker": { "sees": "all" },
+      "expect": { "verdict": "unknown", "need": 0, "node": "s1", "slot": "shelf", "held": "index" }
+    },
+    {
+      "name": "cup_take_with_both_hands_full",
+      "act": { "this": "c1", "form": "take" },
+      "state": { "actor": "b1", "nodes": { "c1": { "kind": "r2:cup" }, "b1": { "hands": { "left": "x1", "right": "x2" } } } },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": { "step": "put" } }
+    },
+    {
+      "name": "cup_clink_holding_no_cup",
+      "act": { "this": "c1", "form": "clink" },
+      "state": { "actor": "b1", "nodes": { "c1": { "kind": "r2:cup" }, "x1": { "kind": "r2:lamp" }, "b1": { "hands": { "left": "x1", "right": null } } } },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "not_holding_kind", "need": 0, "detail": { "kind": "r2:cup" }, "fix": { "step": "take", "kind": "r2:cup" } }
+    },
+    {
+      "name": "cup_drink_from_a_cup_on_the_table",
+      "act": { "this": "c1", "form": "drink" },
+      "state": { "actor": "b1", "nodes": { "c1": { "kind": "r2:cup", "fields": { "water_g": 200 } }, "b1": { "hands": { "left": null } } } },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": { "step": "take", "thing": "c1" } }
+    },
+    {
+      "name": "cup_pour_that_would_overflow",
+      "act": { "this": "c1", "form": "pour", "args": { "into": "c2", "grams": 200 } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "c1": { "kind": "r2:cup", "fields": { "water_g": 250 } }, "c2": { "kind": "r2:cup", "fields": { "water_g": 250 } }, "b1": { "hands": { "right": "c1" } } }
+      },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "no_room", "need": 1, "detail": { "node": "c2", "field": "water_g", "room": 50, "amount": 200 }, "fix": null }
+    },
+    {
+      "name": "cup_pour_into_a_cup_held_at_an_index_level_only_is_unknown",
+      "act": { "this": "c1", "form": "pour", "args": { "into": "c2", "grams": 50 } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "c1": { "kind": "r2:cup", "fields": { "water_g": 250 } }, "c2": { "kind": "r2:cup", "held": "index" }, "b1": { "hands": { "right": "c1" } } }
+      },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "unknown", "need": 1, "node": "c2", "field": "water_g", "held": "index" }
+    }
+  ]
+}

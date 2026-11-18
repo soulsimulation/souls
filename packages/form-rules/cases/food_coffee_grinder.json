@@ -1,6 +1,6 @@
 {
   "format": "souls-form-cases/1",
-  "about": "eden:coffee_grinder (from #1885). Six bean portions; a drawer that holds three ground. Grinding takes four seconds with a free hand and turns one bean portion into one ground portion (the original chose 1, 2 or 3 per act; here each act grinds one). Refused as the original refused: no beans left ('Not enough supplied beans remain; choose fewer whole portions'), the drawer full ('The grounds drawer holds three portions; dose a washed mug before grinding more') and no free hand ('Put down held objects before using this supported coffee grinder'). Dosing a mug is handed back (see the pull request).",
+  "about": "eden:coffee_grinder (from #1885). Six bean portions; a drawer that holds three ground. Grinding takes four seconds with a free hand and turns one bean portion into one ground portion (the original chose 1, 2 or 3 per act; here each act grinds one). Refused as the original refused: no beans left ('Not enough supplied beans remain; choose fewer whole portions'), the drawer full ('The grounds drawer holds three portions; dose a washed mug before grinding more') and no free hand ('Put down held objects before using this supported coffee grinder'). Dosing takes two seconds with both hands empty and moves one ground portion into a coffee mug the act names, read through the mug's own kind: the grinder needs a portion ground ('Grind at least one supplied bean portion before dosing a mug', fix: grind), and the mug washed (dirt 0) and empty (grounds 0) ('Wash and empty the selected coffee mug first; do not replace existing grounds or drink'). With dosing, a full drawer names it as the fix ('dose a washed mug before grinding more').",
   "cases": [
     {
       "name": "coffee_grinder_take_every_need_met",
@@ -35,7 +35,7 @@
       "act": {"this": "cg1", "form": "grind"},
       "state": {"actor": "b1", "nodes": {"cg1": {"kind": "eden:coffee_grinder", "fields": {"beans": 3, "grounds": 3}}, "b1": {"hands": {"left": null, "right": null}}}},
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "grounds", "found": 3, "wanted": {"at_most": 2}}, "fix": null}
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "grounds", "found": 3, "wanted": {"at_most": 2}}, "fix": {"form": "dose"}}
     },
     {
       "name": "coffee_grinder_grind_hands_full",
@@ -43,6 +43,62 @@
       "state": {"actor": "b1", "nodes": {"cg1": {"kind": "eden:coffee_grinder"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
       "asker": {"sees": ["public"]},
       "expect": {"verdict": "no", "reason": "no_free_hand", "need": 2, "detail": {}, "fix": {"step": "put"}}
+    },
+    {
+      "name": "coffee_grinder_dose_every_need_met",
+      "act": {"this": "cg1", "form": "dose", "args": {"mug": "m1"}},
+      "state": {"actor": "b1", "nodes": {"cg1": {"kind": "eden:coffee_grinder", "fields": {"grounds": 1}}, "m1": {"kind": "eden:coffee_mug"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "coffee_grinder_dose_nothing_ground",
+      "act": {"this": "cg1", "form": "dose", "args": {"mug": "m1"}},
+      "state": {"actor": "b1", "nodes": {"cg1": {"kind": "eden:coffee_grinder"}, "m1": {"kind": "eden:coffee_mug"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "grounds", "found": 0, "wanted": {"at_least": 1}}, "fix": {"form": "grind"}, "says": "grind_first"}
+    },
+    {
+      "name": "coffee_grinder_dose_mug_not_washed",
+      "act": {"this": "cg1", "form": "dose", "args": {"mug": "m1"}},
+      "state": {"actor": "b1", "nodes": {"cg1": {"kind": "eden:coffee_grinder", "fields": {"grounds": 1}}, "m1": {"kind": "eden:coffee_mug", "fields": {"dirt": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"node": "m1", "field": "dirt", "found": 1, "wanted": {"at_most": 0}}, "fix": null, "says": "wash_first", "read": [["cg1/field/2", 1], ["m1/field/2", 1]]}
+    },
+    {
+      "name": "coffee_grinder_dose_mug_not_empty",
+      "act": {"this": "cg1", "form": "dose", "args": {"mug": "m1"}},
+      "state": {"actor": "b1", "nodes": {"cg1": {"kind": "eden:coffee_grinder", "fields": {"grounds": 2}}, "m1": {"kind": "eden:coffee_mug", "fields": {"grounds": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 2, "detail": {"node": "m1", "field": "grounds", "found": 1, "wanted": {"at_most": 0}}, "fix": null, "says": "wash_first"}
+    },
+    {
+      "name": "coffee_grinder_dose_holding_something",
+      "act": {"this": "cg1", "form": "dose", "args": {"mug": "m1"}},
+      "state": {"actor": "b1", "nodes": {"cg1": {"kind": "eden:coffee_grinder", "fields": {"grounds": 1}}, "m1": {"kind": "eden:coffee_mug"}, "b1": {"hands": {"left": "x1", "right": null}}, "x1": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "hand_not_empty", "need": 3, "detail": {"holding": 1}, "fix": {"step": "put"}, "says": "put_down_first"}
+    },
+    {
+      "name": "coffee_grinder_dose_no_mug_named",
+      "act": {"this": "cg1", "form": "dose"},
+      "state": {"actor": "b1", "nodes": {"cg1": {"kind": "eden:coffee_grinder", "fields": {"grounds": 1}}, "m1": {"kind": "eden:coffee_mug"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "bad_input", "need": 1, "detail": {"what": "argument_missing", "arg": "mug"}}
+    },
+    {
+      "name": "coffee_mug_take_every_need_met",
+      "act": {"this": "m1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"m1": {"kind": "eden:coffee_mug"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "coffee_mug_take_hands_full",
+      "act": {"this": "m1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"m1": {"kind": "eden:coffee_mug"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
     }
   ]
 }

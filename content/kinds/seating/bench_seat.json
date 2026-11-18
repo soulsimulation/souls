@@ -1,0 +1,70 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bench_seat",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "seat_1_front": { "role": "stand", "at_mm": [-350, 0, 455], "yaw_mdeg": 180000 },
+    "seat_2_front": { "role": "stand", "at_mm": [350, 0, 455], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "seat_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-350, 465, 0], "stand": "seat_1_front" },
+    "seat_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [350, 465, 0], "stand": "seat_2_front" }
+  },
+  "geometry": { "bounds_mm": [1370, 450, 310] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
+  },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:bench_seat",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [0, 430, 0],
+          "polygon": [[-685, -155], [685, -155], [685, 155], [-685, 155]],
+          "h": 20,
+          "tint": "wood"
+        },
+        {
+          "kind": "extrude",
+          "at": [-600, 15, 0],
+          "polygon": [[-15, -135], [15, -135], [15, 135], [-15, 135]],
+          "h": 390,
+          "tint": "wood"
+        },
+        {
+          "kind": "extrude",
+          "at": [600, 15, 0],
+          "polygon": [[-15, -135], [15, -135], [15, 135], [-15, 135]],
+          "h": 390,
+          "tint": "wood"
+        },
+        { "kind": "box", "at": [0, 150, 0], "size": [1140, 50, 40], "round": 0, "tint": "wood" }
+      ],
+      "round": 15,
+      "palette": { "wood": "#9a6b43" },
+      "tags": ["furniture", "seat", "bench"]
+    }
+  },
+  "text": {
+    "card": "A plain indoor bench without a back that seats two; carried in two hands.",
+    "furniture": "furniture",
+    "seat": "seat"
+  },
+  "card": { "text": "card", "category": "furniture", "synonyms": ["seat"] }
+}

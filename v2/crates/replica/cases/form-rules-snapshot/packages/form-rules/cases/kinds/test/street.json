@@ -1,0 +1,7 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:street",
+  "owner": "place",
+  "text": { "card": "A test street for reactions: a place outside the shop." },
+  "card": { "text": "card" }
+}
