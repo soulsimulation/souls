@@ -1,0 +1,44 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:exercise_circuit",
+  "owner": "thing",
+  "state": {
+    "rounds": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "centre": { "role": "stand", "at_mm": [0, 0, 0], "yaw_mdeg": 0 }
+  },
+  "geometry": { "bounds_mm": [1600, 50, 1600] },
+  "forms": {
+    "exercise": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "centre" },
+        { "step": "move", "move": "stretch" },
+        { "step": "wait", "us": 5000000 },
+        { "step": "move", "move": "jump" },
+        { "step": "wait", "us": 10000000 },
+        { "step": "move", "move": "stretch" },
+        { "step": "wait", "us": 5000000 }
+      ],
+      "effects": [{ "change": "set", "field": "rounds", "by": 1, "event": "round_completed" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:exercise_circuit",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,3,0],"size":[1600,6,1600],"tint":"base","collide":false},{"kind":"box","at":[-500,8,-600],"size":[300,4,80],"tint":"mark","collide":false},{"kind":"box","at":[0,8,-600],"size":[300,4,80],"tint":"mark","collide":false},{"kind":"box","at":[500,8,-600],"size":[300,4,80],"tint":"mark","collide":false}],"palette":{"base":"#b86f42","mark":"#f1d48b"},"tags":["exercise","circuit","ground"]}
+  },
+  "text": {
+    "card": "A painted ground marker for a twenty-second stretch and jumping-jack circuit.",
+    "exercise": "exercise",
+    "warm_up": "warm up",
+    "circuit": "circuit",
+    "howto_exercise": "With your hands free: stretch five seconds, jumping jacks ten seconds, stretch five seconds; only a whole circuit counts a round."
+  },
+  "card": { "text": "card", "category": "exercise", "synonyms": ["warm_up", "circuit"] },
+  "howtos": { "exercise": { "text": "howto_exercise", "steps": [{ "form": "exercise" }] } }
+}

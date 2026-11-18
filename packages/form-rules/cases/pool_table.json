@@ -1,0 +1,264 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:pool_table. Two players (the activity's required role), each at a place of the table; anyone racks the balls, a player shoots with a hand free, which breaks the rack.",
+  "cases": [
+    {
+      "name": "play_at_a_free_place",
+      "act": {
+        "this": "t1",
+        "form": "play",
+        "args": {
+          "place": "break_end"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:pool_table"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "play_at_a_taken_place_offers_the_other",
+      "act": {
+        "this": "t1",
+        "form": "play",
+        "args": {
+          "place": "break_end"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:pool_table",
+            "slots": {
+              "break_end": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "fix": {
+          "form": "play",
+          "args": {
+            "place": "side"
+          }
+        }
+      }
+    },
+    {
+      "name": "leave",
+      "act": {
+        "this": "t1",
+        "form": "leave"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:pool_table",
+            "slots": {
+              "break_end": [
+                "b1"
+              ]
+            },
+            "links": {
+              "player": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "rack_a_racked_table",
+      "act": {
+        "this": "t1",
+        "form": "rack"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:pool_table"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "rack_after_a_break",
+      "act": {
+        "this": "t1",
+        "form": "rack"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:pool_table",
+            "fields": {
+              "racked": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "shoot",
+      "act": {
+        "this": "t1",
+        "form": "shoot"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:pool_table",
+            "links": {
+              "player": [
+                "b1",
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "shoot_with_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "shoot"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:pool_table",
+            "links": {
+              "player": [
+                "b1",
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:toy_blocks"
+          },
+          "x2": {
+            "kind": "eden:toy_blocks"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

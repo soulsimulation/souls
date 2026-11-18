@@ -1,0 +1,643 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pavement_chalk",
+  "owner": "thing",
+  "state": {
+    "red": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 8,
+      "min": 0,
+      "max": 8,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "blue": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 8,
+      "min": 0,
+      "max": 8,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "yellow": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 8,
+      "min": 0,
+      "max": 8,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "strokes": {
+      "n": 4,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 8,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        800
+      ],
+      "yaw_mdeg": 180000
+    },
+    "patch": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        24,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1000,
+      60,
+      1000
+    ]
+  },
+  "forms": {
+    "draw_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "red",
+          "at_least": 1
+        },
+        {
+          "need": "state",
+          "field": "strokes",
+          "at_most": 7
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "settle",
+          "posture": "sit"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "patch"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        },
+        {
+          "step": "rise"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "red",
+          "by": -1,
+          "event": "chalk_used"
+        },
+        {
+          "change": "set",
+          "field": "strokes",
+          "by": 1,
+          "event": "stroke_drawn"
+        }
+      ]
+    },
+    "draw_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "blue",
+          "at_least": 1
+        },
+        {
+          "need": "state",
+          "field": "strokes",
+          "at_most": 7
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "settle",
+          "posture": "sit"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "patch"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        },
+        {
+          "step": "rise"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "blue",
+          "by": -1,
+          "event": "chalk_used"
+        },
+        {
+          "change": "set",
+          "field": "strokes",
+          "by": 1,
+          "event": "stroke_drawn"
+        }
+      ]
+    },
+    "draw_yellow": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "yellow",
+          "at_least": 1
+        },
+        {
+          "need": "state",
+          "field": "strokes",
+          "at_most": 7
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "settle",
+          "posture": "sit"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "patch"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        },
+        {
+          "step": "rise"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "yellow",
+          "by": -1,
+          "event": "chalk_used"
+        },
+        {
+          "change": "set",
+          "field": "strokes",
+          "by": 1,
+          "event": "stroke_drawn"
+        }
+      ]
+    },
+    "erase": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "strokes",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "settle",
+          "posture": "sit"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "patch"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        },
+        {
+          "step": "rise"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strokes",
+          "by": -1,
+          "event": "stroke_erased"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:pavement_chalk",
+    "table": [
+      {
+        "part": "knob",
+        "field": "red",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          0,
+          8
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      },
+      {
+        "part": "needle",
+        "field": "blue",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          0,
+          8
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      },
+      {
+        "part": "lid",
+        "field": "yellow",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          0,
+          8
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      },
+      {
+        "part": "fill",
+        "field": "strokes",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          0,
+          8
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            12,
+            0
+          ],
+          "size": [
+            1000,
+            24,
+            1000
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            38,
+            330
+          ],
+          "size": [
+            200,
+            25,
+            25
+          ],
+          "tint": "red",
+          "role": "knob",
+          "pivot": [
+            -400,
+            38,
+            330
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            38,
+            380
+          ],
+          "size": [
+            200,
+            25,
+            25
+          ],
+          "tint": "blue",
+          "role": "needle",
+          "pivot": [
+            -400,
+            38,
+            380
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            38,
+            430
+          ],
+          "size": [
+            200,
+            25,
+            25
+          ],
+          "tint": "yellow",
+          "role": "lid",
+          "pivot": [
+            -400,
+            38,
+            430
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -360,
+            26,
+            -180
+          ],
+          "size": [
+            340,
+            4,
+            34
+          ],
+          "tint": "red",
+          "yaw": 65000,
+          "role": "fill",
+          "pivot": [
+            -450,
+            26,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -255,
+            26,
+            80
+          ],
+          "size": [
+            340,
+            4,
+            34
+          ],
+          "tint": "blue",
+          "yaw": 51250,
+          "role": "fill",
+          "pivot": [
+            -450,
+            26,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            26,
+            -180
+          ],
+          "size": [
+            340,
+            4,
+            34
+          ],
+          "tint": "yellow",
+          "yaw": 77500,
+          "role": "fill",
+          "pivot": [
+            -450,
+            26,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -45,
+            26,
+            80
+          ],
+          "size": [
+            340,
+            4,
+            34
+          ],
+          "tint": "red",
+          "yaw": 62500,
+          "role": "fill",
+          "pivot": [
+            -450,
+            26,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            60,
+            26,
+            -180
+          ],
+          "size": [
+            340,
+            4,
+            34
+          ],
+          "tint": "blue",
+          "yaw": 45000,
+          "role": "fill",
+          "pivot": [
+            -450,
+            26,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            165,
+            26,
+            80
+          ],
+          "size": [
+            340,
+            4,
+            34
+          ],
+          "tint": "yellow",
+          "yaw": 71250,
+          "role": "fill",
+          "pivot": [
+            -450,
+            26,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            270,
+            26,
+            -180
+          ],
+          "size": [
+            340,
+            4,
+            34
+          ],
+          "tint": "red",
+          "yaw": 82500,
+          "role": "fill",
+          "pivot": [
+            -450,
+            26,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            375,
+            26,
+            80
+          ],
+          "size": [
+            340,
+            4,
+            34
+          ],
+          "tint": "blue",
+          "yaw": 60000,
+          "role": "fill",
+          "pivot": [
+            -450,
+            26,
+            0
+          ]
+        }
+      ],
+      "palette": {
+        "stone": "#858b91",
+        "red": "#ed5862",
+        "blue": "#5da5f5",
+        "yellow": "#f5d95d"
+      },
+      "tags": [
+        "art",
+        "chalk",
+        "pavement",
+        "ground"
+      ]
+    }
+  },
+  "text": {
+    "card": "A pavement patch with red, blue and yellow chalk: draw up to eight strokes.",
+    "art": "art",
+    "chalk": "chalk",
+    "pavement_art": "pavement art",
+    "howto_draw": "Kneel at the patch and draw a stroke in one colour; each colour has eight. Erase a stroke for room: the chalk is not given back."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "chalk",
+      "pavement_art"
+    ]
+  },
+  "howtos": {
+    "draw": {
+      "text": "howto_draw",
+      "steps": [
+        {
+          "form": "draw_red"
+        }
+      ]
+    }
+  }
+}

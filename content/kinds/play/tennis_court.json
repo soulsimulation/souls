@@ -1,0 +1,67 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:tennis_court",
+  "owner": "thing",
+  "links": { "player": { "n": 1, "from": "body", "most": 4, "audience": { "rule": "everyone" } } },
+  "points": {
+    "by_side_a_1": { "role": "stand", "at_mm": [-12500, 0, -2500] },
+    "by_side_a_2": { "role": "stand", "at_mm": [-12500, 0, 2500] },
+    "by_side_b_1": { "role": "stand", "at_mm": [12500, 0, -2500] },
+    "by_side_b_2": { "role": "stand", "at_mm": [12500, 0, 2500] }
+  },
+  "slots": {
+    "side_a_1": { "admits": "body", "most": 1, "at_mm": [-12500, 0, -2500], "stand": "by_side_a_1" },
+    "side_a_2": { "admits": "body", "most": 1, "at_mm": [-12500, 0, 2500], "stand": "by_side_a_2" },
+    "side_b_1": { "admits": "body", "most": 1, "at_mm": [12500, 0, -2500], "stand": "by_side_b_1" },
+    "side_b_2": { "admits": "body", "most": 1, "at_mm": [12500, 0, 2500], "stand": "by_side_b_2" }
+  },
+  "geometry": { "bounds_mm": [36000, 3000, 18000] },
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }],
+      "effects": [
+        { "change": "link", "link": "player", "from": "actor", "event": "joined_the_game" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "took_a_place" }
+      ]
+    },
+    "leave": {
+      "who": { "link": "player" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": [
+        { "change": "unlink", "link": "player", "from": "actor", "event": "left_the_game" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stepped_away" }
+      ]
+    }
+  },
+  "roles": {
+    "player": {
+      "need": "required",
+      "places": { "in": "this", "slots": ["side_a_1", "side_b_1", "side_a_2", "side_b_2"] }
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:tennis_court",
+    "shape": {"shapes":[{"kind":"box","at":[0,5,0],"size":[36000,10,18000],"round":0,"tint":"apron"},{"kind":"box","at":[0,8,0],"size":[23770,6,10970],"round":0,"tint":"court"},{"kind":"box","at":[0,12,-5485],"size":[23770,4,50],"round":0,"tint":"line"},{"kind":"box","at":[0,12,5485],"size":[23770,4,50],"round":0,"tint":"line"},{"kind":"box","at":[0,12,-4115],"size":[23770,4,50],"round":0,"tint":"line"},{"kind":"box","at":[0,12,4115],"size":[23770,4,50],"round":0,"tint":"line"},{"kind":"box","at":[-11885,12,0],"size":[50,4,10970],"round":0,"tint":"line"},{"kind":"box","at":[11885,12,0],"size":[50,4,10970],"round":0,"tint":"line"},{"kind":"box","at":[-6400,12,0],"size":[50,4,8230],"round":0,"tint":"line"},{"kind":"box","at":[6400,12,0],"size":[50,4,8230],"round":0,"tint":"line"},{"kind":"box","at":[0,12,0],"size":[12800,4,50],"round":0,"tint":"line"},{"kind":"cyl","at":[0,535,-6385],"r":50,"h":1070,"segments":8,"tint":"post"},{"kind":"cyl","at":[0,535,6385],"r":50,"h":1070,"segments":8,"tint":"post"},{"kind":"box","at":[0,550,0],"size":[12,900,12770],"round":0,"tint":"net"},{"kind":"box","at":[0,980,0],"size":[40,40,12770],"round":0,"tint":"line"}],"palette":{"apron":"#3f7a5a","court":"#3b6aa0","line":"#f2efe6","post":"#3a3d40","net":"#2a2d30"},"tags":["pitch","sport","place"]}
+  },
+  "text": {
+    "card": "A hard tennis court with a net: two or four players, one or two a side.",
+    "sport": "sport",
+    "tennis": "tennis",
+    "court": "court",
+    "play": "play"
+  },
+  "card": { "text": "card", "category": "sport", "synonyms": ["tennis", "court", "play"] }
+}

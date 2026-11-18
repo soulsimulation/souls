@@ -1,0 +1,27 @@
+{
+  "format": "souls-entry/1",
+  "kind": "looks:kettle",
+  "owner": "thing",
+  "state": {
+    "heat": { "n": 1, "type": "int", "unit": "permille", "default": 0, "min": 0, "max": 1000, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [300, 260, 180] },
+  "looks": {
+    "model": "look:looks_kettle",
+    "shape": {
+      "make": { "kind": "gen", "gen": "kit/2", "args": { "shapes": [
+        { "kind": "cyl", "at": [0, 0.09, 0], "r": 0.09, "h": 0.18, "segments": 12, "tint": "steel" },
+        { "kind": "cyl", "at": [0, 0.19, 0], "r": 0.04, "h": 0.02, "segments": 8, "tint": "steel", "role": "lid", "pivot": [0, 0.2, 0] },
+        { "kind": "box", "at": [0.115, 0.14, 0], "size": [0.06, 0.02, 0.025], "round": 0, "tint": "steel" },
+        { "kind": "box", "at": [-0.1, 0.12, 0], "size": [0.02, 0.12, 0.03], "round": 0, "tint": "handle" }
+      ] } },
+      "palette": { "steel": "#aeb6bd", "handle": "#2b2b2b" },
+      "tags": ["kettle"]
+    },
+    "table": [
+      { "part": "lid", "field": "heat", "do": "steam", "range": [600, 1000], "to": [0, 1000] }
+    ]
+  },
+  "text": { "card": "A kettle that steams from under its lid once it is more than six tenths of the way to boiling." },
+  "card": { "text": "card" }
+}

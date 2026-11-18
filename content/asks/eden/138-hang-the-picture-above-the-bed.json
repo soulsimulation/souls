@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":138,"group":"two-things","words":"hang the picture above the bed","obvious":2,"things":{"picture":"eden:picture_frame","bed":"eden:bed"},"chain":[{"this":"me","form":"pick_up","carry":"picture","args":{"thing":"picture"}},{"this":"me","form":"hang","args":{"thing":"picture","above":"bed"}}]}

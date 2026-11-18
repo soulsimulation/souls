@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":77,"group":"object","words":"sit at the far end of the bench","obvious":2,"things":{"bench":"eden:bench"},"chain":[{"this":"bench","form":"sit","args":{"seat":"right"}}]}

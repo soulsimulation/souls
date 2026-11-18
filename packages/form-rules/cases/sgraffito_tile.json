@@ -1,0 +1,504 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:sgraffito_tile (SA-X7, #2902; from #1821): three coats of glaze, up to six windows scratched through a coat; a new coat covers the cuts.",
+  "cases": [
+    {
+      "name": "coat_red_bare_tile",
+      "act": {
+        "this": "g1",
+        "form": "coat_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "coat_red_no_portions_left",
+      "act": {
+        "this": "g1",
+        "form": "coat_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile",
+            "fields": {
+              "portions": 0,
+              "coat": "gold"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "coat_red_hands_full",
+      "act": {
+        "this": "g1",
+        "form": "coat_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "coat_blue_bare_tile",
+      "act": {
+        "this": "g1",
+        "form": "coat_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "coat_blue_no_portions_left",
+      "act": {
+        "this": "g1",
+        "form": "coat_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile",
+            "fields": {
+              "portions": 0,
+              "coat": "gold"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "coat_blue_hands_full",
+      "act": {
+        "this": "g1",
+        "form": "coat_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "coat_gold_bare_tile",
+      "act": {
+        "this": "g1",
+        "form": "coat_gold"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "coat_gold_no_portions_left",
+      "act": {
+        "this": "g1",
+        "form": "coat_gold"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile",
+            "fields": {
+              "portions": 0,
+              "coat": "gold"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "coat_gold_hands_full",
+      "act": {
+        "this": "g1",
+        "form": "coat_gold"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "scratch_coated",
+      "act": {
+        "this": "g1",
+        "form": "scratch"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile",
+            "fields": {
+              "coat": "red",
+              "portions": 2
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "scratch_not_coated",
+      "act": {
+        "this": "g1",
+        "form": "scratch"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "scratch_six_windows_already",
+      "act": {
+        "this": "g1",
+        "form": "scratch"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile",
+            "fields": {
+              "coat": "red",
+              "portions": 2,
+              "cuts": 6
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "scratch_hands_full",
+      "act": {
+        "this": "g1",
+        "form": "scratch"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile",
+            "fields": {
+              "coat": "red",
+              "portions": 2
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    }
+  ]
+}

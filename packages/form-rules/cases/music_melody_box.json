@@ -1,0 +1,104 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:melody_box (from #1725). Eight steps, each a note from C4 to C5 or a rest, a tempo of 60, 90 or 120 beats a minute, and whether it plays. With empty hands ('Empty your hands before operating the melody box.') and the box stopped ('Stop the melody box before composing or winding again.') a Soul sets one step to a note (the original took all eight as text; here each step is a choice from the closed list) or the tempo, in two seconds. Winding needs at least one note (the original's 'at least 1 note'); stopping a stopped box is refused ('The melody box is already stopped.').",
+  "cases": [
+    {
+      "name": "melody_compose_every_need_met",
+      "act": {"this":"m1","form":"compose","args":{"step":"step_8","note":"a4"}},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "melody_compose_hands_full",
+      "act": {"this":"m1","form":"compose","args":{"step":"step_8","note":"a4"}},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "melody_compose_while_playing",
+      "act": {"this":"m1","form":"compose","args":{"step":"step_8","note":"a4"}},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box","fields":{"playing":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"stop_first"}
+    },
+    {
+      "name": "melody_compose_not_a_note",
+      "act": {"this":"m1","form":"compose","args":{"step":"step_8","note":"h4"}},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"bad_input"}
+    },
+    {
+      "name": "melody_set_tempo_every_need_met",
+      "act": {"this":"m1","form":"set_tempo","args":{"tempo":"bpm_120"}},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "melody_set_tempo_hands_full",
+      "act": {"this":"m1","form":"set_tempo","args":{"tempo":"bpm_120"}},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "melody_set_tempo_while_playing",
+      "act": {"this":"m1","form":"set_tempo","args":{"tempo":"bpm_120"}},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box","fields":{"playing":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"stop_first"}
+    },
+    {
+      "name": "melody_wind_every_need_met",
+      "act": {"this":"m1","form":"wind"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "melody_wind_hands_full",
+      "act": {"this":"m1","form":"wind"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "melody_wind_while_playing",
+      "act": {"this":"m1","form":"wind"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box","fields":{"playing":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"stop_first"}
+    },
+    {
+      "name": "melody_wind_all_rests",
+      "act": {"this":"m1","form":"wind"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box","fields":{"step_1":"rest","step_2":"rest","step_3":"rest","step_4":"rest","step_5":"rest","step_6":"rest","step_7":"rest","step_8":"rest"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"says":"no_notes"}
+    },
+    {
+      "name": "melody_stop_every_need_met",
+      "act": {"this":"m1","form":"stop"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box","fields":{"playing":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "melody_stop_hands_full",
+      "act": {"this":"m1","form":"stop"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box","fields":{"playing":true}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "melody_stop_already_stopped",
+      "act": {"this":"m1","form":"stop"},
+      "state": {"actor":"b1","nodes":{"m1":{"kind":"eden:melody_box"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"already_stopped"}
+    }
+  ]
+}

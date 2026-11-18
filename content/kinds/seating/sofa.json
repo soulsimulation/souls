@@ -1,0 +1,139 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sofa",
+  "owner": "thing",
+  "state": {
+    "cushions": {
+      "n": 1,
+      "type": "enum",
+      "values": ["plump", "squashed"],
+      "default": "plump",
+      "audience": { "rule": "everyone" }
+    }
+  },
+  "points": {
+    "seat_1_front": { "role": "stand", "at_mm": [-600, 0, 740], "yaw_mdeg": 180000 },
+    "seat_2_front": { "role": "stand", "at_mm": [0, 0, 740], "yaw_mdeg": 180000 },
+    "seat_3_front": { "role": "stand", "at_mm": [600, 0, 740], "yaw_mdeg": 180000 },
+    "back": { "role": "grip", "at_mm": [0, 700, -330] }
+  },
+  "slots": {
+    "seat_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-600, 520, 100], "stand": "seat_1_front" },
+    "seat_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 520, 100], "stand": "seat_2_front" },
+    "seat_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [600, 520, 100], "stand": "seat_3_front" }
+  },
+  "geometry": { "bounds_mm": [2100, 895, 880] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    },
+    "flop": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "flopped_down" },
+        { "change": "set", "field": "cushions", "to": "squashed", "event": "cushions_squashed" }
+      ]
+    },
+    "plump": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "cushions", "is": "squashed" }, { "need": "within_reach", "point": "back" }],
+      "steps": [{ "step": "walk_to", "point": "back" }, { "step": "move", "move": "press", "at": "back" }],
+      "effects": [{ "change": "set", "field": "cushions", "to": "plump", "event": "cushions_plumped" }]
+    }
+  },
+  "areas": { "cushions": { "allows": { "lie": "on" } } },
+  "motion": { "how": "pushed_by_one" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:sofa",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [0, 115, 0],
+          "polygon": [[-985, -410], [985, -410], [985, 410], [-985, 410]],
+          "h": 270,
+          "tint": "fabric"
+        },
+        {
+          "kind": "extrude",
+          "at": [-450, 410, 70],
+          "polygon": [[-425, -305], [425, -305], [425, 305], [-425, 305]],
+          "h": 100,
+          "tint": "fabric",
+          "role": "fill",
+          "pivot": [-450, 410, 70]
+        },
+        {
+          "kind": "extrude",
+          "at": [450, 410, 70],
+          "polygon": [[-425, -305], [425, -305], [425, 305], [-425, 305]],
+          "h": 100,
+          "tint": "fabric",
+          "role": "fill",
+          "pivot": [450, 410, 70]
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 425, -330],
+          "polygon": [[-915, -85], [915, -85], [915, 85], [-915, 85]],
+          "h": 470,
+          "tint": "fabric"
+        },
+        {
+          "kind": "capsule",
+          "at": [940, 520, 20],
+          "r": 110,
+          "h": 660,
+          "segments": 8,
+          "tint": "fabric",
+          "pitch": 90000
+        },
+        {
+          "kind": "capsule",
+          "at": [-940, 520, 20],
+          "r": 110,
+          "h": 660,
+          "segments": 8,
+          "tint": "fabric",
+          "pitch": 90000
+        },
+        { "kind": "rbox", "at": [-620, 680, -180], "size": [360, 300, 120], "tint": "pillow", "round": 60 },
+        { "kind": "cyl", "at": [-880, 50, -325], "r": 35, "h": 100, "segments": 6, "r2": 28, "tint": "wood" },
+        { "kind": "cyl", "at": [880, 50, -325], "r": 35, "h": 100, "segments": 6, "r2": 28, "tint": "wood" },
+        { "kind": "cyl", "at": [-880, 50, 325], "r": 35, "h": 100, "segments": 6, "r2": 28, "tint": "wood" },
+        { "kind": "cyl", "at": [880, 50, 325], "r": 35, "h": 100, "segments": 6, "r2": 28, "tint": "wood" }
+      ],
+      "round": 15,
+      "palette": { "fabric": "#34476b", "pillow": "#d19c3c", "wood": "#5e3d27" },
+      "tags": ["furniture", "seat", "sofa", "couch"]
+    },
+    "table": [{ "part": "fill", "field": "cushions", "do": "scale", "axis": "y", "at": { "plump": 1000, "squashed": 350 } }]
+  },
+  "text": {
+    "card": "A three-seat sofa to sit or lie on, pushed by one Soul and never carried.",
+    "furniture": "furniture",
+    "couch": "couch"
+  },
+  "card": { "text": "card", "category": "furniture", "synonyms": ["couch"] }
+}

@@ -1,0 +1,36 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:mushrooms",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      593,
+      253,
+      574
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:mushrooms",
+    "shape": {"round":20,"shapes":[{"kind":"cyl","at":[0,90,0],"r":45,"h":180,"segments":5,"tint":"stem"},{"kind":"sphere","at":[0,189,0],"r":117,"segments":6,"tint":"cap","scale":[1000,550,1000]},{"kind":"cyl","at":[250,60,100],"r":30,"h":120,"segments":5,"tint":"stem"},{"kind":"sphere","at":[250,126,100],"r":78,"segments":6,"tint":"cap","scale":[1000,550,1000]},{"kind":"cyl","at":[-200,50,200],"r":25,"h":100,"segments":5,"tint":"stem"},{"kind":"sphere","at":[-200,105,200],"r":65,"segments":6,"tint":"cap","scale":[1000,550,1000]},{"kind":"cyl","at":[100,45,-250],"r":23,"h":90,"segments":5,"tint":"stem"},{"kind":"sphere","at":[100,95,-250],"r":59,"segments":6,"tint":"cap","scale":[1000,550,1000]}],"palette":{"stem":"#efe6d2","cap":"#c8382c"},"tags":["plant","mushroom","forest","fungus"]}
+  },
+  "text": {
+    "card": "A little ring of red-capped toadstools: pretty, not for eating.",
+    "plant": "plant",
+    "toadstools": "toadstools",
+    "fungus": "fungus"
+  },
+  "card": {
+    "text": "card",
+    "category": "plant",
+    "synonyms": [
+      "toadstools",
+      "fungus"
+    ]
+  }
+}

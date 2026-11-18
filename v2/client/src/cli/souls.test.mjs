@@ -1,5 +1,5 @@
 // The thin command (Engine v2 R7, #2701) against the real gateway (`gatewayd`, I1) and the world's stand-in end of it
-// (`worldd gateway-link`) holding a hall of 1,000 cups, with two Souls: the one the commands drive, and another whose
+// (`worldd gateway-link`) holding a hall of 1,000 items, with two Souls: the one the commands drive, and another whose
 // acts change the world between them. Run from v2/ after
 //   cargo build -p gatewayd -p worldd --locked, and replica's wasm-bindgen package in target/wasm-load/pkg.
 // R7_REPORT=1 prints the timings and the brief's size, for the PR.
@@ -97,10 +97,10 @@ test('the arguments make the daemon request: act takes a ranked list, find its w
   assert.equal(requestOf(['dance']).refused, 'unknown-command');
 });
 
-/** What the world's log changed between two of its versions: the stand-in sets cup `s % CUPS` at sequence `s`. */
+/** What the world's log changed between two of its versions: the stand-in sets item `s % CUPS` at sequence `s`. */
 function logChanged(from, to) {
   const names = new Set();
-  for (let s = from + 1; s <= to; s++) names.add(`cup ${2 + (s % CUPS)}`);
+  for (let s = from + 1; s <= to; s++) names.add(`item ${2 + (s % CUPS)}`);
   return [...names].sort((x, y) => x.localeCompare(y, 'en', { numeric: true }));
 }
 
@@ -116,7 +116,7 @@ test('A2: over 100 scripted command sequences, each answer\'s "changed" equals t
       // The other Soul acts between my commands, so not every change is mine.
       for (let m = next(3); m > 0; m--) await request(rtB.socket, { op: 'act', verbs: ['eden:wave'] });
       const pick = next(4);
-      const answer = pick === 0 ? souls(['look']) : pick === 1 ? souls(['find', 'cup', String(2 + next(CUPS))]) : pick === 2 ? souls(['act', 'eden:sit', 'eden:lean']) : souls(['wait', '0']);
+      const answer = pick === 0 ? souls(['look']) : pick === 1 ? souls(['find', 'item', String(2 + next(CUPS))]) : pick === 2 ? souls(['act', 'eden:sit', 'eden:lean']) : souls(['wait', '0']);
       assert.equal(answer.ok, true, JSON.stringify(answer));
       assert.ok(answer.at >= last, `at ${answer.at} after ${last}`);
       const want = logChanged(last, answer.at);
@@ -135,16 +135,16 @@ test('A1 (hall of 1,000), A4, A5: the brief is under 2,000 bytes, says what it l
   const bytes = Buffer.byteLength(JSON.stringify(look));
   assert.ok(bytes < 2000, `${bytes} bytes`);
   assert.equal(look.room.name, 'room 1');
-  assert.ok(look.here.length > 20 && look.here.every((n) => /^cup \d+$/.test(n)), 'things are named');
+  assert.ok(look.here.length > 20 && look.here.every((n) => /^item \d+$/.test(n)), 'things are named');
   assert.match(look.left[0], new RegExp(`^${CUPS - look.here.length} more things in room 1: find them by name$`));
   assert.deepEqual(look.outward, [{ name: 'place 0', kind: 'souls:place' }], 'the room\'s parent by name, no counts');
   const text = JSON.stringify(look);
   assert.ok(!/"(at|position|x|y|z|pose)":\s*\[/.test(text), 'no coordinates');
-  // find: one search over the copy; a cup beyond what the brief named is found by its name.
-  const far = `cup ${2 + CUPS - 1}`;
+  // find: one search over the copy; an item beyond what the brief named is found by its name.
+  const far = `item ${2 + CUPS - 1}`;
   assert.ok(!look.here.includes(far));
   const found = souls(['find', far]);
-  assert.deepEqual(found.found[0], { id: found.found[0].id, name: far, kind: 'souls:cup', in: 'room 1, place 0' });
+  assert.deepEqual(found.found[0], { id: found.found[0].id, name: far, kind: 'souls:item', in: 'room 1, place 0' });
   assert.ok(!JSON.stringify(found).includes('"at":['), 'no coordinates');
   if (process.env.R7_REPORT) console.log(JSON.stringify({ hallBriefBytes: bytes, named: look.here.length }));
 });
@@ -154,7 +154,7 @@ test('A3: the command loads no WASM, and its median time is under 100 ms', async
   const off = 'data:text/javascript,for (const k of Object.keys(WebAssembly)) delete WebAssembly[k]; globalThis.WebAssembly = undefined;';
   const s = souls(['look'], { node: ['--import', off] });
   assert.equal(s.ok, true);
-  for (let k = 0; k < 20; k++) { souls(['status']); souls(['look']); souls(['find', 'cup', String(k)]); }
+  for (let k = 0; k < 20; k++) { souls(['status']); souls(['look']); souls(['find', 'item', String(k)]); }
   const median = (xs) => { const s = [...xs].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
   const report = Object.fromEntries(Object.entries(times).filter(([, xs]) => xs.length).map(([k, xs]) => [k, { n: xs.length, medianMs: Math.round(median(xs)) }]));
   if (process.env.R7_REPORT) console.log(JSON.stringify({ timings: report }));
