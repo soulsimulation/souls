@@ -1,0 +1,502 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Paper quilling (from #1866): strip moves into a coil and back, two sets that sum to zero, so the paper of each colour is always three units; asking for more than is unwound is refused rather than rolled short, and an unwound coil cannot be unrolled. The board is then carried.",
+  "cases": [
+    {
+      "name": "roll_red_twice_unroll_it_all_back",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "q1"
+            ]
+          },
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "q1",
+            "form": "roll_red",
+            "args": {
+              "turns": 2
+            }
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "red_strip",
+                "n": 1,
+                "to": 1,
+                "by": -2
+              },
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "red_coil",
+                "n": 4,
+                "to": 2,
+                "by": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:coil_rolled",
+                "node": "q1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "q1",
+            "form": "roll_red",
+            "args": {
+              "turns": 2
+            }
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "no",
+            "reason": "not_enough",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "q1",
+            "form": "roll_red",
+            "args": {
+              "turns": 1
+            }
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "red_strip",
+                "n": 1,
+                "to": 0,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "red_coil",
+                "n": 4,
+                "to": 3,
+                "by": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:coil_rolled",
+                "node": "q1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "q1",
+            "form": "unroll_red"
+          },
+          "receipt": "r4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "red_coil",
+                "n": 4,
+                "to": 0,
+                "by": -3
+              },
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "red_strip",
+                "n": 1,
+                "to": 3,
+                "by": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:coil_unrolled",
+                "node": "q1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "q1",
+            "form": "unroll_red"
+          },
+          "receipt": "r5",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        }
+      ],
+      "after": {
+        "q1": {
+          "kind": "eden:quilling_board",
+          "fields": {
+            "red_strip": 3,
+            "red_coil": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "roll_and_unroll_blue_then_carry_the_board",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "q1"
+            ]
+          },
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "q1",
+            "form": "roll_blue",
+            "args": {
+              "turns": 3
+            }
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "blue_strip",
+                "n": 2,
+                "to": 0,
+                "by": -3
+              },
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "blue_coil",
+                "n": 5,
+                "to": 3,
+                "by": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:coil_rolled",
+                "node": "q1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "q1",
+            "form": "unroll_blue"
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "blue_coil",
+                "n": 5,
+                "to": 0,
+                "by": -3
+              },
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "blue_strip",
+                "n": 2,
+                "to": 3,
+                "by": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:coil_unrolled",
+                "node": "q1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "q1",
+            "form": "take"
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "q1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "q1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "q1": {
+          "kind": "eden:quilling_board",
+          "fields": {
+            "blue_strip": 3,
+            "blue_coil": 0
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "q1",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "roll_and_unroll_gold_then_carry_the_board",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "q1"
+            ]
+          },
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "q1",
+            "form": "roll_gold",
+            "args": {
+              "turns": 3
+            }
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "gold_strip",
+                "n": 3,
+                "to": 0,
+                "by": -3
+              },
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "gold_coil",
+                "n": 6,
+                "to": 3,
+                "by": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:coil_rolled",
+                "node": "q1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "q1",
+            "form": "unroll_gold"
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "gold_coil",
+                "n": 6,
+                "to": 0,
+                "by": -3
+              },
+              {
+                "change": "set",
+                "node": "q1",
+                "field": "gold_strip",
+                "n": 3,
+                "to": 3,
+                "by": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:coil_unrolled",
+                "node": "q1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "q1",
+            "form": "take"
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "q1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "q1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "q1": {
+          "kind": "eden:quilling_board",
+          "fields": {
+            "gold_strip": 3,
+            "gold_coil": 0
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "q1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}
