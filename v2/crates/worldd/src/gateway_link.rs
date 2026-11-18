@@ -4,7 +4,7 @@
 //!
 //! Each intent goes to the world (`worldd::answers`, I4 #2687): checked, committed at the next tick, logged, and
 //! answered after that tick's sync. A repeat gets the answer it had, across restarts too, since the world rebuilds
-//! its sequences from the log. The world here is I3's lamps world (`checkers::lamps`), `--rooms` rooms of `--bodies`
+//! its sequences from the log. The world here is I3's lamps world (`checkers::toggles`), `--rooms` rooms of `--bodies`
 //! bodies, each with a toggle; its log is `--log` (default: the socket's path and `.log`).
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
