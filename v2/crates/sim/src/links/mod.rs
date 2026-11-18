@@ -36,9 +36,10 @@
 //!   one end on the floor's patch, the other where its passage meets the ground's squares, walked. It is no link of
 //!   the tree (its id is derived, `ground::scene::step_id`), and an edge with nothing to step down to is no link.
 //!
-//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
+//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), boarding a moving frame (N12, [`boarding`]), a
 //! locked door (the door's `locked` field is not read yet), the durable log (K4).
 
+pub mod boarding;
 pub mod turns;
 
 use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Xform};
@@ -85,6 +86,9 @@ pub enum Kind {
     Ladder,
     /// A low floor's open edge stepped down to the open ground (N3's steps): no link of the tree, walked.
     Step,
+    /// Between the ground at a stop and a moving frame's deck, crossable only while the frame stands at that stop
+    /// ([`boarding`], N12): walked.
+    Boarding,
 }
 
 impl Kind {
@@ -101,7 +105,7 @@ impl Kind {
     /// The move that crosses it (contract T4).
     pub fn move_name(self) -> &'static str {
         match self {
-            Kind::Doorway | Kind::Ramp | Kind::Step => "souls:walk",
+            Kind::Doorway | Kind::Ramp | Kind::Step | Kind::Boarding => "souls:walk",
             Kind::Stairs => "souls:stairs",
             Kind::Ladder => "souls:climb",
         }
