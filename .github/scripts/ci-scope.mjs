@@ -42,7 +42,7 @@ export const BODY_TESTS = 'tools/body-authoring/*/*.test.mjs';
 /** The server legs' file groups: the inventory (server-test-files.mjs: every apps/server/src test but the latency one),
  * and on the godSkill shard the god-skill and the body-authoring tests, each run as ci.yml runs it. */
 export const SERVER_GROUPS = [
-  { id: 'server', globs: ['apps/server/src/**/*.test.ts'], exclude: [`apps/server/src/${LATENCY_TEST}`], cwd: 'apps/server', concurrency: SERVER_TEST_CONCURRENCY },
+  { id: 'server', globs: ['apps/server/src/**/*.test.ts'], exclude: [`apps/server/src/${LATENCY_TEST}`], cwd: 'apps/server', filter: '@souls/server', concurrency: SERVER_TEST_CONCURRENCY },
   { id: 'god', globs: GOD_SKILL_TESTS.split(' '), concurrency: 1 },
   { id: 'body', globs: [BODY_TESTS], concurrency: 1, flags: ['--experimental-transform-types'] },
 ];
@@ -50,7 +50,7 @@ export const SERVER_GROUPS = [
 // The qualify matrix, as ci.yml's case block runs it. `reach` lists what a job runs and reads, as globs (a pattern
 // ending in `/` owns its folder, data included; `@package-tests` is every workspace package's test script but the
 // viewer's and the server's, packageTests). `groups` marks a leg whose runner takes a list of test files: only the
-// affected files run (selectJobs). `assets` says whether the job pulls media first; ASSET_INPUTS are then in its reach.
+// affected files run (jobsFor), unless one of a group's `whole` files is affected. `assets` says whether the job pulls media first; ASSET_INPUTS are then in its reach.
 // Keep this list and the case block in ci.yml in step; ci-scope.test.mjs checks LOCAL_COMMANDS against it.
 // `heavy: true` sends the job to the self-hosted pool CI_HEAVY_RUNNER when that variable is set (runnerFor, ci.yml's
 // qualify runs-on): the server shards and the legs whose hosted median is over about 8 minutes. The short legs stay on
@@ -60,9 +60,14 @@ export const JOBS = [
   { name: 'types-web', kind: 'types-web', light: true, assets: true, reach: ['apps/', 'packages/', 'mars/viewer/', 'tools/test-harness/bundle-budget/', 'tools/assets/mars-web.mjs'] },
   { name: 'packages', kind: 'packages', assets: true, heavy: true, reach: ['@package-tests'] },
   { name: 'web', kind: 'web', light: true, assets: true, reach: ['apps/web/', 'tools/test-harness/web-suite.sh', 'tools/test-harness/web-loader.mjs'] },
-  { name: 'launcher', kind: 'launcher', assets: true, heavy: true, reach: ['tools/world-launcher/*.test.mjs', 'tools/world-launcher/soul/*.test.mjs'] },
-  { name: 'client-cli', kind: 'client-cli', light: true, assets: true, reach: ['tools/client-eval/*.test.mjs', 'tools/world-launcher/soul/*.test.mjs'] },
-  { name: 'native', kind: 'native', assets: true, reach: ['mars/viewer/engine/test/*.test.ts'] },
+  // backup-restic.test.mjs needs the restic binary ci.yml's launcher branch installs: when it is affected, the full leg runs
+  { name: 'launcher', kind: 'launcher', assets: true, heavy: true, reach: ['tools/world-launcher/*.test.mjs', 'tools/world-launcher/soul/*.test.mjs'],
+    groups: [{ id: 'launcher', globs: ['tools/world-launcher/*.test.mjs', 'tools/world-launcher/soul/*.test.mjs'], concurrency: 1, whole: ['tools/world-launcher/backup-restic.test.mjs'] }] },
+  { name: 'client-cli', kind: 'client-cli', light: true, assets: true, reach: ['tools/client-eval/*.test.mjs', 'tools/world-launcher/soul/*.test.mjs'],
+    groups: [{ id: 'client-cli', globs: ['tools/client-eval/*.test.mjs', 'tools/world-launcher/soul/*.test.mjs'], concurrency: 1 }] },
+  // pnpm test:mars: mars/viewer's test:engine, node --test engine/test/*.test.ts there
+  { name: 'native', kind: 'native', assets: true, reach: ['mars/viewer/engine/test/*.test.ts'],
+    groups: [{ id: 'native', globs: ['mars/viewer/engine/test/*.test.ts'], cwd: 'mars/viewer', filter: 'mars-campus-viewer' }] },
   { name: 'latency', kind: 'latency', assets: false, reach: [`apps/server/src/${LATENCY_TEST}`] },
   // #898: the generator of the reference pages (docs/site actions, api, mcp) runs against the server's code.
   { name: 'docs-reference', kind: 'docs-reference', light: true, assets: false, reach: ['tools/docs/generate.test.mjs'] },
@@ -163,12 +168,13 @@ const matcher = globs => { const res = globs.map(globRe); return f => res.some(r
  * fixed-port files after the rest one at a time (server-test-files.mjs needsSerial). */
 export function groupCommands(group, files, read = f => readFileSync(join(ROOT, f), 'utf8')) {
   if (!files.length) return [];
-  const node = (n, list) => ['node', ...(group.flags ?? []), '--test', `--test-concurrency=${n}`, ...list];
-  if (group.id !== 'server') return [node(group.concurrency, files)];
-  const rel = files.map(f => posix.relative(group.cwd, f));
+  const node = (n, list) => ['node', ...(group.flags ?? []), '--test', ...(n ? [`--test-concurrency=${n}`] : []), ...list];
+  const inPackage = argv => group.filter ? ['pnpm', '--filter', group.filter, 'exec', ...argv] : argv;
+  const rel = group.cwd ? files.map(f => posix.relative(group.cwd, f)) : files;
+  if (group.id !== 'server') return [inPackage(node(group.concurrency, rel))];
   const serial = rel.filter(f => { try { return needsSerial(read(`${group.cwd}/${f}`)); } catch { return true; } });
   const parallel = rel.filter(f => !serial.includes(f));
-  return [parallel, serial].filter(l => l.length).map((l, i) => ['pnpm', '--filter', '@souls/server', 'exec', ...node(i === 0 && parallel.length ? group.concurrency : 1, l)]);
+  return [parallel, serial].filter(l => l.length).map((l, i) => inPackage(node(i === 0 && parallel.length ? group.concurrency : 1, l)));
 }
 
 /** A partial server selection worth running as such: under PARTIAL_SHARE of the inventory's measured seconds. Above it
@@ -227,7 +233,8 @@ export function jobsFor(files, reason = files === null ? 'no usable base' : 'an 
     serverDone ||= job.kind === 'server';
     const sel = job.groups && !hits(ASSET_INPUTS).length ? groupFiles(job.groups) : null;
     const most = sel?.server && (w => sel.server.picked.reduce((t, f) => t + w(f), 0) >= PARTIAL_SHARE * sel.server.every.reduce((t, f) => t + w(f), 0))(serverWeight());
-    if (!sel || most || Object.values(sel).every(g => g.picked.length === g.every.length)) { include.push(...legs.map(strip)); continue; }
+    const whole = sel && job.groups.some(g => (g.whole ?? []).some(f => sel[g.id].picked.includes(f)));
+    if (!sel || most || whole || Object.values(sel).every(g => g.picked.length === g.every.length)) { include.push(...legs.map(strip)); continue; }
     const picked = Object.fromEntries(Object.entries(sel).map(([id, g]) => [id, g.picked]));
     const parts = job.kind === 'server' ? packServer(picked, sel.server.every) : [picked];
     parts.forEach((part, i) => {

@@ -247,9 +247,11 @@ export function buildReach({ files, extra = [], read }) {
       while (qc.length) {
         const x = from = qc.shift();
         via = `names ${x}`;
-        for (const f of names.get(x) ?? []) EXEC.test(f) ? markB(f, false) : LISTS.test(f) && !CONFIG.test(f) && markC(f);
+        // a test file is a leaf: only another test reads or runs it (CI tooling that lists tests runs no leg's tests)
+        const leaf = TEST.test(x), reader = f => !leaf || TEST.test(f);
+        for (const f of names.get(x) ?? []) if (reader(f)) EXEC.test(f) ? markB(f, false) : LISTS.test(f) && !CONFIG.test(f) && markC(f);
         // a folder: a file that lists folders reads anything under it; any other reads only data there, by a computed name
-        for (const p of ancestors(x)) { via = `names ${p}`; for (const f of names.get(p) ?? []) if (EXEC.test(f) && (enumerators.has(f) || !EXEC.test(x))) markB(f, false); }
+        for (const p of ancestors(x)) { via = `names ${p}`; for (const f of names.get(p) ?? []) if (reader(f) && EXEC.test(f) && (enumerators.has(f) || !EXEC.test(x))) markB(f, false); }
         via = 'reads its unit\'s data';
         if (!EXEC.test(x)) for (const g of unitFiles.get(unitOf(x, packageDirs)) ?? []) markB(g, false);
       }
@@ -258,7 +260,7 @@ export function buildReach({ files, extra = [], read }) {
         // a package import stands for the package's code, not its tests
         for (const p of TEST.test(g) ? [g] : [g, ...ancestors(g)]) { via = `imports ${p}`; for (const f of imports.get(p) ?? []) markB(f, byCode); }
         via = `runs ${g}`;
-        for (const f of names.get(g) ?? []) if (loaders.has(f)) markB(f, byCode);
+        for (const f of names.get(g) ?? []) if (loaders.has(f) && (!TEST.test(g) || TEST.test(f))) markB(f, byCode);
         if (byCode && CODE.test(g) && !TEST.test(g)) for (const p of ancestors(g)) { via = `may load code under ${p}`; for (const f of names.get(p) ?? []) if (dynamic.has(f)) markB(f, true); }
       }
     }
