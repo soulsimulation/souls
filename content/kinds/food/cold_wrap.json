@@ -115,6 +115,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:cold_wrap",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,10,0],"size":[75,20,75],"tint":"bread"},{"kind":"box","at":[-34,38,0],"size":[12,55,75],"tint":"bread","when":"@portions>=1"},{"kind":"box","at":[34,38,0],"size":[12,55,75],"tint":"bread","when":"@portions>=1"},{"kind":"box","at":[-22,45,5],"size":[18,30,60],"tint":"greens","when":"@greens>=1"},{"kind":"box","at":[0,45,5],"size":[18,30,60],"tint":"tomato","when":"@tomato>=1"},{"kind":"box","at":[22,45,5],"size":[18,30,60],"tint":"beans","when":"@beans>=1"}],"palette":{"bread":"#d8bd7c","greens":"#4f8839","tomato":"#c84837","beans":"#a47f47"},"tags":["kitchen","item","food","object"]}

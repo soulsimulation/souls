@@ -253,6 +253,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:cold_meal_bench",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,965,0],"size":[1100,30,650],"tint":"wood"},{"kind":"box","at":[-460,475,-250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[-460,475,250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[460,475,-250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[460,475,250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[-170,985,100],"size":[280,10,280],"tint":"board"},{"kind":"box","at":[-340,1005,-210],"size":[120,40,40],"tint":"greens","when":"@greens>=1"},{"kind":"box","at":[-340,1005,-150],"size":[120,40,40],"tint":"greens","when":"@greens>=2"},{"kind":"box","at":[-340,1005,-90],"size":[120,40,40],"tint":"greens","when":"@greens>=3"},{"kind":"box","at":[-40,1005,-210],"size":[120,40,40],"tint":"tomato","when":"@tomato>=1"},{"kind":"box","at":[-40,1005,-150],"size":[120,40,40],"tint":"tomato","when":"@tomato>=2"},{"kind":"box","at":[-40,1005,-90],"size":[120,40,40],"tint":"tomato","when":"@tomato>=3"},{"kind":"box","at":[260,1005,-210],"size":[120,40,40],"tint":"beans","when":"@beans>=1"},{"kind":"box","at":[260,1005,-150],"size":[120,40,40],"tint":"beans","when":"@beans>=2"},{"kind":"box","at":[260,1005,-90],"size":[120,40,40],"tint":"beans","when":"@beans>=3"}],"palette":{"wood":"#856342","board":"#d4bb82","greens":"#4f8839","tomato":"#c84837","beans":"#a47f47"},"tags":["kitchen","table","food","object"]}
