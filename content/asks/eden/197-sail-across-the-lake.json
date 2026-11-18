@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":197,"group":"getting-around","words":"sail across the lake","obvious":2,"things":{"sailboat":"eden:sailboat","lake":"eden:lake"},"chain":[{"this":"sailboat","form":"sail"},{"this":"sailboat","form":"steer","args":{"toward":"lake"}}]}

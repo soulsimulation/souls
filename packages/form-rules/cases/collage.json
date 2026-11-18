@@ -1,0 +1,313 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:collage_paper and eden:collage_board (from #1803). A Soul holding a piece of collage paper mounts it on the nearest free patch of a board (six patches); the piece itself is kept on the board, so taking it off recovers the same paper. Refused: the piece not in hand (take it first); the chosen patch taken, naming the next free patch as the fix ('Choose valid x,z,angle ... and an empty patch slot. Recover material when all six slots are full.'); every patch taken, with no fix.",
+  "cases": [
+    {
+      "name": "mount_every_need_met",
+      "act": {
+        "this": "c1",
+        "form": "mount",
+        "args": {
+          "patch": {
+            "node": "cb1",
+            "slot": "patch_1"
+          }
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:collage_paper"
+          },
+          "cb1": {
+            "kind": "eden:collage_board"
+          },
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "mount_not_held",
+      "act": {
+        "this": "c1",
+        "form": "mount",
+        "args": {
+          "patch": {
+            "node": "cb1",
+            "slot": "patch_1"
+          }
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:collage_paper"
+          },
+          "cb1": {
+            "kind": "eden:collage_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "take",
+          "thing": "c1"
+        }
+      }
+    },
+    {
+      "name": "mount_patch_taken_names_the_next_free_one",
+      "act": {
+        "this": "c1",
+        "form": "mount",
+        "args": {
+          "patch": {
+            "node": "cb1",
+            "slot": "patch_1"
+          }
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:collage_paper"
+          },
+          "cb1": {
+            "kind": "eden:collage_board",
+            "slots": {
+              "patch_1": [
+                "c2"
+              ]
+            }
+          },
+          "c2": {
+            "kind": "eden:collage_paper"
+          },
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": {
+          "node": "cb1",
+          "slot": "patch_1"
+        },
+        "fix": {
+          "form": "mount",
+          "args": {
+            "patch": {
+              "node": "cb1",
+              "slot": "patch_2"
+            }
+          }
+        },
+        "says": "board_full"
+      }
+    },
+    {
+      "name": "mount_all_six_patches_full",
+      "act": {
+        "this": "c1",
+        "form": "mount",
+        "args": {
+          "patch": {
+            "node": "cb1",
+            "slot": "patch_6"
+          }
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:collage_paper"
+          },
+          "cb1": {
+            "kind": "eden:collage_board",
+            "slots": {
+              "patch_1": [
+                "c2"
+              ],
+              "patch_2": [
+                "c3"
+              ],
+              "patch_3": [
+                "c4"
+              ],
+              "patch_4": [
+                "c5"
+              ],
+              "patch_5": [
+                "c6"
+              ],
+              "patch_6": [
+                "c7"
+              ]
+            }
+          },
+          "c2": {
+            "kind": "eden:collage_paper"
+          },
+          "c3": {
+            "kind": "eden:collage_paper"
+          },
+          "c4": {
+            "kind": "eden:collage_paper"
+          },
+          "c5": {
+            "kind": "eden:collage_paper"
+          },
+          "c6": {
+            "kind": "eden:collage_paper"
+          },
+          "c7": {
+            "kind": "eden:collage_paper"
+          },
+          "b1": {
+            "hands": {
+              "left": "c1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": {
+          "node": "cb1",
+          "slot": "patch_6"
+        },
+        "fix": null,
+        "says": "board_full"
+      }
+    },
+    {
+      "name": "collage_paper_take_every_need_met",
+      "act": {
+        "this": "c1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:collage_paper",
+            "fields": {
+              "colour": "gold",
+              "shape": "tall"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "collage_paper_take_both_hands_full",
+      "act": {
+        "this": "c1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:collage_paper",
+            "fields": {
+              "colour": "gold",
+              "shape": "tall"
+            }
+          },
+          "h1": {
+            "kind": "eden:collage_paper"
+          },
+          "h2": {
+            "kind": "eden:collage_paper"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

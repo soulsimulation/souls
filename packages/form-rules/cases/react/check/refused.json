@@ -1,0 +1,132 @@
+{
+  "format": "souls-react-check-cases/1",
+  "about": "Things react (SA-F15): what the check gate refuses. Each case is a set of kinds, loaded in the order given, and every error the check returns, compared whole. A set of rules that could feed itself is refused naming the cycle (A2); a rule that names a body, an offer or a draw is refused (A3); a trigger or an effect outside the two closed lists is refused.",
+  "cases": [
+    {
+      "name": "two_rules_that_feed_each_other_are_refused_naming_the_cycle",
+      "kinds": [
+        { "kind": "test:ping", "owner": "thing", "state": { "a": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "pair": { "n": 1, "from": "thing", "most": 1, "audience": "public" } },
+          "reactions": { "push_b": { "when": { "on": "changed", "field": "a" }, "do": [{ "change": "set", "field": "b", "to": { "trigger": "value" }, "target": { "link": "pair" } }] } } },
+        { "kind": "test:pong", "owner": "thing", "state": { "b": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "pair": { "n": 1, "from": "thing", "most": 1, "audience": "public" } },
+          "reactions": { "push_a": { "when": { "on": "changed", "field": "b" }, "do": [{ "change": "set", "field": "a", "to": { "trigger": "value" }, "target": { "link": "pair" } }] } } }
+      ],
+      "expect": [
+        { "kind": "test:pong", "path": "reactions", "reason": "cycle", "cycle": ["test:ping#a", "test:pong#b", "test:ping#a"], "rules": ["test:ping/push_b", "test:pong/push_a"] }
+      ]
+    },
+    {
+      "name": "the_same_pair_loaded_the_other_way_round_refuses_the_kind_loaded_last",
+      "kinds": [
+        { "kind": "test:pong", "owner": "thing", "state": { "b": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "pair": { "n": 1, "from": "thing", "most": 1, "audience": "public" } },
+          "reactions": { "push_a": { "when": { "on": "changed", "field": "b" }, "do": [{ "change": "set", "field": "a", "to": { "trigger": "value" }, "target": { "link": "pair" } }] } } },
+        { "kind": "test:ping", "owner": "thing", "state": { "a": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "pair": { "n": 1, "from": "thing", "most": 1, "audience": "public" } },
+          "reactions": { "push_b": { "when": { "on": "changed", "field": "a" }, "do": [{ "change": "set", "field": "b", "to": { "trigger": "value" }, "target": { "link": "pair" } }] } } }
+      ],
+      "expect": [
+        { "kind": "test:ping", "path": "reactions", "reason": "cycle", "cycle": ["test:ping#a", "test:pong#b", "test:ping#a"], "rules": ["test:ping/push_b", "test:pong/push_a"] }
+      ]
+    },
+    {
+      "name": "a_rule_that_feeds_itself_is_refused",
+      "kinds": [
+        { "kind": "test:counter", "owner": "thing", "state": { "count": { "n": 1, "type": "int", "unit": "count", "default": 0, "audience": "public" } },
+          "reactions": { "again": { "when": { "on": "changed", "field": "count" }, "do": [{ "change": "add", "field": "count", "by": 1 }] } } }
+      ],
+      "expect": [
+        { "kind": "test:counter", "path": "reactions", "reason": "cycle", "cycle": ["test:counter#count", "test:counter#count"], "rules": ["test:counter/again"] }
+      ]
+    },
+    {
+      "name": "a_chain_through_two_links_with_no_loop_is_accepted",
+      "kinds": [
+        { "kind": "test:ping", "owner": "thing", "state": { "a": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "pair": { "n": 1, "from": "thing", "most": 1, "audience": "public" } },
+          "reactions": { "push_b": { "when": { "on": "changed", "field": "a" }, "do": [{ "change": "set", "field": "b", "to": { "trigger": "value" }, "target": { "link": "pair" } }] } } },
+        { "kind": "test:pong", "owner": "thing", "state": { "b": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "pair": { "n": 1, "from": "thing", "most": 1, "audience": "public" }, "next": { "n": 2, "from": "thing", "most": 1, "audience": "public" } },
+          "reactions": { "push_c": { "when": { "on": "changed", "field": "b" }, "do": [{ "change": "set", "field": "c", "to": { "trigger": "value" }, "target": { "link": "next" } }] } } },
+        { "kind": "test:pang", "owner": "thing", "state": { "c": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "next": { "n": 1, "from": "thing", "most": 1, "audience": "public" } } }
+      ],
+      "expect": []
+    },
+    {
+      "name": "a_rule_that_moves_a_body_is_refused",
+      "kinds": [
+        { "kind": "test:trapdoor", "owner": "thing", "state": { "open": { "n": 1, "type": "bool", "default": false, "audience": "public" } },
+          "reactions": { "drop": { "when": { "on": "changed", "field": "open", "is": true }, "do": [{ "change": "reparent", "what": "actor", "into": "here" }] } } }
+      ],
+      "expect": [
+        { "kind": "test:trapdoor", "rule": "drop", "path": "reactions.drop.do[0].change", "reason": "acts_on_body", "names": "reparent" }
+      ]
+    },
+    {
+      "name": "a_rule_that_sets_a_field_of_the_body_is_refused",
+      "kinds": [
+        { "kind": "test:fan", "owner": "thing", "state": { "on": { "n": 1, "type": "bool", "default": false, "audience": "public" } },
+          "reactions": { "cool": { "when": { "on": "changed", "field": "on" }, "do": [{ "change": "set", "field": "on", "to": true, "target": "actor" }] } } }
+      ],
+      "expect": [
+        { "kind": "test:fan", "rule": "cool", "path": "reactions.cool.do[0].target", "reason": "acts_on_body", "names": "actor" }
+      ]
+    },
+    {
+      "name": "a_rule_across_a_link_to_a_body_is_refused",
+      "kinds": [
+        { "kind": "test:chair", "owner": "thing", "state": { "warm": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "sitter": { "n": 1, "from": "body", "most": 1, "audience": "public" } },
+          "reactions": { "warm_up": { "when": { "on": "rested" }, "do": [{ "change": "set", "field": "warm", "to": true, "target": { "link": "sitter" } }] } } }
+      ],
+      "expect": [
+        { "kind": "test:chair", "rule": "warm_up", "path": "reactions.warm_up.do[0].target.link", "reason": "acts_on_body", "names": "sitter" }
+      ]
+    },
+    {
+      "name": "a_rule_that_starts_an_offer_is_refused",
+      "kinds": [
+        { "kind": "test:bell", "owner": "thing", "state": { "rung": { "n": 1, "type": "bool", "default": false, "audience": "public" } },
+          "reactions": { "serve": { "when": { "on": "changed", "field": "rung", "is": true }, "do": [{ "change": "set", "field": "rung", "to": false, "form": "serve_tea" }] } } }
+      ],
+      "expect": [
+        { "kind": "test:bell", "rule": "serve", "path": "reactions.serve.do[0].form", "reason": "acts_on_offer", "names": "form" }
+      ]
+    },
+    {
+      "name": "a_rule_that_draws_is_refused",
+      "kinds": [
+        { "kind": "test:die", "owner": "thing", "state": { "face": { "n": 1, "type": "int", "unit": "count", "default": 1, "audience": "public" } },
+          "reactions": { "roll_on_landing": { "when": { "on": "rested" }, "do": [{ "change": "set", "field": "face", "to": { "draw": [1, 6] } }] } } }
+      ],
+      "expect": [
+        { "kind": "test:die", "rule": "roll_on_landing", "path": "reactions.roll_on_landing.do[0].to.draw", "reason": "draws", "names": "draw" }
+      ]
+    },
+    {
+      "name": "a_rule_that_chooses_one_lamp_of_its_links_is_refused",
+      "kinds": [
+        { "kind": "test:picker", "owner": "thing", "state": { "on": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "works": { "n": 1, "from": "thing", "most": 8, "audience": "public" } },
+          "reactions": { "one": { "when": { "on": "changed", "field": "on" }, "do": [{ "change": "set", "field": "lit", "to": true, "target": { "link": "works", "choose": "nearest" } }] } } },
+        { "kind": "test:bulb", "owner": "thing", "state": { "lit": { "n": 1, "type": "bool", "default": false, "audience": "public" } }, "links": { "works": { "n": 1, "from": "thing", "most": 1, "audience": "public" } } }
+      ],
+      "expect": [
+        { "kind": "test:picker", "rule": "one", "path": "reactions.one.do[0].target.choose", "reason": "draws", "names": "choose" }
+      ]
+    },
+    {
+      "name": "a_trigger_that_waits_for_a_time_outside_the_list_is_refused",
+      "kinds": [
+        { "kind": "test:clock_shop", "owner": "place", "state": { "open": { "n": 1, "type": "bool", "default": false, "audience": "public" } },
+          "reactions": { "at_eight": { "when": { "on": "time_of_day", "at": "08:00" }, "do": [{ "change": "set", "field": "open", "to": true }] } } }
+      ],
+      "expect": [
+        { "kind": "test:clock_shop", "rule": "at_eight", "path": "reactions.at_eight.when.on", "reason": "unknown_trigger", "on": "time_of_day" }
+      ]
+    },
+    {
+      "name": "a_flip_outside_the_effects_list_is_refused",
+      "kinds": [
+        { "kind": "test:toggle", "owner": "thing", "state": { "on": { "n": 1, "type": "bool", "default": false, "audience": "public" } },
+          "reactions": { "flip": { "when": { "on": "rested" }, "do": [{ "change": "flip", "field": "on" }] } } }
+      ],
+      "expect": [
+        { "kind": "test:toggle", "rule": "flip", "path": "reactions.flip.do[0].change", "reason": "unknown_effect", "change": "flip" }
+      ]
+    }
+  ]
+}

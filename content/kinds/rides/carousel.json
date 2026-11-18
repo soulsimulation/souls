@@ -1,0 +1,126 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:carousel",
+  "owner": "thing",
+  "state": {"under_way":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "points": {
+    "gate": {"role":"stand","at_mm":[0,0,4700],"yaw_mdeg":180000},
+    "exit_gate": {"role":"stand","at_mm":[0,0,-4700],"yaw_mdeg":0}
+  },
+  "slots": {
+    "horse_1": {"admits":"body","posture":"sit","most":1,"at_mm":[3000,1500,0],"stand":"gate"},
+    "horse_2": {"admits":"body","posture":"sit","most":1,"at_mm":[1500,1500,2598],"stand":"gate"},
+    "horse_3": {"admits":"body","posture":"sit","most":1,"at_mm":[-1500,1500,2598],"stand":"gate"},
+    "horse_4": {"admits":"body","posture":"sit","most":1,"at_mm":[-3000,1500,0],"stand":"gate"},
+    "horse_5": {"admits":"body","posture":"sit","most":1,"at_mm":[-1500,1500,-2598],"stand":"exit_gate"},
+    "horse_6": {"admits":"body","posture":"sit","most":1,"at_mm":[1500,1500,-2598],"stand":"exit_gate"}
+  },
+  "geometry": {"bounds_mm":[9000,6300,9000]},
+  "forms": {
+    "ride": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"state","field":"under_way","is":false},{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"},
+        {"change":"set","field":"under_way","to":true,"event":"set_off"}
+      ]
+    },
+    "board": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"state","field":"under_way","is":false},{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+      "effects": [{"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"}]
+    }
+  },
+  "ride": {
+    "seats": ["horse_1","horse_2","horse_3","horse_4","horse_5","horse_6"],
+    "stops": ["gate","exit_gate"],
+    "returns": false,
+    "start": "ride",
+    "speed_mm_s": 1257,
+    "ground": "level"
+  },
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:carousel",
+    "table": [
+      {
+        "part": "wheel",
+        "field": "under_way",
+        "do": "rotate",
+        "axis": "y",
+        "at": {"false":0,"true":90000},
+        "over_us": 3750000
+      },
+      {"sound":"music","field":"under_way","at":{"false":0,"true":600},"reach_mm":25000}
+    ],
+    "shape": {
+      "shapes": [
+        {"kind":"cyl","at":[0,150,0],"r":4200,"h":300,"segments":16,"tint":"base"},
+        {"kind":"cyl","at":[0,380,0],"r":4000,"h":160,"segments":16,"tint":"deck","role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[0,2400,0],"r":350,"h":4200,"segments":8,"tint":"pole","role":"wheel","pivot":[0,0,0]},
+        {"kind":"cone","at":[0,5100,0],"r":4500,"h":1600,"segments":12,"tint":"canopy","role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[0,4250,0],"r":4500,"h":300,"segments":12,"tint":"trim","role":"wheel","pivot":[0,0,0]},
+        {"kind":"sphere","at":[0,6000,0],"r":300,"segments":6,"tint":"trim","role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[3000,2300,0],"r":40,"h":3800,"segments":5,"tint":"pole","role":"wheel","pivot":[0,0,0]},
+        {"kind":"capsule","at":[3000,1200,0],"r":200,"h":550,"segments":6,"tint":"horse2","pitch":90000,"yaw":0,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[3000,1525,0],"r":80,"h":450,"segments":5,"tint":"horse2","role":"wheel","pivot":[0,0,0]},
+        {"kind":"sphere","at":[3000,1800,350],"r":150,"segments":5,"tint":"horse2","scale":[800,900,1300],"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[3000,850,-340],"r":45,"h":506,"segments":4,"tint":"horse2","pitch":170913,"yaw":180023,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[3000,850,340],"r":45,"h":506,"segments":4,"tint":"horse2","pitch":170913,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[1500,2300,2598],"r":40,"h":3800,"segments":5,"tint":"pole","role":"wheel","pivot":[0,0,0]},
+        {"kind":"capsule","at":[1500,1450,2598],"r":200,"h":550,"segments":6,"tint":"horse","pitch":90000,"yaw":-60000,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[1500,1775,2598],"r":80,"h":450,"segments":5,"tint":"horse","role":"wheel","pivot":[0,0,0]},
+        {"kind":"sphere","at":[1197,2050,2773],"r":150,"segments":5,"tint":"horse","scale":[800,900,1300],"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[1794,1100,2428],"r":45,"h":506,"segments":4,"tint":"horse","pitch":170913,"yaw":119977,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[1206,1100,2768],"r":45,"h":506,"segments":4,"tint":"horse","pitch":170913,"yaw":-59989,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-1500,2300,2598],"r":40,"h":3800,"segments":5,"tint":"pole","role":"wheel","pivot":[0,0,0]},
+        {"kind":"capsule","at":[-1500,1200,2598],"r":200,"h":550,"segments":6,"tint":"horse2","pitch":90000,"yaw":-120000,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-1500,1525,2598],"r":80,"h":450,"segments":5,"tint":"horse2","role":"wheel","pivot":[0,0,0]},
+        {"kind":"sphere","at":[-1803,1800,2423],"r":150,"segments":5,"tint":"horse2","scale":[800,900,1300],"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-1206,850,2768],"r":45,"h":506,"segments":4,"tint":"horse2","pitch":170913,"yaw":59989,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-1794,850,2428],"r":45,"h":506,"segments":4,"tint":"horse2","pitch":170913,"yaw":-119977,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-3000,2300,0],"r":40,"h":3800,"segments":5,"tint":"pole","role":"wheel","pivot":[0,0,0]},
+        {"kind":"capsule","at":[-3000,1450,0],"r":200,"h":550,"segments":6,"tint":"horse","pitch":90000,"yaw":-180000,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-3000,1775,0],"r":80,"h":450,"segments":5,"tint":"horse","role":"wheel","pivot":[0,0,0]},
+        {"kind":"sphere","at":[-3000,2050,-350],"r":150,"segments":5,"tint":"horse","scale":[800,900,1300],"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-3000,1100,340],"r":45,"h":506,"segments":4,"tint":"horse","pitch":170913,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-3000,1100,-340],"r":45,"h":506,"segments":4,"tint":"horse","pitch":170913,"yaw":180023,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-1500,2300,-2598],"r":40,"h":3800,"segments":5,"tint":"pole","role":"wheel","pivot":[0,0,0]},
+        {"kind":"capsule","at":[-1500,1200,-2598],"r":200,"h":550,"segments":6,"tint":"horse2","pitch":90000,"yaw":-240000,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-1500,1525,-2598],"r":80,"h":450,"segments":5,"tint":"horse2","role":"wheel","pivot":[0,0,0]},
+        {"kind":"sphere","at":[-1197,1800,-2773],"r":150,"segments":5,"tint":"horse2","scale":[800,900,1300],"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-1794,850,-2428],"r":45,"h":506,"segments":4,"tint":"horse2","pitch":170913,"yaw":-59989,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[-1206,850,-2768],"r":45,"h":506,"segments":4,"tint":"horse2","pitch":170913,"yaw":119977,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[1500,2300,-2598],"r":40,"h":3800,"segments":5,"tint":"pole","role":"wheel","pivot":[0,0,0]},
+        {"kind":"capsule","at":[1500,1450,-2598],"r":200,"h":550,"segments":6,"tint":"horse","pitch":90000,"yaw":-300000,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[1500,1775,-2598],"r":80,"h":450,"segments":5,"tint":"horse","role":"wheel","pivot":[0,0,0]},
+        {"kind":"sphere","at":[1803,2050,-2423],"r":150,"segments":5,"tint":"horse","scale":[800,900,1300],"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[1206,1100,-2768],"r":45,"h":506,"segments":4,"tint":"horse","pitch":170913,"yaw":-119977,"role":"wheel","pivot":[0,0,0]},
+        {"kind":"cyl","at":[1794,1100,-2428],"r":45,"h":506,"segments":4,"tint":"horse","pitch":170913,"yaw":59989,"role":"wheel","pivot":[0,0,0]}
+      ],
+      "round": 20,
+      "palette": {"base":"#8c867a","deck":"#c9a77a","pole":"#d9b54a","canopy":"#d9534f","trim":"#f2efe6","horse":"#f4f1ea","horse2":"#c98a45"},
+      "tags": ["play","carousel","merry-go-round","ride","fair","structure","large","moving"]
+    }
+  },
+  "text": {
+    "card": "A carousel with six painted horses: climb on one and go round to music.",
+    "play": "play",
+    "merry_go_round": "merry-go-round",
+    "roundabout": "roundabout",
+    "howto_ride": "Climb onto a free horse while it stands still; it goes round and lets you off at the exit."
+  },
+  "card": {"text":"card","category":"play","synonyms":["merry_go_round","roundabout"]},
+  "howtos": {"ride":{"text":"howto_ride","steps":[{"form":"ride"}]}}
+}

@@ -1,0 +1,118 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:locomotive",
+  "owner": "thing",
+  "state": {
+    "fire": {"n":1,"type":"bool","default":true,"audience":{"rule":"everyone"}},
+    "under_way": {"n":2,"type":"bool","default":false,"audience":{"rule":"everyone"}}
+  },
+  "points": {
+    "cab_left": {"role":"stand","at_mm":[-1900,0,-2400],"yaw_mdeg":90000},
+    "cab_right": {"role":"stand","at_mm":[1900,0,-2400],"yaw_mdeg":-90000},
+    "regulator": {"role":"contact","at_mm":[0,1500,-1700]}
+  },
+  "slots": {
+    "driver": {"admits":"body","posture":"sit","most":1,"at_mm":[500,980,-2400],"stand":"cab_right"},
+    "fireman": {"admits":"body","posture":"sit","most":1,"at_mm":[-500,980,-2400],"stand":"cab_left"}
+  },
+  "geometry": {"bounds_mm":[2240,5700,8050]},
+  "forms": {
+    "light_fire": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"fire","is":false},{"need":"within_reach","point":"regulator"}],
+      "steps": [{"step":"move","move":"press","at":"regulator"}],
+      "effects": [{"change":"set","field":"fire","to":true,"event":"fire_lit"}]
+    },
+    "put_out_fire": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need":"state","field":"fire","is":true},
+        {"need":"state","field":"under_way","is":false},
+        {"need":"within_reach","point":"regulator"}
+      ],
+      "steps": [{"step":"move","move":"press","at":"regulator"}],
+      "effects": [{"change":"set","field":"fire","to":false,"event":"fire_out"}]
+    },
+    "drive": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [
+        {"need":"state","field":"fire","is":true},
+        {"need":"state","field":"under_way","is":false},
+        {"need":"slot_free","slot":{"arg":"seat"}}
+      ],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"},
+        {"change":"set","field":"under_way","to":true,"event":"set_off"}
+      ]
+    },
+    "board": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"state","field":"under_way","is":false},{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+      "effects": [{"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"}]
+    }
+  },
+  "ride": {
+    "seats": ["driver","fireman"],
+    "stops": ["cab_left","cab_right"],
+    "returns": true,
+    "start": "drive",
+    "speed_mm_s": 2000,
+    "ground": "level"
+  },
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:locomotive",
+    "table": [
+      {"part":"fill","field":"fire","do":"steam","at":{"false":0,"true":800}},
+      {"part":"light","field":"fire","do":"glow","at":{"false":0,"true":800}},
+      {"sound":"engine","field":"fire","at":{"false":0,"true":500},"reach_mm":40000}
+    ],
+    "shape": {
+      "shapes": [
+        {"kind":"box","at":[0,530,0],"size":[1900,300,7600],"round":0,"tint":"frame"},
+        {"kind":"cyl","at":[-720,420,-2600],"r":420,"h":140,"segments":10,"tint":"iron","roll":90000},
+        {"kind":"cyl","at":[720,420,-2600],"r":420,"h":140,"segments":10,"tint":"iron","roll":90000},
+        {"kind":"cyl","at":[-720,420,-900],"r":420,"h":140,"segments":10,"tint":"iron","roll":90000},
+        {"kind":"cyl","at":[720,420,-900],"r":420,"h":140,"segments":10,"tint":"iron","roll":90000},
+        {"kind":"cyl","at":[-720,420,900],"r":420,"h":140,"segments":10,"tint":"iron","roll":90000},
+        {"kind":"cyl","at":[720,420,900],"r":420,"h":140,"segments":10,"tint":"iron","roll":90000},
+        {"kind":"cyl","at":[-720,420,2600],"r":420,"h":140,"segments":10,"tint":"iron","roll":90000},
+        {"kind":"cyl","at":[720,420,2600],"r":420,"h":140,"segments":10,"tint":"iron","roll":90000},
+        {"kind":"cyl","at":[0,1530,1200],"r":850,"h":4600,"segments":12,"tint":"paint","pitch":90000},
+        {"kind":"sphere","at":[0,1530,3500],"r":850,"segments":10,"tint":"iron","scale":[1000,1000,200]},
+        {"kind":"cyl","at":[0,2780,2700],"r":220,"h":900,"segments":8,"r2":300,"tint":"iron","role":"fill"},
+        {"kind":"sphere","at":[0,2430,800],"r":300,"segments":6,"tint":"brass"},
+        {"kind":"extrude","at":[0,610,-2400],"polygon":[[-1020,-1070],[1020,-1070],[1020,1070],[-1020,1070]],"h":2240,"tint":"paint"},
+        {"kind":"extrude","at":[0,2900,-2400],"polygon":[[-1120,-1170],[1120,-1170],[1120,1170],[-1120,1170]],"h":60,"tint":"roof"},
+        {"kind":"box","at":[0,2180,-1290],"size":[1400,600,30],"round":0,"tint":"glass"},
+        {"kind":"extrude","at":[0,130,3850],"polygon":[[-900,0],[900,0],[0,550]],"h":250,"tint":"iron","pitch":-90000},
+        {"kind":"sphere","at":[0,1530,3720],"r":160,"segments":5,"tint":"lamp","glow":800,"role":"light"}
+      ],
+      "palette": {"frame":"#2a2725","iron":"#3a3c3e","paint":"#2f5a4a","brass":"#b8913f","roof":"#2a2725","glass":"#3b4b55","lamp":"#fff2c4","smoke":"#d8d6d2","stripe":"#d9a63a"},
+      "tags": ["vehicle","rail","train"]
+    }
+  },
+  "text": {
+    "card": "A steam locomotive on rails: light its fire, take the driver’s seat, set off.",
+    "getting_around": "transport",
+    "train": "train",
+    "engine": "engine",
+    "steam_train": "steam train",
+    "howto_drive": "With the fire lit, take the driver’s seat: the train sets off along its line."
+  },
+  "card": {"text":"card","category":"getting_around","synonyms":["train","engine","steam_train"]},
+  "howtos": {"drive":{"text":"howto_drive","steps":[{"form":"light_fire"},{"form":"drive"}]}}
+}

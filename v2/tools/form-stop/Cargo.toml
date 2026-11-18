@@ -1,0 +1,13 @@
+[package]
+name = "form-stop"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "The stop table (Engine v2 F3, #2768): a form stopped at every step boundary and in every step, three ways (the Soul leaves, the thing is removed, the process is killed and restarted), and what each stop leaves."
+
+[dependencies]
+replica = { path = "../../crates/replica" }
+sim = { path = "../../crates/sim" }
+skills = { path = "../../crates/skills" }
+# The body and its ground, placed as the script driver places them (B1, #2680).
+body-script = { path = "../body-script" }

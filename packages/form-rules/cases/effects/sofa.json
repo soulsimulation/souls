@@ -1,0 +1,99 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:sofa (SA-X24): three seats; flop down and the cushions squash; plump them again; lie on it (its area).",
+  "cases": [
+    {
+      "name": "sofa_two_souls_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:sofa" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_1" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "seat_1" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_1" } },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 0,
+            "fix": { "form": "sit", "args": { "seat": "seat_2" } }
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_2" } },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b2", "to": { "node": "t1", "slot": "seat_2" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:sofa", "slots": { "seat_1": ["b1"], "seat_2": ["b2"] } } }
+    },
+    {
+      "name": "sofa_flop_then_plump",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:sofa" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null }, "effector_mm": [0, 700, -200] }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "flop", "args": { "seat": "seat_1" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "seat_1" } },
+              { "change": "set", "node": "t1", "field": "cushions", "n": 1, "to": "squashed" }
+            ],
+            "events": [
+              { "event": "eden:flopped_down", "node": "t1", "changes": [0] },
+              { "event": "eden:cushions_squashed", "node": "t1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "plump" },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "cushions", "n": 1, "to": "plump" }],
+            "events": [{ "event": "eden:cushions_plumped", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "plump" },
+          "receipt": "rc3",
+          "expect": { "verdict": "no", "reason": "field_differs", "need": 0 }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:sofa", "fields": { "cushions": "plump" }, "slots": { "seat_1": ["b1"] } } }
+    }
+  ]
+}
