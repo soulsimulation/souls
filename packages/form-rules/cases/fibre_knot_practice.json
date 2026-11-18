@@ -1,0 +1,104 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:knot_board (from #1730): two cords on one board, the red tied or untied as an overhand, the blue as a figure-eight; six seconds with empty hands changes only the chosen cord. Refused with the original's words: a cord already tied ('That cord is already tied; untie it first.'), already loose ('That cord is already loose; tie it first.') and a hand holding something ('Put down what you are holding before knot work.'). The board is taken with a free hand.",
+  "cases": [
+    {
+      "name": "knot_board_take_every_need_met",
+      "act": {"this":"n1","form":"take"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "knot_board_take_hands_full",
+      "act": {"this":"n1","form":"take"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board"},"b1":{"hands":{"left":"x1","right":"x2"}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "knot_tie_overhand_every_need_met",
+      "act": {"this":"n1","form":"tie_overhand"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":false,"eight":false}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "knot_tie_overhand_already_tied",
+      "act": {"this":"n1","form":"tie_overhand"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":true,"eight":false}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"overhand","found":true,"wanted":{"is":false}},"fix":{"form":"untie_overhand"},"says":"already_tied"}
+    },
+    {
+      "name": "knot_tie_overhand_holding_something",
+      "act": {"this":"n1","form":"tie_overhand"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":false,"eight":false}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":1,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "knot_untie_overhand_every_need_met",
+      "act": {"this":"n1","form":"untie_overhand"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":true,"eight":false}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "knot_untie_overhand_already_loose",
+      "act": {"this":"n1","form":"untie_overhand"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":false,"eight":false}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"overhand","found":false,"wanted":{"is":true}},"fix":{"form":"tie_overhand"},"says":"already_loose"}
+    },
+    {
+      "name": "knot_untie_overhand_holding_something",
+      "act": {"this":"n1","form":"untie_overhand"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":true,"eight":false}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":1,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "knot_tie_eight_every_need_met",
+      "act": {"this":"n1","form":"tie_eight"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":false,"eight":false}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "knot_tie_eight_already_tied",
+      "act": {"this":"n1","form":"tie_eight"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":false,"eight":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"eight","found":true,"wanted":{"is":false}},"fix":{"form":"untie_eight"},"says":"already_tied"}
+    },
+    {
+      "name": "knot_tie_eight_holding_something",
+      "act": {"this":"n1","form":"tie_eight"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":false,"eight":false}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":1,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "knot_untie_eight_every_need_met",
+      "act": {"this":"n1","form":"untie_eight"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":false,"eight":true}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "knot_untie_eight_already_loose",
+      "act": {"this":"n1","form":"untie_eight"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":false,"eight":false}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"eight","found":false,"wanted":{"is":true}},"fix":{"form":"tie_eight"},"says":"already_loose"}
+    },
+    {
+      "name": "knot_untie_eight_holding_something",
+      "act": {"this":"n1","form":"untie_eight"},
+      "state": {"actor":"b1","nodes":{"n1":{"kind":"eden:knot_board","fields":{"overhand":false,"eight":true}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":1,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    }
+  ]
+}

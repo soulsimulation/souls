@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":153,"group":"two-things","words":"put the toolbox on the workbench","obvious":3,"things":{"toolbox":"eden:toolbox","workbench":"eden:workbench"},"chain":[{"this":"me","form":"pick_up","carry":"toolbox","args":{"thing":"toolbox"}},{"this":"me","form":"put","place":{"at":"on","thing":"toolbox","anchor":"workbench"},"args":{"thing":"toolbox"}}]}

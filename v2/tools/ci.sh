@@ -19,12 +19,21 @@ step() {
 step toolchain bash -c 'rustup component add rustfmt clippy && rustup target add wasm32-unknown-unknown'
 
 step format cargo fmt --all --check
+# Engine code names no kind (K3, #2667): the fixture kinds' names are in no Rust code under the crates' src/. Comment
+# lines and lines that embed a fixture file (data) are set aside; tests and fixtures name kinds on purpose.
+step no-kind-names bash -c '! grep -rniEw --include="*.rs" "lamps?|seats?|cups?" crates/*/src |
+  grep -vE "^[^:]+:[0-9]+:[[:space:]]*//" | grep -v "include_str!"'
 step lints cargo clippy --workspace --all-targets --locked -- -D warnings
 # replica's WASM-only code (the wasm-bindgen export) is linted on its own target too.
 step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked -- -D warnings
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
+# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md).
+# The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
+step origin-headers node --test tools/origin/origin.test.mjs
+# The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
+step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 # The driver's loads (I10, #2693): the shared shapes imported, the stretch merged, every kind given a verb.
 step driver-loads node --test tools/driver/loads.test.mjs
 
@@ -90,8 +99,36 @@ step intents-goldens node --input-type=module -e '
   const got = r.intents_goldens(), want = readFileSync("crates/replica/fixtures/intents/goldens.txt", "utf8");
   console.log(`${got}intents-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
   if (got !== want) process.exit(1);'
+# The malformed intents (I2, #2689): the WASM build refuses each by the registry name beside it, as the native build
+# does in `cargo test` (crates/replica/tests/intent_decode.rs).
+step intent-decode node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
+  const rows = r.intent_decode_table().trim().split("\n"), wrong = rows.filter((l) => { const [, a, b] = l.split(" "); return a !== b; });
+  console.log(`intent-decode: WASM in Node ${process.version}, ${rows.length} malformed intents, ${wrong.length} refused by another name`, wrong);
+  if (wrong.length || rows.length < 60) process.exit(1);'
 # The checker a client loads by hash (T10, #2664): replica for wasm32 with no wasm-bindgen exports, so no imports.
 step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p replica --release \
     --target wasm32-unknown-unknown --locked --features checker &&
   CHECKER_WASM="$PWD/target/checker/wasm32-unknown-unknown/release/replica.wasm" \
     cargo test -p replica --test intents --locked the_built_checker_artifact_loads_by_its_hash -- --nocapture'
+# The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
+# same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
+step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
+  node tools/bench/replica-equal/node.mjs target/wasm-load/pkg target/replica-equal crates/replica/tests/queries.txt'
+# The form rules (R2, #2685): every case `cargo test` ran (tests/rules.rs: 10,000 generated, and the case files) through
+# the same WASM build in Node, giving the native answers byte for byte.
+step rules-equal node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
+  const got = r.rules_run(readFileSync("target/tmp/rules/run.json", "utf8")), want = readFileSync("target/tmp/rules/native.txt", "utf8");
+  console.log(`rules-equal: ${want.split("\n").length - 1} cases, WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} native`);
+  if (got !== want) process.exit(1);'
+# The form rules' drift report (R2, #2685): the live packages/form-rules cases against this library, whose required
+# test reads a pinned snapshot. Only the daily full run on main (schedule) or V2_FULL=1, never per change; it prints
+# each disagreement and never fails the job.
+if [[ "${GITHUB_EVENT_NAME:-}" == schedule || "${V2_FULL:-}" == 1 ]]; then
+  step rules-drift bash -c 'cargo test -p replica --locked --test rules -- --ignored --nocapture drift || echo "::warning::rules-drift did not run"'
+fi

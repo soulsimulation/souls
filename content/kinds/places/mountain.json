@@ -1,0 +1,104 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:mountain",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      400000,
+      180000,
+      400000
+    ]
+  },
+  "looks": {
+    "model": "look:mountain",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "profile": [
+            [
+              200000,
+              0
+            ],
+            [
+              175000,
+              6461
+            ],
+            [
+              150000,
+              19587
+            ],
+            [
+              125000,
+              37473
+            ],
+            [
+              100000,
+              59378
+            ],
+            [
+              75000,
+              84856
+            ],
+            [
+              50000,
+              113598
+            ],
+            [
+              25000,
+              145374
+            ],
+            [
+              0,
+              180000
+            ]
+          ],
+          "segments": 24,
+          "tint": "rock"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            162000,
+            0
+          ],
+          "r": 26000,
+          "h": 36000,
+          "segments": 24,
+          "tint": "snow"
+        }
+      ],
+      "round": 0,
+      "palette": {
+        "rock": "#8a8579",
+        "snow": "#f3f3ef"
+      },
+      "tags": [
+        "terrain",
+        "mountain"
+      ]
+    }
+  },
+  "text": {
+    "card": "A mountain: one high peak, or a range of them.",
+    "land": "land",
+    "peak": "peak",
+    "range": "range",
+    "summit": "summit"
+  },
+  "card": {
+    "text": "card",
+    "category": "land",
+    "synonyms": [
+      "peak",
+      "range",
+      "summit"
+    ]
+  }
+}

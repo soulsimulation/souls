@@ -1,0 +1,104 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:blind_window: lower the blind, then raise it. Open is field 1, stored 1 and 0.",
+ "cases": [
+  {
+   "name": "lower_then_raise",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:blind_window",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       750,
+       1250,
+       500
+      ]
+     }
+    },
+    "moves": {
+     "tug": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "close"
+     },
+     "receipt": "r1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "open",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:blind_lowered",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "open"
+     },
+     "receipt": "r2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "open",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:blind_raised",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:blind_window",
+     "fields": {
+      "open": 1
+     }
+    }
+   }
+  }
+ ]
+}

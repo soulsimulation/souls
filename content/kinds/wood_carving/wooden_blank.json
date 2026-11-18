@@ -1,0 +1,121 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wooden_blank",
+  "owner": "thing",
+  "state": {
+    "carving": { "n": 1, "type": "enum", "values": ["blank", "leaf", "bird", "totem"], "default": "blank", "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "carved_by": { "n": 1, "from": "soul", "most": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 120, 0] }
+  },
+  "geometry": { "bounds_mm": [260, 260, 320] },
+  "forms": {
+    "carve_leaf": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bench": { "type": "thing", "select": { "of": "things", "kind": "eden:wood_carving_bench", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "state", "field": "carving", "is": "blank" },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": { "arg": "bench" } }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "bench" } },
+        { "step": "wait", "us": 10000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "carving", "to": "leaf", "event": "carved_leaf" },
+        { "change": "link", "link": "carved_by", "from": "actor", "event": "maker_credited" }
+      ]
+    },
+    "carve_bird": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bench": { "type": "thing", "select": { "of": "things", "kind": "eden:wood_carving_bench", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "state", "field": "carving", "is": "blank" },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": { "arg": "bench" } }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "bench" } },
+        { "step": "wait", "us": 10000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "carving", "to": "bird", "event": "carved_bird" },
+        { "change": "link", "link": "carved_by", "from": "actor", "event": "maker_credited" }
+      ]
+    },
+    "carve_totem": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bench": { "type": "thing", "select": { "of": "things", "kind": "eden:wood_carving_bench", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "state", "field": "carving", "is": "blank" },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": { "arg": "bench" } }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "bench" } },
+        { "step": "wait", "us": 10000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "carving", "to": "totem", "event": "carved_totem" },
+        { "change": "link", "link": "carved_by", "from": "actor", "event": "maker_credited" }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:wooden_blank",
+    "table": [
+      { "field": "carving", "do": "pick", "at": { "blank": "body", "leaf": "blade", "bird": "wing.l", "totem": "neck" } }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        { "kind": "box", "at": [0, 120, 0], "size": [260, 240, 320], "tint": "wood", "role": "body" },
+        { "kind": "box", "at": [0, 15, -100], "size": [90, 30, 55], "tint": "cut", "role": "blade" },
+        { "kind": "box", "at": [0, 15, -50], "size": [155, 30, 55], "tint": "cut", "role": "blade" },
+        { "kind": "box", "at": [0, 15, 0], "size": [220, 30, 55], "tint": "cut", "role": "blade" },
+        { "kind": "box", "at": [0, 15, 50], "size": [155, 30, 55], "tint": "cut", "role": "blade" },
+        { "kind": "box", "at": [0, 15, 100], "size": [90, 30, 55], "tint": "cut", "role": "blade" },
+        { "kind": "box", "at": [0, 15, 150], "size": [20, 20, 60], "tint": "wood", "role": "blade" },
+        { "kind": "box", "at": [0, 32, 0], "size": [14, 6, 270], "tint": "wood", "role": "blade" },
+        { "kind": "box", "at": [0, 65, 15], "size": [120, 130, 170], "tint": "cut", "role": "wing.l" },
+        { "kind": "box", "at": [0, 150, -75], "size": [85, 85, 85], "tint": "cut", "role": "wing.l" },
+        { "kind": "box", "at": [0, 145, -135], "size": [45, 30, 35], "tint": "wood", "role": "wing.l" },
+        { "kind": "box", "at": [0, 75, 115], "size": [90, 35, 70], "tint": "wood", "role": "wing.l" },
+        { "kind": "box", "at": [-85, 70, 15], "size": [80, 30, 100], "tint": "wood", "role": "wing.l" },
+        { "kind": "box", "at": [85, 70, 15], "size": [80, 30, 100], "tint": "wood", "role": "wing.l" },
+        { "kind": "box", "at": [0, 25, 0], "size": [200, 50, 200], "tint": "wood", "role": "neck" },
+        { "kind": "box", "at": [0, 110, 0], "size": [100, 120, 100], "tint": "cut", "role": "neck" },
+        { "kind": "box", "at": [0, 200, 0], "size": [160, 60, 140], "tint": "wood", "role": "neck" },
+        { "kind": "box", "at": [0, 240, 0], "size": [60, 40, 60], "tint": "cut", "role": "neck" }
+      ],
+      "palette": { "wood": "#a97742", "cut": "#cf9c60" },
+      "tags": ["art", "wood", "item", "carving", "object"]
+    }
+  },
+  "text": {
+    "card": "A wooden blank: at a carving bench, carve it once into a leaf, bird or totem.",
+    "carving": "carving",
+    "woodwork": "woodwork",
+    "sculpture": "sculpture",
+    "howto_carve": "Take the blank to a carving bench and choose a leaf, a bird or a totem; ten seconds of work cut this same block for good, and it keeps its maker."
+  },
+  "card": { "text": "card", "category": "carving", "synonyms": ["woodwork", "sculpture"] },
+  "howtos": {
+    "carve": { "text": "howto_carve", "steps": [{ "form": "carve_bird" }] }
+  }
+}
