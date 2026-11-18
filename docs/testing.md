@@ -133,7 +133,8 @@ The engine's own browser tests are in `mars/viewer/e2e/`.
 
 ## CI window
 
-Per-PR CI (`ci.yml`) shares GitHub's hosted-runner cap, about 20 concurrent jobs. A server change selects about ten
+Per-PR CI (`ci.yml`) shares GitHub's hosted-runner cap: 60 concurrent jobs, measured on 17 November (four times that
+evening 60 ran at once while 20 to 34 more sat queued, some for up to 8.5 minutes). A server change selects about ten
 heavy legs, so with several workers pushing, unready PRs used to starve the merge path. Pull request runs are
 therefore **windowed**:
 
@@ -160,13 +161,21 @@ therefore **windowed**:
 
 **Low-risk paths.** When every file a PR or a merge group changes sits under `tools/entry/`, `content/kinds/`,
 `content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
-`AGENTS.md` and `CLAUDE.md`, CI skips the server shards, `latency`, the smoke, `packages` (the walk) and `types-web` (the
-bundle). It runs `repo`, `soul-tools` (the entry tests, the form-rules tests and the one launcher test that reads
-`content/kinds`) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
-keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
-and the usual path map decides; a changelog fragment beside any other file still selects every job. The list is
-`LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after a low-risk merge group runs in full, since the
-group did not run every `qualify` job.
+`AGENTS.md` and `CLAUDE.md`, CI skips `latency`, the smoke, `packages` (the walk) and `types-web` (the bundle), and the
+server shards that do not read those paths. It runs `repo`, `soul-tools` (the entry tests, the form-rules tests, the
+inline check of `eden.mjs` and the launcher tests that read `content/kinds` or form-rules) and, for `docs/site` reference
+pages, `docs-reference`. A change under `tools/entry/`, `content/` or `packages/form-rules/` also runs the server shard(s)
+holding a server test that reads them (the forms adapter's tests; `serverReaders` finds them in the tree at scope time,
+so a new reader or a rebalanced shard needs no edit). A change under `packages/form-rules/src/` also keeps `types-web` and
+`web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff, and the usual path map
+decides; a changelog fragment beside any other file still selects every job. The list is `LOW_RISK` in
+`.github/scripts/ci-scope.mjs`. The push to main after a low-risk merge group runs in full, since the group did not run
+every `qualify` job.
+
+**Content PRs.** A PR whose files are all under `content/kinds/<family>/`, `packages/form-rules/cases/` or `changes/` (the
+shape of the content batches) runs the content lane, written out as `CONTENT_JOBS` in `ci-scope.mjs`: `soul-tools` and
+the server shard(s) that read content or cases. No web or bundle job: `apps/web` reads neither. Content PRs are low-risk
+for the merge train, so they fill a queue group up to its limit rather than waiting behind `MIXED_CAP`.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
 `merge:ready` once a head's `ci-ok` is green, and remove `ci:run` from PRs that leave the window. A PR labelled
@@ -234,6 +243,21 @@ commands, which need a core plan there, and `settled`. Viewer arms above 2,000 a
 - **Remove it.** On the host, in its install directory: `sudo ./svc.sh stop && sudo ./svc.sh uninstall`. Then delete its
   `<unit>.d` drop-in under `/etc/systemd/system`, run `sudo systemctl daemon-reload` and delete the directory. Finally,
   delete the runner on GitHub (`gh api -X DELETE repos/soulsimulation/souls/actions/runners/<id>`).
+
+**Light runners.** The `qualify` legs that `ci-scope.mjs` marks `light: true` (`soul-tools`: the Soul runtime, trace,
+entry and form-rules tests) run on a self-hosted runner labelled `souls-light` when one is online and idle, and on
+`ubuntu-latest` otherwise, with the same steps either way. `runs-on` cannot fall back by itself, so the `scope` job asks
+the runner list (`GET /repos/{owner}/{repo}/actions/runners`) and gives each light job the label while idle runners last
+(`idleRunners`, `assignLight`); its step summary says where each went and why. Listing runners needs a token with
+Administration: read, which the workflow's own token cannot have, so it comes from the repository secret
+`CI_RUNNERS_TOKEN`. Without the secret, or on any API error or timeout (10 s), every light job runs hosted, as before.
+- **Where.** Three instances on the timed-runner host, pinned to every CPU the six `souls-timed` instances do not own
+  (physical cores 18-23 and their siblings: 6 physical, 12 logical), so the timed runs keep their cores. Set them up with
+  `tools/ci/setup-runners.sh --count 3 --prefix souls-light --label souls-light --no-playwright --cpus-except
+  souls-timed-1,souls-timed-2,souls-timed-3,souls-timed-4,souls-timed-5,souls-timed-6`, run as root on the host,
+  `--dry-run` first: it prints the CPUs it read from each timed instance and the set it pins to.
+- **Turn it off** by deleting the secret (`gh secret delete CI_RUNNERS_TOKEN -R soulsimulation/souls`) or stopping the
+  instances; light jobs then run hosted. A light job placed on a runner that goes offline before it starts waits for it.
 
 ## Remote gate
 
