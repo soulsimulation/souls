@@ -242,6 +242,8 @@ fn generate(r: &mut Rng, kinds: &[(String, Value)], index: usize) -> Value {
                 .iter()
                 .map(move |(f, form)| (k.as_str(), f.as_str(), form))
         })
+        // A reach to another thing's point (`of`) is not built here; hand-written cases cover it (reach_of.json).
+        .filter(|(_, _, form)| !form.to_json().contains("\"of\":"))
         .collect();
     let (kind, form_name, form) = *r.pick(&pairs);
     let entry = &kinds.iter().find(|(k, _)| k == kind).unwrap().1;
@@ -700,7 +702,7 @@ fn a2_unknown_only_for_a_field_outside_the_audience_or_a_node_held_at_an_index_l
     let w = world();
     let mut cases = generated(&w);
     cases.extend(w.hand);
-    let (mut unknown, mut by_audience, mut by_index) = (0, 0, 0);
+    let (mut unknown, mut by_audience, mut by_index, mut no_pose) = (0, 0, 0, 0);
     for Case { file, case } in &cases {
         let client = verdict_of(&w.kinds, case);
         let server = verdict_of(&w.kinds, &as_server(case));
@@ -709,6 +711,21 @@ fn a2_unknown_only_for_a_field_outside_the_audience_or_a_node_held_at_an_index_l
             server.get("verdict").unwrap(),
         );
         let name = case.get("name").unwrap().to_json();
+        // An input with no pose for the thing a reach measures to is unknown to everyone, the server too: no copy is
+        // involved, so it is not A2's case (SA #3012). It must name that pose and the pose must be missing.
+        if sv == &s("unknown") && server.get("field") == Some(&s("at_mm")) {
+            let node = server.get("node").and_then(Value::str).unwrap();
+            let nodes = case.get("state").and_then(|st| st.get("nodes"));
+            assert!(
+                nodes
+                    .and_then(|n| n.get(node))
+                    .and_then(|n| n.get("at_mm"))
+                    .is_none(),
+                "{file} {name}"
+            );
+            no_pose += 1;
+            continue;
+        }
         assert_ne!(
             sv,
             &s("unknown"),
@@ -753,6 +770,7 @@ fn a2_unknown_only_for_a_field_outside_the_audience_or_a_node_held_at_an_index_l
             None
         };
         let outside = audience.is_some_and(|a| !seen(sees, a));
+        // An index-held node includes the pose of a thing whose point `within_reach` measures (`field: at_mm`).
         let index = held == Some(&s("index"));
         assert!(
             outside || index,
@@ -771,7 +789,7 @@ fn a2_unknown_only_for_a_field_outside_the_audience_or_a_node_held_at_an_index_l
         }
     }
     println!(
-        "a2: {} cases; {unknown} unknown to the client and definite to the server: {by_audience} outside the audience, {by_index} held at an index level",
+        "a2: {} cases; {unknown} unknown to the client and definite to the server: {by_audience} outside the audience, {by_index} held at an index level; {no_pose} with no pose in the input, unknown to both",
         cases.len()
     );
     assert!(by_audience > 0 && by_index > 0);

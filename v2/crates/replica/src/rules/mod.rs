@@ -26,7 +26,9 @@
 //!
 //! **Unknown** has exactly two causes, and only these: the field or link is outside the asker's audience
 //! (`asker.sees`), or the node is one the asker's copy holds at an index level only (`"held": "index"` on the node,
-//! E1): then the unknown carries `"held": "index"` too. Unknown never blocks a send (R8).
+//! E1): then the unknown carries `"held": "index"` too. Unknown never blocks a send (R8). A `within_reach` of another
+//! thing's point (`of: {arg}`) reads that thing's pose as `field: "at_mm"`: unknown when the input gives none, as for
+//! anyone, server included.
 //!
 //! Whole numbers only (`i128`), no float is ever worked with, and the only list an asker states (a body's hands) is
 //! capped at [`MAX_HANDS`]; every other loop runs over lists the kind declares.
@@ -813,25 +815,65 @@ impl<'a> Rules<'a> {
             let arg = has(n.get("point"), "arg").cloned().unwrap_or(Value::Null);
             return Outcome::No(self.bad(i, "argument_missing", vec![("arg".into(), arg)]));
         };
-        let place = match has(entry.get("points"), &name) {
+        // `of` names another thing by a form argument: its point is in its own frame, placed by its `at_mm` in the
+        // input (SA #3012). Without `of`, the point is this thing's own.
+        let mut owner = entry;
+        let mut other: Option<(String, String, &Value)> = None;
+        if let Some(of) = n.get("of") {
+            let Some(arg) = of.get("arg").and_then(Value::str) else {
+                return Outcome::No(self.bad(i, "malformed_need", vec![]));
+            };
+            let Some(id) = has(args, arg).map(|v| v.str().map(str::to_owned)) else {
+                return Outcome::No(self.bad(
+                    i,
+                    "argument_missing",
+                    vec![("arg".into(), Value::s(arg))],
+                ));
+            };
+            let node = id.as_deref().and_then(|id| has(self.nodes(), id));
+            let (Some(id), Some(node), Some(kind)) = (id.clone(), node, self.entry_of(node)) else {
+                let shown = id.map_or(Value::Null, Value::Str);
+                return Outcome::No(self.bad(i, "no_such_node", vec![("node".into(), shown)]));
+            };
+            owner = kind;
+            other = Some((id, arg.to_owned(), node));
+        }
+        let place = match has(owner.get("points"), &name) {
             Some(point) => point.get("at_mm"),
-            None => has(has(entry.get("slots"), &name), "at_mm"),
+            None => has(has(owner.get("slots"), &name), "at_mm"),
         };
-        let place: Option<Vec<i128>> = place
-            .and_then(Value::arr)
-            .filter(|p| p.len() == 3)
-            .and_then(|p| p.iter().map(|v| whole(Some(v))).collect());
-        let Some(place) = place else {
+        let xyz3 = |p: Option<&Value>| -> Option<Vec<i128>> {
+            p.and_then(Value::arr)
+                .filter(|p| p.len() == 3)
+                .and_then(|p| p.iter().map(|v| whole(Some(v))).collect())
+        };
+        let Some(place) = xyz3(place) else {
             return Outcome::No(self.bad(
                 i,
                 "no_such_point",
                 vec![("point".into(), Value::Str(name))],
             ));
         };
+        // The other thing's pose: missing from the input, or held at an index level only, it is unknown, not no.
+        let mut origin = None;
+        if let Some((id, _, node)) = &other {
+            let Some(at) = xyz3(node.get("at_mm")) else {
+                return Outcome::Unknown(self.unknown(i, id, "field", "at_mm", false));
+            };
+            if index_only(Some(node)) {
+                return Outcome::Unknown(self.unknown(i, id, "field", "at_mm", true));
+            }
+            origin = Some(at);
+        }
         let steps: &[Value] = form.get("steps").and_then(Value::arr).unwrap_or(&[]);
         let step = steps.iter().find(|s| {
             s.get("step").and_then(Value::str) == Some("move")
-                && resolve(s.get("at"), args).as_deref() == Some(&name)
+                && match &other {
+                    None => resolve(s.get("at"), args).as_deref() == Some(&name),
+                    Some((_, arg, _)) => {
+                        has(s.get("toward"), "arg").and_then(Value::str) == Some(arg.as_str())
+                    }
+                }
         });
         let Some(mv) = step.and_then(|s| s.get("move")).and_then(Value::str) else {
             return Outcome::No(self.bad(
@@ -857,18 +899,37 @@ impl<'a> Rules<'a> {
         };
         self.push(format!("{actor_id}/effector_mm"), from.clone());
         self.push(format!("move/{mv}/reach_mm"), Value::Int(reach));
-        // Each coordinate is within 2^53, so each square is within 2^108 and the sum within i128.
+        if let (Some((id, _, _)), Some(at)) = (&other, &origin) {
+            let at = Value::Arr(at.iter().map(|v| Value::Int(*v)).collect());
+            self.push(format!("{id}/at_mm"), at);
+        }
+        let at = origin.unwrap_or_else(|| vec![0, 0, 0]);
+        // Each coordinate is within 2^53, so each difference within 2^55, its square within 2^110 and the sum within
+        // i128.
         let distance_sq: i128 = (0..3)
-            .map(|k| (xyz[k] - place[k]) * (xyz[k] - place[k]))
+            .map(|k| {
+                let d = xyz[k] - place[k] - at[k];
+                d * d
+            })
             .sum();
         if distance_sq <= reach * reach {
             return Outcome::Ok;
         }
-        let detail = vec![
-            ("point".into(), Value::s(&name)),
-            ("move".into(), Value::s(mv)),
-        ];
-        let fix = Value::object([("step", Value::s("walk_to")), ("point", Value::Str(name))]);
+        let mut detail = vec![("point".to_owned(), Value::s(&name))];
+        let fix = match &other {
+            None => Value::object([("step", Value::s("walk_to")), ("point", Value::s(&name))]),
+            Some((id, _, _)) => {
+                detail.push(("of".into(), Value::s(id)));
+                // Walk to the thing's point named `stand` if its kind declares one, else to the point itself.
+                let stand = has(owner.get("points"), "stand").is_some();
+                Value::object([
+                    ("step", Value::s("walk_to")),
+                    ("point", Value::s(if stand { "stand" } else { &name })),
+                    ("thing", Value::s(id)),
+                ])
+            }
+        };
+        detail.push(("move".into(), Value::s(mv)));
         Outcome::No(self.no("out_of_reach", i, detail, fix))
     }
 
