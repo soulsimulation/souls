@@ -1,0 +1,335 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:stair_flight",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      1100,
+      2800,
+      4000
+    ]
+  },
+  "areas": {
+    "bottom": {
+      "at_mm": [
+        0,
+        0,
+        2500
+      ],
+      "radius_mm": 500
+    },
+    "top": {
+      "at_mm": [
+        0,
+        2800,
+        -2250
+      ],
+      "radius_mm": 500
+    }
+  },
+  "forms": {
+    "go_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "top"
+        }
+      ],
+      "effects": []
+    },
+    "go_down": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "bottom"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:stair_flight",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            100,
+            1846
+          ],
+          "size": [
+            1100,
+            200,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            200,
+            1538
+          ],
+          "size": [
+            1100,
+            400,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            300,
+            1231
+          ],
+          "size": [
+            1100,
+            600,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            400,
+            923
+          ],
+          "size": [
+            1100,
+            800,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            500,
+            615
+          ],
+          "size": [
+            1100,
+            1000,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            600,
+            308
+          ],
+          "size": [
+            1100,
+            1200,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            700,
+            0
+          ],
+          "size": [
+            1100,
+            1400,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            800,
+            -308
+          ],
+          "size": [
+            1100,
+            1600,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            -616
+          ],
+          "size": [
+            1100,
+            1800,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1000,
+            -923
+          ],
+          "size": [
+            1100,
+            2000,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1100,
+            -1231
+          ],
+          "size": [
+            1100,
+            2200,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1200,
+            -1539
+          ],
+          "size": [
+            1100,
+            2400,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1300,
+            -1846
+          ],
+          "size": [
+            1100,
+            2600,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1400,
+            -2154
+          ],
+          "size": [
+            1100,
+            2800,
+            308
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1400,
+            -2250
+          ],
+          "size": [
+            1100,
+            2800,
+            500
+          ],
+          "tint": "stone"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -520,
+            2400,
+            0
+          ],
+          "size": [
+            50,
+            50,
+            4900
+          ],
+          "pitch": 34992,
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            520,
+            2400,
+            0
+          ],
+          "size": [
+            50,
+            50,
+            4900
+          ],
+          "pitch": 34992,
+          "tint": "rail"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "stone": "#a8a296",
+        "rail": "#4a4a4a"
+      },
+      "tags": [
+        "structure",
+        "stairs",
+        "access"
+      ]
+    }
+  },
+  "text": {
+    "card": "A flight of stairs from the ground up to a terrace, deck or upper landing.",
+    "stairs": "stairs",
+    "steps": "steps",
+    "staircase": "staircase",
+    "stairway": "stairway"
+  },
+  "card": {
+    "text": "card",
+    "category": "stairs",
+    "synonyms": [
+      "steps",
+      "staircase",
+      "stairway"
+    ]
+  }
+}
