@@ -46,11 +46,10 @@ pub fn entry_to_kind(json: &str) -> Result<String, String> {
         out.push(section);
     }
     out.sort_by_key(|(n, _)| *n);
-    Ok(map(
-        &out.into_iter()
-            .map(|(n, t)| (n, Some(t)))
-            .collect::<Vec<_>>(),
-    ))
+    Ok(map(&out
+        .into_iter()
+        .map(|(n, t)| (n, Some(t)))
+        .collect::<Vec<_>>()))
 }
 
 fn map(entries: &[(u64, Option<String>)]) -> String {
@@ -70,9 +69,15 @@ fn diag(v: &Value) -> Result<String, String> {
         Value::Str(_) => quoted(v),
         Value::Arr(a) => Ok(format!(
             "[{}]",
-            a.iter().map(diag).collect::<Result<Vec<_>, _>>()?.join(", ")
+            a.iter()
+                .map(diag)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ")
         )),
-        _ => Err(format!("entry-value: {} is not a whole number, name or list", v.to_json())),
+        _ => Err(format!(
+            "entry-value: {} is not a whole number, name or list",
+            v.to_json()
+        )),
     }
 }
 
@@ -98,10 +103,7 @@ fn numbered_by_n(
     Ok(map(&rows))
 }
 
-fn in_order(
-    v: &Value,
-    each: fn(&str, &Value) -> Result<String, String>,
-) -> Result<String, String> {
+fn in_order(v: &Value, each: fn(&str, &Value) -> Result<String, String>) -> Result<String, String> {
     let rows = v
         .obj()
         .unwrap_or(&[])
@@ -150,7 +152,10 @@ fn point(n: &str, p: &Value) -> Result<String, String> {
 fn slot(n: &str, s: &Value) -> Result<String, String> {
     let admits = match s.get("kinds") {
         Some(k) => diag(k)?,
-        None => format!("[{}]", s.get("admits").map(quoted).transpose()?.unwrap_or_default()),
+        None => format!(
+            "[{}]",
+            s.get("admits").map(quoted).transpose()?.unwrap_or_default()
+        ),
     };
     Ok(map(&[
         (1, Some(admits)),

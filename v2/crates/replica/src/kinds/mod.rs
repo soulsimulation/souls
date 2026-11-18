@@ -327,7 +327,10 @@ impl Kinds {
             return Err(refuse(
                 "link-type-undeclared",
                 ka.name.as_str(),
-                format!("neither end declares {ty} with the other's kind, {}", kb.name.as_str()),
+                format!(
+                    "neither end declares {ty} with the other's kind, {}",
+                    kb.name.as_str()
+                ),
             ));
         }
         if !ka.joins() && !kb.joins() {
@@ -335,10 +338,18 @@ impl Kinds {
         }
         let connector = |e: LinkEnd, k: &KindDef| -> Result<Connector, KindError> {
             let n = e.connector.ok_or_else(|| {
-                refuse("connector-missing", k.name.as_str(), format!("a {ty} names a connector at each end"))
+                refuse(
+                    "connector-missing",
+                    k.name.as_str(),
+                    format!("a {ty} names a connector at each end"),
+                )
             })?;
             k.point(n).and_then(|p| p.connector.clone()).ok_or_else(|| {
-                refuse("connector-unknown", k.name.as_str(), format!("{n} is not a connector of this kind"))
+                refuse(
+                    "connector-unknown",
+                    k.name.as_str(),
+                    format!("{n} is not a connector of this kind"),
+                )
             })
         };
         let (ca, cb) = (connector(a, ka)?, connector(b, kb)?);
@@ -346,7 +357,11 @@ impl Kinds {
             return Err(refuse(
                 "connectors-do-not-mate",
                 ka.name.as_str(),
-                format!("{} does not mate with {}", ca.kind.as_str(), cb.kind.as_str()),
+                format!(
+                    "{} does not mate with {}",
+                    ca.kind.as_str(),
+                    cb.kind.as_str()
+                ),
             ));
         }
         Ok(())
@@ -514,10 +529,16 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         let connector = match (role, text(e.get(&5)), text(e.get(&6))) {
             (Some(Role::Joint), Some(kind), Some(mates)) => Some(Connector { kind, mates }),
             (Some(Role::Joint), _, _) => {
-                return Err(why("a joint names its connector kind in 5 and what it mates with in 6"));
+                return Err(why(
+                    "a joint names its connector kind in 5 and what it mates with in 6",
+                ));
             }
             (_, None, None) => None,
-            _ => return Err(why("only a joint names a connector kind (5) and what it mates with (6)")),
+            _ => {
+                return Err(why(
+                    "only a joint names a connector kind (5) and what it mates with (6)",
+                ));
+            }
         };
         points.insert(
             n,
@@ -552,11 +573,14 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
     for (n, e) in entries(SECTION_LINKS, "kind-link")? {
         let why = |reason: &str| bad("kind-link", SECTION_LINKS, Some(n), reason.into());
         let name = text(e.get(&1)).ok_or_else(|| why("1, the name, is text"))?;
-        let from = text(e.get(&2)).ok_or_else(|| why("2, the other end, is a category or a kind"))?;
+        let from =
+            text(e.get(&2)).ok_or_else(|| why("2, the other end, is a category or a kind"))?;
         let count = |k| match e.get(&k) {
             None => Ok(None),
             Some(Value::Uint(u)) if *u > 0 => Ok(Some(*u)),
-            Some(_) => Err(why("3 and 4, most and most_per, are whole numbers above zero")),
+            Some(_) => Err(why(
+                "3 and 4, most and most_per, are whole numbers above zero",
+            )),
         };
         let (most, most_per) = (count(3)?, count(4)?);
         links.insert(
@@ -587,7 +611,10 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
                 Value::Map(e) => {
                     let at_mm = match e.get(&2) {
                         None => None,
-                        Some(v) => Some(xyz(v).ok_or_else(|| why("2, the place, is three whole millimetres"))?),
+                        Some(v) => Some(
+                            xyz(v)
+                                .ok_or_else(|| why("2, the place, is three whole millimetres"))?,
+                        ),
                     };
                     (e.get(&1), at_mm, text(e.get(&3)))
                 }
