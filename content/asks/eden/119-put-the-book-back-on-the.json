@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":119,"group":"two-things","words":"put the book back on the shelf","obvious":3,"things":{"book":"eden:book","bookshelf":"eden:bookshelf"},"chain":[{"this":"me","form":"pick_up","carry":"book","args":{"thing":"book"}},{"this":"me","form":"put","place":{"at":"in","thing":"book","anchor":"bookshelf"},"args":{"thing":"book"}}]}

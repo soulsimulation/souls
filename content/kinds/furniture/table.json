@@ -1,0 +1,13 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:table",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [1600, 740, 900] },
+  "motion": { "how": "pushed_by_one" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:table" },
+  "text": {
+    "card": "A table with a front, pushed by one Soul."
+  },
+  "card": { "text": "card" }
+}

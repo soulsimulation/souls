@@ -3,6 +3,7 @@
 
 pub mod clock;
 pub mod controller;
+pub mod frozen;
 pub mod ground;
 pub mod host;
 pub mod index;

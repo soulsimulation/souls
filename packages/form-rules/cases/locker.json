@@ -1,0 +1,166 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "test:locker (cases/kinds/test/locker.json): the need kinds the three examples do not use (a field in a range, a hand free or holding a kind) and a field outside the asker's audience.",
+  "cases": [
+    {
+      "name": "open_every_need_met_seen_by_all",
+      "act": { "this": "x1", "form": "open" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker", "fields": { "locked": false, "alarm": "off" } },
+          "b1": { "hands": { "left": "k1", "right": null }, "effector_mm": [0, 900, 700] },
+          "k1": { "kind": "eden:kettle" }
+        },
+        "moves": { "pull": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": "all" },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "open_alarm_outside_audience_is_unknown",
+      "act": { "this": "x1", "form": "open" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker", "fields": { "locked": false, "alarm": "off" } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 900, 700] }
+        },
+        "moves": { "pull": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "unknown", "need": 1, "node": "x1", "field": "alarm" }
+    },
+    {
+      "name": "open_alarm_seen_by_its_owner",
+      "act": { "this": "x1", "form": "open" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker", "fields": { "locked": false, "alarm": "armed" } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 900, 700] }
+        },
+        "moves": { "pull": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public", "owner"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "detail": { "field": "alarm", "found": "armed", "wanted": { "is": "off" } }, "fix": null }
+    },
+    {
+      "name": "open_locked_is_definite_even_with_the_alarm_hidden",
+      "act": { "this": "x1", "form": "open" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker", "fields": { "locked": true } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 900, 700] }
+        },
+        "moves": { "pull": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "locked", "found": true, "wanted": { "is": false } }, "fix": { "form": "unlock" } }
+    },
+    {
+      "name": "open_later_need_unmet_beats_hidden_alarm",
+      "act": { "this": "x1", "form": "open" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker", "fields": { "locked": false } },
+          "b1": { "hands": { "left": "k1", "right": "k2" }, "effector_mm": [0, 900, 700] },
+          "k1": { "kind": "eden:kettle" },
+          "k2": { "kind": "eden:kettle" }
+        },
+        "moves": { "pull": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 2, "detail": {}, "fix": { "step": "put" } }
+    },
+    {
+      "name": "open_out_of_reach",
+      "act": { "this": "x1", "form": "open" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker", "fields": { "locked": false } },
+          "b1": { "hands": { "left": null }, "effector_mm": [0, 900, 2000] }
+        },
+        "moves": { "pull": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": "all" },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 3, "detail": { "point": "handle", "move": "pull" }, "fix": { "step": "walk_to", "point": "handle" } }
+    },
+    {
+      "name": "charge_every_need_met",
+      "act": { "this": "x1", "form": "charge" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker", "fields": { "charge": 900 } },
+          "b1": { "hands": { "left": null, "right": "p1" }, "effector_mm": [0, 200, 700] },
+          "p1": { "kind": "test:battery" }
+        },
+        "moves": { "plug": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": {
+        "verdict": "yes",
+        "read": [["x1/field/3", 900], ["b1/hand/left", null], ["b1/hand/right", "p1"], ["b1/effector_mm", [0, 200, 700]], ["move/plug/reach_mm", 600]]
+      }
+    },
+    {
+      "name": "charge_above_its_range",
+      "act": { "this": "x1", "form": "charge" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker", "fields": { "charge": 901 } },
+          "b1": { "hands": { "right": "p1" }, "effector_mm": [0, 200, 700] },
+          "p1": { "kind": "test:battery" }
+        },
+        "moves": { "plug": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "charge", "found": 901, "wanted": { "at_most": 900 } }, "fix": null }
+    },
+    {
+      "name": "charge_not_holding_a_battery",
+      "act": { "this": "x1", "form": "charge" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker" },
+          "b1": { "hands": { "left": "k1", "right": null }, "effector_mm": [0, 200, 700] },
+          "k1": { "kind": "eden:kettle" }
+        },
+        "moves": { "plug": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_holding_kind", "need": 1, "detail": { "kind": "test:battery" }, "fix": { "step": "take", "kind": "test:battery" } }
+    },
+    {
+      "name": "charge_field_not_a_whole_number",
+      "act": { "this": "x1", "form": "charge" },
+      "state": {
+        "actor": "b1",
+        "nodes": { "x1": { "kind": "test:locker", "fields": { "charge": 1.5 } }, "b1": { "hands": {} } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "bad_input", "need": 0, "detail": { "what": "not_whole_number", "field": "charge" }, "fix": null }
+    },
+    {
+      "name": "reach_squares_beyond_two_to_the_53",
+      "act": { "this": "x1", "form": "charge" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": { "kind": "test:locker" },
+          "b1": { "hands": { "right": "p1" }, "effector_mm": [1, 100000200, 300] },
+          "p1": { "kind": "test:battery" }
+        },
+        "moves": { "plug": { "reach_mm": 100000000 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 2, "detail": { "point": "port", "move": "plug" } }
+    }
+  ]
+}

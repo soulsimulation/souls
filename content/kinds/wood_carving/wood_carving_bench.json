@@ -1,0 +1,41 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wood_carving_bench",
+  "owner": "thing",
+  "points": {
+    "worker": { "role": "stand", "at_mm": [-50, 0, 1100], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "top": { "admits": "thing", "kinds": ["eden:wooden_blank"], "most": 1, "at_mm": [-50, 990, 20], "stand": "worker" }
+  },
+  "geometry": { "bounds_mm": [900, 1120, 650] },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:wood_carving_bench",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        { "kind": "box", "at": [0, 965, 0], "size": [900, 30, 650], "tint": "bench" },
+        { "kind": "box", "at": [-370, 475, -250], "size": [55, 950, 55], "tint": "bench" },
+        { "kind": "box", "at": [-370, 475, 250], "size": [55, 950, 55], "tint": "bench" },
+        { "kind": "box", "at": [370, 475, -250], "size": [55, 950, 55], "tint": "bench" },
+        { "kind": "box", "at": [370, 475, 250], "size": [55, 950, 55], "tint": "bench" },
+        { "kind": "box", "at": [0, 300, 0], "size": [740, 30, 500], "tint": "bench" },
+        { "kind": "box", "at": [300, 1040, -40], "size": [22, 120, 35], "tint": "metal" },
+        { "kind": "box", "at": [300, 1105, -40], "size": [40, 25, 50], "tint": "wood" },
+        { "kind": "box", "at": [250, 1000, 200], "size": [120, 40, 60], "tint": "wood" },
+        { "kind": "cyl", "at": [250, 1050, 200], "r": 25, "h": 60, "segments": 8, "tint": "wood" }
+      ],
+      "palette": { "bench": "#65503c", "wood": "#a97742", "metal": "#a6aaad" },
+      "tags": ["art", "woodwork", "table", "bench", "object"]
+    }
+  },
+  "text": {
+    "card": "A carving bench with a chisel and mallet: set a wooden blank on it to carve.",
+    "woodwork": "woodwork",
+    "workbench": "workbench",
+    "carve": "carve"
+  },
+  "card": { "text": "card", "category": "woodwork", "synonyms": ["workbench", "carve"] }
+}

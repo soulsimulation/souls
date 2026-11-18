@@ -1,0 +1,118 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:clay_vase",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        150,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      160,
+      260,
+      160
+    ]
+  },
+  "forms": {},
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:clay_vase",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "profile": [
+            [
+              0,
+              0
+            ],
+            [
+              55,
+              0
+            ],
+            [
+              75,
+              60
+            ],
+            [
+              70,
+              150
+            ],
+            [
+              40,
+              210
+            ],
+            [
+              45,
+              255
+            ],
+            [
+              38,
+              255
+            ],
+            [
+              33,
+              210
+            ],
+            [
+              62,
+              150
+            ],
+            [
+              67,
+              62
+            ],
+            [
+              50,
+              8
+            ],
+            [
+              0,
+              8
+            ]
+          ],
+          "segments": 20,
+          "tint": "clay"
+        }
+      ],
+      "palette": {
+        "clay": "#b96b45"
+      },
+      "tags": [
+        "pottery",
+        "vase",
+        "item"
+      ]
+    }
+  },
+  "text": {
+    "card": "A terracotta vase, made by hand at a pottery bench.",
+    "vase": "vase",
+    "pottery": "pottery"
+  },
+  "card": {
+    "text": "card",
+    "category": "pottery",
+    "synonyms": [
+      "vase"
+    ]
+  }
+}
