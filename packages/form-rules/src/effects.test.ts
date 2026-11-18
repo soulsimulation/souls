@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { apply, effects, outsideProfile, type Done, type State } from './effects.ts';
+import { apply, effects, outsideProfile, stockList, type Done, type State } from './effects.ts';
 import { generate } from './generate.ts';
 import { CASES, loadEffectCases, loadKinds, mismatches, same } from './load.ts';
 
@@ -27,6 +27,7 @@ for (const [file, c] of cases) {
       assert.deepEqual(twice.ok && twice.state, once.state, `step ${k}: applied twice is applied once`);
       state = once.state;
     });
+    for (const l of c.lists ?? []) assert.ok(same(stockList(kinds, { ...state, actor: l.actor ?? state.actor }, l.node), l.expect), `${l.node}: ${JSON.stringify(stockList(kinds, state, l.node))}`);
     for (const [id, want] of Object.entries(c.after ?? {})) assert.ok(same(state.nodes[id] ?? null, want), `${id}: ${JSON.stringify(state.nodes[id] ?? null)}`);
   });
 }

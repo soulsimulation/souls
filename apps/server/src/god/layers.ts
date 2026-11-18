@@ -134,8 +134,14 @@ export class GodLayers {
     const tick = this.h.engine.world.tick, t = clockAt(tick, l.origin, l.dayTicks);
     return { minute: t.hour * 60 + t.minute, weekday: new Date(t.datetime).getUTCDay(), day: t.datetime.slice(0, 10), tick, ticksPerMinute: l.dayTicks / 1440 };
   }
-  /** Today's date changed since the last call (places carry today's slots: re-derive them). */
-  dayKey(): string { return this.clock()?.day ?? ''; }
+  /** Today's date changed since the last call (places carry today's slots: re-derive them). #2597: kept per tick and clock
+   *  (GodPlaces asks it on every place lookup: a walk listing's hundreds; the clock's date formatting was 6 % of a slow bind). */
+  dayKey(): string {
+    const l = this.h.living(), tick = this.h.engine.world.tick, m = this.dayMemo;
+    if (m && m.tick === tick && m.origin === l?.origin && m.dayTicks === l?.dayTicks) return m.day;
+    const day = this.clock()?.day ?? ''; this.dayMemo = {tick, origin: l?.origin, dayTicks: l?.dayTicks, day}; return day;
+  }
+  private dayMemo: {tick: number; origin: number | undefined; dayTicks: number | undefined; day: string} | null = null;
 
   /** One clock step (the bridge calls it every couple of seconds): states that follow schedules, calendar items. */
   step(): { changed: number; posted: number; set?: number; packed?: number } {

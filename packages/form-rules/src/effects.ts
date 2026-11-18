@@ -8,11 +8,15 @@
 // - An amount moved between two things is two `set` changes on one field, each carrying its signed `by`
 //   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not.
 // - Holding is a parent: take and put are `reparent` into or out of a hand, a slot or the actor's place (`here`).
-//   What is moved is the actor, this thing, or a thing argument of the form.
+//   What is moved is the actor, this thing, a thing argument of the form, or the one thing at the end of a link.
 // - A made thing appears where its form names: a slot, the actor's hand, or `here`, loose in the actor's
 //   place (the spot is Engine v2's set-down, E4, and is not chosen here). Its id comes from the receipt.
 // - Effects are worked out in order on a copy, so a later effect sees an earlier one, and a form whose
 //   changes would not all apply is refused with the effect that failed.
+// - A stock's take (an entry's `stock` section names the form) is one event: the `create` into the actor's hand,
+//   marked with the stock's name, and a `set` of the count with `by: -1`. The make is the other side of that `by`,
+//   so `apply` counts it, and nothing is made from nothing. An empty stock is refused `empty`, a closed container
+//   `closed` (the actor is not linked by the link its `closed` audience names), each before the rules are asked.
 // - A timer is not a change to state: it is returned beside the changes, with its event.
 // - Every value is one Engine v2's encoding profile holds (T0, v2/docs/encoding.md): whole numbers and names,
 //   never a float, a boolean or null. A flag is 0 or 1, text is a key by reference `{text: <key>}` (never
@@ -27,7 +31,7 @@ export type Change =
   | { change: 'set'; node: string; field: string; n: number; to?: unknown; by?: number }
   | { change: 'link' | 'unlink'; node: string; link: string; n: number; end: string }
   | { change: 'reparent'; node: string; to: Place }
-  | { change: 'create'; node: string; kind: string; to: Place }
+  | { change: 'create'; node: string; kind: string; to: Place; stock?: string; carries?: string[] }
   | { change: 'remove'; node: string };
 /** The generic changes, Engine v2 T6's list less the motion sample. */
 export const CHANGES = Object.freeze(['set', 'link', 'unlink', 'reparent', 'create', 'remove']);
@@ -47,6 +51,35 @@ export type State = Input['state'] & { applied?: string[] };
 const has = (o: unknown, k: string): boolean => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
 const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() : []);
 const arg = (v: unknown, args: Record<string, unknown>) => (v && typeof v === 'object' && has(v, 'arg') ? args[(v as { arg: string }).arg] : v);
+
+type Stock = { name: string; kind: string; count: string; take: string; carries?: string[] };
+type Closed = { audience?: { rule?: string; link?: string } };
+const stockOf = (entry: Entry, form: string): Stock | undefined => {
+  const all = (entry as { stock?: Record<string, Omit<Stock, 'name'>> }).stock ?? {};
+  const name = sorted(all).find((k) => all[k].take === form);
+  return name === undefined ? undefined : { ...all[name], name };
+};
+/** Whether `actor` has opened `node`: a kind with no `closed` section is always open; else the actor is linked by the audience's link. */
+function opened(entry: Entry, node: Node, actor: string): boolean {
+  const closed = (entry as { closed?: Closed }).closed;
+  if (!closed) return true;
+  const a = closed.audience;
+  if (a?.rule === 'everyone') return true;
+  return a?.rule === 'linked' && typeof a.link === 'string' && (node.links?.[a.link] ?? []).includes(actor);
+}
+const countOf = (entry: Entry, node: Node, field: string): unknown => (has(node.fields, field) ? node.fields![field] : entry.state?.[field]?.default);
+
+/**
+ * What a container is known to hold, as the actor may see it: one row per stock (its name, kind, count and the
+ * text fields its things carry), or null while the container is closed to the actor.
+ */
+export function stockList(kinds: Record<string, Entry>, state: Input['state'], node: string): { stock: string; kind: string; count: unknown; carries: string[] }[] | null {
+  const n = has(state.nodes, node) ? state.nodes[node] : undefined;
+  const entry = n?.kind && has(kinds, n.kind) ? kinds[n.kind] : undefined;
+  if (!n || !entry || !opened(entry, n, state.actor)) return null;
+  const all = (entry as { stock?: Record<string, Stock> }).stock ?? {};
+  return sorted(all).map((name) => ({ stock: name, kind: all[name].kind, count: countOf(entry, n, all[name].count), carries: all[name].carries ?? [] }));
+}
 
 /** A field's value as it is stored: a flag 0 or 1, text a key by reference, and nothing (undefined) for a missing value. */
 function stored(def: { type?: string }, v: unknown): unknown {
@@ -86,9 +119,11 @@ export function outsideProfile(v: unknown, at = '', depth = 0): { at: string; re
 export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: number[] }): Done | Refused | Verdict | Unknown {
   const refuse = (effect: number, reason: string, detail: Record<string, unknown> = {}): Refused => ({ verdict: 'no', reason, effect, detail });
   if (!input || typeof input.receipt !== 'string' || !input.receipt) return refuse(-1, 'bad_input', { what: 'no_receipt' });
+  const { kinds, act, state, receipt } = input;
+  const pre = stockRefusal(kinds, act, state);
+  if (pre) return pre;
   const verdict = decide({ ...input, asker: { sees: 'all' } });
   if (verdict.verdict !== 'yes') return verdict;
-  const { kinds, act, state, receipt } = input;
   const self = act.this, actor = state.actor, args = act.args ?? {};
   const entry = kinds[state.nodes[self].kind!];
   const namespace = entry.kind.slice(0, entry.kind.indexOf(':') + 1);
@@ -118,12 +153,17 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     }
     return slotPlace(into);
   };
-  // The node an effect moves or removes: the actor, this thing, or a thing argument of the form (a body's pick_up).
-  const subject = (what: unknown) => {
-    if (what === 'actor') return actor;
-    if (what === 'this') return self;
-    const id = has(what, 'arg') ? args[(what as { arg: string }).arg] : undefined;
-    return typeof id === 'string' && has(work, id) ? id : null;
+  // The node an effect moves or removes: the actor, this thing, a thing argument of the form (a body's pick_up), or
+  // `{link}`: the one thing at the end of that link of this node (what a give hands over, SA-G4); never a body.
+  const subject = (what: unknown): string | null => {
+    if (what === 'actor' || what === 'this') return what === 'actor' ? actor : self;
+    if (has(what, 'arg')) {
+      const id = args[(what as { arg: string }).arg];
+      return typeof id === 'string' && has(work, id) ? id : null;
+    }
+    const link = what && typeof what === 'object' ? (what as { link?: unknown }).link : undefined;
+    const ends = typeof link === 'string' ? ((work[self].links?.[link] ?? []) as string[]) : [];
+    return ends.length === 1 && has(work, ends[0]) && !has(work[ends[0]], 'hands') ? ends[0] : null;
   };
 
   const effectList = entry.forms![act.form].effects ?? [];
@@ -187,7 +227,14 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
       if (typeof to === 'string') return refuse(i, to === 'no_free_hand' || to === 'slot_taken' ? to : 'bad_input', { what: to });
       if (e.change === 'create') {
         if (typeof e.kind !== 'string' || !has(kinds, e.kind)) return refuse(i, 'bad_input', { what: 'no_such_kind', kind: e.kind ?? null });
-        out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to });
+        const stock = stockOf(entry, act.form);
+        if (stock && stock.kind === e.kind && e.into === 'actor_hand') {
+          const def = entry.state?.[stock.count];
+          const count = countOf(entry, work[self], stock.count);
+          if (!def || !Number.isSafeInteger(count) || (count as number) < 1) return refuse(i, 'bad_input', { what: 'bad_stock', stock: stock.name });
+          out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to, stock: stock.name, ...(stock.carries?.length ? { carries: [...stock.carries] } : {}) });
+          out.push({ change: 'set', node: self, field: stock.count, n: def.n, to: (count as number) - 1, by: -1 });
+        } else out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to });
       } else {
         const node = subject(e.what);
         if (!node) return refuse(i, 'bad_input', { what: 'malformed_subject' });
@@ -217,6 +264,19 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
   return done;
 }
 
+/** A take from an empty stock or a closed container, refused by name before the rules are asked. */
+function stockRefusal(kinds: Record<string, Entry>, act: Input['act'], state: Input['state']): Refused | null {
+  const n = act && state?.nodes && has(state.nodes, act.this) ? state.nodes[act.this] : undefined;
+  const entry = n?.kind && has(kinds, n.kind) ? kinds[n.kind] : undefined;
+  const stock = entry && has(entry.forms, act.form) ? (stockOf(entry, act.form)) : undefined;
+  if (!n || !entry || !stock) return null;
+  const effect = (entry.forms![act.form].effects ?? []).findIndex((e) => e.change === 'create' && e.kind === stock.kind);
+  const no = (reason: string): Refused => ({ verdict: 'no', reason, effect: Math.max(effect, 0), detail: { kind: entry.kind, stock: stock.name } });
+  if (!opened(entry, n, state.actor)) return no('closed');
+  const count = countOf(entry, n, stock.count);
+  return Number.isSafeInteger(count) && (count as number) < 1 ? no('empty') : null;
+}
+
 /**
  * Apply a result of `effects` to plain state: every change or none, and once per receipt. A refusal changes
  * nothing; a receipt already applied changes nothing (`again: true`). Needs no kinds.
@@ -239,6 +299,8 @@ export function apply(
   for (const event of result.events ?? []) {
     let sum = 0n;
     for (const k of event.changes) {
+      // A thing made from a stock is the other side of the count's `by`.
+      if ((changes[k] as { change?: string; stock?: unknown } | undefined)?.change === 'create' && typeof (changes[k] as { stock?: unknown }).stock === 'string') sum += 1n;
       const by = (changes[k] as { by?: unknown } | undefined)?.by;
       if (by === undefined) continue;
       if (!Number.isSafeInteger(by)) return { ok: false, reason: 'not_whole_number', change: k };

@@ -51,6 +51,8 @@ export type Need = {
   at_most?: number;
   slot?: Ref;
   point?: Ref;
+  /** `within_reach`: the thing whose point it is, given as a form argument; omitted means this thing. */
+  of?: { arg: string };
   link?: string;
   free?: boolean;
   holds?: string;
@@ -63,7 +65,7 @@ export type Form = {
   who?: unknown;
   starts?: string;
   needs?: Need[];
-  steps?: { step: string; move?: string; at?: Ref; point?: Ref }[];
+  steps?: { step: string; move?: string; at?: Ref; toward?: Ref; point?: Ref }[];
   effects?: Effect[];
 };
 /** An effect as an entry writes it. `transfer` moves an amount of one field from one node to another (SA-F2b). */
@@ -80,12 +82,12 @@ export type Effect = {
   amount?: unknown;
   form?: string;
   after_us?: number;
+  /** A `draw`: the table the world draws one outcome from (SA-F13). */
+  outcomes?: DrawRow[];
   /** A set on a timed value: its new rate per second, settled at the act's time. */
   rate?: number;
   /** A set on an int field may add `by` (signed) to its value instead of naming `to`: a count, or an amount used up. */
   by?: number;
-  /** A `draw`: the table the world draws one outcome from (SA-F13). */
-  outcomes?: DrawRow[];
 };
 /** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
 export type DrawRow = { name: string; weight: number | { field: string }; event: string; set: { field: string; to: unknown }[] };
@@ -96,9 +98,9 @@ export type Entry = {
   points?: Record<string, { at_mm: number[] }>;
   slots?: Record<string, { admits: string; most: number; at_mm?: number[] }>;
   forms?: Record<string, Form>;
-  motion?: { how?: string };
   /** A closed kind: the fields it names take the container's audience and declare none of their own (SA-F8, #2849). */
   closed?: { audience: Audience; fields?: string[] };
+  motion?: { how?: string };
 };
 export type Node = {
   kind?: string;
@@ -107,6 +109,8 @@ export type Node = {
   slots?: Record<string, unknown[]>;
   hands?: Record<string, string | null>;
   effector_mm?: number[];
+  /** Its origin in the frame of the place it is loose in, whole mm, supplied by the engine (an activity's places, SA-G1a). */
+  at_mm?: number[];
   /** Things resting loose in this node (on its ground or a surface), not in a slot or a hand. */
   loose?: string[];
 };
@@ -222,12 +226,12 @@ export function decide(input: Input): Verdict {
       const wanted: Record<string, unknown> = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
       // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does;
-      // a set with `by` meets it if the value it adds up to does, within the field's bounds (a crank that adds charge);
-      // the fix's own needs on this field must hold now, or it would be refused in turn
+      // a set with `by` meets it if the value it adds up to does, within the field's bounds (a crank that adds charge)
       const after = (by: unknown) => (whole(by) && whole(value) ? value + by : null);
       const fix = formFix((e) => (e.change === 'set' && e.field === field && !has(e, 'by') && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
         (e.change === 'set' && e.field === field && after(e.by) !== null && after(e.by)! >= (def.min ?? 0) && (!whole(def.max) || after(e.by)! <= def.max) && meets(after(e.by))) ||
         (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))),
+        // the fix's own needs on this field must hold now, or it would be refused in turn
         (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
@@ -269,18 +273,40 @@ export function decide(input: Input): Verdict {
     within_reach(n, i) {
       const name = resolve(n.point, args);
       if (name === null) return { ok: false, no: bad(i, 'argument_missing', { arg: (n.point as { arg: string })?.arg ?? null }) };
-      // A thing argument the form walks to is reached by that walk: entries keep no position for a loose thing, so the
-      // rules ask only that it is in the actor's place (the engine walks; reach was decided for SA-P9's follow-up).
-      const walks = (form.steps ?? []).some((s) => s.step === 'walk_to' && same(s.point, n.point));
-      if (walks && has(nodes, name) && !has(entry.points, name) && !has(entry.slots, name)) {
-        const there = placeOf(nodes, name), mine = placeOf(nodes, state.actor);
-        read.push([`${name}/place`, there]);
+      // Reach to another thing, in this order (decided 17 Nov): (1) walk-first: a form that walks to the thing first
+      // reaches it by that walk, so the need is met when the thing is in the actor's place (the engine walks); (2) else
+      // the measured pose: `of` names the thing by a form argument, its point is in its own frame, placed by its
+      // `at_mm` in the input; (3) else unknown.
+      const thingRef = n.of !== undefined ? n.of : n.point;
+      const thingId = n.of !== undefined ? (n.of && typeof n.of === 'object' ? resolve(n.of, args) : null) : name;
+      const walks = (form.steps ?? []).some((s) => s.step === 'walk_to' && sameRef(s.point, thingRef));
+      const isThing = thingId !== null && has(nodes, thingId) && (n.of !== undefined || (!has(entry.points, name) && !has(entry.slots, name)));
+      if (walks && isThing) {
+        const there = placeOf(nodes, thingId!), mine = placeOf(nodes, state.actor);
+        read.push([`${thingId}/place`, there]);
         if (there !== null && there === mine) return { ok: true };
-        return { ok: false, no: { verdict: 'no', reason: 'out_of_reach', need: i, detail: { thing: name }, fix: { step: 'walk_to', thing: name }, read } };
+        return { ok: false, no: { verdict: 'no', reason: 'out_of_reach', need: i, detail: { thing: thingId }, fix: { step: 'walk_to', thing: thingId }, read } };
       }
-      const place = has(entry.points, name) ? entry.points![name].at_mm : has(entry.slots, name) ? entry.slots![name].at_mm : undefined;
+      if (n.of === undefined && isThing) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: thingId!, field: 'at_mm', read } };
+      let owner = entry;
+      let ownerId: string | null = null;
+      let origin: number[] | null = null;
+      if (n.of !== undefined) {
+        const argName = (n.of as { arg?: unknown } | null)?.arg;
+        if (typeof argName !== 'string') return { ok: false, no: bad(i, 'malformed_need') };
+        if (!has(args, argName)) return { ok: false, no: bad(i, 'argument_missing', { arg: argName }) };
+        ownerId = typeof args[argName] === 'string' ? (args[argName] as string) : null;
+        const other = ownerId !== null && has(nodes, ownerId) ? nodes[ownerId] : undefined;
+        const otherKind = other?.kind && has(kinds, other.kind) ? kinds[other.kind] : undefined;
+        if (!other || !otherKind) return { ok: false, no: bad(i, 'no_such_node', { node: ownerId }) };
+        owner = otherKind;
+        origin = Array.isArray(other.at_mm) && other.at_mm.length === 3 && other.at_mm.every(whole) ? other.at_mm : null;
+      }
+      const place = has(owner.points, name) ? owner.points![name].at_mm : has(owner.slots, name) ? owner.slots![name].at_mm : undefined;
       if (!Array.isArray(place) || place.length !== 3 || !place.every(whole)) return { ok: false, no: bad(i, 'no_such_point', { point: name }) };
-      const step = (form.steps ?? []).find((s) => s.step === 'move' && resolve(s.at, args) === name);
+      if (ownerId !== null && !origin) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: ownerId, field: 'at_mm', read } };
+      const same = (s: { at?: Ref; toward?: Ref }) => (ownerId === null ? resolve(s.at, args) === name : (s.toward as { arg?: string } | undefined)?.arg === (n.of as { arg: string }).arg);
+      const step = (form.steps ?? []).find((s) => s.step === 'move' && same(s));
       if (!step || typeof step.move !== 'string') return { ok: false, no: bad(i, 'no_move_at_point', { point: name }) };
       const move = has(state.moves, step.move) ? state.moves![step.move] : undefined;
       if (!move || !whole(move.reach_mm) || move.reach_mm < 0) return { ok: false, no: bad(i, 'no_move_reach', { move: step.move }) };
@@ -289,13 +315,14 @@ export function decide(input: Input): Verdict {
       read.push([`${state.actor}/effector_mm`, from]);
       read.push([`move/${step.move}/reach_mm`, move.reach_mm]);
       let distanceSq = 0n;
+      if (ownerId !== null) read.push([`${ownerId}/at_mm`, origin]);
       for (let k = 0; k < 3; k++) {
-        const d = BigInt(from[k]) - BigInt(place[k]);
+        const d = BigInt(from[k]) - BigInt(place[k]) - BigInt(origin ? origin[k] : 0);
         distanceSq += d * d;
       }
       const reach = BigInt(move.reach_mm);
       if (distanceSq <= reach * reach) return { ok: true };
-      return { ok: false, no: { verdict: 'no', reason: 'out_of_reach', need: i, detail: { point: name, move: step.move }, fix: { step: 'walk_to', point: name }, read } };
+      return { ok: false, no: { verdict: 'no', reason: 'out_of_reach', need: i, detail: ownerId === null ? { point: name, move: step.move } : { point: name, of: ownerId, move: step.move }, fix: ownerId === null ? { step: 'walk_to', point: name } : { step: 'walk_to', point: has(owner.points, 'stand') ? 'stand' : name, thing: ownerId }, read } };
     },
 
     hand(n, i) {
@@ -403,30 +430,6 @@ export function decide(input: Input): Verdict {
   }
   return unknown ?? { verdict: 'yes', read };
 }
-
-const same = (a: unknown, b: unknown): boolean =>
-  typeof a === 'string' ? a === b : !!a && typeof a === 'object' && !!b && typeof b === 'object' && has(a, 'arg') && (a as { arg: unknown }).arg === (b as { arg: unknown }).arg;
-
-/** The node a node stands loose in, through any slot or hand it is in; null if nowhere. Bounded by the number of nodes. */
-function placeOf(nodes: Record<string, Node>, id: string): string | null {
-  const ids = sorted(nodes);
-  const parent = (x: string): { node: string; loose: boolean } | null => {
-    for (const holder of ids) {
-      const n = nodes[holder];
-      if (n.loose?.includes(x)) return { node: holder, loose: true };
-      for (const slot of sorted(n.slots)) if (n.slots![slot]?.includes(x)) return { node: holder, loose: false };
-      for (const hand of sorted(n.hands)) if (n.hands![hand] === x) return { node: holder, loose: false };
-    }
-    return null;
-  };
-  let at = parent(id);
-  for (let hops = 0; at && hops < ids.length; hops++) {
-    if (at.loose) return at.node;
-    at = parent(at.node);
-  }
-  return null;
-}
-
 
 // timed:begin. A value that changes with time (SA-F5a, #2845), shared with Engine v2 F5 (#2770).
 // It is stored as three whole numbers, `{value, per_s, set_us}`: the value when it was set, its rate per second
@@ -571,6 +574,28 @@ export function whoMay(input: Input): WhoVerdict {
   return ends.some((e) => e === state.actor || (soul !== null && e === soul)) ? yes : refuse({ link: type, ends });
 }
 // who:end
+const sameRef = (a: unknown, b: unknown): boolean =>
+  typeof a === 'string' ? a === b : !!a && typeof a === 'object' && !!b && typeof b === 'object' && has(a, 'arg') && (a as { arg: unknown }).arg === (b as { arg: unknown }).arg;
+
+/** The node a node stands loose in, through any slot or hand it is in; null if nowhere. Bounded by the number of nodes. */
+function placeOf(nodes: Record<string, Node>, id: string): string | null {
+  const ids = sorted(nodes);
+  const parent = (x: string): { node: string; loose: boolean } | null => {
+    for (const holder of ids) {
+      const n = nodes[holder];
+      if (n.loose?.includes(x)) return { node: holder, loose: true };
+      for (const slot of sorted(n.slots)) if (n.slots![slot]?.includes(x)) return { node: holder, loose: false };
+      for (const hand of sorted(n.hands)) if (n.hands![hand] === x) return { node: holder, loose: false };
+    }
+    return null;
+  };
+  let at = parent(id);
+  for (let hops = 0; at && hops < ids.length; hops++) {
+    if (at.loose) return at.node;
+    at = parent(at.node);
+  }
+  return null;
+}
 
 function resolve(ref: unknown, args: Record<string, unknown>): string | null {
   if (typeof ref === 'string') return ref;
