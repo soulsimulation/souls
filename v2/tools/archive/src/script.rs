@@ -74,6 +74,8 @@ pub fn tick(w: &mut World, tick: u64, movers: usize, say_every: u64) -> Vec<u8> 
             let mut e = w.entry(b, changes);
             e.envelope.at = at;
             if says {
+                // The Soul says it (V4's event index names the actor).
+                e.envelope.actor = replica::effects::Actor::Soul(b);
                 e.events = Some(vec![Event {
                     name: Name::new("souls:said").expect("a name"),
                     fields: BTreeMap::from([(

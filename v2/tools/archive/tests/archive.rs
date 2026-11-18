@@ -85,6 +85,7 @@ fn a4_objects_and_bundles_hold_text_references_and_no_words() {
             }
             objects += 1;
         } else if k.contains("bundles/") && !k.ends_with("/index") {
+            let bytes = archive::bundle_body(&bytes).expect("inflates");
             assert_eq!(
                 words_in_bundle(&bytes, &SAID).expect("scans"),
                 Vec::<String>::new(),

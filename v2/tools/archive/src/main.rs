@@ -7,10 +7,13 @@
 //! - `cargo run -p archive --release -- count`: the write count of a busy hour and a quiet day, scaled to a month
 //!   with O3's shipping, at R2's price (in memory; `v2/docs/archive.md`).
 //! - `cargo run -p archive --release -- corpus <dir>`: writes entry one of V18's corpus.
+//! - `cargo run -p archive --release -- seek [hours]`: V4's seek table and index sizes (`seek_bench.rs`).
 //!
 //! `record` and `restore` use the S3-compatible store named by `ARCHIVE_STORE_ENDPOINT`, `_BUCKET`, `_REGION`
 //! (default `auto`), `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY` and `_PREFIX`: a local stand-in or a scratch bucket,
 //! never production's.
+
+mod seek_bench;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -315,9 +318,10 @@ fn main() {
         "restore" => restore_cmd(&arg(2)),
         "count" => count(),
         "corpus" => corpus(Path::new(&arg(2))),
+        "seek" => seek_bench::run(arg(2).parse().unwrap_or(24)),
         _ => refuse(
             "usage",
-            "record <dir> | restore <hash> | count | corpus <dir>",
+            "record <dir> | restore <hash> | count | corpus <dir> | seek [hours]",
         ),
     };
     if let Err(e) = out {

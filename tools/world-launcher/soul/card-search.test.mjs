@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { indexCatalog, find, CARD_PURPOSE_MAX } from "./catalog.mjs";
+import { indexCatalog, find, entryCard, cardOf, CARD_PURPOSE_MAX } from "./catalog.mjs";
 
 /** The purpose line of an example entry: the text its `card` names. */
 const lineOf = (file) => { const e = JSON.parse(readFileSync(new URL(`../../../content/kinds/${file}.json`, import.meta.url), "utf8")); return e.text[e.card.text]; };
@@ -80,4 +80,22 @@ test("a card's synonym and category find a thing; the name still wins over the p
   assert.equal(find(ix, "sink", { at: [50, 0] }).found[0].kind, "eden-basin");
   assert.equal(find(ix, "kitchen", { at: [50, 0] }).found.slice(0, 2).every((r) => ["eden-kettle", "eden-oven"].includes(r.kind)), true);
   assert.equal(find(ix, "tree", { at: [50, 0] }).found[0].kind, "core-tree");
+});
+
+// A world of today sends a kind's card only inside its entry (`catalog.entries`, SA-C3), its words as keys of the entry's text.
+test("an entry's card in catalog.entries is the kind's card; catalog.cards wins when a world sends both", () => {
+  const kettle = JSON.parse(readFileSync(new URL("../../../content/kinds/kitchen/kettle.json", import.meta.url), "utf8"));
+  const thing = { id: "e_k9", name: "run-kettle-1", kind: kettle.kind, place: "g-library", at: [72, 3] };
+  const cat = { ...bare, things: [...bare.things, thing], entries: { [kettle.kind]: kettle } };
+  assert.deepEqual(entryCard(kettle), { purpose: kettle.text.card, category: "kitchen", synonyms: ["heat", "brew"] });
+  assert.equal(entryCard({ kind: "x:y" }), null);
+  // "boils" is in the card only, not in the thing's name or kind
+  const ix = indexCatalog(structuredClone(cat)), row = find(ix, "boils", { at: [50, 0] }).found[0];
+  assert.equal(row.id, "e_k9");
+  assert.equal(row.purpose, kettle.text.card);
+  assert.equal(cardOf(ix, "e_k9").category, "kitchen");
+  assert.equal(cardOf(ix, "e_c1"), null);
+  const both = indexCatalog(structuredClone({ ...cat, cards: { [kettle.kind]: { purpose: "A pot that whistles." } } }));
+  assert.equal(cardOf(both, "e_k9").purpose, "A pot that whistles.");
+  assert.equal(find(both, "boils", { at: [50, 0] }).found.some((r) => r.id === "e_k9"), false);
 });
