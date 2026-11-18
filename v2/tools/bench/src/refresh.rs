@@ -18,18 +18,23 @@ use std::time::Instant;
 
 use import_eden::Import;
 use import_eden::json;
+use replica::bodies::{Class, Family, Resource};
 use replica::effects::{
-    Actor, Body as EffectBody, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest,
-    schema_hash,
+    Actor, Body as EffectBody, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Refusal,
+    Rest, schema_hash,
 };
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::world_model::{Audience, End, parse_kinds, show};
+use sim::host::Runner;
 use sim::links::Doors;
+use sim::mover::Body;
 use sim::refresh::{Job, Plan, Writer, plan};
-use sim::walk::Crowd;
+use sim::unstick::Ladder;
+use sim::walk::World;
 use sim::walk::town::Town;
+use skills::route::{Leg, Route};
 
 const SPEED: i64 = 1_400_000; // µm a second
 const TICK: i64 = 50_000; // µs: 20 ticks a second
@@ -85,6 +90,56 @@ fn revisions(text: &str) -> (String, String) {
         1,
     );
     (old, new)
+}
+
+/// The walkers: the host's runner walking each body by the walk skill, the ladder keeping it, as the `walkers` bench
+/// builds them (T9c retired N7's crowd).
+struct Crowd {
+    runner: Runner,
+    ladder: Ladder,
+    count: usize,
+}
+
+impl Crowd {
+    /// Starts `body`'s walk to `goal` on `node` for `order`: its legs planned by the town.
+    fn add(
+        &mut self,
+        town: &mut Town,
+        body: Body,
+        order: Id,
+        node: Id,
+        goal: Vec3,
+    ) -> Result<(), Refusal> {
+        let legs = town.plan(&body, node, goal)?;
+        let skill = Box::new(Route::new(
+            legs.iter()
+                .map(|l| Leg {
+                    to: l.to,
+                    link: l.link,
+                })
+                .collect(),
+            SPEED,
+            TICK,
+        ));
+        let r = |n: &str| Resource {
+            name: Name::new(n).expect("a name"),
+            class: Class::Locomotion,
+            slot: None,
+        };
+        let humanoid = Family {
+            name: Name::new("souls:humanoid").expect("a name"),
+            resources: vec![r("souls:leg-left"), r("souls:leg-right")],
+        };
+        self.runner.add(humanoid, body, skill)?;
+        self.ladder.add(body.id, order, SPEED, node, goal, legs);
+        self.count += 1;
+        Ok(())
+    }
+
+    /// One tick for every walker.
+    fn step(&mut self, town: &mut Town) -> Result<(), Refusal> {
+        self.ladder.step(&mut self.runner, town)
+    }
 }
 
 struct Run {
@@ -296,11 +351,15 @@ impl Run {
                 }
             }
         }
-        let mut c = Crowd::new(TICK);
+        let mut c = Crowd {
+            runner: Runner::new(TICK),
+            ladder: Ladder::new(),
+            count: 0,
+        };
         let mut mint = Minter::new(Scope([0xf9; 16]));
         let n = spots.len();
         for k in 0..n {
-            if c.walkers.len() == WALKERS {
+            if c.count == WALKERS {
                 break;
             }
             let (from, to) = (spots[k], spots[(k * 7 + n / 2) % n]);
@@ -321,14 +380,9 @@ impl Run {
                 )
                 .expect("placed");
             let order = mint.mint().expect("an id");
-            let _ = c.add(t, body, SPEED, order, g, to);
+            let _ = c.add(t, body, order, g, to);
         }
-        assert_eq!(
-            c.walkers.len(),
-            WALKERS,
-            "{} spots on the open ground",
-            spots.len()
-        );
+        assert_eq!(c.count, WALKERS, "{} spots on the open ground", spots.len());
         c
     }
 }

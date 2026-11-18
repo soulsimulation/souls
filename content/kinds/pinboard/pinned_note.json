@@ -31,7 +31,7 @@
       "who": { "link": "author" },
       "starts": "act",
       "needs": [
-        { "need": "linked", "link": "author" },
+        { "need": "linked", "link": "author", "end": "actor", "says": "not_your_note" },
         { "need": "within_reach", "point": "card" }
       ],
       "steps": [{ "step": "move", "move": "press", "at": "card" }],
@@ -49,6 +49,7 @@
   },
   "text": {
     "card": "A place for one signed note on a notice board; only its author takes it down.",
+    "not_your_note": "You have no note on this board; only its author takes a note down.",
     "note": "note"
   },
   "card": { "text": "card", "category": "note" }

@@ -54,7 +54,8 @@ pub struct Solid {
 
 /// A doorway at this node: the link, its centre, a metre along its wall (`along`) and through it (`across`), its
 /// width and the height of the floor it opens from. A step ([`steps_of`]) is a doorway of no depth on a low floor's
-/// open edge, `across` pointing off the floor; its link is derived ([`step_id`]), never a link of the tree.
+/// open edge, `across` pointing off the floor, or between two of a floor's surfaces ([`inner_steps_of`]); its link is
+/// derived ([`step_id`]), never a link of the tree.
 #[derive(Clone, Debug)]
 pub struct Doorway {
     pub link: Id,
@@ -623,6 +624,64 @@ fn steps_of(
     Ok(out)
 }
 
+/// Where an inner step's link counters start ([`inner_steps_of`]), above any outline edge's number.
+const INNER: u64 = 1 << 40;
+
+/// The steps inside a floor: where two of its surfaces share a stretch of edge (within 2 mm of one line, at least
+/// 10 mm long) and lie apart in height by no more than [`STEP`], what a body steps over (a bridge's deck, its quads
+/// each 100 to 145 mm above the last). Each is a doorway of no depth on that stretch, at the height between the two,
+/// whose link joins the floor to itself (N4 reads both its ends on the floor's patch). Its link is derived as a step
+/// off the floor's outline is ([`step_id`]), counted from [`INNER`]. Surfaces of one height are one surface already;
+/// surfaces further apart are joined only by a stair.
+fn inner_steps_of(floor: Id, own: &[Surface]) -> Vec<Doorway> {
+    let mut out = Vec::new();
+    let mut k = INNER;
+    for (i, s) in own.iter().enumerate() {
+        for t in &own[i + 1..] {
+            let dy = (s.y - t.y).abs();
+            if dy == 0 || dy > STEP * 1000 {
+                continue;
+            }
+            for e in 0..s.ring.len() {
+                let (a, b) = (s.ring[e], s.ring[(e + 1) % s.ring.len()]);
+                let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+                let len = (ex * ex + ez * ez).isqrt();
+                if len == 0 {
+                    continue;
+                }
+                for f in 0..t.ring.len() {
+                    let (c, d) = (t.ring[f], t.ring[(f + 1) % t.ring.len()]);
+                    // Off the line through a and b, and along it from a, µm.
+                    let off =
+                        |p: Xz| (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])) / len;
+                    let on =
+                        |p: Xz| (ex * i128::from(p[0] - a[0]) + ez * i128::from(p[1] - a[1])) / len;
+                    if off(c).abs() > 2_000 || off(d).abs() > 2_000 {
+                        continue;
+                    }
+                    let (lo, hi) = (on(c).min(on(d)).max(0), on(c).max(on(d)).min(len));
+                    if hi - lo < 10_000 {
+                        continue;
+                    }
+                    let at = |u: i128| [a[0] + (ex * u / len) as i64, a[1] + (ez * u / len) as i64];
+                    let unit = |v: i128| (v * 1_000_000 / len) as i64;
+                    out.push(Doorway {
+                        link: step_id(floor, k),
+                        at: at((lo + hi) / 2),
+                        along: [unit(ex), unit(ez)],
+                        across: [unit(ez), -unit(ex)],
+                        width: (hi - lo) as i64,
+                        y: (s.y + t.y) / 2,
+                        step: true,
+                    });
+                    k += 1;
+                }
+            }
+        }
+    }
+    out
+}
+
 impl Scene {
     /// The ground of node `id`: a floor (its surfaces, everything its building holds, its doorways) or the open ground
     /// (everything on it, the footprints of its buildings, its ground cover, its doorways, its waters). Anything else
@@ -667,6 +726,7 @@ impl Scene {
                 let mut ends = vec![h];
                 ends.extend(tree.children(h).ok_or("a floor")?.iter().copied());
                 doorways_at(tree, &ends, thing, &mut s)?;
+                s.doorways.extend(inner_steps_of(id, &s.surfaces));
                 if let Some(g) = on_ground {
                     let to_ground = xform_to(tree, thing, g)?;
                     s.doorways

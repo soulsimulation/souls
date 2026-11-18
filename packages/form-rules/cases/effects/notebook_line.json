@@ -1,6 +1,6 @@
 {
  "format": "souls-effect-cases/1",
- "about": "A notebook line (from #990): Ana writes \"Came by at noon\"; Ben cannot write over it or cross it out; Ana crosses it out.",
+ "about": "A notebook line (from #990): Ana writes \"Came by at noon\"; Ben cannot write over it or cross it out; Ana crosses it out. Another Soul's attempt to take the line back is refused by its need (the actor is not at an end of the link), with the original's words by key.",
  "cases": [
   {
    "name": "written_then_crossed_out_by_its_writer",
@@ -126,10 +126,12 @@
      "expect": {
       "verdict": "no",
       "reason": "not_linked",
-      "effect": 0,
+      "need": 0,
       "detail": {
-       "link": "writer"
-      }
+       "link": "writer",
+       "count": 1
+      },
+      "says": "not_your_line"
      }
     },
     {
