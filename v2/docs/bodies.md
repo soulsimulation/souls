@@ -99,6 +99,9 @@ slot) with the stance the request named. Postures are the controller's stance in
   controller keeps it apart from the bodies it steps, so a tick never visits it.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
   when the sit is cancelled before contact by a later claim on its legs.
+- **Never stuck.** A later claim on the legs can cancel a sit after contact, or a rise before contact. The body is
+  then handed back onto the floor at the stand point, under the new claim's driver, and the seat is released. Left in
+  the slot, it would be stuck, because a tick never steps a body in a slot.
 - **A taken stand point.** `slots::clear_spot` finds the nearest clear point, and the body walks there. It never
   appears there.
 

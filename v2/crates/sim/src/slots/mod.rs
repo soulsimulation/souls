@@ -15,8 +15,9 @@
 //! - **A seated body has no timer and no mover.** When the move is done, a driver with no timer ([`seated_shape`])
 //!   holds its legs and its stance, and the controller's tick never visits it.
 //! - **The engine releases the seat**, never the skill: when the holder rises (at the rise's contact), and when the
-//!   sit is cancelled before contact (a later claim on its legs, `claim-taken`). A sit cancelled after contact leaves
-//!   the body seated; a rise cancelled before contact leaves it seated too.
+//!   sit is cancelled before contact (a later claim on its legs, `claim-taken`). A body is never left stuck: when a
+//!   later claim cancels a sit after contact, or a rise before it, the body is handed back onto the floor at the stand
+//!   point under that claim's driver and the seat is released, since a tick never steps a body in a slot.
 //! - **Rising onto a taken spot.** The stand point may be taken: [`clear_spot`] finds the nearest clear point, and the
 //!   body walks there by the mover. It never appears there.
 //!
@@ -298,6 +299,36 @@ impl Slots {
         self.set(thing, State::Seated(d));
     }
 
+    /// A body left in its slot while another driver holds its legs (a walk claimed them and cancelled the sit after
+    /// contact, or the rise before it) would be stuck: a tick never steps a body in a slot. So it is handed back onto
+    /// the floor at the stand point under that driver, standing, and the seat is released.
+    fn give_way(
+        &mut self,
+        c: &mut Controller,
+        at: &SeatAt,
+        floors: &BTreeMap<Id, Surface>,
+        thing: Id,
+        now: Micros,
+    ) -> Option<R<HandOff>> {
+        let h = self.held.get(&thing).copied()?;
+        if h.state != State::Seated(None) {
+            return None;
+        }
+        let claims = c.claims(h.body)?;
+        let leg = claims
+            .family()
+            .resources
+            .iter()
+            .find(|r| r.class == Class::Locomotion)?;
+        let d = claims.holder(&leg.name)?;
+        let handed = self.stand(c, at, floors, h.body, d, now);
+        if handed.is_ok() {
+            let _ = c.set(h.body, d, Part::Stance(Stance::Stand));
+            self.release(thing);
+        }
+        Some(handed)
+    }
+
     /// Runs a due timer through [`Moves::fire`], then does what it means for a seat: at a sit's contact the body is
     /// handed into the slot, at a rise's onto the floor at the stand point (its surface in `floors`) and the seat is
     /// released; a sit done leaves it seated; a sit cancelled before contact releases the seat. Returns what the move
@@ -377,7 +408,7 @@ impl Slots {
             }
             (Fired::Cancelled(_), _) => {
                 self.sit_still(c, thing);
-                None
+                self.give_way(c, &at, floors, thing, now)
             }
             _ => None,
         };

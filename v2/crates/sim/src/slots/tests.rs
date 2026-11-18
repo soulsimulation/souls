@@ -1,5 +1,6 @@
 //! B3's checks (#2682) on one chair: one body per seat whatever the order, the seat released when a sit is cancelled
-//! before contact and when its holder rises, a seat above reach refused by name, and the nearest clear spot. The
+//! before contact and when its holder rises, a body never stuck when a sit is cancelled after contact or a rise
+//! before it, a seat above reach refused by name, and the nearest clear spot. The
 //! 300-seat hall is the `seats` bench (`v2/tools/bench/src/seats.rs`).
 
 use std::collections::BTreeMap;
@@ -14,7 +15,7 @@ use replica::pose::{Frame, Quat, Support, Vec3, fixture};
 use replica::world_model::show;
 
 use super::{Request, SeatAt, Slots, clear_spot, seated_shape};
-use crate::controller::{Controller, Stance};
+use crate::controller::{Controller, Part, Stance};
 use crate::ground::Piece;
 use crate::mover::Surface;
 use crate::moves::{Moves, Reach, load};
@@ -320,6 +321,80 @@ fn rising_hands_the_body_back_at_the_stand_point() {
     );
     w.run(i64::MAX);
     assert!(w.c.claims(b).expect("a body").running().is_empty());
+}
+
+/// A later claim on the legs that nothing cancels: a walk.
+fn walk_shape() -> replica::bodies::SkillShape {
+    replica::bodies::SkillShape {
+        name: Name::new("test:walk").expect("a name"),
+        claims: vec![replica::bodies::Want::All(Class::Locomotion)],
+        blocks: vec![],
+        cancelled_by: vec![],
+    }
+}
+
+/// Never stuck: the walk that took `b`'s legs (`driver`) walks it away from the seat, and the seat is free.
+fn walks_away(w: &mut World, b: Id, driver: u64) {
+    assert!(
+        w.due.is_empty() && w.moves.is_empty(),
+        "nothing left running"
+    );
+    let p = w.c.body(b).expect("a body").pose;
+    assert!(matches!(p.support, Support::Surface { .. }), "on the floor");
+    assert_eq!(
+        (w.slots.held_by(b), w.slots.holder(w.chair)),
+        (None, None),
+        "the seat is free"
+    );
+    let v = Vec3::new(0, 0, 1_000_000);
+    w.c.set(b, driver, Part::Velocity(v, replica::pose::Mode::Surface))
+        .expect("steered by the walk");
+    assert!(w.c.step(&w.floors, 50_000, 9_000_000).refused.is_empty());
+    let q = w.c.body(b).expect("a body").pose.position;
+    assert_eq!(q.z - p.position.z, 50_000, "walked one tick at 1 m/s");
+}
+
+#[test]
+fn a_sit_cancelled_after_contact_never_leaves_the_body_stuck() {
+    let sit = mv("souls:sit");
+    let mut w = world(chair());
+    let b = w.bodies[0];
+    let n = w.sit(&[0], &sit)[0].1.clone().expect("started");
+    let contact = w.moves.record(n).expect("in progress").contact_at();
+    w.run(contact + 1);
+    assert_eq!(
+        w.c.body(b).expect("a body").pose.support,
+        Support::Slot,
+        "in the slot"
+    );
+    let d = w.c.claim(b, &walk_shape()).expect("a walk takes the legs");
+    w.run(i64::MAX);
+    walks_away(&mut w, b, d);
+}
+
+#[test]
+fn a_rise_cancelled_before_contact_never_leaves_the_body_stuck() {
+    let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
+    let mut w = world(chair());
+    let b = w.bodies[0];
+    w.sit(&[0], &sit)[0].1.clone().expect("started");
+    w.run(i64::MAX);
+    let geo = w.geo();
+    w.slots
+        .rise(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &geo,
+            b,
+            &rise,
+            2_000_000,
+        )
+        .expect("rising");
+    let d = w.c.claim(b, &walk_shape()).expect("a walk takes the legs");
+    w.run(i64::MAX);
+    walks_away(&mut w, b, d);
 }
 
 #[test]
