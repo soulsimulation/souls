@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":167,"group":"getting-around","words":"walk to the market","obvious":3,"things":{"stall":"eden:market_stall"},"chain":[{"this":"me","form":"go_to","args":{"place":"stall"}}]}

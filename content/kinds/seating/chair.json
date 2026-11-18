@@ -1,0 +1,13 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:chair",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [450, 900, 450] },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:chair" },
+  "text": {
+    "card": "A chair, carried in two hands."
+  },
+  "card": { "text": "card" }
+}

@@ -1,0 +1,39 @@
+//! The shared library: built natively and to WASM, loaded by the world, the client and the page (Engine v2, #2635).
+//! Empty but for the load probe (K1, #2638).
+#![forbid(unsafe_code)]
+
+pub mod effects;
+pub mod encode;
+pub mod ids;
+pub mod pose;
+pub mod time;
+pub mod tree;
+pub mod world_model;
+pub mod zones;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::wasm_bindgen;
+
+/// Hashes `input` (FNV-1a, 32 bit, over its little-endian bytes). v2/tools/wasm-load calls it natively, in Node and
+/// in a headless browser and checks that all three return the same value.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub fn load_probe(input: u32) -> u32 {
+    input
+        .to_le_bytes()
+        .iter()
+        .fold(0x811c_9dc5_u32, |hash, byte| {
+            (hash ^ u32::from(*byte)).wrapping_mul(0x0100_0193)
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_probe;
+
+    #[test]
+    fn load_probe_is_fnv1a_of_the_le_bytes() {
+        assert_eq!(load_probe(0), 0x4b95_f515);
+        assert_eq!(load_probe(2638), load_probe(2638));
+        assert_ne!(load_probe(2638), load_probe(2639));
+    }
+}

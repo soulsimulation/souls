@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>replica load test</title>
+<!-- Served by browser.mjs (K1, #2638): loads replica's WASM build the way a page does and reports load_probe back. -->
+<script type="module">
+  const report = (fields) => fetch(`/result?${new URLSearchParams(fields)}`);
+  try {
+    const replica = await import('/pkg/replica.js');
+    await replica.default();
+    const input = Number(new URLSearchParams(location.search).get('input'));
+    await report({ value: String(replica.load_probe(input)) });
+  } catch (error) {
+    await report({ error: String(error?.stack ?? error) });
+  }
+</script>

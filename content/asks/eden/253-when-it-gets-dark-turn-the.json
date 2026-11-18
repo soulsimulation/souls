@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":253,"group":"over-time","words":"when it gets dark turn the lamps on","obvious":2,"when":"when it gets dark","things":{"lamp1":"eden:floor_lamp","lamp2":"eden:floor_lamp"},"chain":[{"this":"lamp1","form":"switch_on"},{"this":"lamp2","form":"switch_on"}]}

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":13,"group":"object","words":"turn off the light before you leave","obvious":2,"things":{"lamp":"eden:floor_lamp","door":"eden:door"},"chain":[{"this":"lamp","form":"switch_off"},{"this":"door","form":"open"},{"this":"door","form":"go_through"}]}
