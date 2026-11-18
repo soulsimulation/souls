@@ -2,7 +2,8 @@
 //! things is recorded into W8's in-memory store; then 100 random moments of the day, and 100 random moments of its
 //! busiest minutes, are each seeked cold (the day's index and one bundle fetched, nothing kept between seeks) and the
 //! time to draw is modelled on the declared reference link. Also prints Step 0's sizes and the index sizes for the day
-//! and a modelled year (`v2/docs/archive.md`, seeking).
+//! and a modelled year (`v2/docs/archive.md`, seeking), and the bytes the day's bundles take stored, deflated as they
+//! are stored now and as CBOR as they were (#3284).
 //!
 //! The load: in the first minute of each hour every body moves each world second (the busiest scripted load: at the
 //! history level a moving body keeps one sample a second, so this is what a world of 1,000 moving bodies writes);
@@ -14,7 +15,7 @@ use std::sync::Arc;
 use miniz_oxide::deflate::compress_to_vec;
 
 use archive::script::{self, TICK};
-use archive::{Archiver, R, Shared, seek};
+use archive::{Archiver, R, Shared, bundle_body, seek};
 use directoryd::directory::store::{Memory, Store};
 use replica::encode::encode;
 use replica::history::events::{Counts, EventIndex, Span, counts_key, events_key};
@@ -67,7 +68,13 @@ fn seeks(
         for k in &s.keys {
             if !wire.contains_key(k) {
                 let b = store.get(k)?.map(|o| o.bytes).unwrap_or_default();
-                wire.insert(k.clone(), compress_to_vec(&b, 6).len() as u64);
+                // A bundle is stored deflated (#3284) and goes as stored; an index is deflated in transit.
+                let n = if k.ends_with("/index") {
+                    compress_to_vec(&b, 6).len()
+                } else {
+                    b.len()
+                };
+                wire.insert(k.clone(), n as u64);
             }
             on_wire += wire[k];
         }
@@ -82,7 +89,7 @@ fn seeks(
     let mean = bytes.iter().sum::<f64>() / bytes.len() as f64;
     println!(
         "{label}: {} seeks, ready to draw p50 {:.3} s, p95 {:.3} s, max {:.3} s; bytes per seek on the wire mean {:.0}, \
-         p95 {:.0}, max {:.0} (stored, uncompressed: p95 {:.0}); apply p95 {:.3} s; up to {nodes} public nodes; \
+         p95 {:.0}, max {:.0} (stored: p95 {:.0}); apply p95 {:.3} s; up to {nodes} public nodes; \
          bar p95 < 2 s {}",
         at.len(),
         pct(&mut total.clone(), 0.5),
@@ -162,22 +169,23 @@ pub fn run(hours: i64) -> R<()> {
         .iter()
         .find(|(s, _, _)| *s == 3_600_000_000)
         .expect("a busy minute");
-    let b = Bundle::read(&store.get(&busy.1)?.expect("the bundle").bytes)?;
+    let busy_stored = store.get(&busy.1)?.expect("the bundle").bytes;
+    let b = Bundle::read(&bundle_body(&busy_stored)?)?;
     let snap = encode(&b.snapshot).map_or(0, |v| v.len());
     let z = |v: &[u8]| compress_to_vec(v, 6).len();
     let snap_z = z(&encode(&b.snapshot).unwrap_or_default());
     println!(
-        "step 0 on the wire (deflate, as V1's compression in transit carries them): snapshot {snap_z} bytes, the \
+        "step 0 on the wire (deflated, as the bundle is stored since #3284): snapshot {snap_z} bytes, the \
          one-minute bundle {} bytes; bar 4,000,000 {}",
-        z(b.bytes()),
-        if z(b.bytes()) < 4_000_000 {
+        busy_stored.len(),
+        if busy_stored.len() < 4_000_000 {
             "MET at one minute"
         } else {
             "UNMET"
         }
     );
     println!(
-        "step 0: at the top load a one-minute bundle is {} bytes, its snapshot {snap} and its view {} ({} records); \
+        "step 0: at the top load a one-minute bundle is {} bytes before deflate, its snapshot {snap} and its view {} ({} records); \
          a five-minute bundle would hold five times the view: {} bytes; bar 4,000,000 {}",
         b.bytes().len(),
         b.bytes().len() - snap,
@@ -188,6 +196,43 @@ pub fn run(hours: i64) -> R<()> {
         } else {
             "UNMET"
         }
+    );
+
+    // The day's bundles as stored (deflated) against their bytes before deflate, as V3 and V4 stored them (#3284).
+    let (mut quiet, mut top) = ([0usize; 3], [0usize; 3]);
+    for (start, key, _) in &ix.bundles {
+        let stored = store.get(key)?.expect("the bundle").bytes;
+        let body = bundle_body(&stored)?;
+        let row = if start % 3_600_000_000 < 60_000_000 {
+            &mut top
+        } else {
+            &mut quiet
+        };
+        row[0] += 1;
+        row[1] += body.len();
+        row[2] += stored.len();
+    }
+    let all = [0, 1, 2].map(|i| quiet[i] + top[i]);
+    for (label, row) in [
+        ("quiet minutes", quiet),
+        ("busy minutes", top),
+        ("the day", all),
+    ] {
+        println!(
+            "bundles stored, {label}: {} bundles, {} bytes before (CBOR, as stored until now), {} bytes stored \
+             (deflated), {:.3} of the bytes",
+            row[0],
+            row[1],
+            row[2],
+            row[2] as f64 / row[1].max(1) as f64
+        );
+    }
+    let ratio = all[2] as f64 / all[1].max(1) as f64;
+    println!(
+        "bundles stored, a modelled year at this load: {:.0} GB before, {:.0} GB stored; bar at most 0.1 of the bytes {}",
+        all[1] as f64 * 365.0 / 1e9 * 24.0 / hours as f64,
+        all[2] as f64 * 365.0 / 1e9 * 24.0 / hours as f64,
+        if ratio <= 0.1 { "MET" } else { "UNMET" }
     );
 
     let header = &w.header;

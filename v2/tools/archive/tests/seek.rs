@@ -107,8 +107,10 @@ fn a3_the_event_index_holds_time_kind_node_and_actor_only() {
             .iter()
             .filter(|k| k.contains("bundles/") && !k.ends_with("/index"))
             .flat_map(|k| {
-                let b = replica::history::Bundle::read(&store.get(k).unwrap().unwrap().bytes)
-                    .expect("a bundle");
+                let b = replica::history::Bundle::read(
+                    &archive::bundle_body(&store.get(k).unwrap().unwrap().bytes).expect("inflates"),
+                )
+                .expect("a bundle");
                 replica::history::snapshot_nodes(&b.snapshot).expect("nodes")
             })
             .collect()

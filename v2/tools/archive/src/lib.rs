@@ -10,9 +10,10 @@
 //! 2. **A manifest per world day** names that day's objects with their SHA-256 and the previous day's manifest; a
 //!    **head** names the world's root and its kind (where replay starts) and the newest manifest. A manifest is
 //!    rewritten as its day gains objects; the head only when a new day begins.
-//! 3. **Bundles** ([`Bundler`], formats in `replica::history`) are the public view at the history level, five
-//!    minutes of world time each, with a public snapshot at each start, and a **day index** per day, written when the
+//! 3. **Bundles** ([`Bundler`], formats in `replica::history`) are the public view at the history level, one
+//!    minute of world time each, with a public snapshot at each start, and a **day index** per day, written when the
 //!    day closes and at shutdown. A window with no public record writes no bundle: **a still world writes nothing.**
+//!    A bundle is stored deflated ([`bundle_stored`], #3284); its day index names the SHA-256 of its bytes before.
 //! 4. **No words** (T8): records hold text by reference, and so do objects and bundles; [`words`] scans for them.
 //! 5. **Restore** ([`fetch`], [`restore`]) reads the head, the manifests and the objects, checks each against its
 //!    hash and checksum, and replays the records from the root with K5's [`replay`]: no local file is read.
@@ -583,6 +584,22 @@ impl Bundler {
     }
 }
 
+/// The most bytes a stored bundle may inflate to, as for an archive object.
+const BUNDLE_MOST: usize = INFLATE_MOST;
+
+/// A bundle's stored bytes (#3284): deflate (RFC 1951) of its bytes. Its snapshot is most of a quiet minute's bundle
+/// and deflates to about a twentieth; the index names the hash of the bytes before, so a bundle made again from the
+/// archive is checked by what it holds, not by how it was compressed.
+pub fn bundle_stored(b: &Bundle) -> Vec<u8> {
+    compress_to_vec(b.bytes(), 6)
+}
+
+/// A bundle's bytes from its stored bytes, inflated up to a limit; check them by the hash its index names.
+pub fn bundle_body(stored: &[u8]) -> R<Vec<u8>> {
+    decompress_to_vec_with_limit(stored, BUNDLE_MOST)
+        .or_else(|e| refuse("history-inflate", format!("{e:?}")))
+}
+
 /// Stores bundles and a day index per day (rule 3).
 pub struct Shelf<S: Store> {
     store: S,
@@ -642,7 +659,7 @@ impl<S: Store> Shelf<S> {
             self.day = None;
         }
         let key = format!("{}bundles/{day:08}/{:020}", self.prefix, b.start);
-        put(&self.store, &key, b.bytes(), None)?;
+        put(&self.store, &key, &bundle_stored(b), None)?;
         self.writes.bundles += 1;
         let (ix, _) = self.day.get_or_insert_with(|| {
             (
@@ -857,7 +874,7 @@ pub fn stored_bundles<S: Store>(store: &S, prefix: &str, f: &Fetched) -> R<Vec<B
             continue;
         };
         for (_, key, hash) in DayIndex::read(&ix.bytes)?.bundles {
-            let b = Bundle::read(&get(store, &key)?)?;
+            let b = Bundle::read(&bundle_body(&get(store, &key)?)?)?;
             if b.hash() != hash {
                 return refuse("history-hash", key);
             }
@@ -956,7 +973,7 @@ pub fn seek<S: Store>(store: &S, prefix: &str, header: &Header, at: i64) -> R<Se
         let b = get(store, key)?;
         requests += 1;
         bytes += b.len() as u64;
-        let b = Bundle::read_named(&b, hash)?;
+        let b = Bundle::read_named(&bundle_body(&b)?, hash)?;
         return Ok(Seeked {
             state: replica::history::seek::state_at(&b, header, at)?,
             bytes,
