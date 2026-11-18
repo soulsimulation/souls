@@ -98,6 +98,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:camp_fish",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,25,0],"size":[140,50,70],"tint":"raw","when":"@heat<1"},{"kind":"box","at":[0,25,0],"size":[140,50,70],"tint":"cooked","when":"@heat>=1&@bites>=2"},{"kind":"box","at":[-35,25,0],"size":[70,50,70],"tint":"cooked","when":"@heat>=1&@bites=1"},{"kind":"box","at":[0,4,0],"size":[120,8,55],"tint":"skin","when":"@heat>=1&@bites<1"},{"kind":"box","at":[-85,12,0],"size":[30,15,55],"tint":"skin"}],"palette":{"raw":"#d9a69b","cooked":"#bc713a","skin":"#606963"},"tags":["camping","item","food","fish","object"]}

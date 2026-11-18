@@ -28,7 +28,7 @@ and [AGENTS.md](../../AGENTS.md):
 
 | | A. `@claude` comments (`.github/workflows/claude.yml`) | B. Dispatch adapter (kept branch `agent/601-cloud-dispatch`, PR #604) | C. App-native cloud session |
 |---|---|---|---|
-| Trigger | An owner/member/collaborator comment, review or issue mentioning `@claude` | `gh workflow run claude-worker.yml` with a validated 10-field JSON input, on `main` only | The coordinator starts a session on the app's cloud target |
+| Trigger | An owner/member/collaborator PR review or review comment mentioning `@claude` (issues and issue comments dropped, #3109) | `gh workflow run claude-worker.yml` with a validated 10-field JSON input, on `main` only | The coordinator starts a session on the app's cloud target |
 | Runner | GitHub-hosted Linux, existing OAuth secret | Same runner and secret, pinned existing action | Provider-hosted environment for this repository |
 | Bounds | 60-minute job; no turn cap; no quota check | 30-minute job, 25-minute step, 12 turns; per-target concurrency without cancelling active work | Session limits of the app; the ceiling is enforced by the coordinator |
 | Quota | None | Owner attests a fresh observation; refuses at 85% or above, or when stale or unknown | Owner reads the same subscription's meter before starting |

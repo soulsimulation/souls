@@ -1,0 +1,19 @@
+# Ownership (Engine v2 T2, #2641). Soul 100 owns a cup and a key. Its body holds the cup: the cup is a child of the
+# body's right-hand slot (slot 2), a change of parent, never a link. The key lies in the room. Owning is a link from
+# the Soul, owned by the thing's end, since a Soul is in no zone. Layout as in door.diag.
+{
+  1: [100],
+  2: {},
+  3: [
+    {1: 1, 2: "souls:place"},
+    {1: 2, 2: "souls:room", 3: 1},
+    {1: 3, 2: "souls:body", 3: 2},
+    {1: 4, 2: "souls:cup", 3: 3, 4: 2},
+    {1: 5, 2: "souls:key", 3: 2}
+  ],
+  4: [
+    {1: 6, 2: "body-of", 3: [3, 100], 4: 0, 5: "everyone"},
+    {1: 7, 2: "owns", 3: [100, 4], 4: 1, 5: "everyone"},
+    {1: 8, 2: "owns", 3: [100, 5], 4: 1, 5: "everyone"}
+  ]
+}

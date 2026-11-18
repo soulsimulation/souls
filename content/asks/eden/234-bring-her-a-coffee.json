@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":234,"group":"with-others","words":"bring her a coffee","obvious":3,"things":{"her":"eden:humanoid","coffee":"eden:cup_of_coffee_pack","counter":"eden:counter"},"chain":[{"this":"counter","form":"take"},{"this":"me","form":"give","args":{"thing":"coffee","to":"her"}}]}

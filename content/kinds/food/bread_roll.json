@@ -82,6 +82,8 @@
       ]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:bread_roll",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,4,0],"size":[40,8,30],"tint":"crumb"},{"kind":"box","at":[-28,35,-28],"size":[55,60,55],"tint":"crust","round":12,"when":"@bites>=1"},{"kind":"box","at":[28,35,-28],"size":[55,60,55],"tint":"crust","round":12,"when":"@bites>=2"},{"kind":"box","at":[-28,35,28],"size":[55,60,55],"tint":"crust","round":12,"when":"@bites>=3"},{"kind":"box","at":[28,35,28],"size":[55,60,55],"tint":"crust","round":12,"when":"@bites>=4"}],"palette":{"crust":"#c98b45","crumb":"#e2c690"},"tags":["kitchen","item","food","bread","object"]}
