@@ -20,7 +20,9 @@ use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 
 use crate::Gateway;
+use crate::receipts::Outcome;
 use crate::resume::Cursor;
+use crate::times;
 
 /// The answer to an intent sent while the world restarts.
 pub const RESTARTING: &str = "world.restarting";
@@ -45,11 +47,14 @@ pub struct Link {
     state: Mutex<State>,
 }
 
+type Pending = (Vec<u8>, u64, Vec<u8>, u64, u64);
+
 #[derive(Default)]
 struct State {
     next: u64,
-    /// Unanswered intents in the order they were first sent: (actor's bytes, sequence, the intent's bytes).
-    pending: BTreeMap<u64, (Vec<u8>, u64, Vec<u8>)>,
+    /// Unanswered intents in the order they were first sent: (actor's bytes, sequence, the intent's bytes, when it
+    /// was received and handed to the link: O4's gateway in).
+    pending: BTreeMap<u64, Pending>,
     index: HashMap<(Vec<u8>, u64), u64>,
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
     /// The newest version the world sent: the "version now" of a refusal the gateway gives itself.
@@ -57,8 +62,8 @@ struct State {
 }
 
 impl Link {
-    /// Hands an intent to the world, keeping it until it is answered.
-    pub fn submit(&self, key: Vec<u8>, sequence: u64, bytes: Vec<u8>) -> Sent {
+    /// Hands an intent to the world, keeping it until it is answered; `received` is when its socket read it.
+    pub fn submit(&self, key: Vec<u8>, sequence: u64, bytes: Vec<u8>, received: u64) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(out) = s.out.clone() else {
             return Sent::Restarting;
@@ -72,7 +77,8 @@ impl Link {
         s.index.insert((key.clone(), sequence), n);
         // A send to a writer that has just ended is not lost: the intent stays kept and goes again on reconnect.
         let _ = out.send(bytes.clone());
-        s.pending.insert(n, (key, sequence, bytes));
+        s.pending
+            .insert(n, (key, sequence, bytes, received, times::stamp()));
         Sent::Sent
     }
 
@@ -100,21 +106,19 @@ impl Link {
         s.now.clone().unwrap_or(Value::Array(Vec::new()))
     }
 
-    /// Takes the intent an answer is for; false if it was answered already.
-    fn answered(&self, key: &[u8], sequence: u64, now: &Value) -> bool {
+    /// Takes the intent an answer is for, with when it was received and handed on; none if it was answered already.
+    fn answered(&self, key: &[u8], sequence: u64, now: &Value) -> Option<(u64, u64)> {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.now = Some(now.clone());
-        match s.index.remove(&(key.to_vec(), sequence)) {
-            Some(n) => s.pending.remove(&n).is_some(),
-            None => false,
-        }
+        let n = s.index.remove(&(key.to_vec(), sequence))?;
+        s.pending.remove(&n).map(|p| (p.3, p.4))
     }
 
     /// Connected: the writer's queue, with every unanswered intent already in it, in first-sent order.
     fn connected(&self) -> mpsc::UnboundedReceiver<Vec<u8>> {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        for (_, _, bytes) in s.pending.values() {
+        for (_, _, bytes, _, _) in s.pending.values() {
             let _ = tx.send(bytes.clone());
         }
         s.out = Some(tx);
@@ -167,9 +171,12 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             if read.read_exact(&mut frame).await.is_err() {
                 break;
             }
+            let at = times::stamp();
             match read_answer(&frame) {
-                Some((key, sequence, version, cursor)) => {
-                    if gw.link.answered(&key, sequence, &version) {
+                Some((key, sequence, version, cursor, outcome)) => {
+                    if let Some((received, handed)) = gw.link.answered(&key, sequence, &version) {
+                        gw.record(&key, outcome);
+                        let frame = times::read_from_world(frame, received, handed, at);
                         gw.deliver(key, cursor, frame);
                     }
                 }
@@ -181,8 +188,8 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
     }
 }
 
-/// An answer frame's actor (as bytes), sequence, version and cursor.
-fn read_answer(frame: &[u8]) -> Option<(Vec<u8>, u64, Value, Cursor)> {
+/// An answer frame's actor (as bytes), sequence, version, cursor and outcome (a refusal is kind 2 or 5).
+fn read_answer(frame: &[u8]) -> Option<(Vec<u8>, u64, Value, Cursor, Outcome)> {
     let Value::Map(m) = decode(frame).ok()?.value else {
         return None;
     };
@@ -195,5 +202,9 @@ fn read_answer(frame: &[u8]) -> Option<(Vec<u8>, u64, Value, Cursor)> {
     let Value::Uint(sequence) = answer.get(&2)? else {
         return None;
     };
-    Some((key, *sequence, version, cursor))
+    let outcome = match answer.get(&3) {
+        Some(Value::Uint(2 | 5)) => Outcome::Refusal,
+        _ => Outcome::Receipt,
+    };
+    Some((key, *sequence, version, cursor, outcome))
 }
