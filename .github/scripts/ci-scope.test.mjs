@@ -298,6 +298,18 @@ test('low-risk: form-rules source keeps the web jobs, because apps/web imports i
   assert.match(importer, /packages\/form-rules\/src\/looks\.ts/);
 });
 
+test('low-risk: a change to anything eden.mjs inlines runs the inline check (soul-tools), form-rules source alone included', async () => {
+  const { MODULES } = await import('../../tools/world-launcher/soul/inline.mjs');
+  const inputs = MODULES.map(([f]) => new URL(f, new URL('../../tools/world-launcher/soul/', import.meta.url)).pathname.slice(new URL('../../', import.meta.url).pathname.length));
+  assert.ok(inputs.includes('packages/form-rules/src/rules.ts'));
+  for (const f of [...inputs, 'tools/world-launcher/soul/inline.mjs']) assert.ok(names([f]).includes('soul-tools'), f);
+  assert.equal(jobsFor(['packages/form-rules/src/rules.ts']).scope, 'low-risk');
+  assert.ok(!names(['packages/form-rules/src/rules.ts']).includes('launcher'), 'the launcher job stays skipped');
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const tools = workflow.slice(workflow.indexOf('            soul-tools)'), workflow.indexOf('            server)'));
+  assert.match(tools, /^\s*node tools\/world-launcher\/soul\/inline\.mjs --check$/m);
+});
+
 test('low-risk: exact prefixes; one file outside the allowlist runs the full battery', () => {
   for (const f of ['content/other/a.json', 'contents/kinds/a.json', 'tools/entryx/a.mjs', 'packages/form-rules-x/a.ts', 'AGENTS.md', 'CLAUDE.md', 'apps/docs/a.md'])
     assert.notEqual(jobsFor([...LOW, f]).scope, 'low-risk', f);

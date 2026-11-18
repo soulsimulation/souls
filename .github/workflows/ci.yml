@@ -236,6 +236,9 @@ jobs:
               # form-rules' own tests and the launcher test that reads content/kinds: a change confined to the low-risk
               # paths (ci-scope.mjs LOW_RISK) runs this job and no packages or launcher job
               node --test --test-concurrency=4 packages/form-rules/src/*.test.ts tools/world-launcher/soul/card-search.test.mjs
+              # eden.mjs inlines packages/form-rules/src/rules.ts and the CLI's modules: a stale block fails here, since a
+              # low-risk run has no launcher job (the launcher's soul-home test checks the same)
+              node tools/world-launcher/soul/inline.mjs --check
               ;;
             server)
               # The server shard, then (on the shard with `godSkill`, ci-scope.mjs) the god-skill unit tests, replay
