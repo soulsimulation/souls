@@ -250,6 +250,11 @@ impl NodeRef<'_> {
         self.tree.place_of(self.rec)
     }
 
+    /// Its hash as last sealed (K5), covering its children's: none once changed and not sealed since (R5 reads it).
+    pub fn sealed(&self) -> Option<Hash> {
+        self.rec.hash
+    }
+
     /// The motion its last sample gave it, while it moves.
     pub fn moved(&self) -> Option<Moved> {
         match self.rec.at {
