@@ -28,7 +28,8 @@ step tests cargo test --workspace --locked
 # The command's version is the wasm-bindgen crate's in Cargo.lock; it is installed under target/, which CI caches.
 bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
 step wasm-bindgen-cli cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
-step wasm-build cargo build -p replica --release --target wasm32-unknown-unknown --locked
+# `vectors` adds the test-only export the encoding-vectors step calls (T0, #2639).
+step wasm-build cargo build -p replica --release --target wasm32-unknown-unknown --locked --features vectors
 step wasm-bindgen target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg \
   target/wasm32-unknown-unknown/release/replica.wasm
 
@@ -38,3 +39,18 @@ native=$(cargo run -p wasm-load --locked --quiet -- "$input")
 echo "native: load_probe($input) = $native"
 step load-node node tools/wasm-load/node.mjs target/wasm-load/pkg "$input" "$native"
 step load-browser node tools/wasm-load/browser.mjs target/wasm-load/pkg "$input" "$native"
+
+# The encoding vectors (T0, #2639) through the same WASM build and the cborg library, in Node. The native build runs
+# them in `cargo test` (crates/replica/tests/encoding.rs).
+step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit --no-fund &&
+  node tools/encoding-vectors/run.mjs target/wasm-load/pkg crates/replica/fixtures/encoding'
+
+# The ids goldens (T3, #2640): the same WASM build in Node gives fixtures/ids/goldens.txt exactly, as the native build
+# does in `cargo test` (crates/replica/tests/ids.rs).
+step ids-goldens node --input-type=module -e '
+  import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url";
+  const r = await import(pathToFileURL("target/wasm-load/pkg/replica.js").href);
+  r.initSync({ module: readFileSync("target/wasm-load/pkg/replica_bg.wasm") });
+  const got = r.ids_goldens(), want = readFileSync("crates/replica/fixtures/ids/goldens.txt", "utf8");
+  console.log(`${got}ids-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
+  if (got !== want) process.exit(1);'
