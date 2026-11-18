@@ -27,6 +27,8 @@
       "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
     }
   },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
   "looks": { "model": "look:bench" },
   "text": {
     "card": "A wooden bench with room for two to sit side by side.",

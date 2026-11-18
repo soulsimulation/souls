@@ -3,7 +3,7 @@
   "kind": "test:stove",
   "owner": "thing",
   "state": {
-    "lit": { "n": 1, "type": "bool", "default": false, "audience": "public" }
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": {"rule": "everyone"} }
   },
   "slots": {
     "hob": { "admits": "thing", "most": 1, "at_mm": [0,900,0] }
