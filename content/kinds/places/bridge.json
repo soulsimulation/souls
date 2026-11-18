@@ -1,0 +1,359 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bridge",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      10000,
+      3000,
+      4000
+    ]
+  },
+  "areas": {
+    "end_a": {
+      "at_mm": [
+        -5000,
+        0,
+        0
+      ],
+      "radius_mm": 1000
+    },
+    "middle": {
+      "at_mm": [
+        0,
+        1400,
+        0
+      ],
+      "radius_mm": 1000
+    },
+    "end_b": {
+      "at_mm": [
+        5000,
+        0,
+        0
+      ],
+      "radius_mm": 1000
+    }
+  },
+  "forms": {
+    "cross": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "end_a"
+        },
+        {
+          "step": "walk_to",
+          "point": "end_b"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "looks": {
+    "model": "look:bridge",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            -3000,
+            650,
+            0
+          ],
+          "size": [
+            4250,
+            200,
+            3000
+          ],
+          "roll": 17996,
+          "tint": "deck"
+        },
+        {
+          "kind": "box",
+          "at": [
+            3000,
+            650,
+            0
+          ],
+          "size": [
+            4250,
+            200,
+            3000
+          ],
+          "roll": -17996,
+          "tint": "deck"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1300,
+            0
+          ],
+          "size": [
+            2100,
+            200,
+            3000
+          ],
+          "tint": "deck"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -3000,
+            1650,
+            -1450
+          ],
+          "size": [
+            4250,
+            80,
+            80
+          ],
+          "roll": 17996,
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            3000,
+            1650,
+            -1450
+          ],
+          "size": [
+            4250,
+            80,
+            80
+          ],
+          "roll": -17996,
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2300,
+            -1450
+          ],
+          "size": [
+            2100,
+            80,
+            80
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -4800,
+            550,
+            -1450
+          ],
+          "size": [
+            100,
+            1100,
+            100
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2400,
+            925,
+            -1450
+          ],
+          "size": [
+            100,
+            1850,
+            100
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1150,
+            -1450
+          ],
+          "size": [
+            100,
+            2300,
+            100
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            2400,
+            925,
+            -1450
+          ],
+          "size": [
+            100,
+            1850,
+            100
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            4800,
+            550,
+            -1450
+          ],
+          "size": [
+            100,
+            1100,
+            100
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -3000,
+            1650,
+            1450
+          ],
+          "size": [
+            4250,
+            80,
+            80
+          ],
+          "roll": 17996,
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            3000,
+            1650,
+            1450
+          ],
+          "size": [
+            4250,
+            80,
+            80
+          ],
+          "roll": -17996,
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2300,
+            1450
+          ],
+          "size": [
+            2100,
+            80,
+            80
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -4800,
+            550,
+            1450
+          ],
+          "size": [
+            100,
+            1100,
+            100
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2400,
+            925,
+            1450
+          ],
+          "size": [
+            100,
+            1850,
+            100
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1150,
+            1450
+          ],
+          "size": [
+            100,
+            2300,
+            100
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            2400,
+            925,
+            1450
+          ],
+          "size": [
+            100,
+            1850,
+            100
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            4800,
+            550,
+            1450
+          ],
+          "size": [
+            100,
+            1100,
+            100
+          ],
+          "tint": "rail"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "deck": "#8a6a48",
+        "rail": "#5e4630"
+      },
+      "tags": [
+        "bridge",
+        "path-network",
+        "structure"
+      ]
+    }
+  },
+  "text": {
+    "card": "A humped wooden bridge with rails over a stream or a gap.",
+    "bridge": "bridge",
+    "footbridge": "footbridge",
+    "crossing": "crossing"
+  },
+  "card": {
+    "text": "card",
+    "category": "bridge",
+    "synonyms": [
+      "footbridge",
+      "crossing"
+    ]
+  }
+}
