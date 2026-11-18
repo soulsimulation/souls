@@ -3135,7 +3135,7 @@ const formRules = (() => {
 // What a form does once it may be done is effects.ts (SA-F2b, #2844); the amount a transfer
 // moves is measured here, so the `room` need and the effect agree on one number.
 
-const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'enough', 'sum', 'moves']);
+const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'enough', 'sum', 'any', 'moves']);
 const REASONS = Object.freeze([
   'field_differs',
   'slot_taken',
@@ -3164,7 +3164,8 @@ const PUSHED                                   = Object.freeze({ pushed_by_one: 
                                                               
                     
                
-                 
+                                                                                                  
+              
                
                 
                     
@@ -3175,7 +3176,8 @@ const PUSHED                                   = Object.freeze({ pushed_by_one: 
                                                                                                                        
                                                                      
            
-                                                                                                                 
+                                                                                                                       
+                                                               
                     
                         
                  
@@ -3189,9 +3191,12 @@ const PUSHED                                   = Object.freeze({ pushed_by_one: 
                                                                   
               
   
+/** An argument's type. A `field` or `value` argument is a choice from the form's own closed list, `of`. */
+                                                                    
                     
                 
                   
+                
                  
                                                                                  
                      
@@ -3200,7 +3205,8 @@ const PUSHED                                   = Object.freeze({ pushed_by_one: 
                       
                  
                  
-                 
+                                                                                          
+              
                
                 
                                   
@@ -3309,6 +3315,13 @@ function decide(input       )          {
   if (!form) return bad(-1, 'no_such_form', { form: act.form });
   const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
   if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
+  // A field or value argument is one of the form's own choices, so a form never writes a field it does not name.
+  const takes        = form.takes && typeof form.takes === 'object' ? form.takes : {};
+  for (const name of sorted(takes)) {
+    const t = takes[name];
+    if (!t || (t.type !== 'field' && t.type !== 'value') || !has(args, name)) continue;
+    if (!Array.isArray(t.of) || !t.of.includes(args[name]          )) return bad(-1, 'not_a_choice', { arg: name, value: (args[name] ?? null)            });
+  }
   // The asker's `sees` lists the audiences it belongs to: `owner`, `creator`, and `linked:<link type>` for each link
   // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
   const sees = (audience          ) => seesAudience(asker.sees, audience);
@@ -3337,7 +3350,10 @@ function decide(input       )          {
     state(n, i) {
       if (has(n, 'link')) return placeState(n, i);
       if (has(n, 'of')) return argState(n, i);
-      const field = n.field ?? '';
+      // A field argument names one of the form's fields; a value argument the value compared with (a choice each).
+      for (const k of ['field', 'is', 'not']         ) if (isRef(n[k]) && !has(args, (n[k]                   ).arg)) return { ok: false, no: bad(i, 'argument_missing', { arg: (n[k]                   ).arg }) };
+      const field = resolve(n.field, args) ?? '';
+      const target = { is: valueOf(n.is, args), not: valueOf(n.not, args) };
       const def = has(entry.state, field) ? entry.state [field] : undefined;
       if (!def) return { ok: false, no: bad(i, 'no_such_field', { field }) };
       if (!sees(audienceOf(entry, field))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
@@ -3355,10 +3371,26 @@ function decide(input       )          {
         (!has(m, 'not') || flag(def, v) !== flag(def, m.not)) &&
         (!has(m, 'at_least') || (int(v) && v >= (m.at_least          ))) &&
         (!has(m, 'at_most') || (int(v) && v <= (m.at_most          )));
-      const meets = (v         ) => holds(n, v);
+      const meetsWith = (v         , t                               ) =>
+        (!has(n, 'is') || flag(def, v) === flag(def, t.is)) &&
+        (!has(n, 'not') || flag(def, v) !== flag(def, t.not)) &&
+        (!has(n, 'at_least') || (int(v) && v >= (n.at_least          ))) &&
+        (!has(n, 'at_most') || (int(v) && v <= (n.at_most          )));
+      const meets = (v         ) => meetsWith(v, target);
       if (meets(value)) return { ok: true };
       const wanted                          = {};
-      for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n                           )[k];
+      for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = k === 'is' || k === 'not' ? target[k] : (n                           )[k];
+      // The closest fix is this same act with another choice of the value it compares with (brush the other way); a
+      // field argument's other choices are other acts, not fixes (another shoot is not this one).
+      for (const k of ['is', 'not']         ) {
+        const ref = n[k];
+        if (!isRef(ref)) continue;
+        const choices = takes[ref.arg]?.type === 'value' ? takes[ref.arg].of ?? [] : [];
+        for (const c of choices) {
+          if (c === args[ref.arg] || !meetsWith(value, { ...target, [k]: c })) continue;
+          return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix: { form: act.form, args: { ...args, [ref.arg]: c } }, read } };
+        }
+      }
       // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does;
       // a set with `by` meets it if the value it adds up to does, within the field's bounds (a crank that adds charge)
       const after = (by         ) => (whole(by) && whole(value) ? value + by : null);
@@ -3551,6 +3583,27 @@ function decide(input       )          {
       const detail = { fields, found: total, wanted, ...(n.after_moves === true ? { after_moves: true } : {}) };
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail, fix: null, read } };
     },
+
+    // At least one of two or more fields of this kind is not a value (sand not yet smooth everywhere). A refusal lists
+    // every field's value; its fix is a form that sets one of them to another value, where the data offers one.
+    any(n, i) {
+      const fields = Array.isArray(n.fields) ? n.fields : [];
+      if (fields.length < 2 || !has(n, 'not')) return { ok: false, no: bad(i, 'malformed_need') };
+      const found            = [];
+      let differs = false;
+      for (const field of fields) {
+        const def = has(entry.state, field) ? entry.state [field] : undefined;
+        if (!def || def.type === 'timed') return { ok: false, no: bad(i, 'no_such_field', { field }) };
+        if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
+        const value = has(self.fields, field) ? self.fields [field] : def.default;
+        read.push([`${act.this}/field/${def.n}`, value]);
+        found.push(value);
+        if (flag(def, value) !== flag(def, n.not)) differs = true;
+      }
+      if (differs) return { ok: true };
+      const fix = formFix((e) => e.change === 'set' && typeof e.field === 'string' && fields.includes(e.field) && !has(e, 'by') && e.to !== null && typeof e.to !== 'object' && flag(entry.state [e.field], e.to) !== flag(entry.state [e.field], n.not));
+      return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { fields, found, wanted: { not: n.not } }, fix, read } };
+    },
   };
 
   // A field of the place this thing stands in, read through its link to the place (from "place", most 1), never from
@@ -3583,7 +3636,7 @@ function decide(input       )          {
   function otherField(n      , i        , id        )          {
     const other = has(nodes, id) ? nodes[id] : undefined;
     const kind = other?.kind && has(kinds, other.kind) ? kinds[other.kind] : undefined;
-    const field = n.field ?? '';
+    const field = typeof n.field === 'string' ? n.field : '';
     const def = kind && has(kind.state, field) ? kind.state [field] : undefined;
     if (!def) return { ok: false, no: bad(i, 'no_such_field', { node: id, field }) };
     if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: id, field, read } };
@@ -3820,6 +3873,11 @@ function placeOf(nodes                      , id        )                {
     at = parent(at.node);
   }
   return null;
+}
+const isRef = (v         )                       => v !== null && typeof v === 'object' && has(v, 'arg') && typeof (v                    ).arg === 'string';
+/** A value as written, or the value an argument holds. */
+function valueOf(v         , args                         )          {
+  return isRef(v) ? args[v.arg] : v;
 }
 
 function resolve(ref         , args                         )                {
