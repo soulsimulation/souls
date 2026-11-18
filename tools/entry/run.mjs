@@ -44,8 +44,9 @@ import {tmpdir} from 'node:os';
 import {join, relative, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {filesOf} from './prove.mjs';
-import {load as loadPlan} from './load.mjs';
-import {CASES, loadCases, loadEffectCases, same} from '../../packages/form-rules/src/load.ts';
+import {load as loadPlan, NEW_ENGINE_ONLY} from './load.mjs';
+import {CASES, loadCases, loadEffectCases, loadKinds, same} from '../../packages/form-rules/src/load.ts';
+import {decide} from '../../packages/form-rules/src/rules.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const GOD = join(ROOT, 'tools/god-skill/cli.mjs'), SOUL = join(ROOT, 'tools/world-launcher/soul/eden.mjs');
@@ -86,9 +87,40 @@ export function casesFor(kinds, {cases: dir = CASES} = {}) {
 
 // ---------------------------------------------------------------- playing one case through a transport
 
-/** The fields a node starts with: the entry's defaults under the case's own. */
-function startFields(entry, node) {
-  return {...Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k, f.default])), ...(node?.fields ?? {})};
+/** A field's value as today's world holds it: a case writes a bool as 0/1 (effect cases) or true/false. */
+export function asWorld(entry, field, v) {
+  return entry?.state?.[field]?.type === 'bool' && (v === 0 || v === 1) ? v === 1 : v;
+}
+/** The fields a node starts with: the entry's defaults under the case's own. A list, schedule or timed field is not
+ *  carried today (load.mjs), and a text with nothing written (null) is left unset. */
+export function startFields(entry, node) {
+  const out = {};
+  for (const [k, v] of Object.entries({...Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k, f.default])), ...(node?.fields ?? {})})) {
+    const f = entry.state?.[k];
+    if (NEW_ENGINE_ONLY.includes(f?.type) || (f?.type === 'text' && v === null)) continue;
+    out[k] = asWorld(entry, k, v);
+  }
+  return out;
+}
+/** Why a case needs a field today's def does not carry (a list, schedule or timed field), or null: its start sets one, or
+ *  a step or its end expects one. */
+export function newEngineGap(c, kinds) {
+  const kindOf = nid => kinds.get(c.state?.nodes?.[nid]?.kind);
+  const needs = (nid, field) => { const f = kindOf(nid)?.state?.[field]; return NEW_ENGINE_ONLY.includes(f?.type) ? `${field} (a ${f.type} field)` : null; };
+  const named = [
+    ...Object.entries(c.state?.nodes ?? {}).flatMap(([nid, n]) => Object.keys(n.fields ?? {}).map(k => needs(nid, k))),
+    ...(c.do ?? []).flatMap(s => (s.expect?.changes ?? []).filter(x => x.change === 'set').map(x => needs(x.node, x.field))),
+    ...Object.entries(c.after ?? {}).flatMap(([nid, w]) => Object.keys(w?.fields ?? {}).map(k => needs(nid, k))),
+  ].filter(Boolean);
+  return named.length ? `the case needs ${named[0]}: new engine only, today's def does not carry it` : null;
+}
+/** The kinds a row places. */
+const kindsOfRow = row => row.type === 'disturb' || !row.case ? [row.kind] : [...new Set([row.kind, ...Object.values(row.case.state?.nodes ?? {}).map(n => n.kind).filter(Boolean)])];
+let allKinds;
+/** The rules' own fix for a case's refusal, when the case does not state one (a case compares only what it names). */
+export function rulesFix(c) {
+  if (c.expect?.verdict !== 'no' || c.expect.fix) return c.expect?.fix;
+  try { return decide({kinds: (allKinds ??= loadKinds()), act: c.act, state: c.state, asker: c.asker}).fix; } catch { return undefined; }
 }
 
 /** Why a case's start cannot be set up from outside, or null. */
@@ -116,7 +148,7 @@ async function settled(t, id) {
   for (let i = 0; i < 6; i++) { await sleep(800); const b = await t.fields(id); if (same(a, b)) return b; a = b; }
   return a;
 }
-const sameFields = (got, want) => got && Object.entries(want).every(([k, v]) => same(got[k], v));
+const sameFields = (got, want) => got && Object.entries(want).every(([k, v]) => same(got[k] ?? null, v));
 
 /** Check one act's answer against what its case expects. A list of what is off, and how it was met. */
 function judge(expect, got, before, after) {
@@ -135,6 +167,7 @@ function judge(expect, got, before, after) {
 async function ruleCase(t, row, kinds, placed) {
   const c = row.case, entry = kinds.get(row.kind), form = entry.forms?.[c.act.form];
   if (form && form.starts !== 'act') return {result: 'skip', why: `${c.act.form} is started by the world (${form.starts}), not by an act`};
+  const unborn = newEngineGap(c, kinds); if (unborn) return {result: 'skip', why: unborn};
   const id = await placed(row.kind);
   const want = startFields(entry, c.state.nodes[c.act.this]);
   await t.set(id, want);
@@ -142,15 +175,19 @@ async function ruleCase(t, row, kinds, placed) {
   if (!sameFields(before, want)) return {result: 'fail', why: `the scene could not be set: the fields read ${JSON.stringify(before)}, not ${JSON.stringify(want)}`};
   if (form && !(await t.offers(id)).includes(c.act.form)) return {result: 'skip', why: `${c.act.form} is not offered by this world`};
   const gap = setupGap(c, kinds); if (gap) return {result: 'skip', why: gap};
-  const got = await t.act(id, c.act.form, c.act.args);
+  // the case's other things (an argument: a pot, a pail), placed and set as the effect cases place them
+  const ids = {[c.act.this]: id}, others = Object.entries(c.state.nodes).filter(([nid, n]) => n.kind && nid !== c.act.this);
+  for (const [nid, n] of others) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
+  for (const [nid, n] of others) await readUntil(t, ids[nid], startFields(kinds.get(n.kind), n));
+  const got = await t.act(id, c.act.form, Object.fromEntries(Object.entries(c.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v])));
   const after = got.verdict === 'no' ? await settled(t, id) : await t.fields(id);
-  const {off, via} = judge(c.expect, got, before, after);
+  const {off, via} = judge({...c.expect, ...(c.expect.verdict === 'no' ? {fix: rulesFix(c)} : {})}, got, before, after);
   return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), got: brief(got), ...(via ? {via} : {})};
 }
 
 async function effectCase(t, row, kinds, placed) {
   const c = row.case;
-  const gap = setupGap(c, kinds); if (gap) return {result: 'skip', why: gap};
+  const gap = setupGap(c, kinds) ?? newEngineGap(c, kinds); if (gap) return {result: 'skip', why: gap};
   const ids = {};
   for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
   for (const [nid, n] of Object.entries(c.state.nodes)) if (n.kind) await readUntil(t, ids[nid], startFields(kinds.get(n.kind), n));
@@ -159,7 +196,7 @@ async function effectCase(t, row, kinds, placed) {
     const kind = c.state.nodes[step.act.this]?.kind, form = kinds.get(kind)?.forms?.[step.act.form], id = ids[step.act.this];
     if (form && form.starts !== 'act') {
       if (!t.timers) return {result: 'skip', why: `step ${k}: ${step.act.form} is started by the world's timer, which this world does not run`, steps};
-      const want = setsOf(step.expect, ids)[id] ?? {}, got = await readUntil(t, id, want, (timerAfter(c, step) ?? 0) / 1000 + 10000);
+      const want = setsOf(step.expect, ids, c, kinds)[id] ?? {}, got = await readUntil(t, id, want, (timerAfter(c, step) ?? 0) / 1000 + 10000);
       if (!sameFields(got, want)) return {result: 'fail', why: `step ${k}: ${step.act.form} by the world: the fields read ${JSON.stringify(got)}`, steps};
       steps.push({step: k, form: step.act.form, by: 'world'});
       continue;
@@ -171,7 +208,7 @@ async function effectCase(t, row, kinds, placed) {
     const before = await t.fields(id);
     const args = Object.fromEntries(Object.entries(step.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v]));
     const got = await t.act(id, step.act.form, args);
-    const sets = setsOf(step.expect, ids);
+    const sets = setsOf(step.expect, ids, c, kinds);
     const after = got.verdict === 'no' ? await settled(t, id) : await readUntil(t, id, sets[id] ?? {});
     const {off, via} = judge(step.expect ?? {}, got, before, after);
     for (const [nid, want] of Object.entries(sets)) { const now = nid === id ? after : await readUntil(t, nid, want); if (!sameFields(now, want)) off.push(`after the step, ${nid} reads ${JSON.stringify(now)}, not ${JSON.stringify(want)}`); }
@@ -181,8 +218,9 @@ async function effectCase(t, row, kinds, placed) {
   }
   for (const [nid, want] of Object.entries(c.after ?? {})) {
     if (!ids[nid] || !want?.fields) continue;
-    const now = await readUntil(t, ids[nid], want.fields);
-    if (!sameFields(now, want.fields)) return {result: 'fail', why: `after: ${nid} reads ${JSON.stringify(now)}, not ${JSON.stringify(want.fields)}`, steps};
+    const entry = kinds.get(c.state.nodes[nid]?.kind), fields = Object.fromEntries(Object.entries(want.fields).map(([k, v]) => [k, asWorld(entry, k, v)]));
+    const now = await readUntil(t, ids[nid], fields);
+    if (!sameFields(now, fields)) return {result: 'fail', why: `after: ${nid} reads ${JSON.stringify(now)}, not ${JSON.stringify(fields)}`, steps};
   }
   return {result: 'pass', steps};
 }
@@ -284,10 +322,10 @@ async function disturbCase(t, row, kinds, placed) {
 }
 
 const timerAfter = (c, step) => c.do.flatMap(s => s.expect?.timers ?? []).find(x => x.form === step.act.form)?.after_us;
-/** The `set` changes a step expects, as fields per world id. */
-function setsOf(expect, ids) {
+/** The `set` changes a step expects, as fields per world id, in the world's terms (a bool's 0/1 as false/true). */
+export function setsOf(expect, ids, c, kinds) {
   const out = {};
-  for (const x of expect?.changes ?? []) if (x.change === 'set' && ids[x.node]) (out[ids[x.node]] ??= {})[x.field] = x.to;
+  for (const x of expect?.changes ?? []) if (x.change === 'set' && ids[x.node]) (out[ids[x.node]] ??= {})[x.field] = asWorld(kinds?.get(c?.state?.nodes?.[x.node]?.kind), x.field, x.to);
   return out;
 }
 const brief = g => ({verdict: g.verdict, ...(g.reason ? {reason: g.reason} : {}), ...(g.code ? {code: g.code} : {}), ...(g.receipt ? {receipt: g.receipt} : {})});
@@ -300,7 +338,9 @@ export async function runOnce(t, kinds, rows) {
     const placed = async (kind, how) => { const id = await t.place(kind, kinds.get(kind), how); mine.push(id); return id; };
     const t0 = Date.now();
     let r;
-    try { r = await {rule: ruleCase, effect: effectCase, disturb: disturbCase}[row.type](t, row, kinds, placed); }
+    const unloaded = kindsOfRow(row).map(k => t.unloaded?.get(k) && `${k}: ${t.unloaded.get(k)}`).find(Boolean);
+    if (unloaded) r = {result: 'skip', why: unloaded};
+    else try { r = await {rule: ruleCase, effect: effectCase, disturb: disturbCase}[row.type](t, row, kinds, placed); }
     catch (e) { r = {result: 'fail', why: `the run broke: ${String(e.message ?? e).split(ROOT).join('')}`}; }
     for (const id of mine) await t.remove(id).catch(() => {});
     out.push({case: row.name, type: row.type, kind: row.kind, form: row.form, file: row.file, ...r, ms: Date.now() - t0});
@@ -352,27 +392,31 @@ export function todayTransport({world, god = process.cwd(), soul, launcher: laun
   let n = 0;
   const thing = id => soulCli(['query', JSON.stringify({thing: id})]).answers?.[0] ?? {};
   const t = {
-    name: 'today', timers: false, events: false, reads: [],
+    name: 'today', timers: false, events: false, reads: [], unloaded: new Map(),
     async start(loaded) {
       const status = cli(GOD, ['status'], {cwd: resolve(god)});
       if (!status.out.includes(world.replace(/\/$/, ''))) throw new Error(`the god folder ${relative(process.cwd(), resolve(god)) || '.'} holds no seat for ${world}`);
       const dir = mkdtempSync(join(tmpdir(), 'entry-run-'));
       try {
+        // kind by kind: a kind the world refuses (or one with no shape to place) skips its own cases, not the family's
         for (const r of loaded) {
-          if (!r.plan || !r.entry.forms) continue;
+          if (!r.entry.forms) continue;
+          if (!r.plan) { t.unloaded.set(r.kind, unloadedWhy(r.errors)); continue; }
           const file = join(dir, `${r.plan.name}.json`);
           writeFileSync(file, JSON.stringify(r.plan));
-          godCli(['define', file]);
-          defs.set(r.kind, r.def);
+          try { godCli(['define', file]); defs.set(r.kind, r.def); }
+          catch (e) { t.unloaded.set(r.kind, `the world refused its def: ${String(e.message ?? e).replace(/^god define: /, '').split('\n')[0]}`); }
         }
       } finally { rmSync(dir, {recursive: true, force: true}); }
     },
     async place(kind, entry, {far = false} = {}) {
       const def = defs.get(kind); if (!def) throw new Error(`${kind} could not be loaded into this world`);
       const me = soulCli(['here']).me?.pos ?? [0, 0];
-      // beside the Soul, out of reach of any point on it: the Soul walks there as the form asks
+      // beside the Soul, out of reach of any point on it: the Soul walks there as the form asks; a big thing (a building)
+      // goes further by its own size (placeDistance), so it does not cover the Soul
       // `far`: a disturbance lands while the Soul walks, so it walks longer (a creator's call takes about a second)
-      for (const [dx, dz] of [[3, 0], [0, 3], [-3, 0], [0, -3], [4, 4]].map(([x, z]) => far ? [x * 3, z * 3] : [x, z])) {
+      const k = placeDistance(entry) / 3 * (far ? 3 : 1);
+      for (const [dx, dz] of [[3, 0], [0, 3], [-3, 0], [0, -3], [4, 4]].map(([x, z]) => [x * k, z * k])) {
         const r = cli(GOD, ['place', def, '--at', `${(me[0] + dx).toFixed(2)},${(me[1] + dz).toFixed(2)}`, '--name', `run-${kind.split(':')[1]}-${++n}`, '--json'], {cwd: resolve(god)});
         let j = null; try { j = JSON.parse(r.out); } catch { /* refused in words */ }
         if (j?.accepted && j.ids) return Object.values(j.ids)[0];
@@ -383,17 +427,23 @@ export function todayTransport({world, god = process.cwd(), soul, launcher: laun
     async remove(id) { godCli(['remove', id]); },
     async offers(id) { return (thing(id).acts ?? []).map(a => a.split(':').at(-1)); },
     async fields(id) { return thing(id).state ?? null; },
-    async act(id, form, args) { return answer(soulCli(['act', `object:${id}:${form}`, ...argsOf(args), '--wait', '--json'])); },
+    // today's form actions take no params (forms-adapter.ts `actions`): the adapter chooses each argument thing itself,
+    // the nearest of its kind, so the case's things are placed and its args are not sent
+    async act(id, form) {
+      const j = soulCli(['act', `object:${id}:${form}`, '--wait', '--json']);
+      // the Soul CLI's --wait can end before a form's own long wait does: follow the receipt to its end
+      return j.accepted && ['accepted', 'started'].includes(j.receipt?.phase) && j.receipt?.id ? t.wait(j.receipt.id, 180000) : answer(j);
+    },
     // following an act under way (part 2): today's receipt shows motion, not which of the entry's steps is under way
-    async begin(id, form, args) {
-      const j = soulCli(['act', `object:${id}:${form}`, ...argsOf(args), '--json']);
+    async begin(id, form) {
+      const j = soulCli(['act', `object:${id}:${form}`, '--json']);
       return j.accepted && j.receipt?.id ? {verdict: 'started', rid: j.receipt.id, progress: progressOf(j.receipt)} : answer(j);
     },
     async progress(rid) { return progressOf(soulCli(['receipt', rid])); },
     async leave(rid) { soulCli(['stop', rid]); },
-    async wait(rid) {
+    async wait(rid, ms = 60000) {
       let rc;
-      for (const end = Date.now() + 60000; Date.now() < end; await sleep(500)) { rc = soulCli(['receipt', rid]); if (!['accepted', 'started'].includes(rc.phase)) break; }
+      for (const end = Date.now() + ms; Date.now() < end; await sleep(500)) { rc = soulCli(['receipt', rid]); if (!['accepted', 'started'].includes(rc.phase)) break; }
       return {...answer({accepted: true, receipt: rc}), ...(rc?.reason ? {text: rc.reason} : {})};
     },
     async body() { const me = soulCli(['here']).me ?? {}; return {posture: me.posture, activity: me.activity?.kind ?? null, holding: me.holding ?? []}; },
@@ -425,7 +475,10 @@ export function todayTransport({world, god = process.cwd(), soul, launcher: laun
   };
   return t;
 }
-const argsOf = args => args && Object.keys(args).length ? [JSON.stringify(args)] : [];
+/** How far from the Soul a thing is placed (m): 3 m, or its own half-diagonal and 1.5 m when that is more. */
+export const placeDistance = entry => { const b = entry?.geometry?.bounds_mm ?? [0, 0, 0]; return Math.max(3, Math.hypot(b[0], b[2]) / 2000 + 1.5); };
+/** Why a kind with forms was not loaded: no shape to place, or the load step's own error. */
+export const unloadedWhy = errors => /looks\.shape/.test(errors?.[0] ?? '') ? 'no thing to place: the kind has no looks.shape' : `not loaded: ${errors?.[0] ?? 'no def'}`;
 /** An act's answer in the rules' terms, from the Soul CLI's act or receipt. */
 function answer(j) {
   const rc = j.receipt;
