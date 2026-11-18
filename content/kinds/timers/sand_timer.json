@@ -58,6 +58,8 @@
       "effects": [{ "change": "set", "field": "sand", "to": "top", "event": "flipped" }]
     }
   },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:sand_timer",
     "table": [

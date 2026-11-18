@@ -65,6 +65,8 @@
       "effects": [{ "change": "set", "field": "damped", "to": false, "event": "damper_removed" }]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:damper_bell",
     "table": [

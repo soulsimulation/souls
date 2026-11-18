@@ -33,6 +33,8 @@
       ]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:lantern_oil_station",
     "table": [

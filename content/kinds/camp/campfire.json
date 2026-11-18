@@ -38,6 +38,8 @@
       "effects": [{ "change": "set", "field": "lit", "to": false, "event": "put_out" }]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:campfire",
     "table": [
