@@ -123,6 +123,14 @@ step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p re
     cargo test -p replica --test intents --locked the_built_checker_artifact_loads_by_its_hash -- --nocapture'
 # The client's library by build hash (R5, #2699): cached or downloaded, refused by name, run in a worker with a limit.
 step client-sync node --test client/src/sync/*.test.mjs
+# The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4); R5b's resync after a long cut.
+step client-daemon bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/daemon/*.test.mjs'
+# The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
+step client-command node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs
+# The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
+step client-stats node --test client/src/stats/*.test.mjs
+# The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
+step client-check node --test client/src/check/*.test.mjs
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
