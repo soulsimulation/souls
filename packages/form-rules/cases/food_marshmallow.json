@@ -1,6 +1,6 @@
 {
   "format": "souls-form-cases/1",
-  "about": "eden:marshmallow_fire and eden:marshmallow_skewer (from #1817). The fire is lit by hand and put out. Toasting needs it lit ('Light this campfire before toasting or turning a skewer', fix: light) and a marshmallow skewer in the hand ('Pick up one actual marshmallow skewer and keep it in your hands'); the skewer is named by the act, as the original named it by its exact id. Each toast moves one unit of the fire's heat into the skewer: one side golden, then the other. A skewer with both sides golden refuses a third (no_room: 'This marshmallow is already toasted or eaten'), and a fire with no heat left refuses (not_enough). The skewer is taken and eaten in two bites, only with both sides golden ('Toast both sides before eating'). Turning the skewer between toasts is handed back (see the pull request).",
+  "about": "eden:marshmallow_fire and eden:marshmallow_skewer (from #1817). The fire is lit by hand and put out. Toasting needs it lit ('Light this campfire before toasting or turning a skewer', fix: light) and a marshmallow skewer in the hand ('Pick up one actual marshmallow skewer and keep it in your hands'); the skewer is named by the act, as the original named it by its exact id. Each toast moves one unit of the fire's heat into the side of the skewer facing the fire (`heat`); the fire reads that side through the skewer's own kind and refuses while it is golden ('This exposed side is already golden; turn the skewer to expose the other side'), and a fire with no heat left refuses (not_enough). Turning the held skewer moves the golden side away from the fire (`heat` into `back`, two fields of one thing), so the other side can be toasted; it is refused with nothing golden to turn, and when both sides are golden ('This marshmallow is already toasted or eaten'). The skewer is taken and eaten in two bites, only with both sides golden, the sum of `heat` and `back` ('Toast both sides before eating').",
   "cases": [
     {
       "name": "marshmallow_fire_light_every_need_met",
@@ -66,11 +66,25 @@
       "expect": {"verdict": "no", "reason": "not_enough", "need": 2, "detail": {"node": "fi1", "field": "heat", "has": 0, "amount": 1}, "fix": null}
     },
     {
+      "name": "marshmallow_fire_toast_exposed_side_golden",
+      "act": {"this": "fi1", "form": "toast", "args": {"skewer": "sk1"}},
+      "state": {"actor": "b1", "nodes": {"fi1": {"kind": "eden:marshmallow_fire", "fields": {"lit": true}}, "sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 1}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 3, "detail": {"node": "sk1", "field": "heat", "found": 1, "wanted": {"at_most": 0}}, "fix": null, "says": "turn_first"}
+    },
+    {
+      "name": "marshmallow_fire_toast_other_side_after_turning",
+      "act": {"this": "fi1", "form": "toast", "args": {"skewer": "sk1"}},
+      "state": {"actor": "b1", "nodes": {"fi1": {"kind": "eden:marshmallow_fire", "fields": {"lit": true}}, "sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 0, "back": 1}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
       "name": "marshmallow_fire_toast_both_sides_golden",
       "act": {"this": "fi1", "form": "toast", "args": {"skewer": "sk1"}},
-      "state": {"actor": "b1", "nodes": {"fi1": {"kind": "eden:marshmallow_fire", "fields": {"lit": true}}, "sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 2}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
+      "state": {"actor": "b1", "nodes": {"fi1": {"kind": "eden:marshmallow_fire", "fields": {"lit": true}}, "sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 1, "back": 1}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "no", "reason": "no_room", "need": 3, "detail": {"node": "sk1", "field": "heat", "room": 0, "amount": 1}, "fix": null}
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 3, "detail": {"node": "sk1", "field": "heat", "found": 1, "wanted": {"at_most": 0}}, "fix": null, "says": "turn_first"}
     },
     {
       "name": "marshmallow_skewer_take_every_need_met",
@@ -87,16 +101,44 @@
       "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
     },
     {
+      "name": "marshmallow_skewer_turn_every_need_met",
+      "act": {"this": "sk1", "form": "turn"},
+      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 1}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
+    },
+    {
+      "name": "marshmallow_skewer_turn_not_held",
+      "act": {"this": "sk1", "form": "turn"},
+      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": {"step": "take", "thing": "sk1"}}
+    },
+    {
+      "name": "marshmallow_skewer_turn_nothing_golden",
+      "act": {"this": "sk1", "form": "turn"},
+      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer"}, "b1": {"hands": {"left": "sk1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_enough", "need": 1, "detail": {"node": "sk1", "field": "heat", "has": 0, "amount": 1}, "fix": null, "says": "toast_first"}
+    },
+    {
+      "name": "marshmallow_skewer_turn_both_sides_golden",
+      "act": {"this": "sk1", "form": "turn"},
+      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 1, "back": 1}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_room", "need": 2, "detail": {"node": "sk1", "field": "back", "room": 0, "amount": 1}, "fix": null, "says": "already_toasted"}
+    },
+    {
       "name": "marshmallow_skewer_bite_every_need_met",
       "act": {"this": "sk1", "form": "bite"},
-      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 2}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
+      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 1, "back": 1}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
       "asker": {"sees": ["public"]},
       "expect": {"verdict": "yes"}
     },
     {
       "name": "marshmallow_skewer_bite_not_held",
       "act": {"this": "sk1", "form": "bite"},
-      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 2}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 1, "back": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
       "asker": {"sees": ["public"]},
       "expect": {"verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": {"step": "take", "thing": "sk1"}}
     },
@@ -105,12 +147,12 @@
       "act": {"this": "sk1", "form": "bite"},
       "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 1}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "heat", "found": 1, "wanted": {"at_least": 2}}, "fix": null}
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"fields": ["heat", "back"], "found": 1, "wanted": {"at_least": 2}}, "fix": null, "says": "toast_both"}
     },
     {
       "name": "marshmallow_skewer_bite_nothing_left",
       "act": {"this": "sk1", "form": "bite"},
-      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 2, "bites": 0}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
+      "state": {"actor": "b1", "nodes": {"sk1": {"kind": "eden:marshmallow_skewer", "fields": {"heat": 1, "back": 1, "bites": 0}}, "b1": {"hands": {"left": "sk1", "right": null}}}},
       "asker": {"sees": ["public"]},
       "expect": {"verdict": "no", "reason": "field_differs", "need": 2, "detail": {"field": "bites", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     }

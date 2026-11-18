@@ -101,7 +101,7 @@ function rules(entry) {
     (f.effects ?? []).forEach((e, i) => {
       if (e.change !== 'create') return;
       const spent = Object.values(isObj(entry.stock) ? entry.stock : {}).some(s => isObj(s) && s.take === fn && s.kind === e.kind)
-        || f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && n.field === x.field));
+        || f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && !n.link && !n.of && n.field === x.field));
       if (!spent) add('makes', `${p}.effects.${i}`, `creates ${e.kind} and pays for nothing`, 'add a remove effect for what it is made from, or a set of a field the form needs (spending it)');
     });
     // no-waiting: a timer that arms its own form again waits on a condition by polling; a name that counts a time of day.
@@ -169,7 +169,7 @@ function wayOut(entry, add) {
   const linked = new Set(Object.keys(links).filter(l => !linkers[l]));
   const armed = new Set(), on = new Set();
   const ok = n => {
-    if (n.need === 'state' && n.link) return true; // the place's field is set by its place, from outside
+    if (n.need === 'state' && (n.link || n.of)) return true; // another node's field (its place, a named thing) is set from outside
     if (n.need === 'state') {
       if (open.has(n.field) || !reach[n.field]) return true;
       const v = 'is' in n ? n.is : n.not;

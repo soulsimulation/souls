@@ -1,0 +1,54 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:desk_lamp",
+  "owner": "thing",
+  "state": {
+    "on": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "switch": { "role": "contact", "at_mm": [0, 45, 80] },
+    "base": { "role": "grip", "at_mm": [0, 40, 0] }
+  },
+  "geometry": { "bounds_mm": [180, 510, 320] },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": false },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [{ "change": "set", "field": "on", "to": true, "event": "switched_on" }]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": true },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [{ "change": "set", "field": "on", "to": false, "event": "switched_off" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:desk_lamp",
+    "table": [
+      { "part": "light", "field": "on", "do": "glow", "at": { "true": 1000, "false": 0 } },
+      { "part": "light", "field": "on", "do": "tint", "at": { "true": "#ffe2a8", "false": "#6b665e" } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,20,0],"r":90,"h":40,"segments":10,"tint":"metal"},{"kind":"cyl","at":[20,170,-30],"r":12,"h":270,"segments":8,"tint":"metal","pitch":15527,"yaw":146333},{"kind":"cyl","at":[20,370,20],"r":12,"h":216,"segments":8,"tint":"metal","pitch":49675,"yaw":-14037},{"kind":"sphere","at":[40,300,-60],"r":20,"segments":5,"tint":"metal"},{"kind":"cone","at":[0,420,140],"r":70,"h":110,"segments":10,"tint":"shade","pitch":131780},{"kind":"sphere","at":[0,400,160],"r":30,"segments":6,"tint":"bulb","glow":1000,"role":"light"},{"kind":"box","at":[0,45,70],"size":[24,12,20],"tint":"knob","role":"knob"}],"palette":{"metal":"#3b3d40","shade":"#2f6b5c","bulb":"#ffe2a8","knob":"#d0621f"},"tags":["furniture","lighting","lamp","object"]}
+  },
+  "text": {
+    "card": "An angled desk lamp: press the button on its base to switch it on or off.",
+    "light": "light",
+    "lamp": "lamp",
+    "table_lamp": "table lamp",
+    "reading_lamp": "reading lamp",
+    "anglepoise": "anglepoise"
+  },
+  "card": { "text": "card", "category": "light", "synonyms": ["lamp", "table_lamp", "reading_lamp", "anglepoise"] }
+}
