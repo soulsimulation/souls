@@ -136,6 +136,8 @@ fn span(p: &Part) -> Option<(u64, u64)> {
 
 /// The publishing thread: for each tick handed over (and any queued behind it), a spare caught up, or a whole copy of
 /// the newest, then published.
+// Times its own busy share for `Counts::busy_ns` (a measure, never a verdict); K7's wall-clock rule allows it by name.
+#[allow(clippy::disallowed_methods)]
 fn run(s: &Shared, ticks: &Receiver<Vec<Arc<Part>>>) {
     // Every part after the oldest version a spare or the newest copy stands at.
     let mut kept: VecDeque<Arc<Part>> = VecDeque::new();

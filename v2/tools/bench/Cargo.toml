@@ -32,6 +32,11 @@ path = "commit-cost/main.rs"
 name = "timers"
 path = "src/timers.rs"
 
+# I4, #2687: acts from arrival at the world process to answer, and the kill run.
+[[bin]]
+name = "act-latency"
+path = "act-latency/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 gatewayd = { path = "../../crates/gatewayd" }
