@@ -151,9 +151,9 @@ and a comment naming the files. To redo one by hand, run `gh workflow run restac
   disposition in the PR. The change's author cannot supply its only review. Preserve the failed provider run;
   a separate review does not turn it into a pass. Do not require duplicate provider reviews. All required status
   checks and sign-offs under the approval matrix still apply; a required failed status cannot be bypassed by a comment.
-- **`@claude` for follow-ups.** Mention `@claude` in an issue, PR comment or review (the `claude` workflow) to ask a
-  question, iterate on review feedback or have it push a fix to the PR branch. Only the owner, members and
-  collaborators can trigger it.
+- **`@claude` for follow-ups.** Mention `@claude` in a PR review or review comment (the `claude` workflow; issues and
+  issue comments no longer trigger it) to ask a question, iterate on review feedback or have it push a fix to the PR
+  branch. Only the owner, members and collaborators can trigger it.
 - **Proof tiers.** The PR states its tier and links its proof: lint (T0); focused tests and typecheck (T1); an uncut,
   real-speed clip of the changed journey (T2, the `proof` skill records it); a scenario playtest, a reviewer-agent
   pass and sign-off under the approval matrix (T3). T4 is the release head. What a reviewer checks: [review](review.md).
