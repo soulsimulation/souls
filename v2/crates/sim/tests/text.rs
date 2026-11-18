@@ -52,14 +52,20 @@ fn a1_written_words_are_read_back_by_their_audience_and_refused_to_others() {
         .write(WHISPER.as_bytes(), Audience::Of(listener), speaker)
         .expect("written");
     assert_ne!(aloud, whisper);
-    assert_eq!(name(store.read(aloud, &[stranger])), Ok(ALOUD.as_bytes().to_vec()));
+    assert_eq!(
+        name(store.read(aloud, &[stranger])),
+        Ok(ALOUD.as_bytes().to_vec())
+    );
     assert_eq!(
         name(store.read(whisper, &[listener])),
         Ok(WHISPER.as_bytes().to_vec())
     );
     assert_eq!(name(store.read(whisper, &[stranger])), Err("not-entitled"));
     assert_eq!(name(store.read(whisper, &[])), Err("not-entitled"));
-    assert_eq!(name(store.read(id(0x5a, 99), &[listener])), Err("text-unknown"));
+    assert_eq!(
+        name(store.read(id(0x5a, 99), &[listener])),
+        Err("text-unknown")
+    );
     // An upload is a file of its own, read the same way.
     let pic = store
         .upload(&[1, 2, 3, 250], Audience::Of(listener), speaker)
@@ -120,7 +126,13 @@ fn keys() -> Vec<Key> {
         Audience::Of(id(0xdd, 101)),
     ];
     let mut keys = Vec::new();
-    for node in [id(0xee, 0), id(0xee, 1), id(0xee, 2), id(0xee, 4), id(0xee, 5)] {
+    for node in [
+        id(0xee, 0),
+        id(0xee, 1),
+        id(0xee, 2),
+        id(0xee, 4),
+        id(0xee, 5),
+    ] {
         for level in ORDER {
             for audience in audiences {
                 keys.push(Key {
@@ -184,7 +196,10 @@ fn a2_a3_a_removed_sentence_is_absent_from_every_view_and_the_log_is_unchanged()
     let whisper = store
         .write(WHISPER.as_bytes(), Audience::Of(id(0xdd, 101)), author)
         .expect("written");
-    assert_eq!((board, aloud, whisper), (id(0xcc, 1), id(0xcc, 2), id(0xcc, 3)));
+    assert_eq!(
+        (board, aloud, whisper),
+        (id(0xcc, 1), id(0xcc, 2), id(0xcc, 3))
+    );
 
     // The log: the fixture's part, and the same bytes as the one record of a K4 log on disk.
     let path = d.join("log");
@@ -206,9 +221,16 @@ fn a2_a3_a_removed_sentence_is_absent_from_every_view_and_the_log_is_unchanged()
 
     let before = delivered(&f, &store);
     let shown = before.iter().filter(|(_, b)| holds(b, BOARD)).count();
-    println!("before removal: {shown} of {} views deliver the board's words", before.len());
+    println!(
+        "before removal: {shown} of {} views deliver the board's words",
+        before.len()
+    );
     assert!(shown > 0);
-    assert!(before.iter().all(|(v, _)| !holds(&v.bytes().expect("bytes"), BOARD)));
+    assert!(
+        before
+            .iter()
+            .all(|(v, _)| !holds(&v.bytes().expect("bytes"), BOARD))
+    );
     for (v, b) in &before {
         if holds(b, WHISPER) {
             assert_eq!(v.key.audience, Audience::Of(id(0xdd, 101)), "{:?}", v.key);
@@ -222,7 +244,10 @@ fn a2_a3_a_removed_sentence_is_absent_from_every_view_and_the_log_is_unchanged()
     assert_eq!(name(store.read(board, &[])), Err("removed"));
     assert_eq!(name(store.read(aloud, &[])), Ok(ALOUD.as_bytes().to_vec()));
     let file = std::fs::read(d.join("text").join("text")).expect("the store's file");
-    assert!(!holds(&file, BOARD), "the erased words are still in the store's file");
+    assert!(
+        !holds(&file, BOARD),
+        "the erased words are still in the store's file"
+    );
     assert!(holds(&file, ALOUD));
 
     let f2 = fixture();
@@ -253,7 +278,9 @@ fn a2_a3_a_removed_sentence_is_absent_from_every_view_and_the_log_is_unchanged()
         .remove(aloud, id(0xcc, 900), 1_700_000_000_000_001, Grade::Hidden)
         .expect("hidden");
     assert!(delivered(&f2, &store).iter().all(|(_, b)| !holds(b, ALOUD)));
-    store.restore(aloud, id(0xcc, 900), 1_700_000_000_000_002).expect("restored");
+    store
+        .restore(aloud, id(0xcc, 900), 1_700_000_000_000_002)
+        .expect("restored");
     assert!(delivered(&f2, &store).iter().any(|(_, b)| holds(b, ALOUD)));
     assert_eq!(
         name(store.restore(board, id(0xcc, 900), 1_700_000_000_000_003)),
@@ -291,8 +318,9 @@ fn a5_after_power_cuts_every_returned_reference_has_its_words_and_the_list_is_wh
     for seed in 1..=40u64 {
         let mut r = Rng(seed);
         let (text, list) = (Mem::default(), Mem::default());
-        let store =
-            Arc::new(Store::open_mem(text.clone(), list.clone(), Minter::new(scope)).expect("opens"));
+        let store = Arc::new(
+            Store::open_mem(text.clone(), list.clone(), Minter::new(scope)).expect("opens"),
+        );
         let stall = 2 + r.below(30);
         if seed % 2 == 1 {
             text.0.lock().unwrap().write_budget = Some(500 + r.below(20_000) as usize);
@@ -329,7 +357,11 @@ fn a5_after_power_cuts_every_returned_reference_has_its_words_and_the_list_is_wh
             if let Some((reference, words)) = pick
                 && !removed.iter().any(|(x, _, _)| *x == reference)
             {
-                let grade = if k % 2 == 0 { Grade::Erased } else { Grade::Hidden };
+                let grade = if k % 2 == 0 {
+                    Grade::Erased
+                } else {
+                    Grade::Hidden
+                };
                 if store.remove(reference, id(0xaa, 1), k, grade).is_ok() {
                     removed.push((reference, words, grade));
                 }
@@ -338,9 +370,7 @@ fn a5_after_power_cuts_every_returned_reference_has_its_words_and_the_list_is_wh
         }
         let list_before = store.removals();
         if seed % 2 == 0 {
-            while text.0.lock().unwrap().syncs < stall
-                && writers.iter().any(|w| !w.is_finished())
-            {
+            while text.0.lock().unwrap().syncs < stall && writers.iter().any(|w| !w.is_finished()) {
                 std::thread::yield_now();
             }
         }
@@ -362,7 +392,11 @@ fn a5_after_power_cuts_every_returned_reference_has_its_words_and_the_list_is_wh
 
         let (text2, list2) = (Mem::with(survived), Mem::with(list_survived));
         let again = Store::open_mem(text2.clone(), list2, Minter::new(scope)).expect("reopens");
-        assert_eq!(again.removals(), list_before, "seed {seed}: the redaction list");
+        assert_eq!(
+            again.removals(),
+            list_before,
+            "seed {seed}: the redaction list"
+        );
         for (reference, words) in &returned {
             let got = name(again.read(*reference, &[listener]));
             match removed.iter().find(|(x, _, _)| x == reference) {
@@ -379,7 +413,9 @@ fn a5_after_power_cuts_every_returned_reference_has_its_words_and_the_list_is_wh
         }
         checked += returned.len();
     }
-    println!("40 power cuts: {checked} returned references read back; {torn} cuts left a torn tail; {erasures} erasures checked");
+    println!(
+        "40 power cuts: {checked} returned references read back; {torn} cuts left a torn tail; {erasures} erasures checked"
+    );
     assert!(torn > 0 && checked > 0);
     assert!(erasures > 0);
 }
@@ -392,11 +428,17 @@ fn a5_an_erasure_cut_short_is_finished_on_opening() {
     let scope = Scope([0x5d; 16]);
     let (text, list) = (Mem::default(), Mem::default());
     let store = Store::open_mem(text.clone(), list.clone(), Minter::new(scope)).expect("opens");
-    let gone = store.write(BOARD.as_bytes(), Audience::Everyone, id(0xdd, 1)).expect("written");
-    let kept = store.write(ALOUD.as_bytes(), Audience::Everyone, id(0xdd, 1)).expect("written");
+    let gone = store
+        .write(BOARD.as_bytes(), Audience::Everyone, id(0xdd, 1))
+        .expect("written");
+    let kept = store
+        .write(ALOUD.as_bytes(), Audience::Everyone, id(0xdd, 1))
+        .expect("written");
     // The state after the list's entry and the zeros, before the checksum: built by hand from the bytes before.
     let mut half = text.0.lock().unwrap().bytes.clone();
-    store.remove(gone, id(0xaa, 1), 7, Grade::Erased).expect("erased");
+    store
+        .remove(gone, id(0xaa, 1), 7, Grade::Erased)
+        .expect("erased");
     let at = half
         .windows(BOARD.len())
         .position(|w| w == BOARD.as_bytes())
@@ -405,17 +447,23 @@ fn a5_an_erasure_cut_short_is_finished_on_opening() {
     let listed = list.0.lock().unwrap().bytes.clone();
     drop(store);
 
-    let again = Store::open_mem(Mem::with(half), Mem::with(listed), Minter::new(scope)).expect("reopens");
+    let again =
+        Store::open_mem(Mem::with(half), Mem::with(listed), Minter::new(scope)).expect("reopens");
     assert_eq!(name(again.read(gone, &[])), Err("removed"));
     assert_eq!(name(again.read(kept, &[])), Ok(ALOUD.as_bytes().to_vec()));
     // A record changed with no erasure listed and bytes after it is corruption, refused by name and not trimmed.
     let one = Mem::default();
     let s = Store::open_mem(one.clone(), Mem::default(), Minter::new(scope)).expect("opens");
-    s.write(BOARD.as_bytes(), Audience::Everyone, id(0xdd, 1)).expect("written");
-    s.write(ALOUD.as_bytes(), Audience::Everyone, id(0xdd, 1)).expect("written");
+    s.write(BOARD.as_bytes(), Audience::Everyone, id(0xdd, 1))
+        .expect("written");
+    s.write(ALOUD.as_bytes(), Audience::Everyone, id(0xdd, 1))
+        .expect("written");
     drop(s);
     let mut bad = one.0.lock().unwrap().bytes.clone();
-    let at = bad.windows(BOARD.len()).position(|w| w == BOARD.as_bytes()).expect("the words");
+    let at = bad
+        .windows(BOARD.len())
+        .position(|w| w == BOARD.as_bytes())
+        .expect("the words");
     bad[at] ^= 1;
     assert_eq!(
         name(Store::open_mem(Mem::with(bad), Mem::default(), Minter::new(scope)).map(|_| ())),

@@ -153,7 +153,12 @@ fn read_meta(b: &[u8]) -> Option<(u8, Id, Audience, Id)> {
         0 => Audience::Everyone,
         _ => Audience::Of(get_id(&b[2 + ID_LEN..])?),
     };
-    Some((b[0], get_id(&b[1..])?, audience, get_id(&b[2 + 2 * ID_LEN..])?))
+    Some((
+        b[0],
+        get_id(&b[1..])?,
+        audience,
+        get_id(&b[2 + 2 * ID_LEN..])?,
+    ))
 }
 
 fn read_removal(b: &[u8]) -> Option<Removal> {
@@ -300,10 +305,7 @@ impl Place {
     fn uploads(&self) -> R<PathBuf> {
         match self {
             Place::Dir(d, _) => Ok(d.join("uploads")),
-            Place::Mem(_) => refuse(
-                "uploads-need-a-folder",
-                "an upload is a file of its own",
-            ),
+            Place::Mem(_) => refuse("uploads-need-a-folder", "an upload is a file of its own"),
         }
     }
 }

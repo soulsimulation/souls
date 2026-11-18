@@ -34,7 +34,9 @@ fn main() {
         std::env::consts::OS,
         std::env::consts::ARCH
     );
-    println!("| repeat | writes | writes/s | p50 ms | p99 ms | max ms | syncs/s | writes per sync | bar |");
+    println!(
+        "| repeat | writes | writes/s | p50 ms | p99 ms | max ms | syncs/s | writes per sync | bar |"
+    );
     println!("|---|---|---|---|---|---|---|---|---|");
     let mut pass = true;
     for repeat in 1..=repeats {
@@ -51,7 +53,8 @@ fn main() {
                     let mut lat = Vec::new();
                     for k in 0.. {
                         // Write k of thread t is due at (k * threads + t) / rate seconds after the start.
-                        let due = start + Duration::from_nanos((k * threads + t) * 1_000_000_000 / rate);
+                        let due =
+                            start + Duration::from_nanos((k * threads + t) * 1_000_000_000 / rate);
                         if due >= end {
                             break;
                         }
@@ -59,7 +62,8 @@ fn main() {
                         if due > now {
                             std::thread::sleep(due - now);
                         }
-                        let words = format!("thread {t} says line {k} of the bench, about forty bytes");
+                        let words =
+                            format!("thread {t} says line {k} of the bench, about forty bytes");
                         let t0 = Instant::now();
                         store
                             .write(words.as_bytes(), Audience::Everyone, author)
