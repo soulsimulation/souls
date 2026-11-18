@@ -17,8 +17,9 @@
 // requested for it by hand (--event request: `gh workflow run ci.yml --ref <branch> -f pr=<n>`, scoped by the PR's paths
 // against main). Outside the window a run that selected heavy jobs is deferred: none run and ci-ok fails,
 // so a skipped job never reads as a pass. A run any label started (#2018), or a requested one, whose head already has a green
-// ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>] [--events a,b]` prints
-// whether the head's newest ci run (of those events, when given) passed.
+// ci run (--green-at-head) has nothing left to do: no qualify leg, no smoke and no repo job (output `green`), so its ci-ok
+// repeats that result in about a minute. `green --repo o/r --sha <sha> [--self <run id>] [--events a,b]` prints whether
+// the head's newest ci run (of those events, when given) passed; it reads GH_TOKEN and needs no gh CLI.
 // Pull request, merge_group and push runs never run the legs JOBS marks `heavy: true` (lightOnly): they run once a day
 // in the scheduled full run on main, on a manual run, and before a release in the remote gate, not per change.
 import { execFileSync } from 'node:child_process';
@@ -136,7 +137,7 @@ export function windowFor({ event, draft = false, labels = [] }) {
 
 /** Applies the window to a plan: closed with heavy work selected defers it all; nothing selected is never deferred. */
 export function windowed({ include, smoke }, win, { greenAtHead = false } = {}) {
-  if (win.open && greenAtHead) return { include: [], smoke: false, deferred: false, why: 'a ci run at this head already passed' };
+  if (win.open && greenAtHead) return { include: [], smoke: false, deferred: false, green: true, why: 'a ci run at this head already passed' };
   if (win.open || (!include.length && !smoke)) return { include, smoke, deferred: false, why: win.why };
   return { include: [], smoke: false, deferred: true, why: win.why };
 }
@@ -150,6 +151,23 @@ export function greenAtHead(runs = [], self = null, events = []) {
   return others[0]?.status === 'completed' && others[0].conclusion === 'success';
 }
 
+/** The ci runs at `sha`, read from the REST API with `token` (GH_TOKEN). It uses fetch, not the gh CLI: the light
+ * self-hosted runners have no gh, so a gh call failed there and every label run re-ran its jobs at a green head. An
+ * unreadable answer throws; the caller reads that as not green, so the run does its jobs as before. */
+export async function ciRunsAt(repo, sha, { token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN, api = process.env.GITHUB_API_URL || 'https://api.github.com', fetch: get = fetch } = {}) {
+  const res = await get(`${api}/repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`, {
+    headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) throw new Error(`ci runs at ${sha}: HTTP ${res.status}`);
+  return (await res.json()).workflow_runs ?? [];
+}
+
+/** The `green` subcommand's answer: 'true' or 'false', never a throw (a failed read is 'false', with a warning). */
+export async function greenCommand({ repo, sha, self, events = [] }, opts = {}) {
+  try { return String(greenAtHead(await ciRunsAt(repo, sha, opts), self, events)); }
+  catch (e) { console.error(`::warning::green at head unknown, so this run does its jobs: ${e.message}`); return 'false'; }
+}
+
 const ZERO = /^0+$/;
 export function changedFiles(base, head = 'HEAD', git = (...a) => execFileSync('git', a, { encoding: 'utf8' })) {
   if (!base || ZERO.test(base)) return null; // a new branch or a missing base: run everything
@@ -157,11 +175,10 @@ export function changedFiles(base, head = 'HEAD', git = (...a) => execFileSync('
   catch { return null; }
 }
 
-function main(argv) {
+async function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
   if (argv[0] === 'green') {
-    const runs = JSON.parse(execFileSync('gh', ['api', `repos/${opt('--repo')}/actions/workflows/ci.yml/runs?head_sha=${opt('--sha')}&per_page=100`], { encoding: 'utf8' })).workflow_runs ?? [];
-    console.log(String(greenAtHead(runs, opt('--self'), (opt('--events') ?? '').split(',').filter(Boolean))));
+    console.log(await greenCommand({ repo: opt('--repo'), sha: opt('--sha'), self: opt('--self'), events: (opt('--events') ?? '').split(',').filter(Boolean) }));
     return;
   }
   const event = opt('--event');
@@ -173,7 +190,7 @@ function main(argv) {
   const win = windowFor({ event, draft: opt('--draft') === 'true', labels });
   const own = lightOnly(full.include, event);
   const plan = { ...full, ...windowed({ include: own.include, smoke: smokeFor(files) }, win, { greenAtHead: opt('--green-at-head') === 'true' }) };
-  const out = { matrix: JSON.stringify({ include: plan.include }), any: String(plan.include.length > 0), scope: plan.scope, smoke: String(plan.smoke), deferred: String(plan.deferred), window: plan.why };
+  const out = { matrix: JSON.stringify({ include: plan.include }), any: String(plan.include.length > 0), scope: plan.scope, smoke: String(plan.smoke), deferred: String(plan.deferred), green: String(plan.green === true), window: plan.why };
   console.log(JSON.stringify({ ...out, matrix: plan.include.map(j => j.name), selected: own.include.map(j => j.name), daily: own.daily, diff: plan.diff }, null, 2));
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(out).map(([k, v]) => `${k}=${v}\n`).join(''));
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
