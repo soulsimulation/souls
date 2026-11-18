@@ -77,14 +77,22 @@ test('routing: the server shards and the long legs go to CI_HEAVY_RUNNER; the sh
   assert.ok(jobsFor(['package.json']).include.some(j => j.heavy === true), 'the flag reaches the matrix');
 });
 
-test('routing fallback: with CI_HEAVY_RUNNER unset every job is hosted', () => {
-  for (const unset of ['', undefined]) for (const job of JOBS) assert.equal(runnerFor(job, unset), 'ubuntu-latest', job.name);
+test('routing: the short legs go to CI_LIGHT_RUNNER when set; native and latency keep their wall-time budgets hosted', () => {
+  const light = JOBS.filter(j => j.light).map(j => j.name).sort();
+  assert.deepEqual(light, ['client-cli', 'docs-reference', 'soul-tools', 'types-web', 'web']);
+  for (const job of JOBS) assert.deepEqual(runnerFor(job, 'souls-heavy', 'souls-light'), job.heavy ? 'souls-heavy' : job.light ? 'souls-light' : 'ubuntu-latest', job.name);
+  for (const kind of ['native', 'latency']) assert.equal(runnerFor(JOBS.find(j => j.kind === kind), 'souls-heavy', 'souls-light'), 'ubuntu-latest', kind);
+  assert.ok(jobsFor(['package.json']).include.some(j => j.light === true), 'the flag reaches the matrix');
+});
+
+test('routing fallback: with CI_HEAVY_RUNNER and CI_LIGHT_RUNNER unset every job is hosted', () => {
+  for (const unset of ['', undefined]) for (const job of JOBS) assert.equal(runnerFor(job, unset, unset), 'ubuntu-latest', job.name);
 });
 
 test('ci.yml: qualify runs-on reads the matrix flag, and smoke stays hosted (#1162)', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const runsOn = /^  qualify:[\s\S]*?^    runs-on: (.*)$/m.exec(workflow)?.[1] ?? '';
-  assert.equal(runsOn, "${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}");
+  assert.equal(runsOn, "${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || matrix.light && vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}");
   assert.equal(/^  smoke:[\s\S]*?^    runs-on: (.*)$/m.exec(workflow)?.[1], 'ubuntu-latest');
 });
 

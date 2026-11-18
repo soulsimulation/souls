@@ -35,17 +35,17 @@ import { SERVER_SHARDS } from './server-test-files.mjs';
 // ubuntu-latest, so one run uses both pools at once (docs/testing.md#self-hosted-runners). `native` never is heavy (#1162).
 export const JOBS = [
   // paths: a baseline or budget change is tools-only, so no step selects it, and this job is what compares it (#1117).
-  { name: 'types-web', kind: 'types-web', assets: true, steps: ['V1-types', 'V2-build-root', 'V2-build-worlds', 'V3-bundle'], paths: /^tools\/test-harness\/bundle-budget\// },
+  { name: 'types-web', kind: 'types-web', light: true, assets: true, steps: ['V1-types', 'V2-build-root', 'V2-build-worlds', 'V3-bundle'], paths: /^tools\/test-harness\/bundle-budget\// },
   { name: 'packages', kind: 'packages', assets: true, heavy: true, steps: ['V3-packages', 'V3-walk'] },
-  { name: 'web', kind: 'web', assets: true, steps: ['V4-web'] },
+  { name: 'web', kind: 'web', light: true, assets: true, steps: ['V4-web'] },
   { name: 'launcher', kind: 'launcher', assets: true, heavy: true, steps: ['V3-launcher-unit'] },
-  { name: 'client-cli', kind: 'client-cli', assets: true, steps: ['V3-client-cli'] },
+  { name: 'client-cli', kind: 'client-cli', light: true, assets: true, steps: ['V3-client-cli'] },
   { name: 'native', kind: 'native', assets: true, steps: ['V3-mars-engine'] },
   { name: 'latency', kind: 'latency', assets: false, steps: ['V5-server-full'] },
   // #898: the generator of the reference pages (docs/site actions, api, mcp) still runs against the server's code. Server
   // and package changes can break it; so can the generator and the pages' own prose, which the gate's scope map leaves free
   // (docs and tools never gate on Modal), so `paths` adds the job for those in CI only.
-  { name: 'docs-reference', kind: 'docs-reference', assets: false, steps: ['V5-server-full', 'V3-walk'], paths: /^(?:tools\/docs\/|docs\/site\/(?:actions|api|mcp)\.md$)/ },
+  { name: 'docs-reference', kind: 'docs-reference', light: true, assets: false, steps: ['V5-server-full', 'V3-walk'], paths: /^(?:tools\/docs\/|docs\/site\/(?:actions|api|mcp)\.md$)/ },
   // the server inventory in SERVER_SHARDS duration-balanced shards (server-test-files.mjs). Shard 0 also runs every
   // god-skill unit test (GOD_SKILL_TESTS, the replay corpus among them; none needs a browser or a live server): about
   // 35 s, and some need the pulled media, so they ride on a leg that god paths already select (#918).
@@ -53,14 +53,16 @@ export const JOBS = [
   // No gate step on purpose: picked by its own paths, so the gate's suite tree and cached baseline stay as they are (#1061).
   { name: 'soul-actions', kind: 'soul-actions', assets: false, heavy: true, steps: [], paths: /^(tools\/soul-actions|apps\/server|packages\/world-compiler|packages\/engine-[^/]+)\// },
   // Also no gate step (#1111). soul-trace drives the thin CLI in tools/world-launcher/soul; soul-runtime's native client test uses the server's comms fixture. tools/entry's format, check and look gate tests ride here too, picked by tools/entry, content and packages/form-rules.
-  { name: 'soul-tools', kind: 'soul-tools', assets: false, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|tools\/entry|content|packages\/form-rules|apps\/server)\// },
+  { name: 'soul-tools', kind: 'soul-tools', light: true, assets: false, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|tools\/entry|content|packages\/form-rules|apps\/server)\// },
 ];
 
 /** The runner a qualify job gets, as ci.yml's runs-on computes it: a heavy job goes to CI_HEAVY_RUNNER (one label, or a
- * JSON array of labels) when it is set; every other job, and every job when it is unset, goes to ubuntu-latest. */
-export function runnerFor(job, heavyRunner = '') {
-  if (!job.heavy || !heavyRunner) return 'ubuntu-latest';
-  return heavyRunner.startsWith('[') ? JSON.parse(heavyRunner) : heavyRunner;
+ * JSON array of labels) when it is set; a `light` job (short, no wall-time budget) goes to CI_LIGHT_RUNNER when that is
+ * set; every other job (native and latency keep their wall-time budgets on hosted runners) goes to ubuntu-latest. */
+export function runnerFor(job, heavyRunner = '', lightRunner = '') {
+  const pool = job.heavy ? heavyRunner : job.light ? lightRunner : '';
+  if (!pool) return 'ubuntu-latest';
+  return pool.startsWith('[') ? JSON.parse(pool) : pool;
 }
 
 /** The god-skill unit tests (every *.test.mjs under tools/god-skill), run by the job with `godSkill` (ci.yml). */
