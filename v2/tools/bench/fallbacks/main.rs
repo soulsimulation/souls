@@ -17,14 +17,17 @@
 //! **The clock** (A5). The whole hall, 300 chairs; 600 bodies at seeded points in it each send the selector alone. Four
 //! checker threads resolve on the copy of the holds the clock thread publishes each 50 ms tick; the clock thread
 //! (marked, `sim::commit::off_clock`) only binds and takes the chair. Arms, two repeats each: even, 100 sends a second
-//! for 6 s; burst, 600 sends at once. Reported: the clock's time per bound act (bind and take), mean and 99th
-//! percentile, against I3's bar of 0.05 ms, and rule checks on the clock thread (must be 0).
+//! for 6 s; burst, 600 sends at once. A selector whose few were all taken since its check is resolved again at
+//! commit from the free chairs' index (`sim::commit::bind::FreeIndex`, I5b #3178), not sent back. Reported: each
+//! send's end by cause, the clock's time per bound act (bind, the index when used, and take), mean and 99th
+//! percentile, against I3's bar of 0.05 ms, the most index cells one act visited, and rule checks on the clock
+//! thread (must be 0).
 //!
 //! Run from `v2/`: `cargo run -p bench --release --bin fallbacks`.
 // A bench times a run by the wall clock (the wall-clock rule, K7, is the engine's).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
@@ -38,7 +41,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move, Seat};
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::selector::{Rule, Selector};
-use sim::commit::bind::{Bound, Slot, bind};
+use sim::commit::bind::{Bound, FreeIndex, Slot, bind};
 use sim::commit::{checks_on_clock, mark_clock_thread};
 use sim::controller::{Controller, Stance};
 use sim::ground::Piece;
@@ -112,6 +115,8 @@ struct Hall {
     chairs: Vec<Id>,
     rows: Arc<Vec<SeatRow>>,
     at: BTreeMap<Id, Vec3>,
+    /// The free chairs, as the clock thread resolves a burst from them at commit (I5b, #3178).
+    index: FreeIndex,
 }
 
 fn chair_kind() -> Name {
@@ -125,6 +130,7 @@ fn hall(seat: &Seat, rows: std::ops::Range<i64>, points: &[Vec3]) -> Hall {
     let mut slots = Slots::new();
     let mut chairs = Vec::new();
     let mut table = Vec::new();
+    let mut index = FreeIndex::new();
     for r in rows {
         for k in 0..SEATS_PER_ROW {
             let x = CENTRE_AISLE / 2 + SEAT_PITCH / 2 + k % (SEATS_PER_ROW / 2) * SEAT_PITCH;
@@ -141,6 +147,7 @@ fn hall(seat: &Seat, rows: std::ops::Range<i64>, points: &[Vec3]) -> Hall {
                 })
                 .expect("a seat");
             chairs.push(thing);
+            index.add(thing, floor_id(), chair_kind(), point);
             table.push(SeatRow {
                 thing,
                 room: floor_id(),
@@ -173,11 +180,12 @@ fn hall(seat: &Seat, rows: std::ops::Range<i64>, points: &[Vec3]) -> Hall {
         chairs,
         rows: Arc::new(table),
         at,
+        index,
     }
 }
 
 impl Hall {
-    fn held(&self) -> HashSet<Id> {
+    fn held(&self) -> BTreeSet<Id> {
         self.chairs
             .iter()
             .copied()
@@ -217,8 +225,19 @@ impl Hall {
             if let Some((_, Err(r))) = done.first() {
                 return Bound::Ended(r.name);
             }
+            self.index.take(thing);
         }
         b
+    }
+
+    /// A selector whose few were all taken since its check, resolved again at commit from the free chairs' index and
+    /// bound (I5b, #3178): the end and the cells the index visited.
+    fn at_commit(&mut self, body: Id, any: &Selector, sit: &Move, now: i64) -> (Bound, usize) {
+        let (slot, visited) = self.index.resolve(any, self.at[&body]);
+        (
+            self.bind_and_take(body, &[slot], 0, true, sit, now),
+            visited,
+        )
     }
 
     fn step(&mut self, now: i64) {
@@ -300,7 +319,7 @@ fn crowd(seat: &Seat, sit: &Move, delay: i64, fallbacks: bool, seed: u64) -> Cro
     came.sort();
     let any = Wanted::Select(any_chair(Rule::Nearest));
     // The copy at the end of each tick: tick k's is `copies[k + 1]` (`copies[0]`, the hall before any tick).
-    let mut copies: Vec<Arc<HashSet<Id>>> = vec![Arc::new(HashSet::new())];
+    let mut copies: Vec<Arc<BTreeSet<Id>>> = vec![Arc::new(BTreeSet::new())];
     // Sends in world time: (arrives, body, list as written).
     let mut sends: Vec<(i64, Id, Vec<Wanted>)> = Vec::new();
     let mut next = 0;
@@ -383,7 +402,7 @@ fn crowd(seat: &Seat, sit: &Move, delay: i64, fallbacks: bool, seed: u64) -> Cro
         k += 1;
     }
     out.taken = h.slots.len();
-    let mut holders = HashSet::new();
+    let mut holders = BTreeSet::new();
     for &ch in &h.chairs {
         if let Some(b) = h.slots.holder(ch)
             && !holders.insert(b)
@@ -407,8 +426,19 @@ type Waiting = (i64, usize, Id, Vec<Wanted>, Vec<Slot>, u64, bool);
 
 type Job = (usize, Id, bool, u64);
 
+/// What the clock arm measured.
+struct Clocked {
+    mean: f64,
+    p99: f64,
+    causes: BTreeMap<String, usize>,
+    at_commit: usize,
+    most_cells: usize,
+    on_clock: u64,
+}
+
 /// The clock arm: 600 sends of the selector alone in the 300-chair hall; `even` sends 100 a second, else all at once.
-fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, usize, u64) {
+/// A selector whose few were all taken since its check is resolved again at commit from the index (I5b, #3178).
+fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> Clocked {
     const N: usize = 600;
     const CHECKERS: usize = 4;
     let mut rng = Rng(seed);
@@ -426,7 +456,7 @@ fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, us
     let copy = Arc::new(RwLock::new(SeatsSeen {
         version: 0,
         seats: Arc::clone(&h.rows),
-        held: Arc::new(HashSet::new()),
+        held: Arc::new(BTreeSet::new()),
     }));
     let (jobs, rx): (Sender<Job>, Receiver<Job>) = channel();
     let rx = Arc::new(Mutex::new(rx));
@@ -473,7 +503,9 @@ fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, us
     mark_clock_thread();
     let tick = Duration::from_micros(u64::try_from(TICK).expect("a tick"));
     let mut deadline = Instant::now() + tick;
-    let (mut spent, mut ended, mut rechecks, mut seated) = (Vec::new(), 0, 0, 0);
+    let any = any_chair(Rule::Nearest);
+    let (mut spent, mut ended, mut at_commit, mut most_cells) = (Vec::new(), 0, 0, 0);
+    let mut causes: BTreeMap<String, usize> = BTreeMap::new();
     let mut k: u64 = 0;
     while ended < N {
         let n = Instant::now();
@@ -483,18 +515,16 @@ fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, us
         let now = i64::try_from(k).expect("a tick") * TICK;
         for (job, list) in done.try_iter() {
             let t = Instant::now();
-            let b = h.bind_and_take(job.1, &list, k, job.2, sit, now);
-            spent.push(t.elapsed());
-            match b {
-                Bound::Recheck { version } => {
-                    rechecks += 1;
-                    jobs.send((job.0, job.1, true, version)).expect("a checker");
-                }
-                b => {
-                    seated += usize::from(matches!(b, Bound::Slot { .. }));
-                    ended += 1;
-                }
+            let mut b = h.bind_and_take(job.1, &list, k, job.2, sit, now);
+            if let Bound::Recheck { .. } = b {
+                let (again, cells) = h.at_commit(job.1, &any, sit, now);
+                b = again;
+                at_commit += 1;
+                most_cells = most_cells.max(cells);
             }
+            spent.push(t.elapsed());
+            *causes.entry(name(&b)).or_default() += 1;
+            ended += 1;
         }
         h.step(now);
         k += 1;
@@ -511,7 +541,14 @@ fn clock(seat: &Seat, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, us
     let ms = |d: Duration| d.as_secs_f64() * 1000.0;
     let mean = spent.iter().map(|d| ms(*d)).sum::<f64>() / spent.len() as f64;
     let p99 = ms(spent[(spent.len() * 99 / 100).min(spent.len() - 1)]);
-    (mean, p99, seated, rechecks, checks_on_clock())
+    Clocked {
+        mean,
+        p99,
+        causes,
+        at_commit,
+        most_cells,
+        on_clock: checks_on_clock(),
+    }
 }
 
 fn main() {
@@ -566,14 +603,30 @@ fn main() {
     println!(
         "clock: 300 chairs, 600 sends of the selector alone, 4 checker threads; bar 0.05 ms at p99"
     );
-    println!("| arm | repeat | mean ms | p99 ms | seated | re-checks | rule checks on the clock |");
-    println!("|---|---|---|---|---|---|---|");
+    println!(
+        "| arm | repeat | mean ms | p99 ms | seated | seat.none-free | stale | other | resolved at commit | \
+         most cells visited | rule checks on the clock |"
+    );
+    println!("|---|---|---|---|---|---|---|---|---|---|---|");
     for (arm, even) in [("even 100/s", true), ("burst 600", false)] {
         for repeat in 1..=2u64 {
-            let (mean, p99, seated, rechecks, on) = clock(&seat, &sit, even, 0xc10c + repeat);
+            let c = clock(&seat, &sit, even, 0xc10c + repeat);
+            let get = |n: &str| c.causes.get(n).copied().unwrap_or(0);
+            let other = c.causes.values().sum::<usize>()
+                - get("seated")
+                - get("seat.none-free")
+                - get("stale");
             println!(
-                "| {arm} | {repeat} | {mean:.4} | {p99:.4} | {seated} | {rechecks} | {on} | {}",
-                if p99 <= 0.05 { "met" } else { "UNMET" }
+                "| {arm} | {repeat} | {:.4} | {:.4} | {} | {} | {} | {other} | {} | {} | {} | {}",
+                c.mean,
+                c.p99,
+                get("seated"),
+                get("seat.none-free"),
+                get("stale"),
+                c.at_commit,
+                c.most_cells,
+                c.on_clock,
+                if c.p99 <= 0.05 { "met" } else { "UNMET" }
             );
         }
     }

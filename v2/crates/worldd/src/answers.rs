@@ -20,6 +20,8 @@
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming both entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). One answer, at its end: I7's accept-then-resolve is not here.
+//! A sit's target may be I5's selector (I5b, #3178): the seat it bound and the candidate's rank are fields 5 and 6 of
+//! its move-started entry, which its receipt names; a sit no seat is free for is refused `seat.none-free`.
 //!
 //! **A restart** replays the log: each record's entries are applied to the world as built, the receipts index and
 //! each actor's last sequence and kept answers are rebuilt from it, and new intent ids follow the last one minted.
@@ -57,7 +59,7 @@
 // worldd's real clock (`Real`): the one place the process reads time.
 #![allow(clippy::disallowed_methods)]
 
-use crate::bodies::{self, Asked, Bodies, Placed};
+use crate::bodies::{self, Asked, Bodies, Chosen, Placed};
 use crate::checkers::{self, Act, Candidate, Rules};
 use crate::views::Tier;
 use replica::apply::Replica;
@@ -567,12 +569,17 @@ impl Clock {
 
     /// Writes the entry of open move `id`: event `event` with `{1: body, 2: how (once it ended; its name's bytes, since
     /// an event's text is a namespaced name), 3: [x, y, z] µm,
-    /// 4: the node of its frame}`, where the body stands or sits. Its cause is the intent, so the receipt finds it.
-    fn note(&mut self, id: Id, event: &str, how: Option<&str>, at: Micros) {
+    /// 4: the node of its frame, 5: the seat a sit bound, 6: the rank of the candidate that bound it}`, where the body
+    /// stands or sits. Its cause is the intent, so the receipt finds it.
+    fn note(&mut self, id: Id, event: &str, how: Option<&str>, chosen: Option<Chosen>, at: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let mut fields = BTreeMap::from([(1, o.body.to_value())]);
         if let Some(h) = how {
             fields.insert(2, Value::Bytes(h.as_bytes().to_vec()));
+        }
+        if let Some(c) = chosen {
+            fields.insert(5, c.seat.to_value());
+            fields.insert(6, Value::Uint(c.rank as u64));
         }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
@@ -652,7 +659,7 @@ impl Clock {
         self.bodies = Some(b);
         for (id, r) in started {
             match r {
-                Ok(()) => self.note(id, MOVE_STARTED, None, now),
+                Ok(chosen) => self.note(id, MOVE_STARTED, None, chosen, now),
                 Err(r) => self.settle(id, Err(r.name.to_owned()), now),
             }
         }
@@ -664,7 +671,7 @@ impl Clock {
         let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
-                self.note(id, MOVE_ENDED, Some("done"), now);
+                self.note(id, MOVE_ENDED, Some("done"), None, now);
                 self.end(id, |c| Answer::Receipt {
                     actor,
                     sequence,
@@ -673,7 +680,7 @@ impl Clock {
                 });
             }
             Err(reason) => {
-                self.note(id, MOVE_ENDED, Some(&reason), now);
+                self.note(id, MOVE_ENDED, Some(&reason), None, now);
                 self.end(id, |c| c.refusal(actor, sequence, &reason));
             }
         }

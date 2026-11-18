@@ -7,7 +7,7 @@
 //! The holds are B3's table (`sim::slots`), not yet in the tree, so the clock publishes that set as it publishes K8's
 //! frozen copy.
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use replica::encode::Name;
@@ -31,7 +31,7 @@ pub struct SeatRow {
 pub struct SeatsSeen {
     pub version: u64,
     pub seats: Arc<Vec<SeatRow>>,
-    pub held: Arc<HashSet<Id>>,
+    pub held: Arc<BTreeSet<Id>>,
 }
 
 /// A candidate as the agent wrote it.
@@ -94,7 +94,7 @@ mod tests {
         let seen = SeatsSeen {
             version: 1,
             seats: Arc::new(seats),
-            held: Arc::new(HashSet::from([id(10)])),
+            held: Arc::new(BTreeSet::from([id(10)])),
         };
         let any = Wanted::Select(Selector::FreeSlot {
             kind: chair,
@@ -123,7 +123,7 @@ mod tests {
             }
         );
         let full = SeatsSeen {
-            held: Arc::new(HashSet::from([id(10), id(11), id(14), id(15)])),
+            held: Arc::new(BTreeSet::from([id(10), id(11), id(14), id(15)])),
             ..seen
         };
         let list = resolve(&full, Vec3::new(0, 0, 0), &[any]);
