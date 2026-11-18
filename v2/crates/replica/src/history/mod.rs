@@ -6,7 +6,8 @@
 //!    the public state at its start: `{1: format, 2: header hash, 3: start µs, 4: length µs, 5: snapshot, 6: view}`.
 //!    The view is T7's output form (`views.rs`); the snapshot is `{1: [[id, node], ...], 2: [[id, link], ...]}` in
 //!    T6's state layout, the public nodes and links only, each reference passed through the redaction list.
-//! 2. **A day index** names a day's bundles: `{1: format, 2: day, 3: [[start µs, key, SHA-256], ...]}`.
+//! 2. **A day index** names a day's bundles: `{1: format, 2: day, 3: [[start µs, key, SHA-256], ...]}`. The store
+//!    holds each bundle deflated (`v2/tools/archive`, #3284); the SHA-256 is of its bytes here, before deflate.
 //! 3. **No words.** A bundle carries text references (`{21: id}`), never the words (T8): words reach a viewer only
 //!    beside a reference, at delivery.
 //!

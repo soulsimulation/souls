@@ -21,13 +21,15 @@
 //!    the next second opens with a marked gap, `{1: 8, 2: second, 3: items not sent}`.
 //! 5. **Addressed events have their own queue** ([`Hub::address`]: a receipt, an utterance to this Soul, from inside
 //!    the set or from outside it, E13): sent first, never merged and never dropped. One that does not fit this second
-//!    waits for the next. Grants, scope changes and gaps travel in the same queue.
+//!    waits for the next. Grants, scope changes and gaps travel in the same queue. An utterance (`souls:said`, B11) is
+//!    addressed by the hub itself from the log's part (#3231): its whole entry, to each subscription that follows one
+//!    of the hearers the entry records, and to no other; nothing is worked out again.
 //!
 //! Every item is a map whose field 1 names it ([`Kind`]). The hub reads only the log's parts; the view tier's thread
 //! runs it, never the clock thread.
 //!
 //! Not here: the socket and its request format (gatewayd), the world-wide index and finding a Soul (E1), speech and
-//! its reach (B11, E13), words beside references (K16).
+//! who hears (B11's `sim::speech`, E13), words beside references (K16).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -36,6 +38,7 @@ use replica::effects::{Body, Change, Effect, Part, Refusal};
 use replica::encode::{Value, encode};
 use replica::ids::Id;
 use replica::pose::Vec3;
+use replica::speech::{SAID, Said};
 use replica::views::{Grant, Level, ORDER, SAMPLE_US, Scope as ViewScope, Subscription, grant};
 
 use super::interest::{Interest, Places, Table};
@@ -184,6 +187,14 @@ struct Sub {
 }
 
 impl Sub {
+    fn address(&mut self, bytes: &[u8]) -> R<()> {
+        self.stats.addressed_in += 1;
+        self.push_urgent(
+            Kind::Addressed,
+            map(vec![(1, Value::Uint(9)), (2, Value::Bytes(bytes.to_vec()))]),
+        )
+    }
+
     fn push_urgent(&mut self, kind: Kind, v: Value) -> R<()> {
         let bytes = bytes_of(v)?;
         self.urgent.push_back(Out { kind, bytes });
@@ -376,12 +387,7 @@ impl Hub {
     /// Queues an event addressed to subscriber `sub` (a receipt, an utterance): sent ahead of any detail, never merged
     /// or dropped.
     pub fn address(&mut self, sub: usize, bytes: &[u8]) -> R<()> {
-        let s = self.sub_mut(sub)?;
-        s.stats.addressed_in += 1;
-        s.push_urgent(
-            Kind::Addressed,
-            map(vec![(1, Value::Uint(9)), (2, Value::Bytes(bytes.to_vec()))]),
-        )
+        self.sub_mut(sub)?.address(bytes)
     }
 
     fn sub_mut(&mut self, sub: usize) -> R<&mut Sub> {
@@ -430,11 +436,21 @@ impl Hub {
         let second = at.div_euclid(SAMPLE_US);
         // The entries of bodies, each encoded once: (bytes, whether `sampled` keeps it whatever the second).
         let mut by_body: ByBody = BTreeMap::new();
+        // The utterances: each entry's bytes and the hearers it records.
+        let mut said: Vec<(Arc<[u8]>, BTreeSet<Id>)> = Vec::new();
         for e in &part.effects {
             self.places.apply(e);
             if let Some((body, keep)) = self.body_of(e) {
                 let bytes = bytes_of(map(vec![(1, Value::Uint(1)), (2, e.to_value())]))?;
                 by_body.entry(body).or_default().push((bytes, keep));
+            }
+            for ev in e.events.iter().flatten() {
+                if ev.name.as_str() == SAID {
+                    let s = Said::read(&ev.to_value(), e.envelope.audience)?;
+                    if !s.hearers.is_empty() {
+                        said.push((bytes_of(e.to_value())?, s.hearers));
+                    }
+                }
             }
         }
         let new_second = self.second != Some(second);
@@ -446,6 +462,17 @@ impl Hub {
             }
             self.second = Some(second);
             self.nodes = self.node_seconds(second)?;
+        }
+        for (bytes, hearers) in &said {
+            for s in self.subs.iter_mut().flatten() {
+                let hears = s
+                    .scopes
+                    .iter()
+                    .any(|sc| matches!(sc, Scope::Follow(b) if hearers.contains(b)));
+                if hears {
+                    s.address(bytes)?;
+                }
+            }
         }
         for i in 0..self.subs.len() {
             self.serve(i, second, new_second, &by_body)?;

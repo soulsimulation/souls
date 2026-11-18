@@ -2,7 +2,7 @@
 # so a crate added there edits no shared file. Folders under tools/ hold Node scripts, checks and data too, so only
 # the Rust tool crates are listed here, one by one. CI's `v2` job runs v2/tools/ci.sh on the workspace.
 [workspace]
-members = ["crates/*", "tools/archive", "tools/bench", "tools/birdseye", "tools/body-script", "tools/compare-reach", "tools/import-eden", "tools/log-crash", "tools/scan-ids", "tools/stall-test", "tools/stream-check", "tools/testworld", "tools/wasm-load"]
+members = ["crates/*", "tools/archive", "tools/bench", "tools/birdseye", "tools/body-script", "tools/compare-reach", "tools/form-stop", "tools/import-accounts", "tools/import-eden", "tools/log-crash", "tools/scan-ids", "tools/stall-test", "tools/stream-check", "tools/testworld", "tools/wasm-load"]
 resolver = "3"
 
 [workspace.package]
