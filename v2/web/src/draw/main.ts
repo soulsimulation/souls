@@ -6,8 +6,11 @@ import { FreeCamera } from '../camera/camera.ts';
 import { PlaybackClock } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
+import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
+import { support } from './support.ts';
+import { pageThings } from '../things/page.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -26,12 +29,26 @@ scene.background = new THREE.Color(0xbcd3e6);
 scene.fog = new THREE.Fog(0xbcd3e6, 300, 1200);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x556644, 1.6));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-sun.position.set(300, 500, 200);
-scene.add(sun);
+// Shadows from the sun over the near part of the view (buildings, trees, things and the nearest bodies: V6's level 0),
+// in a square of SHADOW m each side of where the camera looks, which follows it.
+const SUN = new THREE.Vector3(300, 500, 200).normalize().multiplyScalar(400), SHADOW = 70;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.04;
+Object.assign(sun.shadow.camera, { left: -SHADOW, right: SHADOW, top: SHADOW, bottom: -SHADOW, near: 1, far: 1000 });
+sun.shadow.camera.updateProjectionMatrix();
+scene.add(sun, sun.target);
 const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
 const clock = new PlaybackClock();
+const things = pageThings(scene, world, new URLSearchParams(location.search));
+Object.assign(globalThis, { v2: { renderer, scene, cam, world, things, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
+// Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
+loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 
 let pointer: Pointer | null = null;
 let newestTo: number | null = null;
@@ -50,7 +67,8 @@ if (!address) status.textContent = 'no stream: open this page with ?stream=<the 
 else new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
-    world.apply(p.nodes, p.removed);
+    world.apply(p.nodes, p.removed, p.samples);
+    things.apply(p.nodes, p.removed);
     newestTo = p.to;
     played++;
     if (p.hash !== null) (hashes++, p.hash && hashesEqual++);
@@ -70,11 +88,16 @@ renderer.setAnimationLoop((now) => {
   fps = fps * 0.95 + (1000 / Math.max(1, dt)) * 0.05;
   last = now;
   cam.update(Math.min(100, dt));
+  things.update(cam.camera.position);
+  // The shadow's square moves in whole texels, so standing shadows don't shimmer as the camera moves.
+  const texel = (2 * SHADOW) / sun.shadow.mapSize.x, at = cam.controls.target;
+  sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
+  sun.position.copy(sun.target.position).add(SUN);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
   const t = worldNow === null ? null : clock.step(dt, worldNow, newestTo);
   let drawn = 0;
   if (t !== null) {
-    drawn = world.draw(t);
+    drawn = world.draw(t, cam.camera);
     if (!framed && drawn > 0) {
       framed = true;
       cam.setExtent(world.extent);
