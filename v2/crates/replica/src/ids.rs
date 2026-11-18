@@ -167,6 +167,10 @@ pub enum Purpose {
     StatePrivate,
     /// The sections that sit beside a kind (looks, words, card, how-tos; rule 15).
     KindBeside,
+    /// A log bundle's header, which each of its parts names (contract T6, `v2/docs/effects.md`).
+    Header,
+    /// The layout of effects a header names (contract T6).
+    Schema,
     /// A golden fixture's bytes, and nothing else.
     Fixture,
 }
@@ -179,6 +183,8 @@ impl Purpose {
             Purpose::StatePublic => "souls/state-public/1",
             Purpose::StatePrivate => "souls/state-private/1",
             Purpose::KindBeside => "souls/kind-beside/1",
+            Purpose::Header => "souls/header/1",
+            Purpose::Schema => "souls/schema/1",
             Purpose::Fixture => "souls/fixture/1",
         }
     }

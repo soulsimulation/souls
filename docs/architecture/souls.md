@@ -348,6 +348,11 @@ withholds. Owner messages and credentials are never in it.
   own entry, `<kind>@<revision>`, named by its things' `hands`; a revision with neither is marked `byHand: false`. A
   thing a shut container or a hiding place keeps out of sight is left out, and opening the container makes a new
   catalog version. Eden 2026: 26 kinds (21 with acts), 873 things, 5.8 KB more; a rebuild costs 43 ms instead of 37.
+  `entries` (Soul Actions adapter, `apps/server/src/god/forms-adapter.ts`) holds, per kind, the entry of each thing
+  loaded from one by `tools/entry/load.mjs`, keyed by the kind its def's `entry` param names; such a thing's `kind`
+  (and its `kinds` row) is that kind. It is absent when no entry thing is placed. A form of an entry thing refused at
+  the act, or failed when its programme ends, carries `decided`: the rules library's verdict (reason, detail, fix,
+  what it read), in the act's answer or the receipt.
 - **Live picture: `GET /v1/edge/live`** (`soul-live/1`). Every Soul's position, place and activity, the newest 40 lines
   of speech anywhere, the world tick and the catalog's version. Built at most twice a second whoever asks. No place is secret (#1262), so every Soul is listed with its position
   and place. The answer carries
