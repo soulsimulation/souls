@@ -1,0 +1,212 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:chalkboard",
+  "owner": "thing",
+  "state": {
+    "words": {
+      "n": 1,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    },
+    "face": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        470,
+        190
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      620,
+      863,
+      599
+    ]
+  },
+  "forms": {
+    "write": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "words": {
+          "type": "text"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "words",
+          "is": null
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "face"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "words",
+          "to": {
+            "arg": "words"
+          },
+          "event": "written"
+        }
+      ]
+    },
+    "wipe": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "words",
+          "not": null
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "face"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "words",
+          "to": null,
+          "event": "wiped"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:chalkboard",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            150
+          ],
+          "size": [
+            620,
+            860,
+            30
+          ],
+          "round": 0,
+          "tint": "wood",
+          "pitch": -18335
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            -150
+          ],
+          "size": [
+            620,
+            860,
+            30
+          ],
+          "round": 0,
+          "tint": "wood",
+          "pitch": 18335
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            470,
+            170
+          ],
+          "size": [
+            540,
+            760,
+            10
+          ],
+          "round": 0,
+          "tint": "slate",
+          "pitch": -18335
+        }
+      ],
+      "round": 12,
+      "palette": {
+        "wood": "#7d5a3a",
+        "slate": "#2d3330"
+      },
+      "tags": [
+        "signage",
+        "sign-text",
+        "chalkboard",
+        "menu",
+        "cafe",
+        "market"
+      ]
+    }
+  },
+  "text": {
+    "card": "A chalkboard A-frame, a cafe's menu: write on it, wipe it clean.",
+    "signs": "signs",
+    "menu_board": "menu board",
+    "a_board": "A-board",
+    "howto_rewrite": "Wipe the board clean, then write the new words."
+  },
+  "card": {
+    "text": "card",
+    "category": "signs",
+    "synonyms": [
+      "menu_board",
+      "a_board"
+    ]
+  },
+  "howtos": {
+    "rewrite": {
+      "text": "howto_rewrite",
+      "steps": [
+        {
+          "form": "wipe"
+        },
+        {
+          "form": "write"
+        }
+      ]
+    }
+  }
+}
