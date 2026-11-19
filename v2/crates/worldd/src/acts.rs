@@ -8,8 +8,13 @@
 //!   checks who may (F6) and starts the run. Its candidates are tried in rank order; the first refusal is the answer
 //!   when none starts.
 //! - **The world the runner reaches** is the bodies' own: their controller (B1), their town for a walk's corners (N7),
-//!   and a due list, moves (B2) and a minter of the forms' own. A move's reach is measured from the body's feet to
-//!   the node's place in the tree, across x and z.
+//!   and a due list, moves (B2) and a minter of the forms' own. A move's reach is measured across x and z from the
+//!   body's edge to the nearer of the thing's point the move names and its nearest surface (its entry's bounds), on
+//!   the floor the body stands on (C22, #3485); from the feet to the node's place when its entry gives neither.
+//! - **Moves and their targets** (C23, #3494). A step's move is one of [`library`]'s: every move `content/moves`
+//!   declares and the body's own ([`crate::moves`]). A move with no `at` is made where the body stands ([`AT_SELF`]);
+//!   one whose `at`, or with no `at` whose `toward`, is a thing argument reaches that thing ([`AT_ARG`]); a missing
+//!   one is refused `arg-missing`.
 //! - **Written once.** What the runner writes ([`Forms::out`]) is numbered at the replica's version, applied as one
 //!   part with the tick's other entries and handed back to [`Forms::logged`] (F2's log hook, #3257, as its issue
 //!   describes it). A run's end is its intent's answer: `done` a receipt naming every entry the intent caused, else
@@ -24,14 +29,24 @@
 //!   `sim::forms::span`): a walk across the town and a long pause are its own time, not the 10 s an act gets at its
 //!   arrival.
 //!
+//! - **Timers and values** (C24, #3495). A form's `timer` written to the log ([`Acts::out`]) goes on the forms' due
+//!   list; when it fires its clear is written and its form starts on its node with the world as actor, keyed by the
+//!   timer ([`Acts::fired`]). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
+//!   its sets.
+//! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
+//!   ([`sim::walk::stall::Watch`]): one that gains less than a quarter metre toward its goal over 3 s of world time
+//!   ends `walk.blocked` in that tick, its body's driver released, and the act's ending entry names the nearest thing
+//!   or edge in its way ([`sim::walk::stall::blocker`]).
+//!
 //! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
 //! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use replica::effects::{Actor, Effect, Refusal, fixture_bytes};
-use replica::encode::{Name, decode};
+use replica::effects::{Actor, Body, Effect, Refusal, TimerRec};
+use replica::encode::Name;
 use replica::host::{Answer, Ask, F_CROSSING, Seen};
 use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
@@ -44,8 +59,9 @@ use sim::forms::{Asked, Forms, Intent, Places, RunId, World};
 use sim::host::{Geometry, Staged};
 use sim::mover::Body as Moved;
 use sim::moves::{Moves, Reach};
-use sim::timers::DueList;
+use sim::timers::{DueList, Timer};
 use sim::walk::Leg;
+use sim::walk::stall::{Watch, blocker};
 use sim::walk::town::View;
 use skills::form_runner::Limits;
 
@@ -53,18 +69,13 @@ use crate::bodies::Bodies;
 
 type R<T> = Result<T, Refusal>;
 
-const MOVES: [&str; 5] = [
-    include_str!("../../replica/fixtures/moves/lie.diag"),
-    include_str!("../../replica/fixtures/moves/pour.diag"),
-    include_str!("../../replica/fixtures/moves/press.diag"),
-    include_str!("../../replica/fixtures/moves/rise.diag"),
-    include_str!("../../replica/fixtures/moves/sit.diag"),
-];
-
 /// The longest a form's walk may take, µs (C20, #3469): about 250 m at a body's free speed (1.4 m/s), most of the way
 /// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
 /// or `deadline-passed` by then.
 pub const WALK_MOST: Micros = 180_000_000;
+
+/// The ending of a form's walk that stopped making progress (C21, #3484).
+pub const BLOCKED: &str = "walk.blocked";
 
 /// The runner's limits for a form's run here: the walk's [`WALK_MOST`], the rest the runner's own. A run's act is
 /// given their sum as its deadline (`sim::forms::span`).
@@ -82,6 +93,9 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
+/// A walker's ask for its way (C21): the node it stands on, where it stands, the corner it aims at and its leg's end.
+type Way = (Id, [i64; 2], [i64; 2], [i64; 2]);
+
 /// What the runner sees: the bodies as the controller had them at the call, the town's corners and the tree.
 struct Sight<'a> {
     bodies: BTreeMap<Id, Moved>,
@@ -90,6 +104,13 @@ struct Sight<'a> {
     view: Option<View<'a>>,
     tree: &'a Tree,
     kind: Name,
+    /// The world's entries by kind, for a thing's points and bounds.
+    kinds: &'a Json,
+    /// The thing argument each body's run moves at or toward ([`AT_ARG`]).
+    toward: &'a BTreeMap<Id, Id>,
+    /// Each walker that asked its way this call (C21): the node it stands on, where it stands, the corner it aims at
+    /// and its leg's end, x and z µm.
+    asked: RefCell<BTreeMap<Id, Way>>,
 }
 
 impl Sight<'_> {
@@ -125,6 +146,10 @@ impl Geometry for Sight<'_> {
                     None => [to.x, to.z],
                 };
                 let y = if [x, z] == [to.x, to.z] { to.y } else { 0 };
+                let here = [me.pose.position.x, me.pose.position.z];
+                self.asked
+                    .borrow_mut()
+                    .insert(body, (sim::walk::node_of(me), here, [x, z], [to.x, to.z]));
                 Some(Answer::Point(Vec3::new(x, y, z)))
             }
             Ask::Near { .. } => Some(Answer::Near(Vec::new())),
@@ -175,23 +200,180 @@ impl Geometry for Sight<'_> {
     }
 }
 
+/// `[x, z]` µm across x and z from `a` to `b`.
+fn flat(a: [i64; 2], b: [i64; 2]) -> i64 {
+    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+    i64::try_from((d(a[0], b[0]) + d(a[1], b[1])).isqrt()).unwrap_or(i64::MAX)
+}
+
+/// How far point `q` is from the closed quadrilateral `ring` (convex, its corners in order), across x and z: 0 inside.
+fn to_ring(q: [i64; 2], ring: &[[i64; 2]; 4]) -> i64 {
+    let edge = |a: [i64; 2], b: [i64; 2]| {
+        let (d, w) = (
+            [i128::from(b[0] - a[0]), i128::from(b[1] - a[1])],
+            [i128::from(q[0] - a[0]), i128::from(q[1] - a[1])],
+        );
+        (d[0] * w[1] - d[1] * w[0], d, w)
+    };
+    let sides: Vec<i128> = (0..4).map(|i| edge(ring[i], ring[(i + 1) % 4]).0).collect();
+    if sides.iter().all(|&c| c >= 0) || sides.iter().all(|&c| c <= 0) {
+        return 0;
+    }
+    (0..4)
+        .map(|i| {
+            let (a, (_, d, w)) = (ring[i], edge(ring[i], ring[(i + 1) % 4]));
+            let len = (d[0] * d[0] + d[1] * d[1]).max(1);
+            let t = (d[0] * w[0] + d[1] * w[1]).clamp(0, len);
+            let near = |k: usize| a[k] + i64::try_from(d[k] * t / len).unwrap_or(0);
+            flat(q, [near(0), near(1)])
+        })
+        .min()
+        .unwrap_or(i64::MAX)
+}
+
+/// Whole millimetres `[x, y, z]` in µm.
+fn um(v: Option<&Json>) -> Option<Vec3> {
+    let n = |v: &Json| match v {
+        Json::Int(n) => i64::try_from(*n).ok()?.checked_mul(1000),
+        _ => None,
+    };
+    match v?.arr()? {
+        [x, y, z] => Some(Vec3::new(n(x)?, n(y)?, n(z)?)),
+        _ => None,
+    }
+}
+
+impl Sight<'_> {
+    /// How far a body standing at `from` on floor `floor` is from thing `target` across x and z (C22, #3485): from
+    /// the body's edge (a standard body's radius from its feet, [`sim::ground::HUMAN_RADIUS`]: a hand reaches from the
+    /// shoulder, not the feet) to the nearer of the thing's point `point` its entry names and its nearest surface, the
+    /// box its entry's `geometry.bounds_mm` gives (centred on its place), each turned with the thing and carried onto
+    /// that floor ([`View::on_floor`]). `None` when its entry gives neither, or the thing is not over that floor.
+    fn to_thing(&self, floor: Id, from: Vec3, target: Id, point: &Name) -> Option<i64> {
+        let view = self.view.as_ref()?;
+        let n = self.tree.node(self.tree.handle(target)?)?;
+        let entry = self.kinds.get(plain(n.kind()))?;
+        let on = |p: Vec3| {
+            view.on_floor(target, p)
+                .filter(|(f, ..)| *f == floor)
+                .map(|(_, p, _)| [p.x, p.z])
+        };
+        let q = [from.x, from.z];
+        let named = um(entry
+            .get("points")
+            .and_then(|ps| ps.get(point.as_str()))
+            .and_then(|p| p.get("at_mm")))
+        .and_then(on)
+        .map(|p| flat(q, p));
+        let surface = um(entry.get("geometry").and_then(|g| g.get("bounds_mm"))).and_then(|b| {
+            let (x, z) = (b.x / 2, b.z / 2);
+            let c = |u: i64, v: i64| on(Vec3::new(u, 0, v));
+            let ring = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
+            Some(to_ring(q, &ring))
+        });
+        let d = match (named, surface) {
+            (Some(a), Some(b)) => a.min(b),
+            (a, b) => a.or(b)?,
+        };
+        Some(d.saturating_sub(sim::ground::HUMAN_RADIUS * 1000).max(0))
+    }
+}
+
 impl Reach for Sight<'_> {
+    /// To another body, from feet to feet; to a thing, from the body's edge to its point or its nearest surface
+    /// ([`Sight::to_thing`]), else to its place in the tree; across x and z.
     fn distance(
         &self,
         body: Id,
         _: &Effector,
         _: Option<&Name>,
         target: Id,
-        _: &Name,
+        point: &Name,
     ) -> Option<i64> {
-        let a = self.bodies.get(&body)?.pose.position;
+        let me = self.bodies.get(&body)?;
+        let a = me.pose.position;
+        // C23: a move at the body itself, or at the thing argument its run named.
+        let target = match point.as_str() {
+            AT_SELF => return Some(0),
+            AT_ARG => *self.toward.get(&body)?,
+            _ => target,
+        };
+        if let Some(d) = self.to_thing(sim::walk::node_of(me), a, target, point) {
+            return Some(d);
+        }
         let b = match self.bodies.get(&target) {
             Some(t) => t.pose.position,
             None => self.place(target)?,
         };
-        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-        i64::try_from((d(a.x, b.x) + d(a.z, b.z)).isqrt()).ok()
+        Some(flat([a.x, a.z], [b.x, b.z]))
     }
+}
+
+/// The point a move with no `at` and no `toward` reaches (C23, #3494): the body itself, always in reach (a wave, a
+/// stretch, a bow where it stands).
+pub const AT_SELF: &str = "souls:self";
+
+/// The point a move whose `at` or `toward` is a thing argument reaches (C23): that thing's nearest surface, else its
+/// place, measured as a move at the form's own thing is ([`Sight::to_thing`]).
+pub const AT_ARG: &str = "souls:argument";
+
+fn obj_mut<'a>(v: &'a mut Json, key: &str) -> Option<&'a mut Json> {
+    match v {
+        Json::Obj(o) => o.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v),
+        _ => None,
+    }
+}
+
+/// A move step's target resolved from the form's arguments (C23, #3494), in a copy of `entry` the binder then reads:
+/// a move with no `at` and no `toward` is at [`AT_SELF`]; one whose `at`, or with no `at` whose `toward`, is a thing
+/// argument is at [`AT_ARG`], that thing (returned). A point of this thing named by `at` stays as it is. An argument
+/// not given as a thing is refused `arg-missing`. The two points are added to the copy's points, at its origin, so the
+/// binder knows them; [`Sight`] measures them.
+fn targets(entry: &Json, form: &str, args: &Args) -> R<(Json, Option<Id>)> {
+    let mut e = entry.clone();
+    let mut thing = None;
+    let steps = obj_mut(&mut e, "forms")
+        .and_then(|fs| obj_mut(fs, form))
+        .and_then(|f| obj_mut(f, "steps"));
+    let Some(Json::Arr(steps)) = steps else {
+        return Ok((e, None));
+    };
+    for s in steps.iter_mut() {
+        let kind = s.get("step").and_then(Json::str);
+        if !matches!(kind, Some("move" | "take" | "put")) || s.get("move").is_none() {
+            continue;
+        }
+        let arg = |k: &str| s.get(k).and_then(|v| v.get("arg")).and_then(Json::str);
+        let at = match (s.get("at"), arg("at"), arg("toward")) {
+            (Some(Json::Str(_)), ..) => continue,
+            (None, None, None) => AT_SELF,
+            (_, Some(a), _) | (None, None, Some(a)) => {
+                thing = Some(
+                    *args
+                        .things
+                        .get(a)
+                        .ok_or_else(|| refusal("arg-missing", a))?,
+                );
+                AT_ARG
+            }
+            _ => continue,
+        };
+        if let Json::Obj(o) = s {
+            o.retain(|(k, _)| k != "at");
+            o.push(("at".into(), Json::s(at)));
+        }
+    }
+    let origin = || Json::object([("at_mm", Json::Arr(vec![Json::Int(0); 3]))]);
+    if let Json::Obj(o) = &mut e
+        && !o.iter().any(|(k, _)| k == "points")
+    {
+        o.push(("points".into(), Json::Obj(Vec::new())));
+    }
+    if let Some(Json::Obj(ps)) = obj_mut(&mut e, "points") {
+        ps.push((AT_SELF.into(), origin()));
+        ps.push((AT_ARG.into(), origin()));
+    }
+    Ok((e, thing))
 }
 
 /// A form's arguments, from its intent: things by id (F4), slots of the node by number (C12).
@@ -199,6 +381,8 @@ impl Reach for Sight<'_> {
 pub struct Args {
     pub things: BTreeMap<String, Id>,
     pub slots: BTreeMap<String, u64>,
+    /// Value arguments (C24): a value by name, words by their reference, as a set's `{"arg": a}` reads them (F14).
+    pub values: skills::form_runner::Args,
 }
 
 /// The forms in progress, and what they reach that the bodies do not hold.
@@ -214,19 +398,21 @@ pub struct Acts {
     own: Controller,
     /// Each run's intent.
     runs: BTreeMap<RunId, Id>,
+    /// The thing argument each body's run moves at or toward (C23).
+    toward: BTreeMap<Id, Id>,
+    /// The forms' timers (C24) pending on the due list, by id: each starts its form on its node when it fires.
+    timers: BTreeMap<Id, (Id, Name)>,
+    /// Each form a timer started since the last call, by the timer's id: its run, or its refusal by name (C24).
+    pub fired: Vec<(Id, R<Asked>)>,
+    /// The form's walks watched for progress (C21).
+    watch: Watch,
+    /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
+    blocked: BTreeMap<Id, String>,
 }
 
-/// The moves a form's step may name: the fixture moves.
+/// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
 pub fn library() -> R<Vec<Move>> {
-    MOVES
-        .iter()
-        .map(|t| {
-            let v = decode(&fixture_bytes(t)?)
-                .map_err(|e| refusal("move-unread", e.to_string()))?
-                .value;
-            Move::from_value(&v)
-        })
-        .collect()
+    crate::moves::library()
 }
 
 /// The plain name (`namespace:name`) of a node's kind.
@@ -266,6 +452,11 @@ impl Acts {
             library,
             own: Controller::new(),
             runs: BTreeMap::new(),
+            toward: BTreeMap::new(),
+            timers: BTreeMap::new(),
+            fired: Vec::new(),
+            watch: Watch::new(),
+            blocked: BTreeMap::new(),
         }
     }
 
@@ -302,6 +493,9 @@ impl Acts {
             view,
             tree,
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
+            kinds: &self.kinds,
+            toward: &self.toward,
+            asked: RefCell::new(BTreeMap::new()),
         };
         let mut w = World {
             tree,
@@ -344,9 +538,21 @@ impl Acts {
                 first.get_or_insert(refusal("thing-missing", replica::world_model::show(*node)));
                 continue;
             };
-            let Some(entry) = self.kinds.get(&kind).cloned() else {
+            let Some(entry) = self.kinds.get(&kind) else {
                 first.get_or_insert(refusal("no_such_kind", kind));
                 continue;
+            };
+            // C23: a move's target from the form's arguments, or the body itself.
+            let (entry, thing) = match targets(entry, form, args) {
+                Ok(t) => t,
+                Err(e) => {
+                    first.get_or_insert(e);
+                    continue;
+                }
+            };
+            let was = match thing {
+                Some(t) => self.toward.insert(body, t),
+                None => self.toward.remove(&body),
             };
             // F3's reservation is a link from the body: until bodies are nodes of the tree, a form reserves nothing.
             if tree.handle(body).is_none() {
@@ -354,7 +560,7 @@ impl Acts {
             }
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
-                if args.things.is_empty() && args.slots.is_empty() {
+                if args.things.is_empty() && args.slots.is_empty() && args.values.is_empty() {
                     return forms.commit(
                         w,
                         &audiences,
@@ -368,10 +574,11 @@ impl Acts {
                         now,
                     );
                 }
-                // Thing and slot arguments (F4, C12): bound here, as `Forms::commit` binds none yet.
-                let steps = skills::form_runner::bind_in(&entry, form, &args.slots)?;
-                let effects =
-                    skills::form_runner::bind_effects_in(&entry, form, &args.things, &args.slots)?;
+                // Thing, slot and value arguments (F4, C12, C24, C25): bound here, as `Forms::commit` binds none yet.
+                let steps = skills::form_runner::bind_in(&entry, form, &args.things, &args.slots)?;
+                let mut all = skills::form_runner::args_in(&entry, &args.things, &args.slots)?;
+                all.extend(args.values.clone());
+                let effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 forms.start(w, body, *node, intent, steps, effects, limits(), now)
             });
@@ -383,6 +590,11 @@ impl Acts {
                     return Ok(a);
                 }
                 Err(e) => {
+                    // A refused act leaves the body's run as it was.
+                    match was {
+                        Some(t) => self.toward.insert(body, t),
+                        None => self.toward.remove(&body),
+                    };
                     first.get_or_insert(e);
                 }
             }
@@ -395,15 +607,35 @@ impl Acts {
         let _ = self.with(tree, bodies, 0, |forms, w| forms.leave(w, body, now));
     }
 
-    /// The forms' part of a tick at world time `now`: their walks, then every timer of theirs due by `now`.
+    /// The forms' part of a tick at world time `now`: their walks, each one that stalled ended [`BLOCKED`] (C21), then
+    /// every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
         let mut bodies = bodies;
-        self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
+        let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
+        let mut watch = std::mem::take(&mut self.watch);
+        let mut blocked = Vec::new();
+        let fired = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
             forms.tick(w, now);
-            while let Some(t) = w.due.fire(now) {
-                forms.fire(w, &t);
+            let asked = std::mem::take(&mut *w.geometry.asked.borrow_mut());
+            watch.keep(&asked.keys().copied().collect());
+            for (body, (node, here, aim, to)) in asked {
+                if watch.seen(body, here, aim, to, now) && forms.stall(w, body, BLOCKED, now) {
+                    blocked.push((body, blocker(w.tree, node, here)));
+                }
             }
+            let mut fired = Vec::new();
+            while let Some(t) = w.due.fire(now) {
+                if !forms.fire(w, &t) && timers.contains(&t.id) {
+                    fired.push(t);
+                }
+            }
+            fired
         });
+        self.watch = watch;
+        self.blocked.extend(blocked);
+        for t in fired {
+            self.timer_fired(tree, bodies.as_deref_mut(), &t, tick);
+        }
         // The walks' crossings, carried by the town's links as the bodies' own walks are (C17).
         let mut staged = Staged::default();
         staged.crossings.append(&mut self.forms.crossings);
@@ -414,16 +646,97 @@ impl Acts {
         }
     }
 
-    /// What the forms wrote, to be numbered and applied.
-    pub fn out(&mut self) -> Vec<Effect> {
-        std::mem::take(&mut self.forms.out)
+    /// A form's timer fired (C24): its clear is written, and its form is started on its node with the world as
+    /// actor, keyed by the timer; its run or its refusal by name is kept in [`Acts::fired`].
+    fn timer_fired(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, t: &Timer, tick: u64) {
+        let Some((node, form)) = self.timers.remove(&t.id) else {
+            return;
+        };
+        self.forms.out.push(Effect {
+            envelope: replica::effects::Envelope {
+                sequence: 0,
+                at: t.due,
+                cause: replica::effects::Cause::World,
+                actor: Actor::World,
+                audience: replica::world_model::Audience::Everyone,
+                node,
+            },
+            body: Body::Timers(vec![TimerRec::Clear { timer: t.id }]),
+            events: None,
+            rest: replica::effects::Rest::new(),
+        });
+        let name = form
+            .as_str()
+            .split_once(':')
+            .map_or(form.as_str(), |(_, f)| f);
+        let entry = tree
+            .handle(node)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.kinds.get(plain(n.kind())).cloned());
+        let asked = match entry {
+            None => Err(refusal("thing-missing", replica::world_model::show(node))),
+            Some(entry) => {
+                let intent = Intent {
+                    id: t.id,
+                    expiry: t.due,
+                    actor: Actor::World,
+                    digest: replica::ids::sha256(
+                        &replica::encode::encode(&t.id.to_value()).unwrap_or_default(),
+                    ),
+                };
+                self.with(tree, bodies, tick, |forms, w| {
+                    let steps = skills::form_runner::bind(&entry, name)?;
+                    let effects = skills::form_runner::bind_effects(&entry, name)?;
+                    forms.start(w, node, node, intent, steps, effects, limits(), t.due)
+                })
+            }
+        };
+        if let Ok(Asked::Started(run) | Asked::Running(run)) = &asked {
+            self.runs.insert(*run, t.id);
+        }
+        self.fired.push((t.id, asked));
     }
 
-    /// Runs that ended since the last call: each one's intent and its ending's name.
-    pub fn ended(&mut self) -> Vec<(Id, String)> {
+    /// What the forms wrote, to be numbered and applied. The forms' timers set there go on the due list, and those
+    /// cleared come off it (C24).
+    pub fn out(&mut self) -> Vec<Effect> {
+        let out = std::mem::take(&mut self.forms.out);
+        for e in &out {
+            let Body::Timers(ts) = &e.body else { continue };
+            for t in ts {
+                match t {
+                    TimerRec::Set { timer, due, name } => {
+                        let set = self.due.set(Timer {
+                            node: e.envelope.node,
+                            id: *timer,
+                            due: *due,
+                            name: name.clone(),
+                        });
+                        if set.is_ok() {
+                            self.timers.insert(*timer, (e.envelope.node, name.clone()));
+                        }
+                    }
+                    TimerRec::Clear { timer } => {
+                        if self.timers.remove(timer).is_some() {
+                            let _ = self.due.clear(e.envelope.node, *timer);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Runs that ended since the last call: each one's intent, its ending's name and, for [`BLOCKED`], what blocked
+    /// its walk.
+    pub fn ended(&mut self) -> Vec<(Id, String, Option<String>)> {
         std::mem::take(&mut self.forms.ended)
             .into_iter()
-            .filter_map(|e| Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned())))
+            .filter_map(|e| {
+                let why = self.blocked.remove(&e.body);
+                let why = why.filter(|_| e.how.as_str() == BLOCKED);
+                Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned(), why))
+            })
             .collect()
     }
 }

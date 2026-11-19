@@ -6,10 +6,12 @@
 pub mod acts;
 pub mod answers;
 pub mod bodies;
+pub mod buildsafe;
 pub mod checkers;
 pub mod engine;
 pub mod loose;
 pub mod measures;
+pub mod moves;
 pub mod shipping;
 pub mod start;
 mod syncs;

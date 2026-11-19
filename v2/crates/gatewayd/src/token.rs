@@ -306,7 +306,7 @@ impl ViewKey {
     }
 }
 
-/// A view token as presented (V13b): `view.<expires>.<grant>,<grant>….<HMAC hex>`, minted by the directory from a
+/// A view token as presented (V13b): `view.<expires>.<grant>/<grant>….<HMAC hex>`, minted by the directory from a
 /// signed-in web session (`directoryd::accounts::view`). It lets its holder subscribe to views for its grants, never
 /// send an intent, until it expires. Its text is private to this module and never formatted.
 pub struct ViewToken {
@@ -342,7 +342,7 @@ impl ViewToken {
         let (_, expires, grants) = (parts.next()?, parts.next()?, parts.next()?);
         let expires: u64 = expires.parse().ok()?;
         let grants = grants
-            .split(',')
+            .split('/')
             .map(Grant::parse)
             .collect::<Option<Vec<_>>>()?;
         (now < expires && !grants.is_empty()).then_some(View { grants, expires })

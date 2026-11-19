@@ -29,15 +29,19 @@ step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
-# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md).
+# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md); the site's pages it serves (O23, #3324).
 # The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
-step origin-headers node --test tools/origin/origin.test.mjs
+step origin-headers node --test tools/origin/origin.test.mjs tools/origin/site.test.mjs
 # The install (O17, #2810): nothing it would write, and no unit, user or port it names, is today's system's.
 step install-apart bash tools/ops/install.sh check
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
 step cost node --test tools/ops/cost/cost.test.mjs
+# The cut-over's count of what a rollback leaves in the new system (X7, #2836).
+step cutover-count node --test tools/ops/cutover/count.test.mjs
 # The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
+# Imported Souls approved again per day (X15, #3322): counts only, no Soul or account id.
+step ops-reapproved node --test tools/ops/reapproved.test.mjs
 # The watcher (O15, #2808): one message per trouble and recovery, none for a deploy, a stop or a sleep; no look wakes a world.
 step ops-watch node --test tools/ops/watch/watch.test.mjs
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
@@ -146,7 +150,9 @@ step client-memory node --test client/src/memory/*.test.mjs
 step client-history node --test client/src/history/*.test.mjs
 # Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else;
 # then a paired Soul joins a served world, acts and leaves, through the gateway (C3, #3367).
-step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet && node --test client/src/pair/*.test.mjs'
+# Pairing to a served world writes the history it advertises, which `history --at` reads (R16b, #3480).
+step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
+  node --test client/src/pair/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
 # Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.
@@ -176,6 +182,10 @@ step rules-equal node --input-type=module -e '
 # from the same WASM build in Node as natively (tools/facts/wasm.mjs).
 step facts-wasm bash -c 'cargo run -p facts --release --locked --quiet -- vectors target/facts-vectors &&
   node tools/facts/wasm.mjs target/wasm-load/pkg target/facts-vectors'
+# R16's history against the sheet (R16b, #3480): a 120 s recording's event index, asked by place, thing and Soul.
+step facts-history bash -c 'cargo run -p facts --release --locked --quiet -- record target/facts-history 120 &&
+  cargo run -p facts --release --locked --quiet -- sheet target/facts-history history 0 120 target/facts-history/sheet &&
+  node tools/facts/history.mjs target/facts-history target/facts-history/sheet 120'
 # The code hatch (F8, #2823): the world's 1,000 chess-move cases (crates/sim/tests/hatch.rs, in the tests step) through
 # the same WASM build in Node, the daemon's runtime, and in a headless browser, each giving the world's table exactly.
 step hatch-three-hosts bash -c 'node --test client/src/hatch/*.test.mjs && node web/src/hatch/hatch.browser.mjs'
@@ -184,4 +194,12 @@ step hatch-three-hosts bash -c 'node --test client/src/hatch/*.test.mjs && node 
 # each disagreement and never fails the job.
 if [[ "${GITHUB_EVENT_NAME:-}" == schedule || "${V2_FULL:-}" == 1 ]]; then
   step rules-drift bash -c 'cargo test -p replica --locked --test rules -- --ignored --nocapture drift || echo "::warning::rules-drift did not run"'
+  # The speed bars: the wall-clock bounds the tests above print but do not assert (a loaded runner misses them with
+  # no fault in the code), asserted here with V2_SPEED_BARS=1, Rust in release. Printed; a miss warns, never fails.
+  step speed-bars bash -c 'export V2_SPEED_BARS=1 R6_REPORT=1 R7_REPORT=1 R9_REPORT=1 &&
+    cargo test --release --locked -p sim -p assets -p worldd -p gatewayd -- --include-ignored --nocapture \
+      speed_bar a3_a4_a5_twenty_panics n19_a1_a2 a1_to_a5_ground_rebuilt a3_child_bounds a1_the_real_clock \
+      c8_an_intent_with_no_answer &&
+    node --test client/src/reflex/*.test.mjs client/src/cli/*.test.mjs client/src/daemon/daemon.test.mjs ||
+    echo "::warning::a speed bar was missed (see above)"'
 fi
