@@ -34,9 +34,12 @@ A world that cannot start writes nothing, so the supervisor keeps its own, in `$
 `<world>.log` (the restart record: `start`, `ready`, `exit <what>`, `stop`, with times in ms) and `<world>.json`.
 
 ```text
-WORLDS_ROOT=/var/lib/souls/worlds /usr/local/lib/souls/supervisor health          # every world
-WORLDS_ROOT=/var/lib/souls/worlds /usr/local/lib/souls/supervisor health <world>  # one
+bash v2/tools/ops/world-health.sh <world>
 ```
+
+It runs `/usr/local/lib/souls/supervisor health <world>` with `WORLDS_ROOT=/var/lib/souls/worlds`; without a world's
+name, `supervisor health` prints every world's record. A planned stop and start: `bash v2/tools/ops/world-stop.sh
+<world>`, `bash v2/tools/ops/world-start.sh <world>`.
 
 `state` is `running`, `starting`, `restarting`, `stopped`, or `restart-loop`: started five times in five minutes
 and not serving. `count` is its starts in the last five minutes, `failures` its failures since it last served,
