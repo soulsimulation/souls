@@ -135,11 +135,17 @@ pub struct Slots {
     places: BTreeMap<Key, PlaceAt>,
     held: BTreeMap<Key, Hold>,
     by_body: BTreeMap<Id, Key>,
+    changed: Vec<Id>,
 }
 
 impl Slots {
     pub fn new() -> Slots {
         Slots::default()
+    }
+
+    /// Seat ownership changes, drained by the world to wake standing queues.
+    pub fn changes(&mut self) -> Vec<Id> {
+        std::mem::take(&mut self.changed)
     }
 
     /// Adds a seat (`place-duplicate` when its thing has one in that slot).
@@ -254,6 +260,7 @@ impl Slots {
             State::Lowering { instance, .. } | State::Rising(instance) => Some(instance),
             State::Seated(_) => None,
         };
+        self.changed.push(key.0);
         Some((key.0, under_way))
     }
 
@@ -356,6 +363,7 @@ impl Slots {
             },
         );
         self.by_body.insert(r.body, key);
+        self.changed.push(key.0);
         Ok(instance)
     }
 
@@ -425,6 +433,7 @@ impl Slots {
             },
         );
         self.by_body.insert(body, key);
+        self.changed.push(key.0);
         Ok(())
     }
 
@@ -479,6 +488,7 @@ impl Slots {
     fn release(&mut self, key: Key) {
         if let Some(h) = self.held.remove(&key) {
             self.by_body.remove(&h.body);
+            self.changed.push(key.0);
         }
     }
 

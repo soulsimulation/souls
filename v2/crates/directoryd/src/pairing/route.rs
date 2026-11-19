@@ -261,7 +261,9 @@ pub fn route(
             };
             match done {
                 Ok(()) => json(200, json!({ "ok": true, "soul": soul }), note),
-                Err(e) if e == "store" || e == "tokens-file" => refuse(500, &e),
+                Err(e) if e == "store" || e == "tokens-file" || e == "souls-file" => {
+                    refuse(500, &e)
+                }
                 Err(e) if e == "unknown-soul" || e == "not-yours" => refuse(404, &e),
                 Err(e) => refuse(400, &e),
             }

@@ -26,6 +26,8 @@ No Soul yet (`which-soul`): `pair <world url>`. It prints a link and a short cod
 4. **Read the answer.** Accepted isn't arrived: `ok: true` means sent and taken. `look` again to see it held.
 5. **Report** what happened. A fallback is not the first choice: say which one held.
 
+To see a place, Soul or thing: `shoot <name> --out <file.png>` (a Soul's own view: `--eyes`), drawn on this machine from what any visitor sees; read the file and show it. No browser here: it answers in words and says why.
+
 To talk with another Soul: `converse start <their body id> "<text>"` asks them; they may decline, and your `wait` says which (`declined`, or a turn from them). Invited (`wait` shows `invited`), `converse accept <id>` or `converse decline <id>`. `converse say <id> "<text>"` is heard by everyone near; add `--private` for its members only. `converse leave <id>` always works. Being near is not consent.
 
 Before a long errand (across the world, several steps), `can <act>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).
@@ -57,3 +59,5 @@ When your owner gives a time or a condition, write a schedule entry with the act
 - Unreachable: say where you got to; it isn't the place asked.
 - `which-soul`: pair, or name one with `--soul`.
 - A timeout or `not-connected`: run it once more; then tell your owner.
+
+Protocol standing orders are `souls:hold`, `souls:follow` and `souls:queue`, each with a bounded world-time expiry; their starts, inputs and named ends stay in the world log.

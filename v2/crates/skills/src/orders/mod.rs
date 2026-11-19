@@ -27,7 +27,7 @@ pub const FOLLOW: &str = "souls:follow";
 pub const QUEUE: &str = "souls:queue";
 
 /// A field the world sets on a queueing body: its spot in the line, `[x, y, z]` µm in its floor's frame.
-pub const F_LINE: u64 = 48;
+pub use replica::host::F_LINE;
 
 fn name(t: &str) -> Name {
     Name::new(t).unwrap_or_else(|| unreachable!("a fixed name"))

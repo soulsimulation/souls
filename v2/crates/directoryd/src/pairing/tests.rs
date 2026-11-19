@@ -392,7 +392,7 @@ fn w9_a1_the_account_lists_its_souls_and_devices_and_revokes_one() {
 
 /// A PNG of `side` by `side` RGB pixels, all zero, its pixel data in one stored (uncompressed) zlib block; `text`
 /// adds a tEXt chunk, metadata G6's check strips.
-fn png(side: u32, text: Option<&str>) -> Vec<u8> {
+pub(crate) fn png(side: u32, text: Option<&str>) -> Vec<u8> {
     fn chunk(out: &mut Vec<u8>, ty: &[u8; 4], data: &[u8]) {
         out.extend_from_slice(&(data.len() as u32).to_be_bytes());
         let start = out.len();
@@ -548,4 +548,30 @@ fn w11_a4_a_retire_takes_effect_only_after_the_owners_confirmed_post() {
         Err(("soul-retired", None))
     );
     assert_eq!(p.retire("acct_owner", &grant, T0), Err("soul-retired"));
+}
+
+#[test]
+fn w11b_the_souls_file_tells_the_world_of_saved_words_and_a_retire() {
+    let (p, tokens) = store();
+    let (_, grant) = pair_in(&p, "acct_owner", "mars");
+    let mut name = tokens.file_name().unwrap().to_os_string();
+    name.push(".souls");
+    let file = || std::fs::read_to_string(tokens.with_file_name(&name)).unwrap();
+    let saved = souls::Profile {
+        name: Some("Oriel".into()),
+        description: Some("Quiet and curious.".into()),
+    };
+    p.set_profile("acct_owner", &grant, &saved).expect("saved");
+    let words = format!(
+        "words {grant} {} {}",
+        to_hex(b"Oriel"),
+        to_hex(b"Quiet and curious.")
+    );
+    assert!(file().contains(&words), "{}", file());
+    p.retire("acct_owner", &grant, T0).expect("retired");
+    assert!(file().contains(&format!("retired {grant}")), "{}", file());
+    assert!(
+        !file().lines().any(|l| l.starts_with("words ")),
+        "a retired Soul's words are not sent"
+    );
 }

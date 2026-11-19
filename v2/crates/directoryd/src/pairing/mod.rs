@@ -23,7 +23,7 @@
 pub mod route;
 pub mod souls;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::accounts::random;
 use replica::encode::{from_hex, to_hex};
