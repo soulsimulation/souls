@@ -9,6 +9,7 @@
 //!   (the checkpoint's and the log's after it); the log replayed gives a tree without the thing and with no end
 //!   pending, and a third start writes no second end.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -355,6 +356,7 @@ fn worldd() -> Command {
 struct Served {
     child: Child,
     lines: Receiver<String>,
+    early: RefCell<Vec<String>>,
 }
 
 fn serve(dir: &Path, socket: &Path) -> Served {
@@ -379,18 +381,31 @@ fn serve(dir: &Path, socket: &Path) -> Served {
             }
         });
     }
-    Served { child, lines }
+    Served {
+        child,
+        lines,
+        early: RefCell::default(),
+    }
 }
 
 impl Served {
     // A real process on the real clock: the wait for its line is real time.
     #[allow(clippy::disallowed_methods)]
+    // The two pipes race (the clock thread's stderr line can come in before the main thread's stdout line printed
+    // first): a line passed over is kept for its own wait, never dropped (#3421).
     fn line(&self, prefix: &str) -> String {
+        let mut early = self.early.borrow_mut();
+        if let Some(i) = early.iter().position(|l| l.starts_with(prefix)) {
+            return early.remove(i);
+        }
         let end = Instant::now() + Duration::from_secs(60);
         while let Some(left) = end.checked_duration_since(Instant::now()) {
             match self.lines.recv_timeout(left) {
                 Ok(l) if l.starts_with(prefix) => return l,
-                Ok(l) => println!("  {l}"),
+                Ok(l) => {
+                    println!("  {l}");
+                    early.push(l);
+                }
                 Err(_) => break,
             }
         }

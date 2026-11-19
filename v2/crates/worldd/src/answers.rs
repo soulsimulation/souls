@@ -80,10 +80,12 @@
 //! 8. the auditor checks a slice of the tree (K11).
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
-//! handed to the log is on the disk, so it never holds a change the log lacks. **Lockstep** ([`Config::lockstep`]) runs the
-//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check, and for the checkers' copy
-//! to stand at the live version, before a tick, so a run fed
-//! the same inputs at the same ticks writes the same log: how K12's replay is checked on the real loop.
+//! handed to the log is on the disk, so it never holds a change the log lacks. A tree holding changes no checkpoint
+//! has (a first start from the log, or the log after the newest checkpoint) is checkpointed in [`start`], before the
+//! clock and its watchdog start, so each later checkpoint and each tick's state hash hash only what changed (K20).
+//! **Lockstep** ([`Config::lockstep`]) runs the same loop on a clock the caller moves ([`Event::RunTo`]) and waits for
+//! every check, and for the checkers' copy to stand at the live version, before a tick, so a run fed the same inputs
+//! at the same ticks writes the same log: how K12's replay is checked on the real loop.
 //!
 //! **Measures** (O4, #2694, `crate::measures`): each act carries its stamps from the socket to its answer, each
 //! tick times the loop's own phases above ([`measures::PHASES`]), and every queue its oldest item; the answers thread
@@ -287,6 +289,18 @@ struct Carry {
 }
 
 impl Carry {
+    fn of(sequences: &Sequences, next_intent: u64, placed: Placed, tick: i64) -> Carry {
+        Carry {
+            sequences: sequences
+                .kept()
+                .map(|(a, last, kept)| (a.to_vec(), last, kept.cloned().collect()))
+                .collect(),
+            next_intent,
+            placed,
+            tick,
+        }
+    }
+
     fn to_bytes(&self) -> Vec<u8> {
         let sequences = self
             .sequences
@@ -583,17 +597,21 @@ impl Pace for Stepped {
     fn sleep_until(&mut self, _: Micros) {}
 }
 
-/// The zone's state hash (K18): `souls/fixture/1` over `[tree state hash, [[body, pose], ...]]`, the bodies the
-/// controller holds included, since the tree does not hold them yet.
-pub fn state_hash(replica: &Replica, bodies: &[(Id, Pose)]) -> [u8; 32] {
-    let tree = replica
-        .tree()
-        .to_state()
-        .hash()
-        .map(|h| h.to_bytes())
-        .unwrap_or_default();
+/// The zone's state hash (K18; K20, #3395): `souls/fixture/1` over `[[[audience, state hash], ...], [[body, pose],
+/// ...]]`: each audience's state hash as K5's seal gives it (`replica::tree::Tree::state_hashes`, the public one
+/// first), worked out each tick from the nodes the tick changed, then the bodies the controller holds, since the tree
+/// does not hold them yet.
+pub fn state_hash(tree: &[(Audience, Hash)], bodies: &[(Id, Pose)]) -> [u8; 32] {
+    let audience = |a: &Audience| match a {
+        Audience::Everyone => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+        Audience::Of(id) => Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id.to_value())])),
+    };
     let v = Value::Array(vec![
-        Value::Bytes(tree),
+        Value::Array(
+            tree.iter()
+                .map(|(a, h)| Value::Array(vec![audience(a), Value::Bytes(h.to_bytes())]))
+                .collect(),
+        ),
         Value::Array(
             bodies
                 .iter()
@@ -2248,10 +2266,15 @@ impl Clock {
         }
     }
 
-    /// The zone's state hash now ([`state_hash`]).
-    fn state(&self) -> [u8; 32] {
+    /// The zone's state hash now ([`state_hash`]): the tree's nodes changed since the last are hashed again.
+    fn state(&mut self) -> [u8; 32] {
         let poses = self.bodies.as_ref().map(Bodies::poses).unwrap_or_default();
-        state_hash(&self.replica, &poses)
+        let tree = self
+            .replica
+            .tree_for_seal()
+            .state_hashes()
+            .unwrap_or_default();
+        state_hash(&tree, &poses)
     }
 
     /// A check came back (O4: its stamp and queues); kept for the next tick.
@@ -2494,16 +2517,12 @@ impl Clock {
         if !c.due() || at.record < self.records {
             return;
         }
-        let carry = Carry {
-            sequences: self
-                .sequences
-                .kept()
-                .map(|(a, last, kept)| (a.to_vec(), last, kept.cloned().collect()))
-                .collect(),
-            next_intent: self.next_intent,
-            placed: self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
-            tick: self.tick,
-        };
+        let carry = Carry::of(
+            &self.sequences,
+            self.next_intent,
+            self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
+            self.tick,
+        );
         let version = Version {
             lineage: self.lineage,
             zone: self.zone,
@@ -2533,7 +2552,7 @@ impl Clock {
         }
     }
 
-    fn ran(&self) -> Ran {
+    fn ran(&mut self) -> Ran {
         let panicked = self
             .bodies
             .as_ref()
@@ -2781,6 +2800,42 @@ pub fn start<S: Storage + 'static>(
         name: "id-counter",
         detail: "the zone".into(),
     })?;
+    let records = found.first + found.records.len() as u64;
+    // Restored trees retain sealed hashes: their unchanged records will not be emitted by the next seal.
+    // Keep the validated blobs for sync before the checkpoint writer takes ownership of them.
+    let mut kept = Records::default();
+    kept.extend(blobs.records());
+    let mut checkpoints = match &cfg.checkpoints {
+        Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
+        None => None,
+    };
+    // K20 (#3395): a tree holding changes no checkpoint has (a first start from the log, or the log after the newest
+    // checkpoint) is sealed and checkpointed here, before the clock and its watchdog start: hashing the whole tree is
+    // never a tick's work, and from here each tick's state hash and each checkpoint hash only what changed.
+    if let Some(c) = checkpoints.as_mut()
+        && !world.tree().sealed()
+    {
+        let at = log.durable_mark().at();
+        if at.record >= records {
+            let carry = Carry::of(&sequences, next_intent, placed.clone(), last.unwrap_or(-1));
+            let version = Version {
+                lineage: cfg.lineage,
+                zone,
+                epoch: cfg.epoch,
+                sequence: world.version(),
+            };
+            let minter = Minter::at(cfg.lineage, next_intent);
+            let sealed = world.seal()?;
+            kept.keep(&sealed);
+            c.take_sealed(
+                sealed,
+                version,
+                records,
+                Some((at, &minter)),
+                &carry.to_bytes(),
+            )?;
+        }
+    }
     let mut cfg = cfg;
     let make = cfg.bodies.take();
     let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
@@ -2821,10 +2876,6 @@ pub fn start<S: Storage + 'static>(
             log.durable_mark(),
         )?)),
         false => None,
-    };
-    let checkpoints = match &cfg.checkpoints {
-        Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
-        None => None,
     };
     let loose = Ends::start(
         world.tree(),
@@ -2906,10 +2957,9 @@ pub fn start<S: Storage + 'static>(
     let world_durable = log.durable_mark();
     let synced = cfg.synced.take();
     let served = cfg.served.take();
-    // The first seal hashes every node: taken here, before the clock runs, so no tick waits on it. Later seals hash
-    // what changed. The sync thread (C16) starts from a whole copy of the sealed world and the records the seal gave.
+    // Seal any remaining changes before the clock runs. The sync thread (C16) starts from the sealed world and
+    // one complete cache: restored records, the pre-clock checkpoint's records, and this seal's incremental records.
     let first = world.seal()?;
-    let mut kept = Records::default();
     kept.keep(&first);
     let syncs = syncs::start(world.frozen(), kept, (cfg.lineage, zone, cfg.epoch)).map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
@@ -2936,7 +2986,6 @@ pub fn start<S: Storage + 'static>(
             )
         })
         .map_err(io)?;
-    let records = found.first + found.records.len() as u64;
     let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
@@ -3038,10 +3087,11 @@ pub fn start<S: Storage + 'static>(
                 }
             }
             // The state this start resumes from, bodies included: after a kill it equals the last logged tick's (C1).
+            let state = c.state();
             eprintln!(
                 "worldd: started at tick {} state {}",
                 c.tick,
-                replica::encode::to_hex(&c.state())
+                replica::encode::to_hex(&state)
             );
             // Takes one event; false once the world is to stop.
             let take = |c: &mut Clock, e: Event| -> Option<Sender<Ran>> {
