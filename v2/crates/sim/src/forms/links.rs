@@ -5,14 +5,15 @@
 //! - **Link** writes one K5 link (contract T2 rule 7) of the kind's type from the actor's end (its Soul or its body)
 //!   to the node, owned by the node (an entry writes its own node, T6), seen by everyone.
 //! - **Unlink** takes down the node's own links of that type: the one ending at the actor's end, or every one. A link
-//!   the node does not own is not its to write and is left. With none to take down it is refused `not-linked`.
+//!   the node does not own is not its to write and is left. With none to take down it changes nothing (a form such as
+//!   closing a door unlinks whoever opened it, if anyone did): its one entry carries the effect's key alone.
 //!
 //! Not here: a link seen by its owner or its members (its audience node is T8's); the binder refuses it.
 
 use replica::effects::{Body, Change, ChangeRec, Refusal, Rest};
 use replica::encode::Name;
 use replica::ids::{Id, Minter};
-use replica::world_model::{Audience, End, show};
+use replica::world_model::{Audience, End};
 
 use super::amounts::{Cx, View};
 use crate::slots::Entry;
@@ -96,7 +97,7 @@ pub(super) fn link(cx: &Cx, m: &mut Minter, ty: &Name, soul: bool) -> R<Vec<Entr
 }
 
 /// The node's own links of type `ty` taken down, each in an entry of its audience: the one ending at the actor's end
-/// (its Soul when `soul`, else its body), or every one when `all`. Refused `not-linked` when there is none.
+/// (its Soul when `soul`, else its body), or every one when `all`. With none, one entry of no change.
 pub(super) fn unlink(cx: &Cx, ty: &Name, soul: bool, all: bool) -> R<Vec<Entry>> {
     let end = if soul { cx.soul } else { cx.body };
     let gone: Vec<Entry> = owned(&cx.view, cx.node, ty)
@@ -104,19 +105,8 @@ pub(super) fn unlink(cx: &Cx, ty: &Name, soul: bool, all: bool) -> R<Vec<Entry>>
         .filter(|(_, other, _)| all || *other == end)
         .map(|(link, _, audience)| (cx.node, audience, changes(vec![Change::Unlink { link }])))
         .collect();
-    if gone.is_empty() {
-        return Err(Refusal {
-            name: "not-linked",
-            detail: format!(
-                "{} has no {} link{}",
-                show(cx.node),
-                ty.as_str(),
-                match all {
-                    true => String::new(),
-                    false => format!(" to {}", show(end)),
-                }
-            ),
-        });
+    match gone.is_empty() {
+        true => Ok(vec![(cx.node, Audience::Everyone, changes(Vec::new()))]),
+        false => Ok(gone),
     }
-    Ok(gone)
 }

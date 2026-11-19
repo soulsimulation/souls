@@ -65,7 +65,7 @@
 //!
 //! - **Links** (F15, #3385, `links`). A `link` effect writes a K5 link of the kind's type from the actor (its Soul or
 //!   its body, as the kind's link is from) to the thing, owned by the thing and seen by everyone; an `unlink` takes
-//!   down the thing's own links of that type, the actor's or every one (`not-linked` with none). Written with the
+//!   down the thing's own links of that type, the actor's or every one (with none, it changes nothing). Written with the
 //!   form's other effects at their instant, all or none: a run that fails before it, or whose other effect is
 //!   refused, links nothing.
 //!

@@ -383,11 +383,14 @@ fn a1_link_and_unlink_commit_as_k5_links_between_the_actor_and_the_thing() {
     // A link from the Soul ends at the actor's Soul, not its body.
     assert_eq!(b.act(soul(51), id(2), rack, "join_soul"), "done");
     assert_eq!(b.links(rack, MEMBER), vec![(soul(51), rack, everyone)]);
-    // Unlink from the actor takes down its own link alone; the other rack has none to take down.
+    // Unlink from the actor takes down its own link alone. With none to take down it changes nothing, and its entry,
+    // carrying the effect's key alone, commits.
     assert_eq!(b.act(soul(51), id(2), rack, "leave"), "done");
     assert_eq!(b.links(rack, USER), vec![(id(3), rack, everyone)]);
-    assert_eq!(b.act(soul(51), id(2), rack, "leave"), "not-linked");
-    assert_eq!(b.act(soul(51), id(2), other_rack, "clear"), "not-linked");
+    assert_eq!(b.act(soul(51), id(2), rack, "leave"), "done");
+    assert_eq!(b.act(soul(51), id(2), other_rack, "clear"), "done");
+    assert_eq!(b.links(rack, USER), vec![(id(3), rack, everyone)]);
+    assert_eq!(b.links(other_rack, USER), vec![]);
     // Unlink from all takes down every link of the type the rack owns, and no other type.
     assert_eq!(b.act(soul(51), id(2), rack, "join"), "done");
     assert_eq!(b.links(rack, USER).len(), 2);
