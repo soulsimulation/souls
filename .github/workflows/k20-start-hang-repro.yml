@@ -1,0 +1,54 @@
+name: k20-start-hang-repro
+# DO NOT MERGE: a scratch repro of #3421's serve-test hang on ubuntu-latest (two cores).
+on:
+  pull_request:
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the pinned Rust toolchain
+        working-directory: v2
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --no-self-update
+          rustup target add wasm32-unknown-unknown
+          nproc
+      - name: Restore cargo cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            v2/target
+          key: v2-cargo-${{ runner.os }}-${{ hashFiles('v2/rust-toolchain.toml', 'v2/Cargo.lock') }}
+          restore-keys: v2-cargo-${{ runner.os }}-
+      - name: Build
+        working-directory: v2
+        run: cargo test -p worldd --test serve --no-run
+      - name: Fixed helper, serve tests x8
+        working-directory: v2
+        run: |
+          fails=0
+          for i in $(seq 1 8); do
+            cargo test -q -p worldd --test serve -- --nocapture > run.log 2>&1 || fails=$((fails+1))
+            echo "run $i: $(grep -c 'REPRO early while waiting for "restart: ": worldd: started at tick' run.log) started-before-restart; $(grep 'test result' run.log)"
+          done
+          echo "fixed helper: $fails failed of 8"
+          test "$fails" = 0
+      - name: Old helper (drops early lines), serve tests x4
+        working-directory: v2
+        env:
+          REPRO_DROP_EARLY: '1'
+        run: |
+          fails=0
+          for i in $(seq 1 4); do
+            cargo test -q -p worldd --test serve -- --nocapture > run.log 2>&1 || fails=$((fails+1))
+            echo "run $i: $(grep -c 'REPRO early while waiting for "restart: ": worldd: started at tick' run.log) started-before-restart; $(grep -E 'test result|no line' run.log | head -3 | tr '\n' ' ')"
+          done
+          echo "old helper: $fails failed of 4"

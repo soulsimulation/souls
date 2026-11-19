@@ -107,7 +107,12 @@ fn first_line(
     while let Some(left) = end.checked_duration_since(Instant::now()) {
         match lines.recv_timeout(left) {
             Ok(l) if l.starts_with(prefix) => return Some(l),
-            Ok(l) => early.push(l),
+            Ok(l) => {
+                eprintln!("REPRO early while waiting for {prefix:?}: {l}");
+                if std::env::var_os("REPRO_DROP_EARLY").is_none() {
+                    early.push(l);
+                }
+            }
             Err(_) => break,
         }
     }
