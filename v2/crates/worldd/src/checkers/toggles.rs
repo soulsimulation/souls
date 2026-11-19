@@ -10,7 +10,7 @@ use replica::encode::{Name, Value as Cbor, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::rules::json::{Value, parse};
-use replica::world_model::{Audience, parse_kinds};
+use replica::world_model::{Audience, Kind, parse_kinds};
 use std::collections::BTreeMap;
 
 /// The world's kinds; the toggle's is the one its entry names.
@@ -51,6 +51,11 @@ pub fn rules() -> Rules {
     }
 }
 
+/// The world's kinds by full name, as its header pins them: what a creator's edit is checked against (G1b, #3362).
+pub fn kinds() -> BTreeMap<String, Kind> {
+    parse_kinds(&kinds_text(&toggle_kind(&entry()))).unwrap_or_else(|e| panic!("kinds: {e}"))
+}
+
 /// The toggle's entry (R2's fixture), parsed.
 fn entry() -> Value {
     parse(ENTRY).unwrap_or_else(|e| panic!("the toggle's entry: {e}"))
@@ -78,6 +83,7 @@ pub fn toggle(id: u64, body: Id, thing: Id) -> Act {
             })
             .to_vec(),
         recheck: None,
+        spot: None,
     }
 }
 

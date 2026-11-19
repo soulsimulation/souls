@@ -225,15 +225,23 @@ fn entries() -> Json {
     let vessel = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
       "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
-      "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] } } }"#,
+      "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] },
+        "discard": { "who": "anyone", "steps": [{ "step": "use_held" }],
+          "effects": [{ "change": "remove", "what": "this", "event": "discarded" }] },
+        "rest_by": { "who": "anyone",
+          "steps": [{ "step": "settle", "posture": "sit" }, { "step": "wait", "us": 500000 }, { "step": "rise" }] } } }"#,
     )
     .unwrap();
+    // A create names its kind pinned (C25's `stock`).
     let rack = parse(
-        r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
+        &r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
       "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] } },
       "slots": { "rest": { "admits": "thing" } },
       "forms": { "put": { "who": "anyone",
-        "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] } } }"#,
+        "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] },
+        "stock": { "who": "anyone", "steps": [],
+          "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" }] } } }"#
+            .replace("PLANK", &fullname(PLANK)),
     )
     .unwrap();
     Json::Obj(vec![(VESSEL.into(), vessel), (RACK.into(), rack)])
@@ -673,4 +681,115 @@ fn a4_two_souls_carry_a_plank_together_through_the_gateway() {
             .expect("left");
     }
     run.stop();
+}
+
+/// C25 (#3496) A1, A3: through the gateway, a form with no steps (the rack's `stock`, which makes a plank in its slot)
+/// applies its effect at once: one act, one receipt, the plank in the rack's slot in the log replayed. The vessel's `rest_by` settles the
+/// body on the ground, pauses and rises: done. Its `discard` (`use_held`, then a removal) is refused `not-held` while
+/// the body does not hold it, and after a take removes it: done.
+#[test]
+fn c25_no_steps_settle_rise_and_use_held_through_the_gateway() {
+    let (run, mut a, _) = serve("c25");
+    let stocked = a.act("test:stock", Some(rack()), BTreeMap::new());
+    println!("C25 stock: {stocked:?}");
+    assert!(!stocked.expect("the stock lands").is_empty(), "one receipt");
+    let r = run.replay();
+    let t = r.tree();
+    let made = t.children(t.handle(rack()).unwrap()).map_or(0, <[_]>::len);
+    assert_eq!(made, 1, "a plank in the rack's slot");
+    let rested = a.act("test:rest_by", Some(vessel()), BTreeMap::new());
+    println!("C25 rest_by: {rested:?}");
+    assert!(rested.is_ok(), "settled, paused and rose");
+    let early = a.act("test:discard", Some(vessel()), BTreeMap::new());
+    println!("C25 discard before a take: {early:?}");
+    assert_eq!(early, Err("not-held".to_owned()));
+    a.act("test:take", Some(vessel()), BTreeMap::new())
+        .expect("the take lands");
+    let discarded = a.act("test:discard", Some(vessel()), BTreeMap::new());
+    println!("C25 discard: {discarded:?}");
+    assert!(!discarded.expect("the discard lands").is_empty());
+    assert!(
+        run.replay().tree().handle(vessel()).is_none(),
+        "the vessel is gone"
+    );
+    run.stop();
+}
+
+/// C24 (#3495) A1: a form's `timer` effect is written as the node's timer (one entry), goes on the forms' due list,
+/// and when it fires its clear is written and its form starts on the node with the world as actor and runs to its
+/// end; the tree holds no timer after.
+#[test]
+fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
+    use worldd::acts::{Acts, Args, intent, library};
+    let vessel_entry = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
+      "forms": {
+        "ring": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+          "effects": [{ "change": "timer", "form": "quiet", "after_us": 200000, "event": "will_quiet" }] },
+        "quiet": { "who": "world", "steps": [{ "step": "wait", "us": 50000 }] } } }"#,
+    )
+    .unwrap();
+    let mut r = world();
+    let mut b = bodies().expect("the bodies");
+    let mut acts = Acts::new(
+        Json::Obj(vec![(VESSEL.into(), vessel_entry)]),
+        library().expect("the moves"),
+        header(ground()),
+        Scope([0xc4; 16]),
+    );
+    let (mut now, mut tick) = (1_000_000_i64, 0u64);
+    b.begin(now);
+    let ask = intent(id(9000), now + 60_000_000, Actor::Soul(w1()), b"ring");
+    let started = acts.start(
+        r.tree(),
+        Some(&mut b),
+        w1(),
+        &[(vessel(), "ring".to_owned())],
+        &Args::default(),
+        ask,
+        tick,
+        now,
+    );
+    assert!(
+        matches!(started, Ok(sim::forms::Asked::Started(_))),
+        "{started:?}"
+    );
+    let (mut ended, mut timers) = (Vec::new(), Vec::new());
+    while ended.len() < 2 && now < 5_000_000 {
+        now += 50_000;
+        tick += 1;
+        let _ = b.step(now);
+        acts.tick(r.tree(), Some(&mut b), tick, now);
+        let mut out = acts.out();
+        for (k, e) in out.iter_mut().enumerate() {
+            e.envelope.sequence = r.version() + k as u64;
+        }
+        if !out.is_empty() {
+            let part = sim::commit::write(&mut r, &out).expect("the forms' entries commit");
+            for e in &part.effects {
+                acts.forms.logged(e);
+                if let Body::Timers(t) = &e.body {
+                    timers.push((e.envelope.at, t.clone()));
+                }
+            }
+        }
+        if r.tree().timers().len() == 1 {
+            println!("{now} µs: pending {:?}", r.tree().timers().values().next());
+        }
+        ended.extend(acts.ended());
+    }
+    let fired: Vec<_> = acts.fired.drain(..).collect();
+    println!("timer entries: {timers:?}\nfired: {fired:?}\nended: {ended:?}");
+    assert_eq!(timers.len(), 2, "set, then cleared as it fired");
+    assert!(matches!(
+        &fired[..],
+        [(_, Ok(sim::forms::Asked::Started(_)))]
+    ));
+    assert_eq!(ended.len(), 2, "the act's run, then the timer's");
+    assert!(ended.iter().all(|(_, how)| how == "done"), "{ended:?}");
+    assert_eq!(
+        ended[1].0, fired[0].0,
+        "the timer's run is keyed by the timer"
+    );
+    assert!(r.tree().timers().is_empty());
 }

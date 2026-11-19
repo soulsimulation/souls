@@ -1,12 +1,15 @@
 //! Pairing over HTTP (W2). Bodies are JSON both ways; the card is the one HTML page.
 //!
-//! - `POST /v1/pair/request` `{secret_hash, device, label, soul | new: true, scope: "soul", force?}` →
+//! - `POST /v1/pair/request` `{secret_hash, device, label, soul | new: true, scope: "soul", force?}`, or a
+//!   creator's `{secret_hash, device, label, creator, scope: "creator", force?}` (G7) →
 //!   `{code, link, interval}`. No sign-in: the daemon asks.
 //! - `POST /v1/pair/poll` `{secret}` → `{pending: "authorization_pending" | "slow_down", interval?}`,
 //!   `{refused, device?}` or, once, `{token, grant}`.
 //! - `GET /pair` → the approval card. It shows and changes nothing until the signed-in owner acts in it.
 //! - `POST /v1/pair/show` and `POST /v1/pair/approve` `{code, confirm: true}`, signed in: W1's session token as
 //!   `Authorization: Bearer`, or on a test world W1's test person as `test_person`.
+//! - `POST /v1/account/souls` → `{souls: [{soul, device}]}` and `POST /v1/account/souls/revoke` `{soul}` →
+//!   `{revoked: soul}`, signed in the same way (the account page, W9 #2827).
 //!
 //! The log line notes a refusal's name or a short hash of the account, never a token, secret, code or name.
 
@@ -82,7 +85,8 @@ pub fn route(
                 .and_then(|h| from_hex(&h).ok())
                 .and_then(|h| h.try_into().ok());
             let new = b.get("new").and_then(Value::as_bool) == Some(true);
-            let soul = text(&b, "soul");
+            // A creator's request names its grant as `creator` (G7); a Soul's as `soul`.
+            let soul = text(&b, "soul").or_else(|| text(&b, "creator"));
             let (Some(secret_hash), Some(device), Some(label)) =
                 (secret_hash, text(&b, "device"), text(&b, "label"))
             else {
@@ -155,6 +159,35 @@ pub fn route(
                     Err(("code-guesses", _)) => refuse(429, "code-guesses"),
                     Err((e @ "unknown-code", _)) => refuse(404, e),
                     Err((e, device)) => json(409, json!({"refused": e, "device": device}), e),
+                }
+            }
+        }
+        ("POST", "/v1/account/souls" | "/v1/account/souls/revoke") => {
+            let b = body();
+            let account = match signed_in(app, bearer, &b) {
+                Ok(a) => a,
+                Err(e) => return Some(refuse(401, e)),
+            };
+            let note = format!("account#{}", correlate(&account));
+            if path == "/v1/account/souls" {
+                match p.souls(&account) {
+                    Ok(s) => {
+                        let s: Vec<Value> = s
+                            .into_iter()
+                            .map(|(soul, device)| json!({"soul": soul, "device": device}))
+                            .collect();
+                        json(200, json!({ "souls": s }), note)
+                    }
+                    Err(e) => refuse(500, e),
+                }
+            } else {
+                let Some(soul) = text(&b, "soul") else {
+                    return Some(refuse(400, "request"));
+                };
+                match p.revoke(&account, &soul) {
+                    Ok(()) => json(200, json!({ "revoked": soul }), note),
+                    Err(e @ ("store" | "tokens-file")) => refuse(500, e),
+                    Err(e) => refuse(404, e),
                 }
             }
         }

@@ -6,6 +6,8 @@
 // - `V2_STREAM_DIR`, in `vite` (dev) and `vite preview`, serves a stream writer's folder (stream-check's `www`) under
 //   /s/, uncached, as V2 will serve it. The page plays the stream named by its `stream` parameter, e.g.
 //   /?stream=/s/<lineage>/<zone>/<epoch>/<node>/<level>/<audience>/
+// - `V2_DIRECTORY`, in `vite` and `vite preview`, passes /v1/ to directoryd at that origin (W3's list of worlds, at
+//   /src/worlds/).
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,11 +35,17 @@ function streamFiles(): Plugin {
   };
 }
 
+const directory = process.env.V2_DIRECTORY ? { '/v1/': process.env.V2_DIRECTORY } : undefined;
+
 export default defineConfig({
   base: './',
   resolve: { alias: { replica: resolve(pkg, 'replica.js') } },
-  server: { fs: { allow: [here, pkg] } },
+  server: { fs: { allow: [here, pkg] }, proxy: directory },
+  preview: { proxy: directory },
   worker: { format: 'es' },
-  build: { target: 'es2022', outDir: 'dist', assetsInlineLimit: 0, chunkSizeWarningLimit: 1024 },
+  build: {
+    target: 'es2022', outDir: 'dist', assetsInlineLimit: 0, chunkSizeWarningLimit: 1024,
+    rollupOptions: { input: { main: resolve(here, 'index.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), account: resolve(here, 'src/account/index.html') } },
+  },
   plugins: [streamFiles()],
 });

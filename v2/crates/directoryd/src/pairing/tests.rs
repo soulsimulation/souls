@@ -186,7 +186,9 @@ fn a_request_is_checked_before_it_is_kept() {
         scope: "creator".into(),
         force: false,
     };
-    assert_eq!(p.ask(&a, T0), Err("scope-not-yet"));
+    assert_eq!(p.ask(&a, T0), Err("not-a-creator"));
+    a.scope = "god".into();
+    assert_eq!(p.ask(&a, T0), Err("scope-unknown"));
     a.scope = "soul".into();
     a.soul = Some("creator-00-1".into());
     assert_eq!(p.ask(&a, T0), Err("not-a-soul"));
@@ -242,4 +244,98 @@ fn a_request_is_approved_once() {
         p.poll(&secret, T0 + 2 * INTERVAL),
         Poll::Refused("delivered".into(), None)
     );
+}
+
+/// G7 (#2796): a creator pairs like a Soul, for a world's creator grant its account holds, and is handed a creator
+/// token, which the gateway's tokens file then lists.
+#[test]
+fn g7_a_creator_pairs_with_a_creator_scope_token() {
+    let (p, tokens) = store();
+    let creator = "creator-0123456789abcdef0123456789abcdef-0";
+    p.register(creator, "acct_owner").expect("registered");
+    let creator_ask = |device: &str| {
+        let secret = to_hex(&random::<32>());
+        let a = Ask {
+            secret_hash: sha256(secret.as_bytes()),
+            device: device.into(),
+            label: "builder agent".into(),
+            soul: Some(creator.into()),
+            scope: "creator".into(),
+            force: false,
+        };
+        (secret, p.ask(&a, T0).expect("asked").code)
+    };
+    // Someone else's account cannot approve it.
+    let (_, code) = creator_ask("their laptop");
+    assert_eq!(
+        p.show("acct_owner", &code, T0).expect("a card").scope,
+        "creator"
+    );
+    assert_eq!(p.approve("acct_other", &code, T0), Err(("not-yours", None)));
+    // The holder approves once; the daemon is handed a creator token.
+    let (secret, code) = creator_ask("studio laptop");
+    assert_eq!(p.approve("acct_owner", &code, T0), Ok(creator.to_string()));
+    let Poll::Token { token, grant } = p.poll(&secret, T0 + INTERVAL) else {
+        panic!("a token")
+    };
+    assert_eq!(grant, creator);
+    assert!(token.starts_with(&format!("{creator}.")));
+    let file = std::fs::read_to_string(tokens).expect("the tokens file");
+    assert!(file.contains(&format!("{creator} {}", to_hex(&sha256(token.as_bytes())))));
+    assert!(!file.contains(&token));
+    // A creator is never made by a pairing.
+    let mut a = Ask {
+        secret_hash: [9; 32],
+        device: "d".into(),
+        label: "l".into(),
+        soul: None,
+        scope: "creator".into(),
+        force: false,
+    };
+    assert_eq!(p.ask(&a, T0), Err("not-a-creator"));
+    a.soul = Some("soul-0123456789abcdef0123456789abcdef-0".into());
+    assert_eq!(p.ask(&a, T0), Err("not-a-creator"));
+}
+
+#[test]
+fn w9_a1_the_account_lists_its_souls_and_devices_and_revokes_one() {
+    let (p, tokens) = store();
+    let Poll::Token { token, grant } = pair(&p, "acct_owner", "studio laptop", None, false, T0)
+    else {
+        panic!("a token")
+    };
+    let Poll::Token { grant: other, .. } = pair(&p, "acct_owner", "phone", None, false, T0) else {
+        panic!("a token")
+    };
+    let mut want = vec![
+        (grant.clone(), Some("studio laptop".to_string())),
+        (other.clone(), Some("phone".to_string())),
+    ];
+    want.sort();
+    assert_eq!(p.souls("acct_owner").expect("souls"), want);
+    assert_eq!(p.souls("acct_other").expect("souls"), vec![]);
+    // Another account may not revoke it.
+    assert_eq!(p.revoke("acct_other", &grant), Err("not-yours"));
+    let hash = to_hex(&sha256(token.as_bytes()));
+    assert!(std::fs::read_to_string(&tokens).unwrap().contains(&hash));
+    p.revoke("acct_owner", &grant).expect("revoked");
+    // Its hash leaves the gateway's tokens file (the gateway then refuses its next intent: gatewayd's a3 test), and
+    // no device holds it.
+    let file = std::fs::read_to_string(&tokens).unwrap();
+    assert!(!file.contains(&hash), "{file}");
+    assert!(file.contains(&other), "the other Soul keeps its token");
+    let souls = p.souls("acct_owner").expect("souls");
+    assert!(souls.contains(&(grant.clone(), None)), "{souls:?}");
+    // A revoke takes the Soul to no other device; a new pairing of it is not refused as connected.
+    assert!(matches!(
+        pair(
+            &p,
+            "acct_owner",
+            "new laptop",
+            Some(&grant),
+            false,
+            T0 + 100
+        ),
+        Poll::Token { .. }
+    ));
 }

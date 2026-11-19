@@ -11,6 +11,10 @@
 //!   and a due list, moves (B2) and a minter of the forms' own. A move's reach is measured across x and z from the
 //!   body's edge to the nearer of the thing's point the move names and its nearest surface (its entry's bounds), on
 //!   the floor the body stands on (C22, #3485); from the feet to the node's place when its entry gives neither.
+//! - **Moves and their targets** (C23, #3494). A step's move is one of [`library`]'s: every move `content/moves`
+//!   declares and the body's own ([`crate::moves`]). A move with no `at` is made where the body stands ([`AT_SELF`]);
+//!   one whose `at`, or with no `at` whose `toward`, is a thing argument reaches that thing ([`AT_ARG`]); a missing
+//!   one is refused `arg-missing`.
 //! - **Written once.** What the runner writes ([`Forms::out`]) is numbered at the replica's version, applied as one
 //!   part with the tick's other entries and handed back to [`Forms::logged`] (F2's log hook, #3257, as its issue
 //!   describes it). A run's end is its intent's answer: `done` a receipt naming every entry the intent caused, else
@@ -25,14 +29,19 @@
 //!   `sim::forms::span`): a walk across the town and a long pause are its own time, not the 10 s an act gets at its
 //!   arrival.
 //!
+//! - **Timers and values** (C24, #3495). A form's `timer` written to the log ([`Acts::out`]) goes on the forms' due
+//!   list; when it fires its clear is written and its form starts on its node with the world as actor, keyed by the
+//!   timer ([`Acts::fired`]). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
+//!   its sets.
+//!
 //! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
 //! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use replica::effects::{Actor, Effect, Refusal, fixture_bytes};
-use replica::encode::{Name, decode};
+use replica::effects::{Actor, Body, Effect, Refusal, TimerRec};
+use replica::encode::Name;
 use replica::host::{Answer, Ask, F_CROSSING, Seen};
 use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
@@ -45,7 +54,7 @@ use sim::forms::{Asked, Forms, Intent, Places, RunId, World};
 use sim::host::{Geometry, Staged};
 use sim::mover::Body as Moved;
 use sim::moves::{Moves, Reach};
-use sim::timers::DueList;
+use sim::timers::{DueList, Timer};
 use sim::walk::Leg;
 use sim::walk::town::View;
 use skills::form_runner::Limits;
@@ -53,32 +62,6 @@ use skills::form_runner::Limits;
 use crate::bodies::Bodies;
 
 type R<T> = Result<T, Refusal>;
-
-const MOVES: [&str; 6] = [
-    include_str!("../../replica/fixtures/moves/lie.diag"),
-    include_str!("../../replica/fixtures/moves/pour.diag"),
-    include_str!("../../replica/fixtures/moves/press.diag"),
-    include_str!("../../replica/fixtures/moves/rise.diag"),
-    include_str!("../../replica/fixtures/moves/sit.diag"),
-    SLIDE,
-];
-
-/// A slide (C22, #3485), as today's engine gives it (`content/moves/slide.json`): one hand reaches the thing's named
-/// point, as a press does, and keeps contact while it slides along the surface. Contact begins when start-up ends.
-const SLIDE: &str = r#"
-{
-  1: "souls:slide", 2: 1,
-  3: [{1: 2, 2: 2}],                        # claims any one manipulator
-  4: [2],                                   # blocks the other manipulators while it runs
-  5: [2],                                   # a new claim on a manipulator cancels it
-  6: [{1: "souls:start-up", 2: 250000},     # contact at its end
-      {1: "souls:slide", 2: 400000},        # the contact window
-      {1: "souls:recovery", 2: 300000}],
-  7: {1: 2},                                # reaches with the hand it holds
-  8: 600000,
-  9: "souls:surface"
-}
-"#;
 
 /// The longest a form's walk may take, µs (C20, #3469): about 250 m at a body's free speed (1.4 m/s), most of the way
 /// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
@@ -111,6 +94,8 @@ struct Sight<'a> {
     kind: Name,
     /// The world's entries by kind, for a thing's points and bounds.
     kinds: &'a Json,
+    /// The thing argument each body's run moves at or toward ([`AT_ARG`]).
+    toward: &'a BTreeMap<Id, Id>,
 }
 
 impl Sight<'_> {
@@ -288,6 +273,12 @@ impl Reach for Sight<'_> {
     ) -> Option<i64> {
         let me = self.bodies.get(&body)?;
         let a = me.pose.position;
+        // C23: a move at the body itself, or at the thing argument its run named.
+        let target = match point.as_str() {
+            AT_SELF => return Some(0),
+            AT_ARG => *self.toward.get(&body)?,
+            _ => target,
+        };
         if let Some(d) = self.to_thing(sim::walk::node_of(me), a, target, point) {
             return Some(d);
         }
@@ -299,11 +290,80 @@ impl Reach for Sight<'_> {
     }
 }
 
+/// The point a move with no `at` and no `toward` reaches (C23, #3494): the body itself, always in reach (a wave, a
+/// stretch, a bow where it stands).
+pub const AT_SELF: &str = "souls:self";
+
+/// The point a move whose `at` or `toward` is a thing argument reaches (C23): that thing's nearest surface, else its
+/// place, measured as a move at the form's own thing is ([`Sight::to_thing`]).
+pub const AT_ARG: &str = "souls:argument";
+
+fn obj_mut<'a>(v: &'a mut Json, key: &str) -> Option<&'a mut Json> {
+    match v {
+        Json::Obj(o) => o.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v),
+        _ => None,
+    }
+}
+
+/// A move step's target resolved from the form's arguments (C23, #3494), in a copy of `entry` the binder then reads:
+/// a move with no `at` and no `toward` is at [`AT_SELF`]; one whose `at`, or with no `at` whose `toward`, is a thing
+/// argument is at [`AT_ARG`], that thing (returned). A point of this thing named by `at` stays as it is. An argument
+/// not given as a thing is refused `arg-missing`. The two points are added to the copy's points, at its origin, so the
+/// binder knows them; [`Sight`] measures them.
+fn targets(entry: &Json, form: &str, args: &Args) -> R<(Json, Option<Id>)> {
+    let mut e = entry.clone();
+    let mut thing = None;
+    let steps = obj_mut(&mut e, "forms")
+        .and_then(|fs| obj_mut(fs, form))
+        .and_then(|f| obj_mut(f, "steps"));
+    let Some(Json::Arr(steps)) = steps else {
+        return Ok((e, None));
+    };
+    for s in steps.iter_mut() {
+        let kind = s.get("step").and_then(Json::str);
+        if !matches!(kind, Some("move" | "take" | "put")) || s.get("move").is_none() {
+            continue;
+        }
+        let arg = |k: &str| s.get(k).and_then(|v| v.get("arg")).and_then(Json::str);
+        let at = match (s.get("at"), arg("at"), arg("toward")) {
+            (Some(Json::Str(_)), ..) => continue,
+            (None, None, None) => AT_SELF,
+            (_, Some(a), _) | (None, None, Some(a)) => {
+                thing = Some(
+                    *args
+                        .things
+                        .get(a)
+                        .ok_or_else(|| refusal("arg-missing", a))?,
+                );
+                AT_ARG
+            }
+            _ => continue,
+        };
+        if let Json::Obj(o) = s {
+            o.retain(|(k, _)| k != "at");
+            o.push(("at".into(), Json::s(at)));
+        }
+    }
+    let origin = || Json::object([("at_mm", Json::Arr(vec![Json::Int(0); 3]))]);
+    if let Json::Obj(o) = &mut e
+        && !o.iter().any(|(k, _)| k == "points")
+    {
+        o.push(("points".into(), Json::Obj(Vec::new())));
+    }
+    if let Some(Json::Obj(ps)) = obj_mut(&mut e, "points") {
+        ps.push((AT_SELF.into(), origin()));
+        ps.push((AT_ARG.into(), origin()));
+    }
+    Ok((e, thing))
+}
+
 /// A form's arguments, from its intent: things by id (F4), slots of the node by number (C12).
 #[derive(Clone, Debug, Default)]
 pub struct Args {
     pub things: BTreeMap<String, Id>,
     pub slots: BTreeMap<String, u64>,
+    /// Value arguments (C24): a value by name, words by their reference, as a set's `{"arg": a}` reads them (F14).
+    pub values: skills::form_runner::Args,
 }
 
 /// The forms in progress, and what they reach that the bodies do not hold.
@@ -319,19 +379,17 @@ pub struct Acts {
     own: Controller,
     /// Each run's intent.
     runs: BTreeMap<RunId, Id>,
+    /// The thing argument each body's run moves at or toward (C23).
+    toward: BTreeMap<Id, Id>,
+    /// The forms' timers (C24) pending on the due list, by id: each starts its form on its node when it fires.
+    timers: BTreeMap<Id, (Id, Name)>,
+    /// Each form a timer started since the last call, by the timer's id: its run, or its refusal by name (C24).
+    pub fired: Vec<(Id, R<Asked>)>,
 }
 
-/// The moves a form's step may name: the fixture moves.
+/// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
 pub fn library() -> R<Vec<Move>> {
-    MOVES
-        .iter()
-        .map(|t| {
-            let v = decode(&fixture_bytes(t)?)
-                .map_err(|e| refusal("move-unread", e.to_string()))?
-                .value;
-            Move::from_value(&v)
-        })
-        .collect()
+    crate::moves::library()
 }
 
 /// The plain name (`namespace:name`) of a node's kind.
@@ -371,6 +429,9 @@ impl Acts {
             library,
             own: Controller::new(),
             runs: BTreeMap::new(),
+            toward: BTreeMap::new(),
+            timers: BTreeMap::new(),
+            fired: Vec::new(),
         }
     }
 
@@ -408,6 +469,7 @@ impl Acts {
             tree,
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
             kinds: &self.kinds,
+            toward: &self.toward,
         };
         let mut w = World {
             tree,
@@ -450,9 +512,21 @@ impl Acts {
                 first.get_or_insert(refusal("thing-missing", replica::world_model::show(*node)));
                 continue;
             };
-            let Some(entry) = self.kinds.get(&kind).cloned() else {
+            let Some(entry) = self.kinds.get(&kind) else {
                 first.get_or_insert(refusal("no_such_kind", kind));
                 continue;
+            };
+            // C23: a move's target from the form's arguments, or the body itself.
+            let (entry, thing) = match targets(entry, form, args) {
+                Ok(t) => t,
+                Err(e) => {
+                    first.get_or_insert(e);
+                    continue;
+                }
+            };
+            let was = match thing {
+                Some(t) => self.toward.insert(body, t),
+                None => self.toward.remove(&body),
             };
             // F3's reservation is a link from the body: until bodies are nodes of the tree, a form reserves nothing.
             if tree.handle(body).is_none() {
@@ -460,7 +534,7 @@ impl Acts {
             }
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
-                if args.things.is_empty() && args.slots.is_empty() {
+                if args.things.is_empty() && args.slots.is_empty() && args.values.is_empty() {
                     return forms.commit(
                         w,
                         &audiences,
@@ -474,10 +548,11 @@ impl Acts {
                         now,
                     );
                 }
-                // Thing and slot arguments (F4, C12): bound here, as `Forms::commit` binds none yet.
-                let steps = skills::form_runner::bind_in(&entry, form, &args.slots)?;
-                let effects =
-                    skills::form_runner::bind_effects_in(&entry, form, &args.things, &args.slots)?;
+                // Thing, slot and value arguments (F4, C12, C24, C25): bound here, as `Forms::commit` binds none yet.
+                let steps = skills::form_runner::bind_in(&entry, form, &args.things, &args.slots)?;
+                let mut all = skills::form_runner::args_in(&entry, &args.things, &args.slots)?;
+                all.extend(args.values.clone());
+                let effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 forms.start(w, body, *node, intent, steps, effects, limits(), now)
             });
@@ -489,6 +564,11 @@ impl Acts {
                     return Ok(a);
                 }
                 Err(e) => {
+                    // A refused act leaves the body's run as it was.
+                    match was {
+                        Some(t) => self.toward.insert(body, t),
+                        None => self.toward.remove(&body),
+                    };
                     first.get_or_insert(e);
                 }
             }
@@ -504,12 +584,20 @@ impl Acts {
     /// The forms' part of a tick at world time `now`: their walks, then every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
         let mut bodies = bodies;
-        self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
+        let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
+        let fired = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
             forms.tick(w, now);
+            let mut fired = Vec::new();
             while let Some(t) = w.due.fire(now) {
-                forms.fire(w, &t);
+                if !forms.fire(w, &t) && timers.contains(&t.id) {
+                    fired.push(t);
+                }
             }
+            fired
         });
+        for t in fired {
+            self.timer_fired(tree, bodies.as_deref_mut(), &t, tick);
+        }
         // The walks' crossings, carried by the town's links as the bodies' own walks are (C17).
         let mut staged = Staged::default();
         staged.crossings.append(&mut self.forms.crossings);
@@ -520,9 +608,85 @@ impl Acts {
         }
     }
 
-    /// What the forms wrote, to be numbered and applied.
+    /// A form's timer fired (C24): its clear is written, and its form is started on its node with the world as
+    /// actor, keyed by the timer; its run or its refusal by name is kept in [`Acts::fired`].
+    fn timer_fired(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, t: &Timer, tick: u64) {
+        let Some((node, form)) = self.timers.remove(&t.id) else {
+            return;
+        };
+        self.forms.out.push(Effect {
+            envelope: replica::effects::Envelope {
+                sequence: 0,
+                at: t.due,
+                cause: replica::effects::Cause::World,
+                actor: Actor::World,
+                audience: replica::world_model::Audience::Everyone,
+                node,
+            },
+            body: Body::Timers(vec![TimerRec::Clear { timer: t.id }]),
+            events: None,
+            rest: replica::effects::Rest::new(),
+        });
+        let name = form
+            .as_str()
+            .split_once(':')
+            .map_or(form.as_str(), |(_, f)| f);
+        let entry = tree
+            .handle(node)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.kinds.get(plain(n.kind())).cloned());
+        let asked = match entry {
+            None => Err(refusal("thing-missing", replica::world_model::show(node))),
+            Some(entry) => {
+                let intent = Intent {
+                    id: t.id,
+                    expiry: t.due,
+                    actor: Actor::World,
+                    digest: replica::ids::sha256(
+                        &replica::encode::encode(&t.id.to_value()).unwrap_or_default(),
+                    ),
+                };
+                self.with(tree, bodies, tick, |forms, w| {
+                    let steps = skills::form_runner::bind(&entry, name)?;
+                    let effects = skills::form_runner::bind_effects(&entry, name)?;
+                    forms.start(w, node, node, intent, steps, effects, limits(), t.due)
+                })
+            }
+        };
+        if let Ok(Asked::Started(run) | Asked::Running(run)) = &asked {
+            self.runs.insert(*run, t.id);
+        }
+        self.fired.push((t.id, asked));
+    }
+
+    /// What the forms wrote, to be numbered and applied. The forms' timers set there go on the due list, and those
+    /// cleared come off it (C24).
     pub fn out(&mut self) -> Vec<Effect> {
-        std::mem::take(&mut self.forms.out)
+        let out = std::mem::take(&mut self.forms.out);
+        for e in &out {
+            let Body::Timers(ts) = &e.body else { continue };
+            for t in ts {
+                match t {
+                    TimerRec::Set { timer, due, name } => {
+                        let set = self.due.set(Timer {
+                            node: e.envelope.node,
+                            id: *timer,
+                            due: *due,
+                            name: name.clone(),
+                        });
+                        if set.is_ok() {
+                            self.timers.insert(*timer, (e.envelope.node, name.clone()));
+                        }
+                    }
+                    TimerRec::Clear { timer } => {
+                        if self.timers.remove(timer).is_some() {
+                            let _ = self.due.clear(e.envelope.node, *timer);
+                        }
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Runs that ended since the last call: each one's intent and its ending's name.

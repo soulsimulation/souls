@@ -41,10 +41,22 @@ a log's only text is `namespace:name`. Kinds are named as the world's Soul Actio
 (C12, `kind_name`): the facts' `core:<name>` and `eden:eden_<name>` load as `eden:<name>`, so each thing finds its
 entry.
 
+Things on another thing's floor (C27, #3509): a thing at the root that stands within a step (220 mm) of a building's
+own floor, one with a room on its level or raised more than a step (a pavilion's, a bandstand's, a deck's), and a
+thing in a building's slot that lies on one of its floors (a roof terrace's tables and benches), is placed on that
+floor, in the room there that holds it. The open ground is cut out under such a floor and a roof is no ground, so
+otherwise nobody could stand by them. A lawn's or a path's low floor is ground cover and keeps its things on the
+open ground, and so does a decor thing (a cableway reaches far past its valley station).
+
 Stand points (C13, #3440): `clear_stand_points` moves each entry's stand point that lies within a body's clearance
 (radius 280 mm, the cut's margin 60 and 20 for rounding) of its own kind's solids straight out until a body can stand
 there, and returns one line for each point moved or left; `worldd seed --entries` applies it and prints those lines
 (`stand point: …`), so the world's copy of the entries is moved and `content/kinds` is not.
+
+One thing per slot (C9, #3397): today a slot may hold several things (a desk's top, a hall's planter spots), the tree
+one. The first thing in the facts keeps the slot; each later one stays a plain child of the same parent at its own
+place, standing on it, and the load prints it under "left out of a full slot" with what holds the slot (29 in Eden
+2026), so K11's auditor finds no `slot-over-full`.
 
 Tests: `cargo test -p import-eden` runs a small world written in the test. The Eden 2026 test needs the exported file:
 `cargo test -p import-eden --release -- --ignored --nocapture`.

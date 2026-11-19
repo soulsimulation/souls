@@ -247,3 +247,30 @@ fn a2_a_joint_is_accepted_beam_end_to_upright_seat_and_refused_by_name_otherwise
     );
     assert_eq!(other.map_err(|e| e.name), Err("link-type-undeclared"));
 }
+
+#[test]
+fn b19_a_frame_bounds_its_crews_and_the_bound_is_in_its_hash() {
+    let kinds = loaded();
+    let upright = kind(&kinds, "mars:rack_upright");
+    println!(
+        "rack_upright children: {:?}, most {:?}",
+        upright.admits.children, upright.most
+    );
+    assert!(upright.admits.children.contains("mars:rack_crew"));
+    assert_eq!(upright.most.get("mars:rack_crew"), Some(&2));
+
+    // The bound is part of the meaning: another bound names another kind; none at all is refused by name.
+    let json = std::fs::read_to_string(folder().join("rack_upright.json")).unwrap();
+    let two = entry_to_kind(&json).unwrap();
+    let three = entry_to_kind(&json.replace("\"most\": 2", "\"most\": 3")).unwrap();
+    assert_ne!(two, three, "the bound is written into the kind's meaning");
+    let load = |text: &str| {
+        let mut k = Kinds::default();
+        k.load(&[("rack_upright.json", text)]);
+        k.admits().into_keys().next()
+    };
+    assert_ne!(load(&two), load(&three), "so the kind's hash moves with it");
+    let none = entry_to_kind(&json.replace(",\n   \"most\": 2", "")).expect_err("refused");
+    println!("a child with no most: {none}");
+    assert!(none.starts_with("entry-value"), "{none}");
+}

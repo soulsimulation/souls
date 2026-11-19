@@ -1,0 +1,144 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wash_station",
+  "owner": "thing",
+  "state": {
+    "clean_water": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "dirt": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [250, 0, 800]
+    }
+  },
+  "slots": {
+    "board": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mess_kit"
+      ],
+      "most": 1,
+      "at_mm": [250, 1000, 0],
+      "fits_mm": [300, 120, 300]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [1100, 1000, 700]
+  },
+  "forms": {
+    "wash": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bowl": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:mess_kit",
+            "in": "this",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "clean_water",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "dirt",
+          "from": {
+            "arg": "bowl"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "washed"
+        },
+        {
+          "change": "set",
+          "field": "clean_water",
+          "by": -1,
+          "event": "water_used"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:wash_station",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-460,460,-250],"size":[70,920,70],"tint":"wood"},{"kind":"box","at":[-460,460,250],"size":[70,920,70],"tint":"wood"},{"kind":"box","at":[460,460,-250],"size":[70,920,70],"tint":"wood"},{"kind":"box","at":[460,460,250],"size":[70,920,70],"tint":"wood"},{"kind":"box","at":[0,935,0],"size":[1100,50,700],"tint":"wood"},{"kind":"box","at":[250,970,0],"size":[500,20,500],"tint":"board"},{"kind":"box","at":[250,990,-150],"size":[460,20,14],"tint":"rib"},{"kind":"box","at":[250,990,-75],"size":[460,20,14],"tint":"rib"},{"kind":"box","at":[250,990,0],"size":[460,20,14],"tint":"rib"},{"kind":"box","at":[250,990,75],"size":[460,20,14],"tint":"rib"},{"kind":"box","at":[250,990,150],"size":[460,20,14],"tint":"rib"},{"kind":"box","at":[-290,950,0],"size":[380,20,440],"tint":"enamel"},{"kind":"box","at":[-490,980,0],"size":[25,40,460],"tint":"enamel"},{"kind":"box","at":[-90,980,0],"size":[25,40,460],"tint":"enamel"},{"kind":"box","at":[-290,980,-230],"size":[400,40,25],"tint":"enamel"},{"kind":"box","at":[-290,980,230],"size":[400,40,25],"tint":"enamel"},{"kind":"box","at":[-290,986,0],"size":[370,8,420],"tint":"water","when":"@clean_water>=1"},{"kind":"box","at":[-290,992,0],"size":[370,8,420],"tint":"grey","when":"@dirt>=1"}],"palette":{"wood":"#79553b","board":"#c3a077","rib":"#9b7752","enamel":"#d8e5dd","water":"#4998ba","grey":"#7b6f5c"},"tags":["camping","washing","sink","object"]}
+  },
+  "text": {
+    "card": "A camp wash bench with one basin of water: scrub a dirty bowl clean on it.",
+    "camp": "camp",
+    "sink": "sink",
+    "washing": "washing",
+    "howto_wash": "Put a dirty camp bowl on the ribbed board and scrub it for ten seconds; the basin's water is used."
+  },
+  "card": {
+    "text": "card",
+    "category": "camp",
+    "synonyms": [
+      "sink",
+      "washing"
+    ]
+  },
+  "howtos": {
+    "wash": {
+      "text": "howto_wash",
+      "steps": [
+        {
+          "form": "wash"
+        }
+      ]
+    }
+  }
+}

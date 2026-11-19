@@ -11,6 +11,7 @@ use import_eden::{
 };
 use replica::encode::Value;
 use replica::world_model::plain;
+use sim::audit::Auditor;
 
 fn kind_of(im: &Import, key: &str) -> String {
     let h = im.tree.handle(im.nodes[key]).expect("a node");
@@ -296,4 +297,82 @@ fn eden_2026_loads_with_the_bakes_counts_and_its_poses_compose_to_the_world() {
     let tiles = tiles_round_trip(&im, &f);
     println!("{tiles} terrain tiles read back byte for byte");
     assert_eq!(tiles, 256);
+
+    // C27 (#3509): a stall in the market pavilion stands in its room, the podium on the commons deck's floor, and a
+    // roof terrace's table on its hotel's roof floor; a stall on the open ground stays there.
+    assert_eq!(parent_key(&im, "e_baf7b2e1"), "e_26f30b38/pavilion");
+    assert_eq!(kind_of(&im, &parent_key(&im, "e_01496dba")), FLOOR);
+    assert_eq!(parent_key(&im, "e_090ced77"), "e_ad082d88/floor-3");
+    assert_eq!(parent_key(&im, "e_0ed9ffad"), "ground");
+
+    // C9 (#3397): one full pass of K11's auditor over the seeded tree finds no slot holding two things.
+    let mut a = Auditor::new();
+    let mut faults = Vec::new();
+    loop {
+        let s = a.slice(&im.tree, 4096);
+        faults.extend(s.faults);
+        if s.pass_ended {
+            break;
+        }
+    }
+    let over = faults.iter().filter(|f| f.name == "slot-over-full").count();
+    println!(
+        "auditor, one pass: {} faults, {over} slot-over-full; left out of a full slot: {}",
+        faults.len(),
+        im.left_out.len()
+    );
+    for l in &im.left_out {
+        println!("  {l}");
+    }
+    assert_eq!(over, 0, "{faults:?}");
+    assert_eq!(im.left_out.len(), 29, "every thing left out is reported");
+}
+
+/// C9 (#3397): two things today puts in the house's one porch slot. The first keeps the slot; the second is reported
+/// and stays a plain child of the house at its own place, so no slot holds two.
+#[test]
+fn a_second_thing_in_a_held_slot_is_left_out_of_it_and_reported() {
+    let text = SMALL
+        .replace(
+            r#"{"ref": "core-chair@1", "hash": "cc", "name": "core:chair", "form": "point"},"#,
+            r#"{"ref": "core-chair@1", "hash": "cc", "name": "core:chair", "form": "point"},
+    {"ref": "core-crate@1", "hash": "ee", "name": "core:crate", "form": "point"},"#,
+        )
+        .replace(
+            r#"    {"id": "e_lake","#,
+            r#"    {"id": "e_crate1", "def": "core-crate@1", "ref": "core-crate@1", "parent": "e_house", "slot": {"n": 4, "id": "porch"},
+     "pose": [0, 0, 4000, 0], "world": [14000, 0, 20000, 90000], "scale_ppm": 1000000},
+    {"id": "e_crate2", "def": "core-crate@1", "ref": "core-crate@1", "parent": "e_house", "slot": {"n": 4, "id": "porch"},
+     "pose": [500, 0, 4000, 0], "world": [14000, 0, 19500, 90000], "scale_ppm": 1000000},
+    {"id": "e_lake","#,
+        );
+    let im = load(&text).expect("loads");
+    let slot = |key: &str| {
+        let h = im.tree.handle(im.nodes[key]).unwrap();
+        im.tree.node(h).unwrap().slot()
+    };
+    assert_eq!(slot("e_crate1"), Some(4));
+    assert_eq!(slot("e_crate2"), None);
+    assert_eq!(parent_key(&im, "e_crate2"), "e_house");
+    assert_eq!(im.left_out.len(), 1, "{:?}", im.left_out);
+    assert!(
+        im.left_out[0]
+            .starts_with("e_crate2 (core-crate@1): slot 4 of e_house already holds e_crate1"),
+        "{:?}",
+        im.left_out
+    );
+    // Both poses are from the house's origin, 500 mm apart: out of the slot, the second keeps its own place.
+    let (p1, p2) = (
+        world_of(&im, im.nodes["e_crate1"]).unwrap(),
+        world_of(&im, im.nodes["e_crate2"]).unwrap(),
+    );
+    let (dx, dy, dz) = (p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+    assert_eq!(dy, 0);
+    assert!(
+        ((dx * dx + dz * dz) as f64).sqrt().round() as i64 == 500_000,
+        "{p1:?} {p2:?}"
+    );
+    let mut a = Auditor::new();
+    let s = a.slice(&im.tree, 1 << 20);
+    assert!(s.pass_ended && s.faults.is_empty(), "{:?}", s.faults);
 }

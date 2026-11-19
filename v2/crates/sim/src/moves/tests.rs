@@ -11,7 +11,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
 use replica::pose::{Frame, Quat, Vec3, fixture};
 
-use super::{Fired, Moves, Reach, load};
+use super::{Fired, Moves, Reach, library, load};
 use crate::controller::Controller;
 use crate::ground::Piece;
 use crate::mover::Surface;
@@ -70,6 +70,7 @@ fn world() -> World {
             outline: vec![corners.clone()],
             vertices: corners,
             triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: crate::gaits::Ground::Dry,
         }],
     );
     let mut mint = Minter::new(Scope([0xb2; 16]));
@@ -98,63 +99,76 @@ fn world() -> World {
 fn every_move_runs_from_data_phase_by_phase() {
     let all = moves();
     assert_eq!(all.len(), 5, "five moves in the fixtures");
-    for mv in &all {
-        let mut w = world();
-        let geo = Fixed(mv.reach);
-        let n = w
-            .moves
-            .start(
-                &mut w.c,
-                &mut w.due,
-                &mut w.mint,
-                &geo,
-                w.body,
-                mv,
-                w.target,
-                0,
-            )
-            .expect("started");
-        let record = w.moves.record(n).expect("in progress").clone();
-        assert!(!record.limbs.is_empty());
-        let input = w.c.input(w.body).expect("a body");
-        for limb in &record.limbs {
-            assert_eq!(
-                input.moves.get(limb),
-                Some(&mv.name),
-                "set on what it holds"
-            );
-        }
-        // One timer at a time: the end of the phase in progress.
-        let mut seen = Vec::new();
-        while let Some(t) = w.due.fire(Micros::MAX) {
-            assert_eq!(w.due.len(), 0);
-            match w.moves.fire(&mut w.c, &mut w.due, &mut w.mint, &geo, &t) {
-                Some(Fired::Phase { phase, .. }) => seen.push((t.due, phase)),
-                Some(Fired::Done(r)) => {
-                    assert_eq!(r.ended.as_ref().map(|e| e.how.as_str()), Some("done"));
-                    assert_eq!(r.ended.as_ref().map(|e| e.at), r.ends.last().copied());
-                    seen.push((t.due, mv.phases.len()));
-                }
-                other => panic!("{}: {other:?}", mv.name.as_str()),
-            }
-        }
-        let want: Vec<_> = record.ends.iter().copied().zip(1..).collect();
+    all.iter().for_each(runs_phase_by_phase);
+}
+
+/// Every `content/moves` entry loads at world start (F13, #3383) and runs from data, phase by phase.
+#[test]
+fn every_content_move_loads_and_runs() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/moves");
+    let (lib, refused) = library(&dir).expect("content/moves");
+    assert_eq!(refused, Vec::<String>::new());
+    let files = std::fs::read_dir(&dir).expect("a folder").count();
+    assert_eq!(lib.len(), files, "one move a file");
+    lib.current().iter().for_each(runs_phase_by_phase);
+}
+
+fn runs_phase_by_phase(mv: &Move) {
+    let mut w = world();
+    let geo = Fixed(mv.reach);
+    let n = w
+        .moves
+        .start(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &geo,
+            w.body,
+            mv,
+            w.target,
+            0,
+        )
+        .expect("started");
+    let record = w.moves.record(n).expect("in progress").clone();
+    assert!(!record.limbs.is_empty());
+    let input = w.c.input(w.body).expect("a body");
+    for limb in &record.limbs {
         assert_eq!(
-            seen,
-            want,
-            "{}: each phase ends on its own timer",
-            mv.name.as_str()
-        );
-        assert!(w.moves.is_empty());
-        assert!(
-            w.c.claims(w.body).expect("a body").running().is_empty(),
-            "released"
-        );
-        assert!(
-            w.c.input(w.body).expect("a body").moves.is_empty(),
-            "back to neutral"
+            input.moves.get(limb),
+            Some(&mv.name),
+            "set on what it holds"
         );
     }
+    // One timer at a time: the end of the phase in progress.
+    let mut seen = Vec::new();
+    while let Some(t) = w.due.fire(Micros::MAX) {
+        assert_eq!(w.due.len(), 0);
+        match w.moves.fire(&mut w.c, &mut w.due, &mut w.mint, &geo, &t) {
+            Some(Fired::Phase { phase, .. }) => seen.push((t.due, phase)),
+            Some(Fired::Done(r)) => {
+                assert_eq!(r.ended.as_ref().map(|e| e.how.as_str()), Some("done"));
+                assert_eq!(r.ended.as_ref().map(|e| e.at), r.ends.last().copied());
+                seen.push((t.due, mv.phases.len()));
+            }
+            other => panic!("{}: {other:?}", mv.name.as_str()),
+        }
+    }
+    let want: Vec<_> = record.ends.iter().copied().zip(1..).collect();
+    assert_eq!(
+        seen,
+        want,
+        "{}: each phase ends on its own timer",
+        mv.name.as_str()
+    );
+    assert!(w.moves.is_empty());
+    assert!(
+        w.c.claims(w.body).expect("a body").running().is_empty(),
+        "released"
+    );
+    assert!(
+        w.c.input(w.body).expect("a body").moves.is_empty(),
+        "back to neutral"
+    );
 }
 
 type Micros = replica::time::Micros;

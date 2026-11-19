@@ -28,9 +28,10 @@
 mod tests;
 
 use crate::commit::write;
-use crate::edit::{Committed, commit};
+use crate::edit::safety::Who;
+use crate::edit::{Committed, Planned, commit};
 use replica::apply::Replica;
-use replica::edit::{Checked, NODES_MOST, Refused, World};
+use replica::edit::{NODES_MOST, Refused, World};
 use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
 use replica::encode::{Name, Value, encode};
 use replica::hash::node_hash;
@@ -437,18 +438,20 @@ impl History {
         self.kept
     }
 
-    /// Commits a checked edit through G1 (`crate::edit::commit`), keeping its before-values, with `step` its build
-    /// step's name if any. A new edit clears redo.
+    /// Commits a planned edit through G1 (`crate::edit::commit`, which judges the safety rule against `bodies`),
+    /// keeping its before-values, with `step` its build step's name if any. A new edit clears redo.
     pub fn edit(
         &mut self,
         live: &mut Replica,
         minter: &mut replica::ids::Minter,
-        checked: &Checked,
+        planned: &Planned,
+        bodies: &[Who],
         at: Micros,
         step: Option<Step>,
     ) -> Result<Committed, Refused> {
+        let checked = &planned.checked;
         let before = Before::of(live.tree(), checked.reads.iter().map(|(_, id)| *id));
-        let c = commit(live, minter, checked, at)?;
+        let c = commit(live, minter, planned, bodies, at)?;
         self.undone.clear();
         let batch = self.batch(&before, live, &c.part, step);
         self.done.push_back(batch);

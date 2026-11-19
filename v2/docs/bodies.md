@@ -4,8 +4,8 @@ Engine v2 T9 (#2663), contract T9 in [TRUNK.md](TRUNK.md). It fixes what a body 
 is (a claim on them), the one interface a skill touches the world through, and the code hatch's shape. Code:
 `v2/crates/replica/src/bodies.rs` and `host.rs`; the built-in skills in `v2/crates/skills`. Fixtures:
 `v2/crates/replica/fixtures/bodies/`. Checks: `crates/replica/tests/bodies.rs` and `crates/skills/tests/`. Moving
-the real walk behind the interface and handing intents back after a restart (K13, T9b) and running a hatch (F8) are
-not here. The controller (B1) is summarised under [The controller](#the-controller-b1).
+the real walk behind the interface and handing intents back after a restart (K13, T9b) are not here; running a
+hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](#the-controller-b1).
 
 ## Bodies and skills
 
@@ -148,6 +148,16 @@ by the intent, and is answered once, at its end: a receipt naming both when done
 (`claim-taken`, `resource-held`, ...). A new move ends a walk still going for an earlier intent as `claim-taken`. A
 sit or a rise past its act's deadline runs to its end, so a seat is never left half taken.
 
+C14 (#3442): a walk to a node that is neither a point nor a seat (a room, the square, an area) goes to a free standing
+spot in it: its middle by E2's shared library (`replica::select`), granted by N9's table, the same every run. A walk,
+sit or lie with ranked fallbacks (other targets of the same form) takes the first that holds: a sit's or a lie's
+through I5's `sim::commit::bind` (the first free seat), a walk's the first with somewhere to go; none is refused by
+name (`place-taken`). The started entry names what was taken: field 5 its rank, field 6 its target. Before starting,
+the move is checked by `replica::move_check`, the function a client's `can` runs (R8) on its copy and its own
+receipts, so its `no` is the world's name: `move.no-target`, `move.bad-point`, `resource-held` (a walk while seated),
+`place-already-held`, `place-taken`, `not-seated`. A seat's holds are not in a client's copy, so its verdict on a sit
+on a free-looking seat stays `unknown`.
+
 ## The code hatch, shape only
 
 10. **The hatch is one pure function named by the hash of its module** (SA-F9, #3000): `{1: module (its SHA-256
@@ -158,9 +168,15 @@ sit or a rise past its act's deadline runs to its end, so a seat is never left h
     `hatch-module-not-hash`, `hatch-reads-nothing`, `hatch-steps-out-of-range`. One read is the engine's floor; SA-F9's
     gate asks for two, against hatches that bypass the closed lists. It sits on a form (`forms.<name>.hatch`), inside
     the kind's hash.
-11. **No scripting language is embedded.** F8 will run a hatch in one WASM interpreter inside `replica`, with no
-    imports, so the client and the server give the same answer. That is an interpreter of a pure function, not a
-    language a world is written in.
+11. **No scripting language is embedded.** F8 (#2823) runs a hatch in one WASM interpreter inside `replica`
+    (`wasmi`, `v2/crates/replica/src/hatch`), with no imports, so the world, the daemon and a page give the same
+    verdict at the same counted steps. That is an interpreter of a pure function, not a language a world is written
+    in. A module is refused at load by name: `hatch-module-hash-differs`, `-invalid`, `-float` (any float
+    instruction), `-imports`, `-memory` (over 1 MiB), `-shape`. It exports `memory`, an `i32` global `input` and
+    `run: (i32) -> i64`; the host writes each read at `input` as a count of i64 words and the words (a list or a
+    record flattened in order). Over its budget a call ends `hatch-over-budget`; any other fault `hatch-trapped`, in
+    that call only. The form runner binds and calls it (`bind_hatch`, `run_hatch`); a no refuses the act
+    `hatch-said-no` with its `why`. Answering a field's value is not built yet (`hatch-answer-not-built`).
 
 **Step 0.** A throwaway skill crate depending on `replica` alone, naming `sim::walk::Walker`, does not compile:
 `error[E0433]: failed to resolve: use of unresolved module or unlinked crate 'sim'`. The same crate using only
