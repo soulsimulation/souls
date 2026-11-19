@@ -1,13 +1,16 @@
 //! The directory process (Engine v2, #2635): so far the sign-in (W1, #2704). Arguments: [`start::USAGE`]. It prints
 //! `listening on <address>` once it serves, and refuses to start, with a line saying why, on what [`start::parse`]
-//! refuses.
+//! refuses. It ships its stores to the offsite bucket (O20b, #3523: [`directoryd::backup::run`]).
 
 use directoryd::accounts::serve::{App, key_digest, now, run};
 use directoryd::accounts::session::{Jwks, Verifier};
 use directoryd::accounts::start;
 use directoryd::accounts::store::Store;
 use directoryd::accounts::view::ViewKey;
+use directoryd::backup;
+use std::collections::BTreeMap;
 use std::net::TcpListener;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 fn main() {
@@ -72,9 +75,7 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let addr = listener.local_addr().expect("a bound address");
-    println!("listening on {addr}");
-    let app = App {
+    let app = Arc::new(App {
         store,
         verifier,
         test_sign_in: config.test_sign_in,
@@ -93,6 +94,40 @@ fn main() {
             }
             w => w.and_then(Result::ok),
         },
-    };
-    run(listener, Arc::new(app));
+    });
+    // O20's shipper for the directory's stores (O20b, #3523): the account store's copy is handed over by this program,
+    // which holds it exclusively; with no bucket set it says so once and ships nothing.
+    let mut stores = Vec::new();
+    for mut e in backup::owned_by("directoryd", &[]).unwrap_or_default() {
+        let at = match e.name.as_str() {
+            "accounts" => Some(&config.store),
+            "pairing" => config.pairing.as_ref(),
+            "gateway-tokens" => config.gateway_tokens.as_ref(),
+            _ => None,
+        };
+        if let Some(at) = at.and_then(|p| std::path::absolute(p).ok()) {
+            e.path = at.to_string_lossy().into_owned();
+            stores.push(e);
+        }
+    }
+    let owner = Arc::clone(&app);
+    let hooks = BTreeMap::from([(
+        "accounts".to_owned(),
+        Box::new(move |to: &Path| owner.store.backup(to).map_err(|e| e.to_string()))
+            as backup::Hook,
+    )]);
+    let root = std::path::absolute(&config.store)
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .unwrap_or_default();
+    match backup::run("directoryd", root, stores, hooks, "") {
+        Ok(said) => eprintln!("{said}"),
+        Err(e) => {
+            eprintln!("directoryd: refusing to start: {}: {}", e.name, e.detail);
+            std::process::exit(2);
+        }
+    }
+    let addr = listener.local_addr().expect("a bound address");
+    println!("listening on {addr}");
+    run(listener, app);
 }

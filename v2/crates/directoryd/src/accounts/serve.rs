@@ -37,6 +37,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The largest request body read.
 pub const BODY_MOST: usize = 4096;
+/// The largest body of a Soul's picture upload (W11): base64url of `pairing::souls::PICTURE_BYTES`, and its JSON.
+pub const PICTURE_BODY_MOST: usize = 360_000;
 
 pub struct App {
     pub store: Store,
@@ -90,6 +92,11 @@ fn read(stream: &TcpStream) -> Option<Request> {
     let method = words.next()?.to_string();
     let path = words.next()?.split('?').next()?.to_string();
     let (mut bearer, mut soul, mut length) = (None, None, 0usize);
+    let most = if path == "/v1/account/souls/picture" {
+        PICTURE_BODY_MOST
+    } else {
+        BODY_MOST
+    };
     loop {
         let mut h = String::new();
         if r.read_line(&mut h).ok()? == 0 {
@@ -102,7 +109,7 @@ fn read(stream: &TcpStream) -> Option<Request> {
         let (name, value) = h.split_once(':')?;
         let value = value.trim();
         if name.eq_ignore_ascii_case("content-length") {
-            length = value.parse().ok().filter(|n| *n <= BODY_MOST)?;
+            length = value.parse().ok().filter(|n| *n <= most)?;
         } else if name.eq_ignore_ascii_case("authorization") {
             bearer = value.strip_prefix("Bearer ").map(str::to_string);
         } else if name.eq_ignore_ascii_case("souls-soul") {

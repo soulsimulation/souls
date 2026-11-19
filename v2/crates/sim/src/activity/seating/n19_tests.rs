@@ -120,8 +120,9 @@ const WALK_SPEED: i64 = 1_400_000;
 const CROSS: i64 = 7_000_000;
 const LANE: i64 = 600_000;
 
-/// What A1 checks after a seat or a removal: the rebuild at index `at` touched the open ground under the bay, took
-/// under a second, and the part's middle `centre` is no ground (seated) or ground again (taken out).
+/// What A1 checks after a seat or a removal: the rebuild at index `at` touched the open ground under the bay, and the
+/// part's middle `centre` is no ground (seated) or ground again (taken out). The rebuild's time is printed; its bar
+/// (under a second) is real time, asserted only in the speed-bar step (ci.sh, V2_SPEED_BARS=1, release).
 fn rebuilt(kept: &Rc<RefCell<Kept>>, what: &str, at: usize, centre: Vec3, seated: bool) -> u128 {
     let k = kept.borrow();
     let (touched, us) = &k.rebuilds[at];
@@ -129,7 +130,9 @@ fn rebuilt(kept: &Rc<RefCell<Kept>>, what: &str, at: usize, centre: Vec3, seated
         touched.contains(&k.town.ground),
         "{what}: the ground under the bay is touched"
     );
-    assert!(*us < 1_000_000, "{what}: rebuilt in {us} µs");
+    if std::env::var_os("V2_SPEED_BARS").is_some() {
+        assert!(*us < 1_000_000, "{what}: rebuilt in {us} µs");
+    }
     assert_eq!(walkable(&k, centre), !seated, "{what}: the part's middle");
     println!(
         "A1: {what}: ground rebuilt and installed in {us} µs ({} node touched); the part's middle at ({}, {}) mm {}",

@@ -37,7 +37,7 @@ void main(){gl_FragColor=vec4(vC,vA);
 }`;
 
 /** Today's 32-bit hash to [0, 1) (`atmosphere/weather.ts`), so the drops are seeded as today's. */
-function hash01(a: number, b = 0) {
+export function hash01(a: number, b = 0) {
   let h = (Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1)) >>> 0;
   h = Math.imul(h ^ (h >>> 15), 0x85ebca6b) >>> 0;
   h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
