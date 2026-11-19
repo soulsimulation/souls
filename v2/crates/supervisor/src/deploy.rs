@@ -1,8 +1,8 @@
 //! Deploy and roll back one world (Engine v2 O7, #2804): a new build reaches one world at a time, and a bad one is
 //! taken back by the machine. Runbook: `v2/docs/runbook/deploy-and-roll-back.md`.
 //!
-//! 1. **Rehearse** ([`rehearse`]): on a scratch copy of the world's log, never the served one, the new build starts
-//!    from the log as it stood `window` records ago and is fed the intents those records took (the recorded inputs,
+//! 1. **Rehearse** ([`rehearse`]): on a scratch copy of the world's folder, never the served one, the new build starts
+//!    as `worldd serve` from the log as it stood `window` records ago and is fed the intents those records took (the recorded inputs,
 //!    I4's [`ANSWERED`] rows). It passes when it starts, gives every fed intent a named end and gives the probe act a
 //!    receipt. Invariants, not hashes: two builds fed the same inputs need not write the same bytes.
 //! 2. **Canary** ([`watch`]): the world's pin is set to the new build (one conditional write, W8) and the world is
@@ -13,9 +13,10 @@
 //!    must read every schema the new one writes (T6), or the rollback is refused `rollback.schema-unread` and the
 //!    world keeps running what it runs. Otherwise the pin goes back and the world is restarted.
 //!
-//! A build's folder is `builds/<hash>/`; it is started as the launcher starts it, `worldd --dir <state>`, and
-//! `worldd schemas` prints `reads <hash>` and `writes <hash>` lines. The served log is `<state>/world.log`, its
-//! gateway socket `<state>/w.sock`. A rehearsal runs with `WORLDD_REHEARSAL=1` in its environment.
+//! A build's folder is `builds/<hash>/`; it is started as the launcher starts it, `worldd serve --dir <state>` (C1,
+//! #3365), and `worldd schemas` prints `reads <hash>` and `writes <hash>` lines. The served log is `<state>/log`; the
+//! world's socket is the placed world's `<root>/../run/<world>.sock` (`place-world.sh`), else `<state>/gateway.sock`.
+//! A rehearsal runs with `WORLDD_REHEARSAL=1` in its environment and serves `<scratch>/gateway.sock` (O18b, #3498).
 // Deploying is operations, not the engine: its windows and timelines are wall-clock time (the wall-clock rule, K7).
 #![allow(clippy::disallowed_methods)]
 
@@ -40,12 +41,39 @@ pub const ANSWERED: u64 = 3;
 
 /// The served log of a world's state folder.
 pub fn log_path(state: &Path) -> PathBuf {
-    state.join("world.log")
+    state.join("log")
 }
 
-/// The world's gateway socket in its state folder.
+/// The gateway socket `worldd serve` binds in a folder when none is named.
 pub fn socket_path(state: &Path) -> PathBuf {
-    state.join("w.sock")
+    state.join("gateway.sock")
+}
+
+/// The socket a world on this machine serves: a placed world's (`place-world.sh` names it in `WORLDD_SOCKET`, under
+/// `<root>/../run/`, since a world folder's path is too long for one), else its folder's own.
+pub fn served_socket(root: &Path, world: &World) -> PathBuf {
+    let run = root.join("../run");
+    if run.is_dir() {
+        run.join(format!("{}.sock", world.name()))
+    } else {
+        socket_path(&state_path(root, world))
+    }
+}
+
+/// What `worldd serve` reads from a world's folder besides its log: copied into a rehearsal's scratch folder.
+const FOLDER: [&str; 4] = ["world.json", "facts.json", "moves.json", "entries"];
+
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    if from.is_dir() {
+        std::fs::create_dir_all(to)?;
+        for e in std::fs::read_dir(from)? {
+            let e = e?;
+            copy_tree(&e.path(), &to.join(e.file_name()))?;
+        }
+        Ok(())
+    } else {
+        std::fs::copy(from, to).map(|_| ())
+    }
 }
 
 /// A world's state folder on this machine.
@@ -259,21 +287,28 @@ impl Drop for Killed {
     }
 }
 
-/// Runs `build` on a scratch copy of the log at `served` (into `scratch`, which it empties): the log as it stood
-/// `window` records before its end, then the intents those last records took, in order, then the probe.
+/// Runs `build` as `worldd serve` on a scratch copy of the world's folder `state` (into `scratch`, which it empties):
+/// its log as it stood `window` records before its end, then the intents those last records took, in order, then the
+/// probe. The folder's checkpoints are not copied: the build replays the copied log from its start.
 pub fn rehearse(
     build: &Path,
-    served: &Path,
+    state: &Path,
     scratch: &Path,
     window: usize,
     c: &Canary,
     probe: &mut Probe,
 ) -> Result<Rehearsal, String> {
+    let served = &log_path(state);
     let bytes = std::fs::read(served).map_err(|e| format!("rehearsal.no-log: {e}"))?;
     let (served_len, served_sha) = (bytes.len(), to_hex(&sha256(&bytes)));
     let found = recover(&bytes).map_err(|e| format!("rehearsal.log-unread: {e}"))?;
     let epoch = found.header.map_or(1, |h| h.epoch);
-    let keep = found.records.len().saturating_sub(window);
+    // A served world's first record is its import's part, the world from empty (C1): always copied.
+    let keep = found
+        .records
+        .len()
+        .saturating_sub(window)
+        .max(found.records.len().min(1));
     // The recorded intents, one group per tick that took them, fed a tick at a time as they first arrived.
     let mut fed: Vec<Vec<Vec<u8>>> = Vec::new();
     for r in &found.records[keep..] {
@@ -297,6 +332,12 @@ pub fn rehearse(
     let total: usize = fed.iter().map(Vec::len).sum();
     let _ = std::fs::remove_dir_all(scratch);
     std::fs::create_dir_all(scratch).map_err(|e| format!("rehearsal.scratch: {e}"))?;
+    for name in FOLDER {
+        if state.join(name).exists() {
+            copy_tree(&state.join(name), &scratch.join(name))
+                .map_err(|e| format!("rehearsal.scratch: {name}: {e}"))?;
+        }
+    }
     let copy = log_path(scratch);
     let store = FileStore::open(&copy).map_err(|e| format!("rehearsal.scratch: {e}"))?;
     let (mut log, _) = Log::open(store, epoch).map_err(|e| format!("rehearsal.scratch: {e}"))?;
@@ -309,9 +350,13 @@ pub fn rehearse(
     drop(log.close());
 
     let child = Command::new(build)
+        .arg("serve")
         .arg("--dir")
         .arg(scratch)
+        .arg("--socket")
+        .arg(socket_path(scratch))
         .env("WORLDD_REHEARSAL", "1")
+        .env_remove("WORLDD_SOCKET")
         .stdout(Stdio::null())
         .spawn()
         .map_err(|e| format!("rehearsal.no-start: {e}"))?;
@@ -488,7 +533,7 @@ impl Deploy<'_> {
         let scratch = self.root.join("rehearsals").join(&to_hex(new)[..16]);
         let r = match rehearse(
             &self.path(new),
-            &log_path(&state),
+            &state,
             &scratch,
             self.window,
             &self.canary,
@@ -513,7 +558,8 @@ impl Deploy<'_> {
             return (Ended::NotDeployed { why }, tl, Some(r));
         }
         note("restarted: the canary watch begins".into());
-        let fault = match watch(&socket_path(&state), &self.canary, probe, false) {
+        let socket = served_socket(self.root, &self.world);
+        let fault = match watch(&socket, &self.canary, probe, false) {
             Ok(()) => {
                 note(format!(
                     "healthy for {} ms: kept",
@@ -556,8 +602,7 @@ impl Deploy<'_> {
             window: Duration::from_secs(60),
             ..self.canary
         };
-        let state = state_path(self.root, &self.world);
-        watch(&socket_path(&state), &back, probe, true)?;
+        watch(&served_socket(self.root, &self.world), &back, probe, true)?;
         note("serving again: the probe has its receipt".into());
         Ok(())
     }

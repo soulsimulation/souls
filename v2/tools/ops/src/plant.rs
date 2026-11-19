@@ -70,7 +70,7 @@ fn main() {
         std::process::exit(2);
     };
     eprintln!("o7-plant: planted fault: {mode}");
-    let socket = dir.join("w.sock");
+    let socket = dir.join("gateway.sock");
     let listen = || {
         let _ = std::fs::remove_file(&socket);
         UnixListener::bind(&socket).unwrap_or_else(|e| {
@@ -90,7 +90,7 @@ fn main() {
                 kinds: Value::Obj(Vec::new()),
                 moves: toggles::rules().moves,
             };
-            let world = FileStore::open(&dir.join("world.log")).and_then(|store| {
+            let world = FileStore::open(&dir.join("log")).and_then(|store| {
                 answers::start(
                     toggles::World::build(1, bodies, 0).replica,
                     rules,
