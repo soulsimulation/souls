@@ -206,6 +206,10 @@ test('A3 carried adopt: W2 asks for an owned grant, never new; connected refusal
   assert.equal(forced.code, 0, forced.out + forced.err); assert.equal(requests.findLast((r) => r.path.endsWith('/request')).body.force, true);
   assert.deepEqual(read(rt.state), { cursor: 'keep', sequence: 11 });
   assert.equal(statSync(join(next, 'credentials.json')).mode & 0o777, 0o600);
+  const conflict = join(dir, 'conflict');
+  json(join(conflict, 'config.json'), { worlds: { eden: { url: 'https://other.example/eden', gateway: 'wss://other.example/v2/ws' } } });
+  assert.equal((await cli(conflict, ['adopt', B, url], { cwd: dir })).value.code, 'world-conflict');
+  assert.equal(existsSync(join(conflict, 'credentials.json')), false, 'no credentials or existing world overwritten');
 });
 
 test('A4 carried doctor: clears dead locks, keeps live locks and residents, reports unreachable/no-token/orphans, repairs mode, prints no token', async (t) => {

@@ -209,7 +209,9 @@ export async function adoptSoul(home, named, url, { force = false, onAsk } = {})
     world = Object.keys(config.worlds ?? {}).find((k) => config.worlds[k].url === url);
     const segments = u.pathname.split('/').filter(Boolean);
     world ??= segments[0] === 'w' ? segments[1] : segments[0] ?? 'world';
-    spec = { directory: u.origin, gateway: config.worlds?.[world]?.gateway ?? u.searchParams.get('gateway') ?? `${u.protocol === 'https:' ? 'wss' : 'ws'}://${u.host}/v2/ws` };
+    const kept = config.worlds?.[world];
+    if (kept && new URL(kept.url).origin !== u.origin) throw new Refused('world-conflict', 'this world key already names another directory');
+    spec = { directory: u.origin, gateway: u.searchParams.get('gateway') ?? kept?.gateway ?? `${u.protocol === 'https:' ? 'wss' : 'ws'}://${u.host}/v2/ws` };
   } else {
     const worlds = Object.entries(config.worlds ?? {});
     if (worlds.length !== 1) throw new Refused('which-world', 'adopt needs a world URL when the home has several worlds or none');
