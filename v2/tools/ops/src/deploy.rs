@@ -11,6 +11,8 @@
 //! `DIRECTORY_STORE_*` variables name, or `$WORLDS_ROOT/directory`. Prints the timeline and how it ended; exits 0
 //! when the new build is kept or the rollback served, 1 otherwise. It holds the machine's step (`step.rs`) shared while
 //! it runs, and refuses `deploy.gateway-upgrading` while the gateway is upgraded (O16, #2809).
+// Operations, not the engine: the rollback's timeline is wall-clock time (the wall-clock rule, K7).
+#![allow(clippy::disallowed_methods)]
 
 mod step;
 
@@ -96,8 +98,6 @@ fn main() {
         }
         // Whether the build being left wrote anything is not known here: assume it did, so the schemas are compared.
         let mut tl = Timeline::default();
-        // Operations' timeline, wall-clock ms from the rollback's start (the wall-clock rule, K7, is the engine's).
-        #[allow(clippy::disallowed_methods)]
         let t0 = std::time::Instant::now();
         let r = d.roll_back(&build, &from, true, &mut unit, &mut probe, &mut |s| {
             tl.0.push((t0.elapsed().as_millis(), s))
