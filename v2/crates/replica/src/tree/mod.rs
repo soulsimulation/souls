@@ -151,6 +151,9 @@ struct NodeRec {
     at: Where,
     /// Its hash as last sealed (K5); `None` once changed. A node without one has no ancestor with one.
     hash: Option<Hash>,
+    /// The same hash as the state hash last worked it out (K20, `seal`): marked with `hash`, kept apart from it so a
+    /// tick's state hash never takes a node's record from the next checkpoint. Set whenever `hash` is.
+    state: Option<Hash>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -293,6 +296,12 @@ pub struct Tree {
     gaps_met: usize,
     node_reads: Reads,
     link_reads: Reads,
+    /// Parts applied or refused, and keep_seen calls: what a tick's state hash is kept against (K20, `seal`).
+    changes: u64,
+    /// The state hashes as last worked out, and `changes` then.
+    kept: Option<(u64, Vec<(Audience, Hash)>)>,
+    /// Nodes the state hash has hashed again since the tree was built (a measure; `seal`).
+    rehashed: u64,
 }
 
 /// A read counter. A load and a store, not an atomic add: one thread reads a live tree. A frozen copy (K8, #2671),
@@ -330,6 +339,9 @@ impl Tree {
             gaps_met: 0,
             node_reads: Reads(Some(AtomicU64::new(0))),
             link_reads: Reads(Some(AtomicU64::new(0))),
+            changes: 0,
+            kept: None,
+            rehashed: 0,
         };
         let kind = t.intern(&kind);
         t.nodes.push(NodeRec {
@@ -346,6 +358,7 @@ impl Tree {
             fields: BTreeMap::new(),
             at: Where::Root,
             hash: None,
+            state: None,
         });
         t.by_id.insert(root, 0);
         t
@@ -451,6 +464,9 @@ impl Tree {
             gaps_met: 0,
             node_reads: Reads(None),
             link_reads: Reads(None),
+            changes: self.changes,
+            kept: self.kept.clone(),
+            rehashed: 0,
         }
     }
 
@@ -487,6 +503,7 @@ impl Tree {
     /// checkpoint and not a change: drops every node whose audience `seen` refuses, with its subtree and every link
     /// with an end in them, then every link `seen` refuses, and the timers of nodes gone. The sequence stays.
     pub fn keep_seen(&mut self, seen: &dyn Fn(Audience) -> bool) {
+        self.changes += 1;
         let unseen: Vec<u32> = (0..self.nodes.len() as u32)
             .filter(|s| *s != self.root && !seen(self.nodes[*s as usize].audience))
             .collect();
@@ -570,8 +587,13 @@ impl Tree {
     /// refused part leaves its marks; the next seal hashes those nodes again and finds what they were.
     fn touch(&mut self, slot: u32) {
         let mut s = slot;
-        while s != NONE && self.nodes[s as usize].hash.take().is_some() {
-            s = self.nodes[s as usize].parent;
+        while s != NONE {
+            let rec = &mut self.nodes[s as usize];
+            let (sealed, stated) = (rec.hash.take(), rec.state.take());
+            if sealed.is_none() && stated.is_none() {
+                break;
+            }
+            s = rec.parent;
         }
     }
 
@@ -916,6 +938,7 @@ impl Tree {
         rules: Option<&Rules>,
     ) -> R<()> {
         debug_assert!(self.undo.is_empty() && self.dead.is_empty());
+        self.changes += 1;
         let mut result = Ok(());
         for e in effects {
             result = self.entry(header, e, rules);
@@ -1097,6 +1120,7 @@ impl Tree {
                     fields: fields.clone(),
                     at: Where::Still(Place::of(pose)),
                     hash: None,
+                    state: None,
                 });
                 if !self.nodes[slot as usize].links.is_empty() {
                     let id = *node;
