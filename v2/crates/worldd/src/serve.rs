@@ -169,6 +169,8 @@ struct Built {
     header: replica::effects::Header,
     part: Vec<u8>,
     town: Town,
+    /// The planner's copy of the town (K18b), built with it before the clock and its watchdog start.
+    planner: Town,
     ground: Id,
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
@@ -220,10 +222,14 @@ fn build(facts: &str) -> R<Built> {
     let rules = im.rules.clone();
     let doors = Doors::new(header.clone(), im.rules, next);
     let town = Town::new(im.tree, ground, doors).map_err(|e| format!("the town: {e:?}"))?;
+    let planner = town
+        .copy()
+        .map_err(|e| format!("the planner's town: {e:?}"))?;
     Ok(Built {
         header,
         part,
         town,
+        planner,
         ground,
         root,
         rules,
@@ -475,9 +481,10 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
 }
 
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
-/// where the log last had it. The world's seats are added ([`places`]).
+/// where the log last had it. The planner keeps its own town and all declared seats are registered.
 fn bodies(
     town: Town,
+    planner: Town,
     ground: Id,
     placed: &Placed,
     places: Vec<PlaceAt>,
@@ -497,10 +504,11 @@ fn bodies(
             at.push(a);
         }
     }
-    let mut b = Bodies::new(town, 50_000)?;
+    let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
     }
+
     for a in at {
         b.add_body_at(family.clone(), a, placed)?;
     }
@@ -854,7 +862,8 @@ fn serve(args: &[String]) -> R<()> {
         });
         cfg.creator = Some(c);
     }
-    let (town, ground) = (built.town, built.ground);
+    let (town, planner, ground) = (built.town, built.planner, built.ground);
+
     // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
     let int = |v: &Json| match v {
         Json::Int(n) => i64::try_from(*n).ok(),
@@ -873,7 +882,7 @@ fn serve(args: &[String]) -> R<()> {
         per_tick: 8,
     });
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
-        bodies(town, ground, placed, places.clone())
+        bodies(town, planner, ground, placed, places.clone())
     }));
     let empty = Replica::start(built.header.stored()).map_err(refusal)?;
     let world = answers::start(empty.frozen(), rules, store, cfg).map_err(refusal)?;
