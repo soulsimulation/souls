@@ -148,6 +148,10 @@ step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --lock
 step client-reflex node --test client/src/reflex/*.test.mjs
 # The MCP endpoint on v2 (R21, #3334): six tools, each answer the thin command's; 401, 405, 413; the card and page.
 step client-mcp bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/mcp/*.test.mjs'
+# A creator's terrain (G5, #2762): a landform's patches by today's packages/ground (zod is its one dependency; this job
+# runs no pnpm install), and its expansion into one edit.
+step creator-terrain bash -c 'npm install --no-save --no-package-lock --no-audit --no-fund --prefix ../packages/ground zod@4.6.7 &&
+  node --test tools/terrain/*.test.ts client/src/creator/terrain/*.test.mjs'
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&

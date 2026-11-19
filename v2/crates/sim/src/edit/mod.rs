@@ -12,9 +12,14 @@
 //! would-be part on the copy (placed nodes under provisional ids, [`PROVISIONAL`]) and handing it to
 //! [`safety::guard`]. [`commit`] takes the plan and the bodies as they stand on its tick, and refuses the edit by the
 //! first unsafe body's name ([`safety::Guard::judge`], lookups only) before it mints or writes anything.
+//!
+//! A terrain edit (G5's [`terrain`]) is guarded the same way: planned off the clock, its Souls and resting things
+//! judged on the commit tick before the safety rule. A creator's weather is set through [`weather`].
 
 pub mod safety;
+pub mod terrain;
 pub mod undo;
+pub mod weather;
 
 use crate::commit::{off_clock, write_guarded};
 use crate::structure::Structure;
@@ -46,6 +51,7 @@ pub struct Committed {
 pub struct Planned {
     pub checked: Checked,
     guard: Guard,
+    terrain: Option<terrain::Guard>,
 }
 
 fn refused(name: &'static str, detail: impl Into<String>) -> Refused {
@@ -72,9 +78,14 @@ pub fn plan(checked: Checked, copy: &Replica, ground: Option<Id>) -> Result<Plan
     ])))
     .map_err(|e| refused("encoding", e.to_string()))?;
     let part = Part::read(&bytes).map_err(|r| refused(r.name, r.detail))?;
+    let terrain = terrain::guard(copy.tree(), copy.header(), ground, &checked, &part)?;
     let guard = guard(copy.tree(), copy.header(), ground, &part)
         .map_err(|e| refused("edit.unchecked", e))?;
-    Ok(Planned { checked, guard })
+    Ok(Planned {
+        checked,
+        guard,
+        terrain,
+    })
 }
 
 /// Each placed node's temporary name and the id `minter` gives it.
@@ -114,6 +125,9 @@ pub fn commit_guarded(
 ) -> Result<Committed, Refused> {
     let checked = &planned.checked;
     confirm(live, checked)?;
+    if let Some(t) = &planned.terrain {
+        t.judge(bodies)?;
+    }
     let unsafe_ = planned.guard.judge(bodies);
     if let Some(first) = unsafe_.first() {
         let detail = unsafe_.iter().map(|u| u.text()).collect::<Vec<_>>();
