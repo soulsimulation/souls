@@ -11,9 +11,8 @@ rustix = { version = "1", default-features = false, features = ["time", "std"] }
 sim = { path = "../sim" }
 # The built-in walk, run behind the host for a move intent (I4b, #3156).
 skills = { path = "../skills" }
-
-[dev-dependencies]
 # E1's Eden measures (tests/index.rs) load Eden 2026's imported tree (N1, #2649); N2's test world, where a scripted
-# client walks, sits and rises (I4b, #3156).
+# client walks, sits and rises (I4b, #3156), and where `gateway-link --testworld` serves a Soul and three chairs (B10,
+# #2688).
 import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }

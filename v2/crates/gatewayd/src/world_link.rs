@@ -8,13 +8,18 @@
 //! away is answered at once with [`RESTARTING`] and never sent. An answer for an intent no longer kept (the world
 //! answered a repeat) is dropped, so each intent is answered once. Keeping intents across a restart of the gateway
 //! itself, and the world's repeats across its own restart, are I4's durable half.
+//!
+//! A sync request (R5b, #3164; `replica::sync::wire`) goes to the world under the gateway's own number, with the
+//! asking actor; its answer goes back to that actor's socket under the client's number. One asked while the world is
+//! away, or not yet answered when the link drops, is answered at once with [`RESTARTING`]: the client asks again.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use replica::encode::{Value, decode, encode};
+use replica::encode::{Name, Value, decode, encode};
+use replica::sync::wire;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
@@ -59,6 +64,8 @@ struct State {
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
     /// The newest version the world sent: the "version now" of a refusal the gateway gives itself.
     now: Option<Value>,
+    /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes and the client's number.
+    syncs: BTreeMap<u64, (Vec<u8>, Value)>,
 }
 
 impl Link {
@@ -79,6 +86,24 @@ impl Link {
         let _ = out.send(bytes.clone());
         s.pending
             .insert(n, (key, sequence, bytes, received, times::stamp()));
+        Sent::Sent
+    }
+
+    /// Hands a sync request to the world: `ask` is the client's request, with its number `n` taken out.
+    pub fn ask(&self, key: Vec<u8>, n: Value, mut ask: BTreeMap<u64, Value>) -> Sent {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(out) = s.out.clone() else {
+            return Sent::Restarting;
+        };
+        let ours = s.next;
+        s.next += 1;
+        ask.insert(wire::ASK, Value::Uint(ours));
+        ask.insert(wire::ACTOR, Value::Bytes(key.clone()));
+        let Ok(bytes) = encode(&Value::Map(ask)) else {
+            return Sent::Restarting;
+        };
+        s.syncs.insert(ours, (key, n));
+        let _ = out.send(bytes);
         Sent::Sent
     }
 
@@ -114,6 +139,29 @@ impl Link {
         s.pending.remove(&n).map(|p| (p.3, p.4))
     }
 
+    /// A sync answer from the world (key 20): the actor it is for and the frame under the client's number, or
+    /// `Some(None)` for one answering a request not kept. `None` if the frame is not a sync answer.
+    fn sync_answered(&self, frame: &[u8]) -> Option<Option<(Vec<u8>, Vec<u8>)>> {
+        let Value::Map(mut m) = decode(frame).ok()?.value else {
+            return None;
+        };
+        let Some(Value::Uint(ours)) = m.get(&wire::ASK) else {
+            return None;
+        };
+        let ours = *ours;
+        let kept = self
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .syncs
+            .remove(&ours);
+        Some(kept.and_then(|(key, n)| {
+            m.insert(wire::ASK, n);
+            m.remove(&wire::ACTOR);
+            Some((key, encode(&Value::Map(m)).ok()?))
+        }))
+    }
+
     /// Connected: the writer's queue, with every unanswered intent already in it, in first-sent order.
     fn connected(&self) -> mpsc::UnboundedReceiver<Vec<u8>> {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -125,8 +173,11 @@ impl Link {
         rx
     }
 
-    fn disconnected(&self) {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).out = None;
+    /// The world went away: the sync requests it had not answered, to answer with [`RESTARTING`].
+    fn disconnected(&self) -> Vec<(Vec<u8>, Value)> {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        s.out = None;
+        std::mem::take(&mut s.syncs).into_values().collect()
     }
 }
 
@@ -171,6 +222,12 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             if read.read_exact(&mut frame).await.is_err() {
                 break;
             }
+            if let Some(answer) = gw.link.sync_answered(&frame) {
+                if let Some((key, frame)) = answer {
+                    gw.reply(&key, frame);
+                }
+                continue;
+            }
             let at = times::stamp();
             match read_answer(&frame) {
                 Some((key, sequence, version, cursor, outcome)) => {
@@ -183,9 +240,20 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
                 None => (gw.log)("a frame from the world was not {1: version, 2: answer}"),
             }
         }
-        gw.link.disconnected();
+        for (key, n) in gw.link.disconnected() {
+            gw.reply(&key, sync_refused(n, RESTARTING));
+        }
         writer.abort();
     }
+}
+
+/// A sync request's refusal by name, under the client's number `n`.
+pub fn sync_refused(n: Value, name: &str) -> Vec<u8> {
+    let name = Name::new(name).unwrap_or_else(|| unreachable!("a fixed name"));
+    encode(&Value::Map(
+        [(wire::ASK, n), (wire::REFUSED, Value::Text(name))].into(),
+    ))
+    .unwrap_or_default()
 }
 
 /// An answer frame's actor (as bytes), sequence, version, cursor and outcome (a refusal is kind 2 or 5).
