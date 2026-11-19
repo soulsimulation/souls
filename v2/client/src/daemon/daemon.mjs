@@ -135,6 +135,8 @@ const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view s
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
 const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
 const copy = new wire.Copy(); // its scope, by hash (R5b)
+// A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
+// Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
 const syncs = []; // the last syncs: kind, time and R5's counts
 let syncing = null, asked = 0; // the sync under way: its request's number, step, kind and start
@@ -179,8 +181,14 @@ function current() {
 function startSync(sock, kind) {
   syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: [] };
   if (cutAt !== null) cutWhy = 'syncing';
-  syncing.timer = setTimeout(() => { log('sync: no answer; reconnecting'); sock.close(); }, SYNC_WITHIN);
+  awaitAnswer(sock);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
+}
+
+/** The sync's next answer is due within SYNC_WITHIN. */
+function awaitAnswer(sock) {
+  clearTimeout(syncing.timer);
+  syncing.timer = setTimeout(() => { log('sync: no answer; reconnecting'); sock.close(); }, SYNC_WITHIN);
 }
 
 function syncAnswer(sock, n, refused, bytes) {
@@ -190,7 +198,7 @@ function syncAnswer(sock, n, refused, bytes) {
   else copy.onRecords(bytes);
   syncing.n = ++asked;
   const next = copy.next(BigInt(syncing.n));
-  if (next.length > 0) { syncing.step = 'records'; sock.send(next); return; }
+  if (next.length > 0) { syncing.step = 'records'; awaitAnswer(sock); sock.send(next); return; }
   const done = { kind: syncing.kind, ms: Math.round(performance.now() - syncing.t0), ...JSON.parse(copy.finish()) };
   clearTimeout(syncing.timer);
   const t = performance.now();
@@ -209,7 +217,7 @@ function syncAnswer(sock, n, refused, bytes) {
   syncs.push(done);
   if (syncs.length > SYNCS_KEPT) syncs.shift();
   log(`synced (${done.kind}): ${done.fetched} of ${done.held} records in ${done.rounds} rounds, ${done.got} B, ${done.ms} ms`);
-  note({ kind: 'synced', ...done });
+  note({ ...done, kind: 'synced', sync: done.kind }); // its own kind, which wakes no `wait`; `sync` is snapshot or resync
   current();
 }
 

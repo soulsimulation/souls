@@ -152,13 +152,13 @@ pub struct Config {
     /// Makes the world's bodies, on the clock thread, for move intents (I4b, #3156); without them a move is refused
     /// `intent.not-a-form-on-a-node`.
     pub bodies: Option<MakeBodies>,
+    /// The view tier, handed each tick's record once it is on the disk (#3292).
+    pub views: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
     pub text: Option<Arc<Store>>,
     /// Called once at start with the log's durable mark; what it gives is handed each record as it is appended (its
     /// number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
-    /// The view tier, handed each tick's record once it is on the disk (#3292).
-    pub views: Option<crate::views::served::Feed>,
 }
 
 /// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
@@ -180,9 +180,9 @@ impl Config {
             health: None,
             now,
             bodies: None,
+            views: None,
             text: None,
             follow: None,
-            views: None,
         }
     }
 }
@@ -910,8 +910,8 @@ fn answer_loop<S: Storage + 'static>(
     mut log: Log<S>,
     ticks: Receiver<Tick>,
     measures: Option<Arc<Measures>>,
-    mut follow: Option<Offer>,
     views: Option<crate::views::served::Feed>,
+    mut follow: Option<Offer>,
 ) {
     for (n, t) in ticks.into_iter().enumerate() {
         let n = n as u64;
@@ -919,8 +919,8 @@ fn answer_loop<S: Storage + 'static>(
             m.queues[measures::LOG].enter(n, t.handed.unwrap_or_else(measures::steady_us));
         }
         if let Some(record) = t.record {
-            let kept = follow.as_ref().map(|_| record.clone());
             let copy = views.as_ref().map(|v| (v, record.clone()));
+            let kept = follow.as_ref().map(|_| record.clone());
             let appended = log.append(record);
             if let (Ok(n), Some(f), Some(r)) = (&appended, follow.as_mut(), kept) {
                 f(*n, r);
@@ -1026,7 +1026,7 @@ pub fn start<S: Storage + 'static>(
     let (m, views) = (measures.clone(), cfg.views.take());
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks, m, follow, views))
+        .spawn(move || answer_loop(log, ticks, m, views, follow))
         .map_err(io)?;
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
