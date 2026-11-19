@@ -1,0 +1,243 @@
+// The creator's panel (Engine v2 W5, #2801): the world's one creator places and moves things by hand, through the same
+// gate as their agent. The panel opens only after the session exchange (gatewayd's `creator.rs`) gives a creator's
+// token for W1's session; anyone else is told `not-the-creator` and the panel stays shut. Its picture is the world's
+// public stream (`?stream=`, as the page plays it), drawn from above. A drag draws a ghost here and sends one edit on
+// release; the page has no other way to change the world. The world's answer rules: each batch is listed with it.
+//
+// Sign-in is W1's sign-in for test worlds (`Bearer test:<name>`), as the list of worlds signs in; a provider's
+// session rides the same header.
+import init, { wireHello, wireSignIn } from 'replica';
+import { StreamSource } from '../source/stream.ts';
+import type { NodeRec } from '../source/source.ts';
+import { idOf, type Frame, type Op } from './edit.ts';
+import { CreatorSession } from './session.ts';
+import { Drag, refusalText, soulName, type At, type Body } from './drag.ts';
+
+const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const canvas = $<HTMLCanvasElement>('map');
+const ctx = canvas.getContext('2d')!;
+const status = $<HTMLDivElement>('status');
+const kinds = $<HTMLSelectElement>('kind');
+const batches = $<HTMLOListElement>('batches');
+const warn = $<HTMLDivElement>('warn');
+const params = new URLSearchParams(location.search);
+const UM = 1e-6;
+
+// The page's copy, from the stream: nodes by id.
+const nodes = new Map<string, NodeRec>();
+let session: CreatorSession | null = null;
+let placing = false;
+/** Things this panel placed, by id, until the stream shows them: the receipt's id at the spot sent. */
+const placed = new Map<string, At>();
+/** Things moved by the panel, until the stream catches up: drawn where the edit put them. */
+const sentTo = new Map<string, At>();
+
+const short = (kind: string) => kind.split('@')[0]!.replace(/^souls:/, '');
+const isBody = (n: NodeRec) => n.at !== null || n.name !== undefined || /body/.test(short(n.kind));
+function worldAt(id: string): At {
+  let x = 0, z = 0, n = nodes.get(id);
+  while (n) (x += n.pos[0] * UM), (z += n.pos[2] * UM), (n = n.parent ? nodes.get(n.parent) : undefined);
+  return { x, z };
+}
+const bodies = (): Body[] => [...nodes.values()].filter(isBody).map((n) => ({ id: n.id, name: n.name ?? null, at: worldAt(n.id) }));
+/** Things a creator moves: every node with a parent that is not a body and has no children of its own. */
+function things(): NodeRec[] {
+  const parents = new Set([...nodes.values()].map((n) => n.parent));
+  return [...nodes.values()].filter((n) => n.parent && !isBody(n) && !parents.has(n.id));
+}
+/** Where new things go: the parent of the things there are (a room), else the root's first child. */
+function room(): string | null {
+  const t = things()[0];
+  if (t?.parent) return t.parent;
+  const root = [...nodes.values()].find((n) => !n.parent);
+  return [...nodes.values()].find((n) => n.parent === root?.id)?.id ?? null;
+}
+
+// The view: metres from above, the room's middle at the centre.
+let scale = 60, cx = 0, cz = 0;
+const toScreen = (a: At) => [canvas.width / 2 + (a.x - cx) * scale, canvas.height / 2 + (a.z - cz) * scale] as const;
+const toWorld = (px: number, py: number): At => ({ x: cx + (px - canvas.width / 2) / scale, z: cz + (py - canvas.height / 2) / scale });
+
+function draw() {
+  const dpr = devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#e9e4d8';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  for (let m = -20; m <= 20; m++) {
+    const [x0, y0] = toScreen({ x: m, z: -20 }), [x1, y1] = toScreen({ x: m, z: 20 });
+    ctx.beginPath(), ctx.moveTo(x0, y0), ctx.lineTo(x1, y1), ctx.stroke();
+    const [a0, b0] = toScreen({ x: -20, z: m }), [a1, b1] = toScreen({ x: 20, z: m });
+    ctx.beginPath(), ctx.moveTo(a0, b0), ctx.lineTo(a1, b1), ctx.stroke();
+  }
+  ctx.font = `${12 * dpr}px ui-sans-serif, system-ui`;
+  const s = 0.6 * scale;
+  for (const n of things()) {
+    const at = sentTo.get(n.id) ?? worldAt(n.id);
+    const [x, y] = toScreen(at);
+    ctx.fillStyle = drag.ghost?.id === n.id ? '#9aa7b4' : '#3f6e9e';
+    ctx.fillRect(x - s / 2, y - s / 2, s, s);
+    ctx.fillStyle = '#222';
+    ctx.fillText(short(n.kind), x - s / 2, y + s / 2 + 14 * dpr);
+  }
+  for (const [id, at] of placed) {
+    if (nodes.has(id)) continue;
+    const [x, y] = toScreen(at);
+    ctx.fillStyle = '#3f6e9e';
+    ctx.fillRect(x - s / 2, y - s / 2, s, s);
+  }
+  for (const b of bodies()) {
+    const [x, y] = toScreen(b.at);
+    ctx.fillStyle = '#c2553d';
+    ctx.beginPath(), ctx.arc(x, y, 0.5 * scale, 0, Math.PI * 2), ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.fillText(`Soul ${soulName(b)}`, x + 0.55 * scale, y + 4 * dpr);
+  }
+  const g = drag.ghost;
+  if (g) {
+    const [x, y] = toScreen(g.at);
+    ctx.setLineDash([6 * dpr, 4 * dpr]);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(x - s / 2, y - s / 2, s, s);
+    ctx.strokeStyle = g.over ? '#7a1f10' : '#3f6e9e';
+    ctx.lineWidth = 2 * dpr;
+    ctx.strokeRect(x - s / 2, y - s / 2, s, s);
+    ctx.setLineDash([]);
+  }
+  warn.textContent = g?.over ? `This would land on Soul ${soulName(g.over)}: the world will refuse it.` : '';
+  requestAnimationFrame(draw);
+}
+
+function list(text: string): HTMLLIElement {
+  const li = document.createElement('li');
+  li.textContent = text;
+  batches.prepend(li);
+  return li;
+}
+
+/** The answer's line: a receipt, or the refusal's name, and for a build-safety refusal the Soul the edit was onto. */
+function answered(li: HTMLLIElement, what: string, f: Frame, at: At) {
+  if (f.t === 'receipt') return void (li.textContent = `${what}: done`), li.classList.add('ok');
+  if (f.t !== 'refused') return;
+  li.textContent = `${what}: ${refusalText(f.reason, at, bodies())}`;
+  li.classList.add('refused');
+}
+
+async function send(what: string, ops: Op[], at: At): Promise<Frame | null> {
+  if (!session) return null;
+  const li = list(`${what}: sent`);
+  const f = await session.edit(ops);
+  answered(li, what, f, at);
+  status.textContent = `signed in as the creator · edits sent ${session.sent}`;
+  return f;
+}
+
+const spot = (parent: string, at: At) => {
+  const p = worldAt(parent);
+  return { x: (at.x - p.x) / UM, y: 0, z: (at.z - p.z) / UM };
+};
+
+const drag = new Drag((id, at) => {
+  const parent = nodes.get(id)?.parent ?? room();
+  if (!parent) return;
+  sentTo.set(id, at);
+  void send(`move ${short(nodes.get(id)?.kind ?? 'thing')}`, [{ op: 'move', node: id, at: spot(parent, at) }], at).then((f) => {
+    if (f?.t !== 'receipt') sentTo.delete(id);
+  });
+}, bodies);
+
+function hit(at: At): string | null {
+  for (const n of things()) {
+    const p = sentTo.get(n.id) ?? worldAt(n.id);
+    if (Math.abs(p.x - at.x) < 0.4 && Math.abs(p.z - at.z) < 0.4) return n.id;
+  }
+  return null;
+}
+
+const pointer = (e: PointerEvent): At => {
+  const r = canvas.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  return toWorld((e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr);
+};
+canvas.addEventListener('pointerdown', (e) => {
+  if (!session || session.state !== 'open') return;
+  const at = pointer(e);
+  if (placing) {
+    const parent = room(), kind = kinds.value;
+    placing = false;
+    $<HTMLButtonElement>('place').classList.remove('on');
+    if (!parent || !kind) return;
+    void send(`place ${short(kind)}`, [{ op: 'place', name: 1, kind, parent, at: spot(parent, at) }], at).then((f) => {
+      const id = f?.t === 'receipt' ? f.names.get(1) : undefined;
+      if (id) placed.set(id, at);
+    });
+    return;
+  }
+  const id = hit(at);
+  if (!id) return;
+  canvas.setPointerCapture(e.pointerId);
+  drag.down(id, at);
+});
+canvas.addEventListener('pointermove', (e) => drag.move(pointer(e)));
+canvas.addEventListener('pointerup', () => drag.up());
+canvas.addEventListener('pointercancel', () => drag.cancel());
+addEventListener('keydown', (e) => e.key === 'Escape' && drag.cancel());
+$<HTMLButtonElement>('place').addEventListener('click', (e) => {
+  placing = !placing;
+  (e.currentTarget as HTMLElement).classList.toggle('on', placing);
+});
+
+/** The session exchange, then the socket. */
+async function open(name: string) {
+  status.textContent = 'asking the gateway for a creator token';
+  const res = await fetch('/v2/creator-token', { method: 'POST', headers: { authorization: `Bearer test:${name}` } });
+  const body = (await res.json()) as { token?: string; grant?: string; refused?: string };
+  if (!res.ok || !body.token || !body.grant) {
+    status.textContent = `refused: ${body.refused ?? res.status}. The panel opens only for this world's creator.`;
+    document.body.classList.add('refused');
+    return;
+  }
+  await init();
+  const ws = new WebSocket(new URL('/v2/ws', location.href.replace(/^http/, 'ws')));
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => {
+    session = new CreatorSession(ws, idOf(body.grant!.replace(/^creator-/, '')), wireHello(), wireSignIn(body.token!, new Uint8Array(0)), Date.now() * 1000);
+    session.onOpen = () => {
+      status.textContent = 'signed in as the creator · edits sent 0';
+      document.body.classList.replace('refused', 'creator') || document.body.classList.add('creator');
+    };
+  };
+  ws.onmessage = (e) => session?.frame(new Uint8Array(e.data as ArrayBuffer));
+  ws.onclose = () => (status.textContent = `the socket closed${session?.outcome ? ` (${session.outcome})` : ''}`);
+}
+$<HTMLFormElement>('signin').addEventListener('submit', (e) => {
+  e.preventDefault();
+  void open($<HTMLInputElement>('who').value.trim());
+});
+
+const address = params.get('stream');
+if (address) {
+  new StreamSource(address).start({
+    pointer() {},
+    part(p) {
+      for (const id of p.removed) nodes.delete(id);
+      for (const n of p.nodes) nodes.set(n.id, n);
+      for (const id of [...sentTo.keys()]) {
+        const at = worldAt(id), want = sentTo.get(id)!;
+        if (Math.hypot(at.x - want.x, at.z - want.z) < 0.05) sentTo.delete(id);
+      }
+      const seen = new Set([...kinds.options].map((o) => o.value));
+      for (const n of things()) {
+        if (seen.has(n.kind)) continue;
+        seen.add(n.kind);
+        kinds.add(new Option(short(n.kind), n.kind));
+      }
+      const r = room();
+      if (r) ({ x: cx, z: cz } = worldAt(r));
+    },
+    error: (m) => (status.textContent = m),
+  });
+} else status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
+Object.assign(globalThis, { panel: { nodes, get session() { return session; }, drag } });
+requestAnimationFrame(draw);

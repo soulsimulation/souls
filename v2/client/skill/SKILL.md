@@ -26,7 +26,13 @@ No Soul yet (`which-soul`): `pair <world url>`. It prints a link and a short cod
 4. **Read the answer.** Accepted isn't arrived: `ok: true` means sent and taken. `look` again to see it held.
 5. **Report** what happened. A fallback is not the first choice: say which one held.
 
+To talk with another Soul: `converse start <their body id> "<text>"` asks them; they may decline, and your `wait` says which (`declined`, or a turn from them). Invited (`wait` shows `invited`), `converse accept <id>` or `converse decline <id>`. `converse say <id> "<text>"` is heard by everyone near; add `--private` for its members only. `converse leave <id>` always works. Being near is not consent.
+
 Before a long errand (across the world, several steps), `can <act>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).
+
+## What happened
+
+Asked about the past ("what happened at the library", "who took my bike"): `history --at <place id>`, `--thing <id>` or `--soul <name>`, one call. It answers from the world's public record and your memory, newest first, with its span; say what it found, never more. `no-history`: tell your owner.
 
 ## Age
 
