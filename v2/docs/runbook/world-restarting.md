@@ -12,7 +12,8 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   directory record (W8). The store is `DIRECTORY_STORE_*` in `/etc/souls/directory.env`, or the folder
   `$WORLDS_ROOT/directory` on a machine without one. When the store is out of reach it uses this machine's cached
   copy (`$WORLDS_ROOT/cache/<world>`), so an unreachable store holds no world down. It checks that
-  `$WORLDS_ROOT/builds/<hash>/worldd` hashes to the pin (SHA-256 of the file, `1220` in front), and runs it.
+  `$WORLDS_ROOT/builds/<hash>/worldd` hashes to the pin (SHA-256 of the file, `1220` in front), and runs it as
+  `worldd serve --dir $WORLDS_ROOT/worlds/<world>`, the world folder `worldd seed` made and `place-world.sh` placed (C1).
 - **Limits per world** go in `/etc/systemd/system/worldd@<world>.service.d/limits.conf` (`MemoryMax`, `CPUWeight`).
   There is never a `CPUQuota`: it throttles the clock and slows world time. `MemoryHigh` stays `infinity`: below the
   limit with no swap it throttles a leaking world to a crawl that never reaches the limit (one leak run with

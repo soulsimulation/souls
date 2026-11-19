@@ -3,8 +3,8 @@
 //!
 //! - **The launcher** ([`pin`], [`build_path`]): the unit's `ExecStart`. It reads the world's pin from its directory
 //!   record (W8), through this machine's cached copy when the store is out of reach, so an unreachable store holds no
-//!   world down, and runs `builds/<hash>/worldd`. A build that is not on the machine is a failed start like any other,
-//!   `build.missing`, and is retried.
+//!   world down, and runs `builds/<hash>/worldd serve` on the world's folder (C1, #3365). A build that is not on the
+//!   machine is a failed start like any other, `build.missing`, and is retried.
 //! - **The restart record and the health record** ([`health`]): a world that cannot start writes nothing, so the
 //!   supervisor keeps its own. A world started five times in five minutes and not serving is `restart-loop`, with
 //!   its count, its last exit and its next try.
