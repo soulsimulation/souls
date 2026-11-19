@@ -16,6 +16,7 @@ pub mod links;
 pub mod log;
 pub mod mover;
 pub mod moves;
+pub mod planner;
 pub mod random;
 pub mod recorder;
 pub mod routes;

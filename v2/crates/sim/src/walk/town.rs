@@ -231,6 +231,23 @@ impl Town {
         self.buildings.iter().find(|b| b.link(link).is_some())
     }
 
+    /// A copy of this town for a planner (K18b, #3175): built again from a frozen copy of the tree, with its own map
+    /// and spot tables, and a door writer of its own (the planner never opens a door).
+    pub fn copy(&self) -> Result<Town, String> {
+        let d = &self.doors;
+        Town::new(
+            self.tree.frozen(),
+            self.ground,
+            Doors::new(d.header.clone(), d.rules.clone(), d.next),
+        )
+    }
+
+    /// The line from where `body` stands toward `to` on its node ([`View::search`], the planning call): the planner's
+    /// (K18b, #3175), not the clock's.
+    pub fn line(&mut self, body: &Body, to: Vec3) -> Result<Line, Refusal> {
+        self.view().search(body, to)
+    }
+
     /// The town as the host's questions read it in a tick: the map behind a cell (a route is cached as it is
     /// found), the rest shared.
     pub fn view(&mut self) -> View<'_> {
@@ -273,6 +290,7 @@ pub const CHECK: u32 = 20;
 
 /// A walker's line of corners toward `to` on `node` (#3167): where the body stood when it was searched for, then
 /// the corners, x and z µm. It ends at `to` (`whole`), or where the route leaves the piece the search began on.
+#[derive(Clone, Debug)]
 pub struct Line {
     node: Id,
     to: Vec3,
@@ -284,7 +302,31 @@ pub struct Line {
     check: u32,
 }
 
+/// The planner's side of a tick's corners (K18b, #3175): what it found for the last tick's asks, by walker (the leg's
+/// end asked, and the line or the search's refusal), and the walkers that ask it for one in this tick (the body as it
+/// stood, and the leg's end).
+pub struct Plans<'a> {
+    pub found: &'a Found,
+    pub asked: &'a RefCell<Vec<(Body, Vec3)>>,
+}
+
+/// The planner's lines by walker: the leg's end asked, and the line or the search's refusal.
+pub type Found = BTreeMap<Id, (Vec3, Result<Line, Refusal>)>;
+
 impl Line {
+    /// A line for `body` toward `to` through `points` (the first where it stands), aiming at the second. Its first
+    /// check is a whole period away, plus a share of one by id, so checks spread over ticks.
+    fn new(body: &Body, to: Vec3, points: Vec<[i64; 2]>, whole: bool) -> Line {
+        Line {
+            node: node_of(body),
+            to,
+            points,
+            next: 1,
+            whole,
+            check: CHECK + (body.id.counter() % u64::from(CHECK)) as u32,
+        }
+    }
+
     /// Moves on past the corners `p` has reached or gone past. Why the line no longer serves, if it does not: `p` is
     /// more than [`OFF_LINE`] off the stretch it walks ([`Why::Off`]), or it has reached the end of a line that stops
     /// short of `to` ([`Why::End`]).
@@ -606,8 +648,30 @@ impl View<'_> {
     /// Where `body` aims next on its way to `to` (on the node it stands on), x and z µm: `to` when a straight walk
     /// reaches it, else the next corner of the line there.
     pub fn corner(&self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
+        self.corner_in(body, to, None)
+    }
+
+    /// [`View::corner`] with a planner (K18b, #3175): no route search on this thread. A line is taken from `plans`
+    /// (the planner's answers to the last tick's asks) where the walker would search for one; when there is none,
+    /// a straight walk to `to` is checked (the controller's dry run, no search) and, if it is refused, the line is
+    /// asked of the planner and the body stands this tick (its own point is the answer).
+    pub fn corner_planned(
+        &self,
+        body: &Body,
+        to: Vec3,
+        plans: &Plans<'_>,
+    ) -> Result<[i64; 2], Refusal> {
+        self.corner_in(body, to, Some(plans))
+    }
+
+    fn corner_in(
+        &self,
+        body: &Body,
+        to: Vec3,
+        plans: Option<&Plans<'_>>,
+    ) -> Result<[i64; 2], Refusal> {
         let t0 = self.now();
-        let r = self.next_corner(body, to);
+        let r = self.next_corner(body, to, plans);
         let t1 = self.now();
         self.spend(|s| {
             s.corners += 1;
@@ -620,7 +684,12 @@ impl View<'_> {
     /// ([`View::search`]) only for a new `to` or node (a new leg, a new order, a moved target), when the walker is
     /// pushed off it, at the end of a line that stops short of `to`, or when a straight walk to the next corner,
     /// checked once in [`CHECK`] calls, is refused.
-    fn next_corner(&self, body: &Body, to: Vec3) -> Result<[i64; 2], Refusal> {
+    fn next_corner(
+        &self,
+        body: &Body,
+        to: Vec3,
+        plans: Option<&Plans<'_>>,
+    ) -> Result<[i64; 2], Refusal> {
         let node = node_of(body);
         let p = [body.pose.position.x, body.pose.position.z];
         let mut lines = self.lines.borrow_mut();
@@ -649,7 +718,25 @@ impl View<'_> {
             Why::End => s.lines_end += 1,
             Why::Blocked => s.lines_blocked += 1,
         });
-        let l = self.search(body, to)?;
+        let l = match plans {
+            None => self.search(body, to)?,
+            Some(plans) => match plans.found.get(&body.id).filter(|(t, _)| *t == to) {
+                Some((_, Ok(l))) if l.node == node => l.clone(),
+                // The planner's search was refused: the walk hears it by name, as from its own search.
+                Some((_, Err(e))) => {
+                    lines.remove(&body.id);
+                    return Err(e.clone());
+                }
+                _ => {
+                    lines.remove(&body.id);
+                    if !self.clear(body, [to.x, to.z], 0)? {
+                        plans.asked.borrow_mut().push((*body, to));
+                        return Ok(p);
+                    }
+                    Line::new(body, to, vec![p, [to.x, to.z]], true)
+                }
+            },
+        };
         let c = l.points[l.next];
         lines.insert(body.id, l);
         Ok(c)
@@ -662,15 +749,7 @@ impl View<'_> {
     pub fn search(&self, body: &Body, to: Vec3) -> Result<Line, Refusal> {
         let node = node_of(body);
         let p = [body.pose.position.x, body.pose.position.z];
-        // The first check: a whole period after the search, plus a share of one by id, so checks spread over ticks.
-        let line = |points: Vec<[i64; 2]>, whole: bool| Line {
-            node,
-            to,
-            points,
-            next: 1,
-            whole,
-            check: CHECK + (body.id.counter() % u64::from(CHECK)) as u32,
-        };
+        let line = |points: Vec<[i64; 2]>, whole: bool| Line::new(body, to, points, whole);
         if self.clear(body, [to.x, to.z], 0)? {
             return Ok(line(vec![p, [to.x, to.z]], true));
         }

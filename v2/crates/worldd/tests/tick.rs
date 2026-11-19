@@ -551,3 +551,75 @@ fn a1_the_real_clock_paces_the_loop() {
 fn hex(b: &[u8]) -> String {
     b.iter().take(8).map(|x| format!("{x:02x}")).collect()
 }
+
+/// K18b (#3175) A2: a walk round the ring's solid middle (its straight way is not clear, so it asks the planner for
+/// each new line, #3167) and a sit land on the clock thread, which ran no route search and no reach check: one there
+/// panics in a debug build, and is counted in a release one.
+#[test]
+fn k18b_a2_a_walk_round_an_obstacle_searches_off_the_clock() {
+    let p = pairs();
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.lockstep = true;
+    // The walk round the ring takes about two minutes.
+    cfg.deadline = 300_000_000;
+    cfg.bodies = Some(Box::new(|p: &Placed| bodies(p, false)));
+    let w = answers::start(
+        lamp_world().replica,
+        toggles::rules(),
+        Mem::with(Vec::new()),
+        cfg,
+    )
+    .expect("the world starts");
+    let (_, ground) = town();
+    // From the west of the square to the ring's walkway beyond its middle: the straight line crosses the middle.
+    let far = at(
+        &w,
+        2,
+        intent(
+            p[1].0,
+            1,
+            "eden:walk",
+            Some(ground),
+            Some(Vec3::new(88_000_000, 0, -5_000_000)),
+        ),
+    );
+    let to_chair = at(&w, 2, intent(p[0].0, 1, "eden:walk", Some(chair()), None));
+    let sit = at(&w, 400, intent(p[0].0, 2, "eden:sit", Some(chair()), None));
+    let ran = run_to(&w, 4_000);
+    println!("K18b A2: {ran:?}");
+    let (walked, to_chair, sat) = (answer(&far), answer(&to_chair), answer(&sit));
+    println!(
+        "K18b A2: walk round the ring {walked:?}, walk to the chair {to_chair:?}, sit {sat:?}"
+    );
+    walked.expect("the walk round the ring lands");
+    to_chair.expect("the walk to the chair lands");
+    sat.expect("the sit lands");
+    // The legs, and a line each time the walker needs a new one (#3167 keeps a line between searches).
+    assert!(ran.searched > 2, "the planner searched the walk's lines");
+    // No search ran on the clock: in a debug build one would have panicked the clock thread, and no answer would have
+    // come back. (`sim::commit::checks_on_clock` counts across the test binary's threads, the guard's own test
+    // included, so it is not read here.)
+    w.stop();
+}
+
+/// K18b A2: the guard. A route search on a thread marked as the clock fails (a debug build panics).
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "ran on the clock thread")]
+fn k18b_a2_a_route_search_on_the_clock_thread_fails() {
+    let (mut t, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let body = t.surfaces[&ground]
+        .place(
+            pairs()[0].0,
+            frame,
+            Vec3::new(-40_000_000, 0, 30_000_000),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    sim::commit::mark_clock_thread();
+    let _ = t.line(&body, Vec3::new(88_000_000, 0, -5_000_000));
+}

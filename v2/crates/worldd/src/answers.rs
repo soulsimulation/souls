@@ -65,9 +65,14 @@
 //! never holds it. `health.json` is written by its own thread. [`Config::measures`] off takes no stamps and adds no
 //! block. Intents enter through a [`Door`], which stamps them as they are read.
 //!
-//! Not here (K18's known limits): a route search and a move's checks still run on the clock thread (`sim::host`'s
-//! runner plans a walk's route when its spot is granted; B3 checks a seat at commit); a walk or a sit in progress at
-//! a kill is not resumed (its intent is taken again when sent again); one zone a process.
+//! **Off the clock** (K18b, #3175). The clock runs no rule check, no route search and no reach check: the checkers
+//! run the rules (I3), and the bodies' planner thread (`sim::planner`) writes the spot tables, plans a walk's legs,
+//! finds each walker's line and measures each reach, from the bodies as a tick left them, for the next tick. Each
+//! tick waits for the planner's answers to the last one, as a lockstep tick waits for every check, so a run's results
+//! never depend on the threads' timing; the planner works while the clock commits, records and waits for the next tick.
+//!
+//! Not here (K18's known limits): a walk or a sit in progress at a kill is not resumed (its intent is taken again
+//! when sent again); one zone a process.
 // worldd's real clock (`Real`): the one place the process reads time.
 #![allow(clippy::disallowed_methods)]
 
@@ -184,6 +189,8 @@ pub struct Ran {
     pub panicked: u64,
     /// The bodies in a seat: (body, the seat's thing), in body order.
     pub seated: Vec<(Id, Id)>,
+    /// Route searches the bodies' planner ran, off the clock (K18b).
+    pub searched: u64,
 }
 
 /// How a start found the world (K18c, #3176): from the newest checkpoint and the log after it, or the whole log.
@@ -1137,6 +1144,7 @@ impl Clock {
             faults: self.faults,
             panicked,
             seated,
+            searched: self.bodies.as_ref().map_or(0, Bodies::searched),
         }
     }
 }

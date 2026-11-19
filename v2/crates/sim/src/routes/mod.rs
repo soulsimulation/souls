@@ -1103,7 +1103,8 @@ impl Map {
         chain
     }
 
-    /// The route for a body with abilities `has` from `from` to `to`, door states read from `tree`.
+    /// The route for a body with abilities `has` from `from` to `to`, door states read from `tree`. A search never
+    /// runs on the clock thread ([`crate::commit::off_clock`], K18b #3175): the world's planner runs it.
     pub fn route(
         &mut self,
         tree: &Tree,
@@ -1111,6 +1112,7 @@ impl Map {
         to: Spot,
         has: Mask,
     ) -> Result<Route, Refusal> {
+        crate::commit::off_clock();
         let goal_xz = [to.at[0], to.at[2]];
         let start_xz = [from.at[0], from.at[2]];
         if from.piece == to.piece {
