@@ -60,6 +60,10 @@ path = "src/forms.rs"
 name = "commit-cost"
 path = "commit-cost/main.rs"
 
+[[bin]]
+name = "resync"
+path = "resync/main.rs"
+
 # I4, #2687: acts from arrival at the world process to answer, and the kill run.
 [[bin]]
 name = "act-latency"
@@ -69,10 +73,6 @@ path = "act-latency/main.rs"
 [[bin]]
 name = "measures"
 path = "measures/main.rs"
-
-[[bin]]
-name = "resync"
-path = "resync/main.rs"
 
 # F5, #2770: a tick's time with 5,000 timed values and none due.
 [[bin]]
