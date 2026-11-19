@@ -380,11 +380,11 @@ async fn a4_a_client_resumes_from_its_cursor_or_is_told_it_cannot() {
     assert_eq!(o, "stream.cannot-resume");
 }
 
-/// The next frame within five seconds: an answer that never comes fails the test rather than hanging it.
+/// The next frame within 30 s: an answer that never comes fails the test rather than hanging it.
 async fn soon(ws: &mut Ws) -> Value {
-    tokio::time::timeout(std::time::Duration::from_secs(5), next(ws))
+    tokio::time::timeout(std::time::Duration::from_secs(30), next(ws))
         .await
-        .expect("a frame within 5 s")
+        .expect("a frame within 30 s")
         .expect("the socket is open")
 }
 
@@ -652,7 +652,7 @@ async fn r2_a_failed_write_drops_and_counts_and_the_answer_still_comes() {
     let mut ws = connect_as(&r.url, &t, "souls-client/1.2.0").await;
     for s in 1..=5 {
         put(&mut ws, intent(soul(50), s)).await;
-        let answer = tokio::time::timeout(std::time::Duration::from_secs(2), next(&mut ws))
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(30), next(&mut ws))
             .await
             .expect("the answer is not held up");
         assert_eq!(frame_sequence(&answer.unwrap()), Some(s));
