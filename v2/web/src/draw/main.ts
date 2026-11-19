@@ -3,7 +3,7 @@
 // world the picture is, and the clock's state.
 import * as THREE from 'three';
 import { FreeCamera } from '../camera/camera.ts';
-import { PlaybackClock } from '../clock/clock.ts';
+import { PlaybackClock, caughtUp } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { SocketSource } from '../source/socket.ts';
@@ -15,6 +15,7 @@ import { pageThings } from '../things/page.ts';
 import { HistoryPage, readMoment } from '../history/page.ts';
 import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
+import { arrive } from '../worlds/arrive.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -76,6 +77,8 @@ addEventListener('resize', resize);
 resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
+const worldName = new URLSearchParams(location.search).get('world');
+const firstFrame = arrive(worldName, status);
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
@@ -94,7 +97,7 @@ let history = moment && new HistoryPage(moment, cam, {
   frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
 });
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
-else if (!address) status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
+else if (!address) worldName || (status.textContent = 'no stream: open this page with ?stream=<the stream directory>');
 else (live(address), near?.start({ pointer: () => {}, part: (p) => world.apply([], [], p.samples), error: (m) => (error = m) }));
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
@@ -115,7 +118,7 @@ renderer.setAnimationLoop((now) => {
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
   sun.position.copy(sun.target.position).add(SUN);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
-  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, newestTo);
+  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   const ck = near?.clock ?? clock;
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
@@ -123,6 +126,7 @@ renderer.setAnimationLoop((now) => {
     drawn = world.draw(t, cam.camera);
     if (!framed && drawn > 0) {
       framed = true;
+      firstFrame();
       cam.setExtent(world.extent);
       const at = world.crowd(t);
       if (at) cam.look(at, 0.6, -0.6, 55);
