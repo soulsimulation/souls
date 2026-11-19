@@ -8,6 +8,7 @@ pub mod answers;
 pub mod bodies;
 pub mod buildsafe;
 pub mod checkers;
+pub mod directory;
 pub mod engine;
 pub mod loose;
 pub mod measures;

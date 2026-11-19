@@ -53,3 +53,8 @@ test('one search over whatever the copy holds: a set of ids narrows it, nothing 
   assert.deepEqual(find(rows, 'library', { within: new Set(['g-library']) }).found.map((r) => r.id), ['g-library']);
   assert.deepEqual(find(rows, 'the').found, [], 'stop words alone find nothing');
 });
+
+test('a joined body keeps its Soul and parent through the search projection', () => {
+  const body = { ...row('body-1', 'body 1', 'souls:body'), soul: 'soul-1', parent: 'ground-1' };
+  assert.deepEqual(find([body], 'body').found[0], { id: body.id, name: body.name, kind: body.kind, soul: body.soul, parent: body.parent, in: 'World' });
+});
