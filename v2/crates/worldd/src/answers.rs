@@ -20,6 +20,9 @@
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming both entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). One answer, at its end: I7's accept-then-resolve is not here.
+//! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
+//! sit, a lie or a rise runs to its end (a seat is never left half taken) and ends so then; a walk a new move
+//! replaces ends `claim-taken` in the tick the new move starts.
 //!
 //! **A restart** starts from the newest checkpoint that verifies, when the world takes them (K5, K18c #3176): its
 //! tree, and its carry (each actor's last sequence and kept answers, the next intent id, every body's pose and seat,
@@ -75,7 +78,8 @@
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
 //! handed to the log is on the disk, so it never holds a change the log lacks. **Lockstep** ([`Config::lockstep`]) runs the
-//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check before a tick, so a run fed
+//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check, and for the checkers' copy
+//! to stand at the live version, before a tick, so a run fed
 //! the same inputs at the same ticks writes the same log: how K12's replay is checked on the real loop.
 //!
 //! **Measures** (O4, #2694, `crate::measures`): each act carries its stamps from the socket to its answer, each
@@ -91,7 +95,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use crate::acts::{self, Acts};
-use crate::bodies::{self, Ask, Asked, Bodies, Placed};
+use crate::bodies::{self, Ask, Asked, Bodies, Cut, Placed};
+use crate::buildsafe;
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::engine::{self, Engine};
 use crate::loose::Ends;
@@ -127,6 +132,7 @@ use sim::commit::spot::{self, Spot as Bound};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
 use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
+use sim::edit::safety::Who;
 use sim::frozen::Publisher;
 use sim::life::{Birth, Life, Ring};
 use sim::log::{Durable, Log, Storage};
@@ -196,8 +202,9 @@ pub enum Event {
         done: Sender<Ran>,
     },
     Checked(Box<(Act, Checks)>),
-    /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick, or its refusal.
-    Edited(Box<(Id, Result<Planned, Refused>)>),
+    /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick with the Souls' bodies
+    /// read from that copy (G1c), or its refusal.
+    Edited(Box<(Id, Result<Checked, Refused>)>),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
     Stall(Duration),
     Stop,
@@ -232,6 +239,10 @@ impl Door {
             .is_ok()
     }
 }
+
+/// How long a lockstep tick waits for the checkers' copy to stand at the live version: only a bound on a publisher
+/// that refused a part; a loaded machine catches up well within it.
+const PUBLISHED_WAIT: Duration = Duration::from_secs(60);
 
 /// Where a lockstep run stands after [`Event::RunTo`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -644,10 +655,15 @@ struct Clock {
     bodies: Option<Bodies>,
     /// Move intents taken since the last tick, committed at the next (I4b).
     moving: Vec<(Id, Asked)>,
+    /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
+    /// ends, so no move outlives its act.
+    overdue: BTreeSet<Id>,
     /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
     edits: Option<Sender<(Id, Edit)>>,
     /// Edits checked since the last tick, committed (or refused) at the next.
-    edited: Vec<(Id, Result<Planned, Refused>)>,
+    edited: Vec<(Id, Result<Checked, Refused>)>,
+    /// Where the edit checker reads the bodies the controller holds, handed off each tick (G1d).
+    walkers: Option<Arc<buildsafe::Moving>>,
     /// Soul Actions (C2, #3366): the forms in progress, and the form acts taken since the last tick, committed at
     /// the next through the form runner when the world has bodies.
     forms: Acts,
@@ -687,6 +703,9 @@ struct Clock {
     loose: Ends,
     unlinked: Vec<Id>,
 }
+
+/// An edit planned off the clock, and the Souls' bodies its commit is judged against (G2's rule, G1c).
+type Checked = (Planned, Vec<Who>);
 
 /// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
 /// by the tick that holds it, and each fire's entries written on the world node.
@@ -779,6 +798,8 @@ pub const FORM_ENDED: &str = "souls:act-ended";
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
 pub const MOVE_STARTED: &str = "souls:move-started";
 pub const MOVE_ENDED: &str = "souls:move-ended";
+/// How an act still going at its deadline ends (C8), and the move it drove with it.
+pub const TIMED_OUT: &str = "act.timed-out";
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| Name::new("act.refused").expect("a name"))
@@ -1271,9 +1292,9 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let committed = checked.and_then(|c| {
+            let committed = checked.and_then(|(c, souls)| {
                 let mut minter = Minter::at(self.lineage, self.next_intent);
-                let done = sim::edit::commit(&mut self.replica, &mut minter, &c, &[], now);
+                let done = sim::edit::commit(&mut self.replica, &mut minter, &c, &souls, now);
                 self.next_intent = minter.next();
                 done
             });
@@ -2030,7 +2051,12 @@ impl Clock {
             }
         }
         let started = b.start(asks);
+        // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
+        let replaced = b.replaced();
         self.bodies = Some(b);
+        for (id, how) in replaced {
+            self.settle(id, how, now);
+        }
         for (id, r) in started {
             match r {
                 Ok(()) => self.note(id, MOVE_STARTED, None, now),
@@ -2044,9 +2070,14 @@ impl Clock {
         }
     }
 
-    /// Ends open move `id` as it ended: its entry, then its answer.
+    /// Ends open move `id` as it ended: its entry, then its answer. A move whose act's deadline passed while it
+    /// went ends `act.timed-out`, however it ended.
     fn settle(&mut self, id: Id, how: Result<(), String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
+        let how = match self.overdue.remove(&id) {
+            true => Err(TIMED_OUT.to_owned()),
+            false => how,
+        };
         let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
@@ -2106,21 +2137,26 @@ impl Clock {
             }
         }
         at[2] = mark();
-        // 1. Due timers: acts whose deadline passed.
+        // 1. Due timers: acts whose deadline passed. A walk going for one stops in this tick and its end is written
+        // by the deadline's name; a sit, a lie or a rise runs to its end, and the act ends with it.
         while let Some(id) = self.deadlines.due(now) {
-            if let Some(b) = self.bodies.as_mut() {
-                b.cancel(id);
-            }
+            let Some(o) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence, body) = (o.actor, o.sequence, o.body);
+            let cut = self.bodies.as_mut().and_then(|b| b.cancel(id));
             // A form's run whose act timed out is left: it ends at its next stable moment (F3).
-            if let Some(o) = self.open.get(&id) {
-                let body = o.body;
-                self.forms
-                    .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            self.forms
+                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            match cut {
+                Some(Cut::Stopped) => self.note(id, MOVE_ENDED, Some(TIMED_OUT), now),
+                Some(Cut::Finishing) => {
+                    self.overdue.insert(id);
+                    continue;
+                }
+                None => {}
             }
-            if let Some(o) = self.open.get(&id) {
-                let (actor, sequence) = (o.actor, o.sequence);
-                self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
-            }
+            self.end(id, |c| c.refusal(actor, sequence, TIMED_OUT));
         }
         // 1. The world node's sky: its timers due in this tick, each at its due time (E6, #3369).
         self.fire_sky(now);
@@ -2192,6 +2228,11 @@ impl Clock {
         self.write_forms(now);
         // 4. What the tick's acts made loose or kept: its timers, in the same tick (F10b, #3476).
         self.set_loose(now);
+        // The bodies as they stand after the tick's steps and starts, for the edit checker (G1d): before the tick's
+        // frozen copy (6).
+        if let (Some(w), Some(b)) = (&self.walkers, &self.bodies) {
+            w.offer(buildsafe::moving(b));
+        }
         at[5] = mark();
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
         let inputs = match std::mem::take(&mut self.inputs) {
@@ -2664,10 +2705,15 @@ pub fn start<S: Storage + 'static>(
     });
     let engine_parts = cfg.engine.take();
     let (events, rx) = channel();
+    let walkers = cfg
+        .edits
+        .is_some()
+        .then(|| Arc::new(buildsafe::Moving::default()));
     let edits = cfg
         .edits
         .take()
-        .map(|w| edit_checker(w, Arc::clone(&publisher), events.clone()))
+        .zip(walkers.clone())
+        .map(|(w, m)| edit_checker(w, Arc::clone(&publisher), m, events.clone()))
         .transpose()?;
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let fwd = events.clone();
@@ -2754,8 +2800,10 @@ pub fn start<S: Storage + 'static>(
         parts: Vec::new(),
         bodies: None,
         moving: Vec::new(),
+        overdue: BTreeSet::new(),
         edits,
         edited: Vec::new(),
+        walkers,
         forms: Acts::new(kinds, library, header, forms_scope),
         forming: Vec::new(),
         engine: engine_parts
@@ -2885,6 +2933,11 @@ pub fn start<S: Storage + 'static>(
                                 }
                             }
                         }
+                        // And the checkers' copy caught up with the live tree: it is published on its own thread, and
+                        // an act checked on a copy behind it is rechecked a tick later, so the commit tick (and the
+                        // log) would depend on that thread's speed.
+                        let live = c.replica.version();
+                        c.publisher.wait_for(live, PUBLISHED_WAIT);
                         let Ok(due) = ticker.due() else { break };
                         *shared.lock().unwrap_or_else(|p| p.into_inner()) = due;
                         if let Err(e) = ticker.run_due(&mut *pace, &beat, &mut |n, s| c.tick(n, s))
@@ -2939,11 +2992,15 @@ pub fn start<S: Storage + 'static>(
 
 /// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) and planned (`sim::edit::plan`, G2's
 /// safety guard) on the newest frozen copy that stands at the version it was planned against, or after a second
-/// whatever it stands at, never on the live tree. The toggles world has no open ground (`None`); its commit is judged
-/// against no Soul's body yet (G1b leaves the bodies' list to a later task).
+/// whatever it stands at, never on the live tree. G2 is given that copy's open ground and its Souls' bodies
+/// ([`crate::buildsafe`], G1c), with the bodies the controller holds as the clock last handed them off, walkers and
+/// the next corner of each walker's line among them (G1d): the plan is cut on the ground, and the commit judges the
+/// bodies (lookups only), so an edit that would bury a Soul, cut it off or change what it uses is refused by name,
+/// naming the Soul.
 fn edit_checker(
     world: edit::World,
     publisher: Arc<Publisher>,
+    walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
 ) -> R<Sender<(Id, Edit)>> {
     let (tx, rx) = channel::<(Id, Edit)>();
@@ -2952,8 +3009,13 @@ fn edit_checker(
         .spawn(move || {
             for (id, e) in rx {
                 let copy = publisher.wait_for(e.planned, Duration::from_secs(1));
-                let checked =
-                    edit::check(e, &copy, &world).and_then(|c| sim::edit::plan(c, &copy, None));
+                let ground = buildsafe::open_ground(&copy);
+                let checked = edit::check(e, &copy, &world)
+                    .and_then(|c| sim::edit::plan(c, &copy, ground))
+                    .map(|p| {
+                        let tree = buildsafe::souls(&copy, &world.kinds);
+                        (p, buildsafe::judged(tree, &walkers.latest()))
+                    });
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
                 }

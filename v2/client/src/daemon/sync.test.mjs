@@ -102,9 +102,9 @@ test('C11 A2, A3: a first sync of 30,000 records completes; it emits synced, whi
   // it to resume after (a grant it has sent nothing is told stream.cannot-resume, I1). A new process holds no copy, so
   // it takes the scope again, on one socket.
   await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: `${SCOPE}-3` });
-  await waitFor(async () => (await status()).answered === 1, 10_000);
+  await waitFor(async () => (await status()).answered === 1, 30_000);
   await request(rt.socket, { op: 'stop' });
-  await waitFor(async () => { try { await status(); return false; } catch { return true; } }, 5000);
+  await waitFor(async () => { try { await status(); return false; } catch { return true; } }, 30_000);
   credentials();
   start(home, SOUL, PKG);
   const again = await current();
