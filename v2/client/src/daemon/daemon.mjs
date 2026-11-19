@@ -95,6 +95,7 @@ import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
+import { calendarOf, worldDue } from '../schedule/world.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -215,6 +216,7 @@ function current() {
   if (ws && !ws.hearing) { ws.hearing = true; ws.send(wire.wireSubscribe(scope, seat.grant.counter, BigInt(HEARING_BUDGET))); }
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
   follow();
+  scheduleWorld();
 }
 
 /**
@@ -281,7 +283,7 @@ function syncAnswer(sock, n, refused, bytes) {
   for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
-  if (done.kind === 'refresh' || done.kind === 'follow') { follow(); return; }
+  if (done.kind === 'refresh' || done.kind === 'follow') { scheduleWorld(); follow(); return; }
   state.cursor = copyVersion; // the stream carries on from the version the hashes are at
   state.seen = null; // no frame of it applied: the gateway's default
   save();
@@ -714,8 +716,8 @@ const server = createServer((c) => {
 const SCHEDULE = join(soulDirOf(home, soul), 'memory', 'schedule.md');
 const BEAT_MS = 1000, BEAT_SAVED_MS = 10_000, GAP_MS = 15_000;
 const MISSED_NOTE = 'not sent: their moment passed while this daemon was off or asleep. Tell your owner; send what still matters yourself.';
-state.schedule = { marks: {}, beat: null, missed: [], dropped: 0, ...(state.schedule ?? {}) };
-let entries = [], stamp = null, beatSaved = 0;
+state.schedule = { marks: {}, targets: {}, beat: null, missed: [], dropped: 0, ...(state.schedule ?? {}) };
+let entries = [], stamp = null, beatSaved = 0, worldTimer = null;
 const inFlight = new Set();
 
 /** The file's entries, read again only when it changed; a line that does not parse is logged once and inert. */
@@ -786,6 +788,25 @@ function beat() {
   }
   if (missed.length || now - beatSaved >= BEAT_SAVED_MS) { beatSaved = now; save(); }
   for (const f of fire) fireEntry(f.e, now, f.late);
+  scheduleWorld(now, off);
+}
+
+/** One deadline on the current copy's mapping. A sync/rate change and the existing file beat re-arm it; no polling. */
+function scheduleWorld(now = Date.now(), off = null) {
+  clearTimeout(worldTimer);
+  worldTimer = null;
+  if (!signedIn || syncing) return;
+  const s = state.schedule;
+  const { fire, missed, next, resolved } = worldDue(scheduleNow(), s.marks, s.targets, clockOf(copy), calendarOf(copy), now, off);
+  for (const m of missed) {
+    s.marks[m.e.key] = { at: now, missed: true };
+    if (m.told) {
+      s.missed.push({ ...shownEntry(m.e), lateMs: m.late, ...(m.off ? { off: m.off.map((t) => new Date(t).toISOString()) } : {}) });
+    } else s.dropped++;
+  }
+  if (resolved || missed.length) save(); // keep the occurrence before a restart, and before any send
+  for (const f of fire) fireEntry(f.e, now, f.late);
+  if (next !== null) worldTimer = setTimeout(scheduleWorld, Math.min(next - now, 2_147_483_647));
 }
 
 /** The change entries an event fires, sent at once. */
