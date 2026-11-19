@@ -171,7 +171,7 @@ move() {
       continue
     fi
     echo "move: deploy $w$([ "$w" = "$canary" ] && echo ' (the canary)')"
-    if "$rel/bin/deploy" "$w" "$worldd" --probe "$ETC/probe/$w" --window-s "${RELEASE_WINDOW_S:-60}"; then
+    if "$rel/bin/deploy" "$w" "$worldd" --window-s "${RELEASE_WINDOW_S:-60}"; then
       touch "$rel/moved/$w"
     else
       refuse "release.deploy-failed: $w (worlds after it keep their build; worlds before it keep this one)"
@@ -212,7 +212,7 @@ rollback() {
   directory_env
   for w in "$@"; do
     echo "rollback: $w to ${to:0:16}… from ${from:0:16}…"
-    if "$rel/bin/deploy" rollback "$w" "$to" --from "$from" --probe "$ETC/probe/$w"; then
+    if "$rel/bin/deploy" rollback "$w" "$to" --from "$from"; then
       rm -f "$rel/moved/$w"
     else
       status=3

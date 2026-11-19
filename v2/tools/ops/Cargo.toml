@@ -9,7 +9,7 @@ description = "Operations tools in Rust (Engine v2, #2635): deploy and roll back
 name = "ops"
 path = "src/main.rs"
 
-# `deploy <world> <hash> --probe <file>` and `deploy rollback ...`: the commands on a machine with O1's units.
+# `deploy <world> <hash>` and `deploy rollback ...`: the commands on a machine with O1's units.
 [[bin]]
 name = "deploy"
 path = "src/deploy.rs"
@@ -48,8 +48,6 @@ supervisor = { path = "../../crates/supervisor" }
 gatewayd = { path = "../../crates/gatewayd" }
 # O20 (#2812): the world's stores outside its log, restored as one step of O12's restore.
 backup = { path = "backup" }
-# A probe made from a seeded world's facts: its ground (O18b, #3498).
-import-eden = { path = "../import-eden" }
 # The benches' scripted world and the shared store (V3, O3).
 archive = { path = "../archive" }
 # O7's run drives 100 agents through the gateway's socket.

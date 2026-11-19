@@ -104,7 +104,14 @@ fn kind() -> (json::Value, String) {
                 .expect("a form");
             (v, form)
         })
-        .find(|(v, f)| bind_effects(v, f).is_ok_and(|e| !e.is_empty()))
+        // Plain sets only: a `set ... by` (bound since C22) needs the kinds' amount fields, which this stage loads none of.
+        .find(|(v, f)| {
+            bind_effects(v, f).is_ok_and(|e| {
+                !e.is_empty()
+                    && e.iter()
+                        .all(|x| matches!(x, form_runner::Effect::Set { .. }))
+            })
+        })
         .expect("a kind whose effects bind")
 }
 
@@ -483,6 +490,9 @@ pub fn points() -> Vec<(String, u64)> {
         Step::Move { .. } | Step::Hand => "move",
         Step::Wait(_) => "pause",
         Step::Sit { .. } => "sit",
+        Step::Rise => "rise",
+        Step::Settle { .. } => "settle",
+        Step::UseHeld => "use held",
     };
     spans
         .iter()

@@ -5,7 +5,9 @@
 //!   floor) with every body taking a step each 50 ms tick and one of them speaking, by reference, every ten seconds.
 //!   Each tick's part is handed, as the world commits it, to the root's public view at `full` (T7's reference view,
 //!   which R3's tier matches byte for byte) and on to V1's stream writer, which writes the numbered parts under
-//!   `www/`; and to V3's bundler, which writes the bundles (`sampled`, five minutes each) under `bundles/`.
+//!   `www/`; and to V3's bundler, which writes the bundles (`sampled`, five minutes each) under `bundles/`. Its
+//!   effects also go to V4's indexer, which writes the public event index and counts under `history/` as a world's
+//!   history holds them (R16b, #3480), so R16's `history` answers can be checked against the sheet.
 //! - [`sheet`] reads either back into a sheet, one file at a time.
 //! - [`fault`] copies the bundles with one body moved 30 cm in one motion sample, and says the second the sheets
 //!   must first differ at.
@@ -24,6 +26,7 @@ use replica::effects::{Body, Change, Effect, Part, Refusal, State, texts};
 use replica::encode::{Value, encode};
 use replica::facts::{self, SECOND, Sheet};
 use replica::history::Bundle;
+use replica::history::events::Indexer;
 use replica::ids::Id;
 use replica::stream;
 use replica::views::{Key, Level, Redactions, View};
@@ -59,8 +62,8 @@ pub const SAY_EVERY: u64 = 200;
 /// The header file a recording keeps beside its parts and bundles.
 pub const HEADER: &str = "header";
 
-/// Records `seconds` of world time under `dir`: the header, the live parts under `www/` and the bundles under
-/// `bundles/`. Returns the bodies.
+/// Records `seconds` of world time under `dir`: the header, the live parts under `www/`, the bundles under
+/// `bundles/` and V4's event index from the same effects under `history/`. Returns the bodies.
 pub fn record(dir: &Path, seconds: u64) -> R<Vec<Id>> {
     let _ = fs::remove_dir_all(dir);
     io(fs::create_dir_all(dir.join("bundles")))?;
@@ -88,6 +91,15 @@ pub fn record(dir: &Path, seconds: u64) -> R<Vec<Id>> {
     );
     let mut writer = Writer::create(&dir.join("www"), &header, &key, (0, 0))?;
     let mut bundler = Bundler::new(root, kind);
+    let mut indexer = Indexer::new(redactions.clone());
+    let index = |objects: Vec<(String, Vec<u8>)>| -> R<()> {
+        for (k, v) in objects {
+            let path = dir.join(k);
+            io(fs::create_dir_all(path.parent().expect("a key's folder")))?;
+            io(fs::write(path, v))?;
+        }
+        Ok(())
+    };
     let put = |b: &Bundle| {
         io(fs::write(
             dir.join(format!("bundles/{:020}", b.start)),
@@ -99,6 +111,7 @@ pub fn record(dir: &Path, seconds: u64) -> R<Vec<Id>> {
         for bytes in parts {
             let part = Part::read(&bytes)?;
             for e in &part.effects {
+                index(indexer.feed(e)?)?;
                 after.apply_entry(&header, e)?;
                 view.step(&before, e, &after, &redactions)?;
                 before.apply_entry(&header, e)?;
@@ -123,6 +136,7 @@ pub fn record(dir: &Path, seconds: u64) -> R<Vec<Id>> {
     if let Some(b) = bundler.finish()? {
         put(&b)?;
     }
+    index(indexer.finish()?)?;
     Ok(w.bodies.clone())
 }
 

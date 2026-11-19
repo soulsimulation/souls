@@ -23,6 +23,13 @@
   input[type=text] { font: inherit; padding: .3rem .5rem; width: 12rem; }
   button { font: inherit; padding: .4rem 1rem; margin-top: 1rem; }
   [hidden] { display: none !important; }
+  /* Phones and touch screens (W14): every control at least 44 px, as today's pages (apps/web world-chrome.css). */
+  @media (max-width: 700px), (pointer: coarse) {
+    input[type=text], button { min-height: 44px; box-sizing: border-box; }
+    input[type=text] { width: 100%; max-width: 16rem; }
+    label.match { display: flex; align-items: center; gap: .6rem; min-height: 44px; }
+    label.match input { width: 20px; height: 20px; margin: 0; }
+  }
 </style>
 </head>
 <body>
@@ -43,7 +50,7 @@
       <dt>Asked</dt><dd id="age"></dd>
       <dt>Now on</dt><dd id="connected"></dd>
     </dl>
-    <label><input type="checkbox" id="match"> The code matches the one on my screen</label><br>
+    <label class="match"><input type="checkbox" id="match"> The code matches the one on my screen</label><br>
     <button id="approve" disabled>Approve this device</button>
   </section>
   <p id="said" role="status"></p>

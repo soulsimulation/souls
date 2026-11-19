@@ -225,6 +225,7 @@ impl Hall {
             .map(|&b| Request {
                 body: b,
                 thing: chair_of[&b],
+                slot: None,
                 mv: sit,
                 stance: Stance::Sit,
             })

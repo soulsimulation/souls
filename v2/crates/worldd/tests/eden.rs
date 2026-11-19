@@ -397,9 +397,9 @@ fn todays_seats(text: &str) -> BTreeMap<String, (usize, usize)> {
     out
 }
 
-/// C17 (#3453) A1: a seeded Eden registers the seats its entries declare, one per thing (B3 holds one seat per thing;
-/// C19 registers the rest), printed against today's Eden; and the gateway's walk, sit and rise work on one: a Soul
-/// born outside the library walks in to the sage armchair's stand point, sits in it and rises.
+/// C17 (#3453) A1 and C19 (#3457) A1: a seeded Eden registers every body slot its entries declare (a sofa's three, a
+/// bed's two), counted slot by slot against today's Eden's seat and bed slots by thing def; and the gateway's walk, sit
+/// and rise work on one: a Soul born outside the library walks in to the sage armchair's stand point, sits and rises.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
@@ -457,34 +457,181 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
             Some((*id, t.get("def")?.str()?.to_owned()))
         })
         .collect();
+    // Registered slots by def, slot by slot (C19), against today's.
     let mut by_def: BTreeMap<String, usize> = BTreeMap::new();
     for s in &mine {
         *by_def
             .entry(def_of.get(&s.thing).cloned().unwrap_or_default())
             .or_default() += 1;
     }
+    let (mut covered, mut short) = (0, Vec::new());
     for (def, (s, t)) in &today {
         let r = by_def.get(def).copied().unwrap_or(0);
-        if r != *t {
-            println!("  {def}: today {s} seats on {t} things; registered on {r}");
+        covered += r.min(*s);
+        if r != *s {
+            println!("  {def}: today {s} slots on {t} things; registered {r}");
+        }
+        if r < *s {
+            short.push(def.clone());
         }
     }
     for (def, r) in &by_def {
         if !today.contains_key(def) {
-            println!("  {def}: no seat today; registered on {r}");
+            println!("  {def}: no seat today; registered {r}");
         }
     }
+    println!(
+        "C19 A1: {covered} of today's {slots} seat and bed slots registered; {} more that today has no seat for; \
+         short of today: {short:?}",
+        registered - covered
+    );
+    let mut on_things: Vec<Id> = mine.iter().map(|s| s.thing).collect();
+    on_things.dedup();
     assert_eq!(
         mine.len(),
         registered,
-        "the world registers what the entries declare"
+        "the world registers every slot the entries declare"
     );
     assert_eq!(left, 0, "every seat placed on a floor");
-    assert_eq!(registered, on, "one seat per thing");
-    assert!(registered * 2 > things, "most of today's seated things");
+    assert_eq!(on, on_things.len(), "the things they are on");
+    assert_eq!(registered, declared, "every declared body slot registered");
+    // Every def today seats has at least today's slots, but those whose entries declare no body slot with a stand
+    // point (C17: the campfire's and the piano's).
+    let none: Vec<&str> = short
+        .iter()
+        .filter(|d| by_def.get(*d).copied().unwrap_or(0) > 0)
+        .map(String::as_str)
+        .collect();
+    assert!(none.is_empty(), "short of today's slots: {none:?}");
+    assert_eq!(
+        short,
+        vec!["core-campfire@1".to_owned(), "core-piano@1".to_owned()],
+        "only the entries with no body slot"
+    );
     walked.expect("walked in to the armchair's stand point");
     sat.expect("sat in the armchair");
     rose.expect("rose from it");
+}
+
+/// Soul `n` joined on the world's socket in `dir`: born by the entry.
+fn join(dir: &Path, n: u64, lineage: Scope) -> Client {
+    let mut soul = reconnect(dir, n, 0, lineage);
+    soul.act(JOIN, None, BTreeMap::new())
+        .expect("born by the entry");
+    soul
+}
+
+/// Soul `n` on the world's socket in `dir` again, its last sequence `seq`.
+fn reconnect(dir: &Path, n: u64, seq: u64, lineage: Scope) -> Client {
+    let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(90))).unwrap();
+    Client(s, Id::new(Scope([0xc1; 16]), n).unwrap(), seq, lineage)
+}
+
+/// Each body's last logged frame (its node and slot) in the world's log in `dir` (K18's body rows).
+fn last_frames(dir: &Path) -> BTreeMap<Id, (Id, Option<u64>)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = Part::read(&r).unwrap().rest.get(&answers::BODIES) {
+            for row in rows {
+                if let Some((id, pose, _)) = worldd::bodies::read_row(row) {
+                    out.insert(id, (pose.frame.node, pose.frame.slot));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// C19 (#3457) A2 and A3: three Souls share a sofa on a seeded Eden, each in its own slot, and keep their slots over a
+/// restart. The roundhouse south of the library (e_9e423940, at (67.5, -18.5) m, its front door open at z -15.6 m) has
+/// a three-seat sofa (e_3bfd13e0). Four Souls are born outside the front door. Three in turn walk to the sofa and sit
+/// on it through the gateway, naming only the sofa: the world picks each the free slot nearest it. The fourth's sit is
+/// refused `place-taken`. The world is stopped and served again on the same folder: the three are seated in the same
+/// slots, the fourth is still refused, and each of the three rises.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c19_three_souls_share_a_sofa_each_in_its_own_slot_over_a_restart() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (sofa, lineage) = (im.nodes["e_3bfd13e0"], im.nodes["world"].scope());
+    let (served, first, dir) = serve(&facts, "66.5,-13.5", "c19", lineage);
+    let mut souls = vec![first];
+    for n in 2..=4 {
+        souls.push(join(&dir, n, lineage));
+    }
+    for (i, soul) in souls.iter_mut().enumerate().take(3) {
+        let walked = soul.act("eden:walk", Some(sofa), BTreeMap::new());
+        let sat = soul.act("eden:sit", Some(sofa), BTreeMap::new());
+        println!(
+            "Soul {}: walk to the sofa {walked:?}, sit on it {sat:?}",
+            i + 1
+        );
+        walked.expect("walked to a free slot's stand point");
+        sat.expect("sat in a free slot");
+    }
+    let fourth = souls[3].act("eden:sit", Some(sofa), BTreeMap::new());
+    println!("Soul 4: sit on the full sofa {fourth:?}");
+    assert_eq!(fourth, Err("place-taken".to_owned()));
+    let frames = last_frames(&dir);
+    let mut slots: Vec<Option<u64>> = frames
+        .values()
+        .filter(|(node, _)| *node == sofa)
+        .map(|f| f.1)
+        .collect();
+    slots.sort_unstable();
+    println!("the sofa's sitters' logged slots: {slots:?}");
+    assert_eq!(
+        slots,
+        vec![Some(1), Some(2), Some(3)],
+        "each in its own slot"
+    );
+
+    // A3: stopped and served again on the same folder (K18c).
+    drop(served);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let served = Served(child);
+    let mut line = String::new();
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        line.clear();
+    }
+    print!("restarted: {line}");
+    let mut souls: Vec<Client> = souls
+        .iter()
+        .enumerate()
+        .map(|(i, s)| reconnect(&dir, i as u64 + 1, s.2, lineage))
+        .collect();
+    let again = souls[3].act("eden:sit", Some(sofa), BTreeMap::new());
+    println!("after the restart, Soul 4: sit on the sofa {again:?}");
+    let mut rose = Vec::new();
+    for soul in souls.iter_mut().take(3) {
+        rose.push(soul.act("eden:rise", None, BTreeMap::new()));
+    }
+    println!("after the restart, the three rise: {rose:?}");
+    let after = last_frames(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(again, Err("place-taken".to_owned()), "still full");
+    for r in rose {
+        r.expect("each rises from its own slot");
+    }
+    assert!(
+        frames
+            .iter()
+            .filter(|(_, f)| f.0 == sofa)
+            .all(|(b, _)| after.get(b).is_some_and(|f| f.0 != sofa)),
+        "each set down off the sofa: {after:?}"
+    );
 }
 
 /// C17 (#3453) A2: a Soul born outside the lake cabin sits at the cabin's chair that stands under its table (its
@@ -1091,6 +1238,523 @@ fn blocked_by(tree: &replica::tree::Tree, id: Id, mut at: replica::pose::Vec3) -
         level = up;
     }
     "no solid: off the walked ground".into()
+}
+
+/// C22 (#3485): a Soul born at `at` (`x,z` m) does `verb` (an Eden form by its own entry) at thing `today` (today's id):
+/// the receipt's entries (world time, events), printed, and the act's answer.
+fn act_at(at: &str, today: &str, verb: &str, tag: &str) -> Result<Vec<u64>, String> {
+    act_in(&facts_path(), at, today, verb, tag)
+}
+
+/// [`act_at`] on the facts file `facts`.
+fn act_in(facts: &str, at: &str, today: &str, verb: &str, tag: &str) -> Result<Vec<u64>, String> {
+    let im = import_eden::load(&std::fs::read_to_string(facts).unwrap()).expect("Eden loads");
+    let thing = im.nodes[today];
+    let (served, mut soul, dir) = serve(facts, at, tag, im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let done = soul.act(verb, Some(thing), BTreeMap::new());
+    println!("{verb} at {today}: {done:?}");
+    if let Some(b) = track(&dir).last() {
+        println!("  the body at the end: ({:.3}, {:.3}) m", b.2, b.3);
+    }
+    let entries = receipt_entries(&dir, done.as_deref().unwrap_or(&[]));
+    for (at, names, _) in &entries {
+        println!("  {at} µs: {names:?}");
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    done
+}
+
+/// C22 (#3485) A1: born outside the hall's front door, a Soul walks to the arcade cabinet in its bar (today's
+/// e_263477b5) and plays it by its own entry (`play`: a walk to `player`, a press at `joystick`, 60 s): a press is
+/// measured to the joystick or the cabinet's nearest surface, not its origin, and the act ends `done`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c22_a1_the_arcade_cabinets_play_ends_done() {
+    act_at("297.5,-14.0", "e_263477b5", "eden:play", "c22a1").expect("played, done");
+}
+
+/// C22 (#3485) A2: born outside the library's door, a Soul walks to the reading room's desk (today's e_0f7fb44b) and
+/// writes at it by its own entry (`write`: a walk to `front`, a slide at `top`, 60 s, the page count up by one).
+/// C18 (#3454): a chair stands in front of every desk on Eden (here e_975f923a), so the desk's `front` is at its front
+/// left corner, beside the chair (`content/kinds/furniture/desk.json`), and the write ends `done` on Eden as it is.
+/// Before C18, `front` was where the chair stands: the walk stopped behind the chair, 1.3 m from the desk's edge, and
+/// the slide ended `out-of-reach`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c22_a2_the_desks_write_ends_done() {
+    act_at("74.0,-1.0", "e_0f7fb44b", "eden:write", "c22a2").expect("written, done");
+}
+
+/// How one form of a sweep ended ([`sweep`]): `done`, `refused <name>` at its start, `failed <name>` by its run's
+/// ending, or `never-ended` past its deadline.
+fn ending(r: Result<String, String>) -> String {
+    match r {
+        Ok(how) if how == "done" => how,
+        Ok(how) => format!("failed {how}"),
+        Err(name) => format!("refused {name}"),
+    }
+}
+
+/// C22 (#3485) A3: every form an act starts (`starts: act`) of every entry in `content/kinds` that has a thing on
+/// Eden, run once on the first such thing (by today's id), by a body set down at the form's stand point (its first
+/// walk's point, else the thing's first `stand` point, else the thing's own place; the nearest clear place within a
+/// form's reach when a body cannot stand there), through worldd's own form runner ([`worldd::acts::Acts`]) and
+/// bodies, as `worldd seed` and `worldd serve` build them (stand points cleared, seats registered), in world time
+/// stepped 50 ms a tick. A slot argument is given slot 1; a thing argument is not given. What a run writes is not
+/// applied, so each form runs on Eden as seeded. Each form's body is taken out after it. Returns each ending with
+/// its forms (`kind form thing`), and the entries with no thing on Eden.
+fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
+    use replica::pose::{Frame, Quat, Vec3};
+    use replica::rules::json::Value as J;
+    use replica::world_model::{plain, show};
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(facts_path()).expect("the Eden facts file");
+    let im = import_eden::load(&text).expect("Eden loads");
+    let mut found = Vec::new();
+    entries(Path::new(&format!("{root}/content/kinds")), &mut found);
+    import_eden::clear_stand_points(&im, &mut found);
+    let tree = import_eden::load(&text).expect("Eden loads").tree;
+    let (world, ground) = (im.nodes["world"], im.nodes["ground"]);
+    let header = import_eden::header(world, &im.rules).unwrap();
+    let mut things: BTreeMap<String, Id> = BTreeMap::new();
+    for &id in im.nodes.values() {
+        if let Some(n) = tree.handle(id).and_then(|h| tree.node(h)) {
+            things
+                .entry(plain(n.kind().as_str()).to_owned())
+                .or_insert(id);
+        }
+    }
+    let next = im.tree.to_state().next;
+    let town = sim::walk::town::Town::new(
+        im.tree,
+        ground,
+        sim::links::Doors::new(header.clone(), im.rules, next),
+    )
+    .expect("the town");
+    let mut bodies = worldd::bodies::Bodies::new(town, 50_000).unwrap();
+    // The seats, as `worldd serve` registers them: a stand point a body cannot stand on moved within reach.
+    let (seats, _) = import_eden::body_slots(&bodies.town.tree, &found);
+    for s in &seats {
+        let view = bodies.town.view();
+        let Some((floor, point, facing)) = view.on_floor(s.thing, s.at) else {
+            continue;
+        };
+        let mut place = sim::slots::PlaceAt {
+            thing: s.thing,
+            place: replica::moves::Place {
+                slot: s.slot,
+                height: s.at.y.max(0),
+                stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
+            },
+            point,
+            facing,
+            floor,
+        };
+        let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
+        let [w, x, y, z] = facing.parts();
+        let back = Quat::new(w, -x, -y, -z);
+        if let (Ok(stand), Ok(back)) = (stand, back)
+            && view.stand_near(floor, stand, 1, None).is_none()
+            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
+            && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
+        {
+            place.place.stand = [d.x, d.z];
+        }
+        let _ = bodies.add_place(place);
+    }
+    let family = {
+        use replica::bodies::{Class, Family, Resource};
+        let r = |n: &str, class, slot| Resource {
+            name: name(n),
+            class,
+            slot,
+        };
+        Family {
+            name: name("souls:humanoid"),
+            resources: vec![
+                r("souls:leg-left", Class::Locomotion, None),
+                r("souls:leg-right", Class::Locomotion, None),
+                r("souls:hand-left", Class::Manipulator, Some(1)),
+                r("souls:hand-right", Class::Manipulator, Some(2)),
+                r("souls:eyes", Class::Gaze, None),
+                r("souls:voice", Class::Voice, None),
+            ],
+        }
+    };
+    let mut acts = worldd::acts::Acts::new(
+        replica::rules::json::Value::Obj(found.clone()),
+        worldd::acts::library().expect("the moves"),
+        header,
+        Scope([0xc2; 16]),
+    );
+    let (mut now, mut tick, mut n) = (1_000_000_000_i64, 0u64, 0u64);
+    bodies.begin(now);
+    let (mut out, mut absent): (BTreeMap<String, Vec<String>>, Vec<String>) = Default::default();
+    for (kind, entry) in &found {
+        let Some(&thing) = things.get(plain(kind)) else {
+            absent.push(kind.clone());
+            continue;
+        };
+        let point = |p: &str| -> Option<Vec3> {
+            let at = entry.get("points")?.get(p)?.get("at_mm")?.arr()?;
+            let mm: Vec<i64> = at
+                .iter()
+                .filter_map(|v| match v {
+                    J::Int(n) => i64::try_from(*n).ok(),
+                    _ => None,
+                })
+                .collect();
+            match mm[..] {
+                [x, y, z] => Some(Vec3::new(x * 1000, y * 1000, z * 1000)),
+                _ => None,
+            }
+        };
+        let first_stand = entry.get("points").and_then(J::obj).and_then(|ps| {
+            ps.iter()
+                .find(|(_, d)| d.get("role").and_then(J::str) == Some("stand"))
+                .map(|(p, _)| p.clone())
+        });
+        for (form, f) in entry.get("forms").and_then(J::obj).unwrap_or(&[]) {
+            if f.get("starts").and_then(J::str) != Some("act") {
+                continue;
+            }
+            let label = format!("{} {form} {}", plain(kind), show(thing));
+            let walk = f
+                .get("steps")
+                .and_then(J::arr)
+                .unwrap_or(&[])
+                .iter()
+                .find(|s| s.get("step").and_then(J::str) == Some("walk_to"))
+                .and_then(|s| s.get("point").and_then(J::str).map(str::to_owned))
+                // A slot named as the walk's point (C25): its stand point.
+                .map(|p| {
+                    let stand = entry.get("slots").and_then(|ss| ss.get(&p));
+                    match stand.and_then(|d| d.get("stand")).and_then(J::str) {
+                        Some(s) => s.to_owned(),
+                        None => p,
+                    }
+                });
+            let at = walk
+                .or_else(|| first_stand.clone())
+                .and_then(|p| point(&p))
+                .unwrap_or(Vec3::ZERO);
+            let view = bodies.town.view();
+            let Some((floor, at, _)) = view.on_floor(thing, at) else {
+                out.entry("no floor under the thing".into())
+                    .or_default()
+                    .push(label);
+                continue;
+            };
+            // Within a form's reach, else out to today's 4 m (C13's `TODAY`): a body set down where it can stand.
+            let at = view
+                .stand_near(floor, at, skills::form_runner::REACH, None)
+                .or_else(|| view.stand_near(floor, at, TODAY, None))
+                .unwrap_or(at);
+            n += 1;
+            let body = Id::new(Scope([0xc1; 16]), 1000 + n).unwrap();
+            let frame = Frame {
+                node: floor,
+                slot: None,
+            };
+            let placed = bodies.town.surfaces[&floor].place(body, frame, at, Quat::IDENTITY);
+            let Ok(placed) = placed else {
+                out.entry("no place to stand".into())
+                    .or_default()
+                    .push(label);
+                continue;
+            };
+            bodies.add_body(family.clone(), placed).unwrap();
+            let mut args = worldd::acts::Args::default();
+            for (a, t) in f.get("takes").and_then(J::obj).unwrap_or(&[]) {
+                if t.get("type").and_then(J::str) == Some("slot") {
+                    args.slots.insert(a.clone(), 1);
+                }
+            }
+            let id = Id::new(Scope([0xc3; 16]), n).unwrap();
+            let intent =
+                worldd::acts::intent(id, now + 3_600_000_000, Actor::Soul(body), label.as_bytes());
+            let started = acts.start(
+                &tree,
+                Some(&mut bodies),
+                body,
+                &[(thing, form.clone())],
+                &args,
+                intent,
+                tick,
+                now,
+            );
+            let how = match started {
+                Err(r) => Err(r.name.to_owned()),
+                Ok(sim::forms::Asked::Applied(_)) => Ok("done".to_owned()),
+                Ok(sim::forms::Asked::Started(run) | sim::forms::Asked::Running(run)) => {
+                    let due = acts.forms.due(run).unwrap_or(now) + 1_000_000;
+                    let mut how = None;
+                    while how.is_none() && now <= due {
+                        now += 50_000;
+                        tick += 1;
+                        let _ = bodies.step(now);
+                        acts.tick(&tree, Some(&mut bodies), tick, now);
+                        let _ = acts.out();
+                        how = acts
+                            .ended()
+                            .into_iter()
+                            .find(|(i, _, _)| *i == id)
+                            .map(|e| e.1);
+                    }
+                    Ok(how.unwrap_or_else(|| "never-ended".to_owned()))
+                }
+            };
+            // The body out, and its seat freed, before the next form.
+            let _ = bodies.slots.release_body(body);
+            bodies.runner.controller.remove(body);
+            out.entry(ending(how)).or_default().push(label);
+        }
+    }
+    (out, absent)
+}
+
+/// C22 (#3485) A3: the sweep ([`sweep`]): the count of each ending, then each form that did not end `done`, by
+/// ending.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file (see the module doc)"]
+fn c22_a3_every_form_of_every_eden_entry_runs_once_from_its_stand_point() {
+    let (out, absent) = sweep();
+    let all: usize = out.values().map(Vec::len).sum();
+    let kinds: std::collections::BTreeSet<&str> = out
+        .values()
+        .flatten()
+        .filter_map(|l| l.split(' ').next())
+        .collect();
+    println!(
+        "C22 sweep: {all} forms of {} entries with a thing on Eden; {} entries with none",
+        kinds.len(),
+        absent.len()
+    );
+    for (how, forms) in &out {
+        println!("  {how}: {}", forms.len());
+    }
+    for (how, forms) in out.iter().filter(|(h, _)| *h != "done") {
+        println!("{how} ({}):", forms.len());
+        for f in forms {
+            println!("    {f}");
+        }
+    }
+    assert!(out.contains_key("done"));
+}
+
+/// C23 (#3494): form `form` of the entry in file `file` (under `entries`) given `edit`, or added by it.
+fn edit_form(
+    entries: &Path,
+    file: &str,
+    form: &str,
+    edit: impl FnOnce(&mut Vec<(String, replica::rules::json::Value)>),
+) {
+    use replica::rules::json::{Value as J, parse};
+    let path = entries.join(file);
+    let mut e = parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let J::Obj(o) = &mut e else {
+        panic!("{file}: an entry")
+    };
+    let Some((_, J::Obj(forms))) = o.iter_mut().find(|(k, _)| k == "forms") else {
+        panic!("{file}: forms")
+    };
+    match forms.iter_mut().find(|(k, _)| k == form) {
+        Some((_, J::Obj(f))) => edit(f),
+        _ => {
+            let mut f = Vec::new();
+            edit(&mut f);
+            forms.push((form.to_owned(), J::Obj(f)));
+        }
+    }
+    std::fs::write(&path, e.to_json()).unwrap();
+}
+
+/// C23 (#3494) A2: a move with no `at`, and a move `toward` or `at` a thing argument, each end `done` on a seeded Eden
+/// by a Soul born beside Eden's gym yoga mat (today's e_ea2c84ac), the receipt printed:
+///
+/// - the yoga mat's own `yoga` (a walk to `middle`, then a `stretch`, no `at`), with its `link` effect left out of the
+///   served entries (effects are C24's);
+/// - the park swings' (e_7dacb4f7, 19 m away) `push`, a press `toward` its `who` argument, here the yoga mat, with its
+///   walk to the argument left out (a walk to a thing argument is C25's): the press reaches the mat, not the swings;
+/// - the same swings given the humanoid's own `touch` (a touch `at` its `target` argument), at the yoga mat, its walk
+///   to the argument left out too.
+///
+/// Without the argument the push is refused `arg-missing`; toward the swings themselves it ends `out-of-reach`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c23_a2_moves_with_no_at_and_toward_or_at_an_argument_end_done() {
+    use replica::rules::json::{Value as J, parse};
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let entries = std::env::temp_dir().join(format!("eden-c23-kinds-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&entries);
+    copy_dir(Path::new(&format!("{root}/content/kinds")), &entries);
+    edit_form(&entries, "floors/yoga_mat.json", "yoga", |f| {
+        f.retain(|(k, _)| k != "effects")
+    });
+    let no_walk = |f: &mut Vec<(String, J)>| {
+        let Some((_, J::Arr(steps))) = f.iter_mut().find(|(k, _)| k == "steps") else {
+            panic!("steps")
+        };
+        steps.retain(|s| s.get("step").and_then(J::str) != Some("walk_to"));
+    };
+    edit_form(&entries, "play/swings.json", "push", no_walk);
+    let body =
+        parse(&std::fs::read_to_string(entries.join("body/humanoid.json")).unwrap()).unwrap();
+    let Some(J::Obj(touch)) = body.get("forms").and_then(|f| f.get("touch")).cloned() else {
+        panic!("the humanoid's touch")
+    };
+    edit_form(&entries, "play/swings.json", "touch", |f| {
+        *f = touch;
+        no_walk(f);
+    });
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (mat, swings) = (im.nodes["e_ea2c84ac"], im.nodes["e_7dacb4f7"]);
+    let (served, mut soul, dir, _) = serve_entries(
+        &facts,
+        entries.to_str().unwrap(),
+        "1.0,88.0",
+        "c23a2",
+        im.nodes["world"].scope(),
+    );
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    let mut each = |verb: &str, at: Id, a: BTreeMap<u64, Value>| {
+        let done = soul.act(verb, Some(at), a);
+        println!("{verb}: {done:?}");
+        for (at, names, _) in receipt_entries(&dir, done.as_deref().unwrap_or(&[])) {
+            println!("  {at} µs: {names:?}");
+        }
+        done
+    };
+    let yoga = each("eden:yoga", mat, BTreeMap::new());
+    let missing = each("eden:push", swings, BTreeMap::new());
+    let push = each("eden:push", swings, args(&[("who", mat.to_value())]));
+    let far = each("eden:push", swings, args(&[("who", swings.to_value())]));
+    let touch = each("eden:touch", swings, args(&[("target", mat.to_value())]));
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&entries);
+    yoga.expect("a stretch, no at: done");
+    assert_eq!(missing, Err("arg-missing".to_owned()));
+    push.expect("a press toward the argument: done");
+    assert_eq!(
+        far,
+        Err("out-of-reach".to_owned()),
+        "toward the swings, 19 m off"
+    );
+    touch.expect("a touch at the argument: done");
+}
+
+/// C25 (#3496): the Eden facts file with `things` added (`(today's id, def, [x, y, z] mm, yaw mdeg)`, each on the open
+/// ground) and their kinds; its path. Eden has no exercise chair, meditation mat or juggling balls, whose forms
+/// rise, settle and use a held thing.
+fn facts_with(things: &[(&str, &str, [i64; 3], i64)], tag: &str) -> String {
+    use replica::rules::json::{Value as J, parse};
+    let mut facts = parse(&std::fs::read_to_string(facts_path()).unwrap()).unwrap();
+    let int = |n: i64| J::Int(n.into());
+    if let J::Obj(o) = &mut facts {
+        for (key, v) in o.iter_mut() {
+            match (key.as_str(), v) {
+                ("kinds", J::Arr(kinds)) => {
+                    for (_, def, ..) in things {
+                        let plain = def.split('@').next().unwrap();
+                        let row = format!(
+                            r#"{{"ref":"{def}","hash":"{}","name":"core:{}","form":"point","layer":"solid","door":false,"mesh":false,"slots":1}}"#,
+                            "c25".repeat(21) + "c",
+                            plain.trim_start_matches("core-")
+                        );
+                        kinds.push(parse(&row).unwrap());
+                    }
+                }
+                ("things", J::Arr(rows)) => {
+                    for (id, def, at, yaw) in things {
+                        let pose = J::Arr(vec![int(at[0]), int(at[1]), int(at[2]), int(*yaw)]);
+                        rows.push(J::Obj(vec![
+                            ("id".into(), J::Str((*id).into())),
+                            ("def".into(), J::Str((*def).into())),
+                            ("ref".into(), J::Str((*def).into())),
+                            ("parent".into(), J::Null),
+                            ("pose".into(), pose.clone()),
+                            ("world".into(), pose),
+                            ("scale_ppm".into(), int(1_000_000)),
+                            ("name".into(), J::Str(format!("c25-{id}"))),
+                        ]));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let path = std::env::temp_dir().join(format!("eden-{tag}-{}.facts.json", std::process::id()));
+    std::fs::write(&path, facts.to_json()).unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+/// C25 (#3496) A2, A3: born outside the crossroads pub's front door, on Eden with an exercise chair, a meditation mat
+/// and juggling balls set down beside it, a Soul does each by its own entry, in turn: the chair's `rises_3` (a walk to
+/// its `seat`, a slot named as the walk's point, so to the seat's `front` stand point; then sit, rise three times),
+/// the mat's `meditate` (a walk to `centre`, settle sitting on the ground, 30 s, rise) and the balls' `juggle`
+/// (`use_held`, then 20 s): the first two end `done`, each receipt printed; the juggle ends `not-held`, as no Eden
+/// form puts the balls in a hand.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c25_a2_a3_a_slot_walked_to_rise_settle_and_use_held_on_eden() {
+    let facts = facts_with(
+        &[
+            (
+                "e_c2500001",
+                "core-exercise_chair@1",
+                [300_000, 347, -14_000],
+                0,
+            ),
+            (
+                "e_c2500002",
+                "core-meditation_mat@1",
+                [300_000, 347, -10_500],
+                0,
+            ),
+            (
+                "e_c2500003",
+                "core-juggling_balls@1",
+                [300_000, 347, -17_000],
+                0,
+            ),
+        ],
+        "c25",
+    );
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(&facts, "297.5,-14.0", "c25", im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let mut out = Vec::new();
+    for (today, verb) in [
+        ("e_c2500001", "eden:rises_3"),
+        ("e_c2500002", "eden:meditate"),
+        ("e_c2500003", "eden:juggle"),
+    ] {
+        let done = soul.act(verb, Some(im.nodes[today]), BTreeMap::new());
+        println!("{verb} at {today}: {done:?}");
+        if let Some(b) = track(&dir).last() {
+            println!("  the body after: ({:.3}, {:.3}) m", b.2, b.3);
+        }
+        for (at, names, _) in receipt_entries(&dir, done.as_deref().unwrap_or(&[])) {
+            println!("  {at} µs: {names:?}");
+        }
+        out.push(done);
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_file(&facts);
+    assert!(out[0].is_ok(), "rises_3 done: {:?}", out[0]);
+    assert!(out[1].is_ok(), "meditate done: {:?}", out[1]);
+    assert_eq!(out[2], Err("not-held".to_owned()), "juggle: not held");
 }
 
 /// C21 (#3484) A1, A3: C20's stall. A Soul born 40 m north of the street sandpit (today's e_1f394e0b, at (52.4, 67.4)

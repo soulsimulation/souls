@@ -16,16 +16,26 @@
 //! - **Remove** takes only a thing the node contains or the body holds (`not-held` otherwise), written by its own
 //!   entry; its subtree goes with it (T2).
 //!
+//! - **Timers, timed values, a body staying, and what a body uses** (C24, #3495). A timer is the node's timer record,
+//!   clearing that form's timer pending there. A timed set settles the value to the effect's instant and writes F5's
+//!   three numbers. The actor `here` moves nothing (`body-seated` while it is in a slot of the node). BUILDSAFE: a
+//!   take or put of a thing another run reserves, or of one holding it, and an unlink of every end of a node another
+//!   run holds, are refused `thing-reserved`, never done from under the body using it.
+//!
 //! Not here: a source whose amount changes with time (F5's timed fields are not transferred), a thing made or set down
 //! where there is no slot (E4), the second hand a two-handed thing fills (B4's `free_hands` reads the zone's rules).
 
 use std::collections::BTreeMap;
 
-use replica::effects::{Body, Change, ChangeRec, Effect, Header, Refusal, Rest, TransferRec};
+use replica::effects::{
+    Body, Change, ChangeRec, Effect, Header, Refusal, Rest, TimerRec, TransferRec,
+};
 use replica::encode::{Name, Value};
 use replica::ids::{Id, Minter};
 use replica::kinds::Kinds;
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::time::Micros;
+use replica::timed::Timed;
 use replica::tree::Tree;
 use replica::world_model::{Audience, plain, show};
 use skills::form_runner::{Amount, Effect as Bound, Of, Place};
@@ -215,6 +225,49 @@ impl View<'_> {
             .map_or(Audience::Everyone, |n| n.audience())
     }
 
+    /// Field `field` of `node` as written: the last value written this tick, else the tree's (C24).
+    pub fn field(&self, node: Id, field: u64) -> Option<Value> {
+        let written = self.changes().find_map(|c| match c {
+            Change::Set {
+                node: n,
+                field: f,
+                to,
+                ..
+            } if *n == node && *f == field => Some(to.clone()),
+            _ => None,
+        });
+        written.or_else(|| {
+            let n = self.tree.node(self.tree.handle(node)?)?;
+            n.fields().get(&field).cloned()
+        })
+    }
+
+    /// The timers pending on `node` named `name`: the tree's, then those set and cleared this tick (C24).
+    pub fn timers(&self, node: Id, name: &Name) -> Vec<Id> {
+        let mut all: Vec<Id> = self
+            .tree
+            .timers()
+            .iter()
+            .filter(|(_, t)| t.node == node && &t.name == name)
+            .map(|(id, _)| *id)
+            .collect();
+        for e in self.out {
+            let Body::Timers(ts) = &e.body else { continue };
+            for t in ts {
+                match t {
+                    TimerRec::Set { timer, name: n, .. }
+                        if e.envelope.node == node && n == name =>
+                    {
+                        all.push(*timer);
+                    }
+                    TimerRec::Clear { timer } => all.retain(|t| t != timer),
+                    _ => {}
+                }
+            }
+        }
+        all
+    }
+
     /// Field `field` of `node`: the last value written, else the tree's, else `None` (the kind's default).
     pub fn amount(&self, node: Id, field: u64) -> Option<i64> {
         let written = self.changes().find_map(|c| match c {
@@ -249,6 +302,8 @@ pub(super) struct Cx<'a> {
     pub node: Id,
     /// The things other runs reserve: none is removed, nor anything holding one.
     pub reserved: &'a [Id],
+    /// The effect's instant, world time (C24: a timed field settles to it, a timer counts from it).
+    pub now: Micros,
 }
 
 fn set(node: Id, field: u64, to: i64, by: i64) -> Entry {
@@ -350,7 +405,13 @@ impl Cx<'_> {
     /// that is gone (removed, or under a thing removed, this tick or before) is refused `thing-missing`.
     pub fn entries(&self, m: &mut Minter, e: &Bound) -> R<Vec<Entry>> {
         let named = match e {
-            Bound::Set { .. } | Bound::Link { .. } | Bound::Unlink { .. } => Vec::new(),
+            Bound::Set { .. }
+            | Bound::Add { .. }
+            | Bound::Link { .. }
+            | Bound::Unlink { .. }
+            | Bound::Timer { .. }
+            | Bound::Timed { .. }
+            | Bound::Here => Vec::new(),
             Bound::Transfer { from, into, .. } => vec![self.of(*from), self.of(*into)],
             Bound::Make { .. } => vec![self.node],
             Bound::Remove { what } | Bound::Take { what } => vec![self.of(*what)],
@@ -377,6 +438,33 @@ impl Cx<'_> {
                     rest: Rest::new(),
                 }]),
             )]),
+            // A count moved by a whole number (C22): its value now (or its default) plus `by`, within its least and
+            // its capacity, written as a plain set, as today's engine writes it; nothing balances it.
+            Bound::Add { field, by } => {
+                let l = self.limit(self.node, *field)?;
+                let has = self.view.amount(self.node, *field).unwrap_or(l.default);
+                match has.checked_add(*by) {
+                    Some(to) if to >= l.min.unwrap_or(0) && l.max.is_none_or(|m| to <= m) => {
+                        Ok(vec![(
+                            self.node,
+                            Audience::Everyone,
+                            Body::Changes(vec![ChangeRec {
+                                change: Change::Set {
+                                    node: self.node,
+                                    field: *field,
+                                    to: value(to),
+                                    by: None,
+                                },
+                                rest: Rest::new(),
+                            }]),
+                        )])
+                    }
+                    _ => refuse(
+                        "out-of-range",
+                        format!("field {field} of {}: {has} by {by}", show(self.node)),
+                    ),
+                }
+            }
             Bound::Transfer {
                 field,
                 from,
@@ -468,6 +556,7 @@ impl Cx<'_> {
             }
             Bound::Take { what } => {
                 let thing = self.of(*what);
+                self.not_in_use(thing)?;
                 let to = self.free_hand()?;
                 self.transfer(m, thing, to)
             }
@@ -494,11 +583,93 @@ impl Cx<'_> {
                         format!("{} is {} or in it", show(self.node), show(thing)),
                     );
                 }
+                self.not_in_use(thing)?;
                 let to = self.free_slot(*slot)?;
                 self.transfer(m, thing, to)
             }
-            Bound::Link { ty, soul } => super::links::link(self, m, ty, *soul),
-            Bound::Unlink { ty, soul, all } => super::links::unlink(self, ty, *soul, *all),
+            Bound::Link { ty, soul, most } => super::links::link(self, m, ty, *soul, *most),
+            Bound::Unlink { ty, soul, all } => {
+                // Every end freed changes what those bodies use (BUILDSAFE, C24): not while another run holds it.
+                if *all && self.reserved.contains(&self.node) {
+                    return refuse(
+                        "thing-reserved",
+                        format!("{} is held by another run", show(self.node)),
+                    );
+                }
+                super::links::unlink(self, ty, *soul, *all)
+            }
+            Bound::Timer { form, after } => {
+                let mut timers: Vec<TimerRec> = self
+                    .view
+                    .timers(self.node, form)
+                    .into_iter()
+                    .map(|timer| TimerRec::Clear { timer })
+                    .collect();
+                timers.push(TimerRec::Set {
+                    timer: mint(m)?,
+                    due: self.now.saturating_add(*after),
+                    name: form.clone(),
+                });
+                Ok(vec![(self.node, Audience::Everyone, Body::Timers(timers))])
+            }
+            Bound::Timed {
+                field,
+                to,
+                per_s,
+                default,
+                bounds,
+            } => {
+                let held = self
+                    .view
+                    .field(self.node, *field)
+                    .and_then(|v| Timed::from_value(&v))
+                    .unwrap_or(*default);
+                let now = held.at(*bounds, self.now).map_err(|e| Refusal {
+                    name: e.name(),
+                    detail: format!("field {field} of {}", show(self.node)),
+                })?;
+                let three = Timed {
+                    value: to.unwrap_or(now),
+                    per_s: *per_s,
+                    set_us: self.now,
+                };
+                Ok(vec![(
+                    self.node,
+                    Audience::Everyone,
+                    Body::Changes(vec![ChangeRec {
+                        change: Change::Set {
+                            node: self.node,
+                            field: *field,
+                            to: three.to_value(),
+                            by: None,
+                        },
+                        rest: Rest::new(),
+                    }]),
+                )])
+            }
+            Bound::Here => match self.view.at(self.body) {
+                Some(f) if f.node == self.node && f.slot.is_some() => refuse(
+                    "body-seated",
+                    format!("{} is in a slot of {}", show(self.body), show(self.node)),
+                ),
+                _ => Ok(vec![(
+                    self.node,
+                    Audience::Everyone,
+                    Body::Changes(Vec::new()),
+                )]),
+            },
+        }
+    }
+
+    /// BUILDSAFE for a take or a put (C24): a thing another run reserves, or one holding such a thing (a seat a body
+    /// uses, a bed it lies in), is refused `thing-reserved`, never moved from under it.
+    fn not_in_use(&self, thing: Id) -> R<()> {
+        match self.reserved.iter().find(|t| self.view.within(**t, thing)) {
+            Some(t) => refuse(
+                "thing-reserved",
+                format!("{} is held by another run", show(*t)),
+            ),
+            None => Ok(()),
         }
     }
 }

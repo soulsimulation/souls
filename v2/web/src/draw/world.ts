@@ -7,6 +7,7 @@ import { Track } from '../clock/samples.ts';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { CrowdBodies } from '../crowd/bodies.ts';
 import { DECKS, DRAPES, WATER, drapeMesh, drapeName, type Area } from './drapes.ts';
+import { asWater } from '../water/water.ts';
 
 const UM = 1e-6, MM = 1e-3;
 export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
@@ -31,6 +32,8 @@ export class WorldView {
   private thingsDirty = false;
   private drapesDirty = false;
   private drapes: THREE.Mesh | null = null;
+  /** V19b: the still water, in today's water shader (`water/water.ts`). */
+  private water: THREE.Mesh | null = null;
   /** Bodies as V6's crowd once its body files have loaded; capsules until then. */
   private crowdBodies: CrowdBodies | null = null;
   private terrainDone = false;
@@ -224,12 +227,12 @@ export class WorldView {
   /** The ground-laid areas, flat on the drawn ground. */
   private rebuildDrapes(): void {
     this.drapesDirty = false;
-    const areas: Area[] = [];
+    const areas: Area[] = [], water: Area[] = [];
     const floors = new Map<string, NodeRec[]>();
     for (const n of this.nodes.values()) if (n.surfaces && n.parent) (floors.get(n.parent) ?? floors.set(n.parent, []).get(n.parent)!).push(n);
     const p = new THREE.Vector3();
     for (const n of this.nodes.values()) {
-      if (n.waterLevel !== undefined && n.outline) areas.push({ colour: WATER, level: true, lift: n.waterLevel * MM, points: n.outline.map(([x, z]) => [x * MM, z * MM]) });
+      if (n.waterLevel !== undefined && n.outline) water.push({ colour: WATER, level: true, lift: n.waterLevel * MM, points: n.outline.map(([x, z]) => [x * MM, z * MM]) });
       const level = this.isDeck(n), colour = level ? DECKS[drapeName(n.kind)] : DRAPES[drapeName(n.kind)];
       if (colour === undefined) continue;
       const own = floors.get(n.id) ?? [];
@@ -242,12 +245,11 @@ export class WorldView {
       }
       if (!own.length && n.outline) areas.push({ colour, lift: 0, points: n.outline.map(([x, z]) => [x * MM, z * MM]) });
     }
-    if (this.drapes) {
-      this.group.remove(this.drapes);
-      this.drapes.geometry.dispose();
-    }
+    for (const m of [this.drapes, this.water]) if (m) (this.group.remove(m), m.geometry.dispose());
     this.drapes = drapeMesh(areas, (x, z) => this.heightAt(x, z));
-    if (this.drapes) this.group.add(this.drapes);
+    const w = drapeMesh(water, (x, z) => this.heightAt(x, z));
+    this.water = w && asWater(w);
+    for (const m of [this.drapes, this.water]) if (m) this.group.add(m);
   }
 
   /** Places every body at world time `t` and returns how many were drawn. */
