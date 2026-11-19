@@ -397,9 +397,9 @@ fn todays_seats(text: &str) -> BTreeMap<String, (usize, usize)> {
     out
 }
 
-/// C17 (#3453) A1: a seeded Eden registers the seats its entries declare, one per thing (B3 holds one seat per thing;
-/// C19 registers the rest), printed against today's Eden; and the gateway's walk, sit and rise work on one: a Soul
-/// born outside the library walks in to the sage armchair's stand point, sits in it and rises.
+/// C17 (#3453) A1 and C19 (#3457) A1: a seeded Eden registers every body slot its entries declare (a sofa's three, a
+/// bed's two), counted slot by slot against today's Eden's seat and bed slots by thing def; and the gateway's walk, sit
+/// and rise work on one: a Soul born outside the library walks in to the sage armchair's stand point, sits and rises.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
@@ -457,34 +457,181 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
             Some((*id, t.get("def")?.str()?.to_owned()))
         })
         .collect();
+    // Registered slots by def, slot by slot (C19), against today's.
     let mut by_def: BTreeMap<String, usize> = BTreeMap::new();
     for s in &mine {
         *by_def
             .entry(def_of.get(&s.thing).cloned().unwrap_or_default())
             .or_default() += 1;
     }
+    let (mut covered, mut short) = (0, Vec::new());
     for (def, (s, t)) in &today {
         let r = by_def.get(def).copied().unwrap_or(0);
-        if r != *t {
-            println!("  {def}: today {s} seats on {t} things; registered on {r}");
+        covered += r.min(*s);
+        if r != *s {
+            println!("  {def}: today {s} slots on {t} things; registered {r}");
+        }
+        if r < *s {
+            short.push(def.clone());
         }
     }
     for (def, r) in &by_def {
         if !today.contains_key(def) {
-            println!("  {def}: no seat today; registered on {r}");
+            println!("  {def}: no seat today; registered {r}");
         }
     }
+    println!(
+        "C19 A1: {covered} of today's {slots} seat and bed slots registered; {} more that today has no seat for; \
+         short of today: {short:?}",
+        registered - covered
+    );
+    let mut on_things: Vec<Id> = mine.iter().map(|s| s.thing).collect();
+    on_things.dedup();
     assert_eq!(
         mine.len(),
         registered,
-        "the world registers what the entries declare"
+        "the world registers every slot the entries declare"
     );
     assert_eq!(left, 0, "every seat placed on a floor");
-    assert_eq!(registered, on, "one seat per thing");
-    assert!(registered * 2 > things, "most of today's seated things");
+    assert_eq!(on, on_things.len(), "the things they are on");
+    assert_eq!(registered, declared, "every declared body slot registered");
+    // Every def today seats has at least today's slots, but those whose entries declare no body slot with a stand
+    // point (C17: the campfire's and the piano's).
+    let none: Vec<&str> = short
+        .iter()
+        .filter(|d| by_def.get(*d).copied().unwrap_or(0) > 0)
+        .map(String::as_str)
+        .collect();
+    assert!(none.is_empty(), "short of today's slots: {none:?}");
+    assert_eq!(
+        short,
+        vec!["core-campfire@1".to_owned(), "core-piano@1".to_owned()],
+        "only the entries with no body slot"
+    );
     walked.expect("walked in to the armchair's stand point");
     sat.expect("sat in the armchair");
     rose.expect("rose from it");
+}
+
+/// Soul `n` joined on the world's socket in `dir`: born by the entry.
+fn join(dir: &Path, n: u64, lineage: Scope) -> Client {
+    let mut soul = reconnect(dir, n, 0, lineage);
+    soul.act(JOIN, None, BTreeMap::new())
+        .expect("born by the entry");
+    soul
+}
+
+/// Soul `n` on the world's socket in `dir` again, its last sequence `seq`.
+fn reconnect(dir: &Path, n: u64, seq: u64, lineage: Scope) -> Client {
+    let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(90))).unwrap();
+    Client(s, Id::new(Scope([0xc1; 16]), n).unwrap(), seq, lineage)
+}
+
+/// Each body's last logged frame (its node and slot) in the world's log in `dir` (K18's body rows).
+fn last_frames(dir: &Path) -> BTreeMap<Id, (Id, Option<u64>)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = Part::read(&r).unwrap().rest.get(&answers::BODIES) {
+            for row in rows {
+                if let Some((id, pose, _)) = worldd::bodies::read_row(row) {
+                    out.insert(id, (pose.frame.node, pose.frame.slot));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// C19 (#3457) A2 and A3: three Souls share a sofa on a seeded Eden, each in its own slot, and keep their slots over a
+/// restart. The roundhouse south of the library (e_9e423940, at (67.5, -18.5) m, its front door open at z -15.6 m) has
+/// a three-seat sofa (e_3bfd13e0). Four Souls are born outside the front door. Three in turn walk to the sofa and sit
+/// on it through the gateway, naming only the sofa: the world picks each the free slot nearest it. The fourth's sit is
+/// refused `place-taken`. The world is stopped and served again on the same folder: the three are seated in the same
+/// slots, the fourth is still refused, and each of the three rises.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c19_three_souls_share_a_sofa_each_in_its_own_slot_over_a_restart() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (sofa, lineage) = (im.nodes["e_3bfd13e0"], im.nodes["world"].scope());
+    let (served, first, dir) = serve(&facts, "66.5,-13.5", "c19", lineage);
+    let mut souls = vec![first];
+    for n in 2..=4 {
+        souls.push(join(&dir, n, lineage));
+    }
+    for (i, soul) in souls.iter_mut().enumerate().take(3) {
+        let walked = soul.act("eden:walk", Some(sofa), BTreeMap::new());
+        let sat = soul.act("eden:sit", Some(sofa), BTreeMap::new());
+        println!(
+            "Soul {}: walk to the sofa {walked:?}, sit on it {sat:?}",
+            i + 1
+        );
+        walked.expect("walked to a free slot's stand point");
+        sat.expect("sat in a free slot");
+    }
+    let fourth = souls[3].act("eden:sit", Some(sofa), BTreeMap::new());
+    println!("Soul 4: sit on the full sofa {fourth:?}");
+    assert_eq!(fourth, Err("place-taken".to_owned()));
+    let frames = last_frames(&dir);
+    let mut slots: Vec<Option<u64>> = frames
+        .values()
+        .filter(|(node, _)| *node == sofa)
+        .map(|f| f.1)
+        .collect();
+    slots.sort_unstable();
+    println!("the sofa's sitters' logged slots: {slots:?}");
+    assert_eq!(
+        slots,
+        vec![Some(1), Some(2), Some(3)],
+        "each in its own slot"
+    );
+
+    // A3: stopped and served again on the same folder (K18c).
+    drop(served);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let served = Served(child);
+    let mut line = String::new();
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        line.clear();
+    }
+    print!("restarted: {line}");
+    let mut souls: Vec<Client> = souls
+        .iter()
+        .enumerate()
+        .map(|(i, s)| reconnect(&dir, i as u64 + 1, s.2, lineage))
+        .collect();
+    let again = souls[3].act("eden:sit", Some(sofa), BTreeMap::new());
+    println!("after the restart, Soul 4: sit on the sofa {again:?}");
+    let mut rose = Vec::new();
+    for soul in souls.iter_mut().take(3) {
+        rose.push(soul.act("eden:rise", None, BTreeMap::new()));
+    }
+    println!("after the restart, the three rise: {rose:?}");
+    let after = last_frames(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(again, Err("place-taken".to_owned()), "still full");
+    for r in rose {
+        r.expect("each rises from its own slot");
+    }
+    assert!(
+        frames
+            .iter()
+            .filter(|(_, f)| f.0 == sofa)
+            .all(|(b, _)| after.get(b).is_some_and(|f| f.0 != sofa)),
+        "each set down off the sofa: {after:?}"
+    );
 }
 
 /// C17 (#3453) A2: a Soul born outside the lake cabin sits at the cabin's chair that stands under its table (its

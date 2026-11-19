@@ -38,8 +38,8 @@
 //! gateway reads the file again: no restart.
 //!
 //! **Seats** (C17, #3453). A start registers the seats the world's entries declare on its things for the gateway's sit,
-//! lie and rise and a form's sit ([`places`]): each thing whose kind's entry has a slot admitting a body gets its first
-//! such slot as a seat (B3 holds one seat per thing), its point carried up the tree onto the floor a body stands on.
+//! lie and rise and a form's sit ([`places`]): every slot admitting a body that a thing's kind's entry declares is a
+//! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
 //! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
 //! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
 //! within a form's reach (C15's rule), so a rise sets the body down where it can stand.
@@ -418,9 +418,9 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
 /// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
 /// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
 /// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground. Returns the
-/// seats, the count of every body slot on those things, the seats that could not be placed (no floor above the
-/// thing) and the stand points moved.
-fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize) {
+/// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
+/// floor above the thing) and the stand points moved.
+fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
     let (found, all) = import_eden::body_slots(&town.tree, kinds);
     let view = town.view();
     let (mut out, mut moved) = (Vec::new(), 0);
@@ -454,7 +454,9 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
         out.push(place);
     }
     let left = found.len() - out.len();
-    (out, all, left, moved)
+    let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
+    things.dedup();
+    (out, things.len(), all, left, moved)
 }
 
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
@@ -715,12 +717,12 @@ fn serve(args: &[String]) -> R<()> {
         souls.len()
     );
     let mut built = built;
-    let (places, all, left, moved) = places(&mut built.town, &kinds);
+    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
         places.len(),
-        places.len() + left
+        things
     );
     let rules = Rules {
         kinds: Json::Obj(kinds),
