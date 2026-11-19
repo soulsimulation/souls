@@ -184,8 +184,8 @@ if [[ "${GITHUB_EVENT_NAME:-}" == schedule || "${V2_FULL:-}" == 1 ]]; then
   # The speed bars: the wall-clock bounds the tests above print but do not assert (a loaded runner misses them with
   # no fault in the code), asserted here with V2_SPEED_BARS=1, Rust in release. Printed; a miss warns, never fails.
   step speed-bars bash -c 'export V2_SPEED_BARS=1 R6_REPORT=1 R7_REPORT=1 R9_REPORT=1 &&
-    cargo test --release --locked -p sim -p assets -- --include-ignored --nocapture \
-      speed_bar a3_a4_a5_twenty_panics n19_a1_a2 a1_to_a5_ground_rebuilt a3_child_bounds &&
+    cargo test --release --locked -p sim -p assets -p worldd -- --include-ignored --nocapture \
+      speed_bar a3_a4_a5_twenty_panics n19_a1_a2 a1_to_a5_ground_rebuilt a3_child_bounds a1_the_real_clock &&
     node --test client/src/reflex/*.test.mjs client/src/cli/*.test.mjs client/src/daemon/daemon.test.mjs ||
     echo "::warning::a speed bar was missed (see above)"'
 fi
