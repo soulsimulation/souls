@@ -175,3 +175,44 @@ fn reach_answers_keep_exact_slot_and_order_identity_off_clock() {
     assert_eq!(got.reach[&(body, thing, 1, current)], [3_000_000; 2]);
     assert_eq!(got.reach[&(body, thing, 2, current)], [5_000_000; 2]);
 }
+
+/// C29: the route result carries its own length/link count to the exact active order. A late answer from a
+/// replaced walk must not provide the replacement's deadline; ending the current order clears its metrics.
+#[test]
+fn route_metrics_belong_only_to_the_current_order_and_clear_on_end() {
+    let mut t = town();
+    let mut r = runner(&t, 1);
+    let who = id(1);
+    let order = id(10_000);
+    let mut planner = Planner::new(t.copy().unwrap());
+    let (wants, _) = r.tick_planned(&mut t, &Planned::default());
+    let old = planner.answer(&wants);
+    let (_, Ok((_, _, expected))) = old.places.get(&who).expect("the planned place") else {
+        panic!("a route was planned")
+    };
+    assert!(expected.length_mm > 0);
+    assert!(r.route_metrics(who, order).is_none());
+    r.tick_planned(&mut t, &old).1.unwrap();
+    assert_eq!(r.route_metrics(who, order), Some(*expected));
+    assert!(r.route_metrics(who, id(99_999)).is_none());
+
+    let next = id(20_000);
+    r.send(
+        who,
+        Box::new(skills::route::Route::sent(SPEED, TICK)),
+        Target::new(t.ground, Vec3::new(88_000_000, 0, 0)),
+        next,
+    )
+    .unwrap();
+    assert!(r.route_metrics(who, order).is_none());
+    let (wants, _) = r.tick_planned(&mut t, &old);
+    assert!(
+        r.route_metrics(who, next).is_none(),
+        "the old order's late plan is ignored"
+    );
+    let fresh = planner.answer(&wants);
+    r.tick_planned(&mut t, &fresh).1.unwrap();
+    assert!(r.route_metrics(who, next).is_some());
+    r.end_order(who);
+    assert!(r.route_metrics(who, next).is_none());
+}

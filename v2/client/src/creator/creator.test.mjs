@@ -127,7 +127,8 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const d = await god('describe');
   const place = d.nodes.find((n) => n.kind === 'souls:place');
   assert.ok(place, JSON.stringify(d));
-  assert.deepEqual(d.kinds['souls:place'].admits, ['souls:room']);
+  const placeKind = Object.keys(d.kinds).find((k) => k.startsWith('souls:place@'));
+  assert.deepEqual(d.kinds[placeKind].admits, ['souls:room']);
 
   // A4: check runs on the copy and sends nothing to the world.
   const before = relay.up;
@@ -182,6 +183,124 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const all = await god('status');
   assert.deepEqual(all.unanswered, []);
   console.log(`edits: ${all.sent} sent, ${all.answered} answered`);
+});
+
+test('boot-body admission is shared by describe and local checks without revising kind pins', async () => {
+  await connected();
+  const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+  wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+  const original = JSON.parse(wire.editKinds(KINDS));
+  const placeKind = Object.keys(original).find((n) => n.startsWith('souls:place@'));
+  const itemKind = Object.keys(original).find((n) => n.startsWith('souls:item@'));
+  assert.ok(!original[placeKind].admits.includes('body'));
+  const file = join(home, 'kinds', 'local.kinds'), source = KINDS + `# souls-boot-body ${placeKind}\n`;
+  const initial = await god('describe'), place = initial.nodes.find((n) => n.kind === 'souls:place');
+  assert.ok(place, JSON.stringify(initial));
+  assert.equal((await god('check', 'place', 'souls:body', '--in', place.id)).code, 'edit.child-not-admitted');
+  writeFileSync(file, source);
+  try {
+    const described = await god('describe');
+    assert.deepEqual(Object.keys(described.kinds).sort(), Object.keys(original).sort(), 'all full hashes remain unchanged');
+    assert.deepEqual(described.kinds[placeKind].admits, ['body', 'souls:room']);
+    const before = relay.up;
+    const checked = await god('check', 'place', 'souls:body', '--in', place.id);
+    assert.equal(checked.ok, true, JSON.stringify(checked));
+    assert.equal(checked.kinds, true);
+    assert.equal(relay.up, before, 'the boot admission is checked locally without a world request');
+    const copy = new wire.Copy();
+    const ops = JSON.stringify([{ op: 'remove', node: place.id }]);
+    for (const annotation of ['# souls-boot-body', '# souls-boot-body unknown@pin', `# souls-boot-body ${itemKind}`, `# souls-boot-body ${placeKind} thing`]) {
+      const invalid = KINDS + annotation + '\n';
+      assert.throws(() => wire.editKinds(invalid), /kinds-text/);
+      assert.equal(JSON.parse(wire.editCheck(copy, ops, invalid)).code, 'edit.kinds-text');
+    }
+    copy.free();
+  } finally {
+    writeFileSync(file, KINDS);
+  }
+  assert.deepEqual(JSON.parse(wire.editKinds(KINDS)), original, 'absent-annotation behavior is unchanged');
+});
+
+test('runtime activity projection shares exact pins and boot admissions across describe and checks', async () => {
+  await connected();
+  const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+  wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+  const original = JSON.parse(wire.editKinds(KINDS));
+  const placeKind = Object.keys(original).find((n) => n.startsWith('souls:place@'));
+  const itemKind = Object.keys(original).find((n) => n.startsWith('souls:item@'));
+  const pins = [`creator:activity@1220${'ab'.repeat(32)}`, `creator:activity@1220${'cd'.repeat(32)}`];
+  const source = KINDS + `# souls-boot-body ${placeKind}\n` + pins.map((pin) => `# souls-boot-activity ${placeKind} ${pin}\n`).join('');
+  const projected = JSON.parse(wire.editKinds(source));
+  const file = join(home, 'kinds', 'local.kinds');
+  writeFileSync(file, source);
+  try {
+    const described = await god('describe');
+    const place = described.nodes.find((n) => n.kind === 'souls:place');
+    assert.deepEqual(Object.keys(described.kinds).sort(), [...Object.keys(original), ...pins].sort());
+    for (const pin of pins) {
+      assert.deepEqual(projected[pin], { owner: 'activity', admits: [], slots: {} });
+      assert.deepEqual(described.kinds[pin], { admits: [] });
+    }
+    assert.deepEqual(described.kinds[placeKind].admits, ['body', 'creator:activity', 'souls:room']);
+    for (const [name, kind] of Object.entries(original)) if (name !== placeKind) assert.deepEqual(projected[name], kind);
+    const before = relay.up;
+    for (const pin of pins) {
+      const checked = await god('check', 'batch', JSON.stringify([
+        { op: 'place', name: 1, kind: pin, in: place.id },
+        { op: 'move', node: 1, at: [1, 0, 1] },
+      ]));
+      assert.equal(checked.ok, true, JSON.stringify(checked));
+    }
+    assert.equal(relay.up, before, 'runtime admission checks ask the world nothing');
+    const copy = new wire.Copy(), ops = JSON.stringify([{ op: 'remove', node: place.id }]);
+    const invalid = [
+      '# souls-boot-activity', `# souls-boot-activity ${placeKind} creator:activity`,
+      `# souls-boot-activity ${placeKind} creator:activity@pin`,
+      `# souls-boot-activity ${placeKind} creator:activity@1220${'AB'.repeat(32)}`,
+      `# souls-boot-activity unknown@pin ${pins[0]}`, `# souls-boot-activity ${itemKind} ${pins[0]}`,
+      `# souls-boot-activity ${placeKind} ${itemKind}`, // existing wrong-owner collision
+      `# souls-boot-activity ${placeKind} ${placeKind}`, // existing place collision
+      `# souls-boot-activity ${placeKind} ${pins[0]} extra`,
+    ];
+    for (const annotation of invalid) {
+      assert.throws(() => wire.editKinds(KINDS + annotation + '\n'), /kinds-text/);
+      assert.equal(JSON.parse(wire.editCheck(copy, ops, KINDS + annotation + '\n')).code, 'edit.kinds-text');
+    }
+    assert.deepEqual(JSON.parse(wire.editKinds(source + `# souls-boot-activity ${placeKind} ${pins[0]}\n`)), projected, 'identical repeated projection is harmless');
+    copy.free();
+  } finally { writeFileSync(file, KINDS); }
+  assert.deepEqual(JSON.parse(wire.editKinds(KINDS)), original, 'absent annotation behavior is unchanged');
+});
+
+test('coexisting pinned revisions stay described and checkable by full name', async () => {
+  const revisions = '{1: "creator:fixture", 2: "thing", 19: "first"}\n{1: "creator:fixture", 2: "thing", 19: "second"}\n';
+  const file = join(home, 'kinds', 'local.kinds');
+  writeFileSync(file, KINDS + revisions);
+  try {
+    const d = await god('describe');
+    assert.equal(d.ok, true, JSON.stringify(d));
+    const names = Object.keys(d.kinds).filter((n) => n.startsWith('creator:fixture@'));
+    assert.equal(names.length, 2);
+    const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+    wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+    const separately = revisions.trim().split('\n').flatMap((line) => Object.keys(JSON.parse(wire.editKinds(line))));
+    assert.deepEqual(names.sort(), separately.sort(), 'exported revisions keep their original hashes');
+    const room = d.nodes.find((n) => n.kind === 'souls:room');
+    for (const kind of names) {
+      const check = await god('check', 'place', kind, '--in', room.id);
+      assert.equal(check.ok, true, JSON.stringify(check));
+      assert.equal(check.kinds, true);
+    }
+    const ambiguous = await god('check', 'place', 'creator:fixture', '--in', room.id);
+    assert.equal(ambiguous.code, 'edit.kind-unknown');
+    assert.match(ambiguous.detail, /ambiguous; copy a full pinned name from describe/);
+    assert.throws(() => wire.editKinds(KINDS + revisions + '{1: "creator:fixture", 2: 42}'), /kinds-text/);
+    // Ordinary sets still name cross-kind references together rather than line by line.
+    const references = '{1: "creator:base", 2: "thing"}\n{1: "creator:linked", 2: "thing", 10: {1: "creator:base"}}';
+    assert.equal(Object.keys(JSON.parse(wire.editKinds(references))).length, 2);
+  } finally {
+    writeFileSync(file, KINDS);
+  }
 });
 
 test('pairing asks for the creator scope and keeps the creator\'s token', async () => {
