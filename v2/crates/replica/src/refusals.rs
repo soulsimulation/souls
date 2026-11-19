@@ -4,7 +4,7 @@
 //! or reused, since every client matches on it. Add a name; never change one.
 
 /// `(name, meaning)`, every name an intent can be refused by for its form (`intent_decode::decode`).
-pub const REFUSALS: [(&str, &str); 30] = [
+pub const REFUSALS: [(&str, &str); 32] = [
     // Limits, checked before anything else reads the intent (`intent_limits.txt`).
     (
         "intent.too-large",
@@ -100,6 +100,15 @@ pub const REFUSALS: [(&str, &str); 30] = [
     (
         "intent.body-not-a-creators",
         "a Soul naming a body other than its own",
+    ),
+    // An edit (rule 15, Engine v2 G1b #3362).
+    (
+        "intent.edit-not-bare",
+        "an edit carrying a target, resources, a replaced intent or a body",
+    ),
+    (
+        "intent.edit-not-a-batch",
+        "an edit's parameters not {1: [operation, ...]} of 1 to 256 operations, each in its one byte form",
     ),
 ];
 
