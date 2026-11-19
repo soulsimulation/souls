@@ -159,7 +159,7 @@ fn a3_a4_a5_twenty_panics_in_units_against_a_clean_twin() {
     let clean = run(&tree, &BTreeMap::new());
     let faulty = run(&tree, &panics);
 
-    // A3: the clock keeps its rate: every tick runs, none overruns, in both.
+    // A3: the clock keeps its rate: every tick runs in both, and (a speed bar, real time) none overruns.
     println!(
         "A3: clean: {} ticks, {} overruns, longest tick {} us; with 20 panics: {} ticks, {} overruns, longest tick {} us",
         clean.stats.ticks,
@@ -171,7 +171,11 @@ fn a3_a4_a5_twenty_panics_in_units_against_a_clean_twin() {
     );
     assert_eq!(faulty.stats.ticks, TICKS as u64);
     assert_eq!(clean.stats.ticks, TICKS as u64);
-    assert_eq!(faulty.stats.overruns, 0, "no tick overran");
+    // An overrun is a tick's real cost over 50 ms: a loaded runner's debug build overruns with no fault in the units,
+    // so the bar is asserted only in the speed-bar step (ci.sh, V2_SPEED_BARS=1, release).
+    if std::env::var_os("V2_SPEED_BARS").is_some() {
+        assert_eq!(faulty.stats.overruns, 0, "no tick overran");
+    }
 
     // A4: the bodies that never failed wrote exactly what they wrote in the clean run.
     let failed: BTreeSet<u64> = panics.keys().map(|(b, _)| *b).collect();

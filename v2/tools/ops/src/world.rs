@@ -626,7 +626,7 @@ pub fn run(args: &[String]) -> R<()> {
     let machine = Name::new(machine).ok_or_else(|| err("usage", "a machine name"))?;
     let restart = rest.iter().any(|a| a == "--restart");
     let restore = rest.iter().any(|a| a == "--restore");
-    let store = Shared(Arc::new(Store_::from_env(bucket)?));
+    let store = Shared(Arc::new(Store_::from_spec(bucket)?));
     let scratch = dir.with_extension("scratch");
     let rx = stdin_lines();
     let mut wr;
