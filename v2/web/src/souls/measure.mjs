@@ -143,11 +143,12 @@ async function arm({ browser, url, tier, VIEWPORTS }) {
     const secret = Buffer.from(SECRET);
     const hits = bodies.filter(([, b]) => b.includes(secret)).map(([u]) => new URL(u).pathname);
     const dt = d.frames.slice(1).map((t, i) => t - d.frames[i]);
+    if (!dt.length) throw new Error('no frames in the window: the page reloaded');
     const median = q(dt, 0.5), p95 = q(dt, 0.95), bar = tier === 'phone' ? 33.3 : 16.7;
     return {
       tier, load: +load.toFixed(2), souls: d.souls, labelsDrawn: d.placed, speechDrawn: d.speech, soulPage: opened,
       a1: { requests: win.length, byClass, others },
-      a2: { frames: dt.length, medianMs: r1(median), p95Ms: r1(p95), bar, holds: median <= bar && p95 <= 2 * bar },
+      a2: { frames: dt.length, medianMs: r1(median), p95Ms: r1(p95), bar, holds: r1(median) <= bar && r1(p95) <= 2 * bar },
       a4: { responsesScanned: bodies.length, streamResponses: bodies.filter(([u]) => classOf(u) !== 'other').length, whisperHits: hits },
       errors,
     };
@@ -172,6 +173,10 @@ try {
     const browser = await pw.chromium.launch({ headless: true, args: launchArgs().args });
     const probe = await browser.newPage();
     const gl = await probe.evaluate(() => { const g = document.createElement('canvas').getContext('webgl2'); return g.getParameter(g.getExtension('WEBGL_debug_renderer_info').UNMASKED_RENDERER_WEBGL); });
+    // A first load lets vite finish optimising the page's modules, which reloads the page once; arms then start clean.
+    await probe.goto(url, { waitUntil: 'domcontentloaded' });
+    await probe.waitForFunction(() => window.v2?.souls?.copy.souls.size > 0, null, { timeout: 120_000, polling: 500 });
+    await probe.waitForTimeout(3000);
     await probe.close();
     log(`renderer ${gl}`);
     const rows = [];
