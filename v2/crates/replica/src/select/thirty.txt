@@ -1,0 +1,51 @@
+# Engine v2 E2 (#2709): thirty described spots in Eden 2026, fixed before any resolver code (A1).
+# Each comes from a request in the 240 (E17, #2824; its number after '#'), said of an Eden place, or from the phrases
+# the issue quotes ('E2').
+# Fields, '|' between: number | the words | from | relation and its arguments | where the asker stands.
+#
+# The relations, a closed list of ten (Step 0's limit is twelve):
+#   pick slots|things <kind> in <node> nearest|furthest <anchor> first|last|<n>   a seat or a thing among a set
+#   middle <node>                                   the middle of a node's own shape
+#   corner <node> nearest|furthest <anchor>         a corner of its outline, stepped in off the walls
+#   end <node> nearest|furthest <anchor>            an end of a line (a pier, a jetty, a path, a bridge)
+#   along <node> <per mille> from <anchor>          a fraction along a line, from its end nearest the anchor
+#   edge <node> toward <node>                       its edge nearest another node (a beach toward the sea)
+#   by <node> toward <anchor>                       just outside it, on the side toward the anchor
+#   front <node>                                    in front of a thing that has a front
+#   behind <node>                                   behind a thing that has a front ("no front" is refused)
+#   between <node> <node>                           halfway between two nodes
+# An anchor is 'me' (the asker's body) or a node; a Soul is its body's node. A node is N1's origin key
+# (v2/tools/import-eden): a thing's id, '<thing>/<room>', '<thing>/<window>', a place's id, or 'ground'.
+# A kind is today's def ref, which the import names as a kind. The asker stands where the node after 'me=' stands.
+1 | go sit by the pond | #1 | by e_5c6d4b00.water toward me | me=e_0bcd1158
+2 | go stand by the window | #6 | by e_b52ce644/window-1 toward e_b52ce644/living | me=e_f8fec424
+3 | go wait outside the bakery | #15 | by e_15fb4210 toward e_733bb5ae | me=e_89d82b59
+4 | sulk in the corner | #39 | corner e_b52ce644/living furthest me | me=e_f8fec424
+5 | sit in the back row at the big top | #53 | pick slots core-theatre-seats@1 in e_8ca89a2c/hall furthest e_56863cbd first | me=e_56863cbd
+6 | walk right down to the end of the west pier | #75 | end e_f6d58586.pier furthest me | me=e_4d8d5a4d
+7 | curl up in the armchair by the fire | #84 | pick things core-armchair@1 in e_a2273d3a/cabin nearest e_6b5e5d37 first | me=e_bbbb741b
+8 | cross the red bridge and stop in the middle | #111 | middle e_57696e8b.bridge | me=e_1bae67c2
+9 | look out the window (the cafe's third) | #132 | by e_a8028230/window-3 toward e_a8028230/cafe | me=e_16ce6ce0
+10 | sit on a pew at the back of the chapel | #133 | pick slots core-pew@1 in e_d4a31bea/nave furthest e_9c209c1a first | me=e_73a3eb70
+11 | go to the beach and stand right at the edge of the water | #157 | edge e_93f4569d.area toward e_d6506d17.water | me=e_4d8d5a4d
+12 | centre spot of the football pitch | #170 | middle e_bc4a74d3.area | me=e_bf9add3a
+13 | pitch a tent by the lake | #174 | by e_f8e62e33.water toward me | me=e_a2273d3a
+14 | wait by the postbox | #177 | front e_32e22443 | me=e_c6eb6211
+15 | eat it on the front step | #198 | front e_b52ce644 | me=e_f8fec424
+16 | the third bench counting from the hotel end | #203 | pick things core-bench@1 in ground nearest e_ad082d88 3 | me=e_d672b82a
+17 | stand behind the counter like you work there (the cafe's) | #204 | behind e_4fb9a218 | me=e_16ce6ce0
+18 | far corner of the library, furthest from the door | #216 | corner e_a0741c1e/reading furthest e_89d82b59 | me=e_89d82b59
+19 | go and stand between the two windmills on the cliff | #227 | between e_9f792c5b e_1d00d1bd | me=e_9f792c5b
+20 | sit on the edge of the jetty with your feet over the water | #48 | end e_7cfcac89.pier furthest me | me=e_a9f6decb
+21 | watch the sunset from the breakwater by the lighthouse | #44 | end e_3f79b313.pier nearest e_edbbc6a7 | me=e_4d8d5a4d
+22 | the stool on the end, furthest from the dartboard | E2 | pick slots core-stool@1 in e_0d56a73c/bar furthest e_a13b47f5 first | me=e_71b6b2a2
+23 | sit in the front row at the big top | #53 | pick slots core-theatre-seats@1 in e_8ca89a2c/hall nearest e_56863cbd first | me=e_56863cbd
+24 | stop halfway along the west promenade | #75 | along e_b49338e2.footpath 500 from me | me=e_48098370
+25 | stand in front of the menu board | #204 | front e_c743220c | me=e_16ce6ce0
+26 | the corner of the pitch nearest the clubhouse | #216 | corner e_bc4a74d3.area nearest e_bf9add3a | me=e_bf9add3a
+27 | the second pew from the front | #133 | pick things core-pew@1 in e_d4a31bea/nave nearest e_9c209c1a 2 | me=e_73a3eb70
+28 | walk right down to the far end of the east pier | #75 | end e_4a9d7f0e.pier furthest me | me=e_4d8d5a4d
+29 | the edge of the west lawns nearest the pond | #1 | edge e_664981e2.area toward e_5c6d4b00.water | me=e_0bcd1158
+30 | a third of the way along the boardwalk from the lighthouse | #75 | along e_a4be7ab3.pier 333 from e_edbbc6a7 | me=e_4d8d5a4d
+# A4, not one of the thirty: a round table has no front, so "behind" it is refused by name.
+A4 | stand behind the round table | E2 | behind e_edf0755f | me=e_16ce6ce0

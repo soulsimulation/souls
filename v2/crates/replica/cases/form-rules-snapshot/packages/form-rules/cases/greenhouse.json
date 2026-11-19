@@ -1,0 +1,293 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:greenhouse (SA-X29, #2919). Its roof vent is opened and closed by pressing the pole inside; an open vent cannot be opened again (the fix is to close it) and the pole must be in reach (the fix is the walk).",
+  "cases": [
+    {
+      "name": "open_vent_every_need_met",
+      "act": {
+        "this": "g1",
+        "form": "open_vent"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "g1": {
+            "kind": "eden:greenhouse"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              1500,
+              1400,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "open_vent_already_open_names_close",
+      "act": {
+        "this": "g1",
+        "form": "open_vent"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "g1": {
+            "kind": "eden:greenhouse",
+            "fields": {
+              "vent_open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              1500,
+              1400,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "vent_open",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": {
+          "form": "close_vent"
+        }
+      }
+    },
+    {
+      "name": "open_vent_out_of_reach",
+      "act": {
+        "this": "g1",
+        "form": "open_vent"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "g1": {
+            "kind": "eden:greenhouse"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              1500,
+              1500,
+              -300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 1,
+        "detail": {
+          "point": "vent_pole",
+          "move": "press"
+        },
+        "fix": {
+          "step": "walk_to",
+          "point": "vent_pole"
+        }
+      }
+    },
+    {
+      "name": "close_vent_every_need_met",
+      "act": {
+        "this": "g1",
+        "form": "close_vent"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "g1": {
+            "kind": "eden:greenhouse",
+            "fields": {
+              "vent_open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              1500,
+              1400,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "close_vent_already_closed_names_open",
+      "act": {
+        "this": "g1",
+        "form": "close_vent"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "g1": {
+            "kind": "eden:greenhouse"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              1500,
+              1400,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "vent_open",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": {
+          "form": "open_vent"
+        }
+      }
+    },
+    {
+      "name": "close_vent_out_of_reach",
+      "act": {
+        "this": "g1",
+        "form": "close_vent"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "g1": {
+            "kind": "eden:greenhouse",
+            "fields": {
+              "vent_open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              1500,
+              1500,
+              -300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 1,
+        "detail": {
+          "point": "vent_pole",
+          "move": "press"
+        },
+        "fix": {
+          "step": "walk_to",
+          "point": "vent_pole"
+        }
+      }
+    }
+  ]
+}

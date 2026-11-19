@@ -1,0 +1,75 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:earth_column",
+  "owner": "thing",
+  "state": {
+    "soil": { "n": 1, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 2, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 900] },
+    "top": { "role": "contact", "at_mm": [0, 160, 0] }
+  },
+  "geometry": { "bounds_mm": [220, 160, 200] },
+  "forms": {
+    "dig": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "pail": { "type": "thing", "select": { "of": "things", "kind": "eden:soil_pail", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "hand", "free": true },
+        { "need": "enough" },
+        { "need": "room" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "slide", "at": "top" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "soil", "from": "this", "into": { "arg": "pail" }, "amount": 1, "event": "dug" }
+      ]
+    },
+    "fill": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "pail": { "type": "thing", "select": { "of": "things", "kind": "eden:soil_pail", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "hand", "free": true },
+        { "need": "enough" },
+        { "need": "room" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "slide", "at": "top" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "soil", "from": { "arg": "pail" }, "into": "this", "amount": 1, "event": "filled" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:earth_column",
+    "table": [
+      { "part": "fill", "field": "soil", "do": "scale", "axis": "y", "range": [0, 2], "to": [0, 1000] }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,5,0],"size":[220,10,200],"tint":"base"},{"kind":"box","at":[0,85,0],"size":[220,160,200],"tint":"earth","role":"fill","pivot":[0,5,0]}],"palette":{"base":"#65513a","earth":"#967548"},"tags":["art","earthwork","soil","object"]}
+  },
+  "text": {
+    "card": "A column of an earthwork tray, up to two soil portions: dig or fill by pail.",
+    "art": "art",
+    "earth": "earth",
+    "soil": "soil",
+    "howto_reshape": "With a hand free, dig a portion from one column into an empty pail beside the tray, then fill a lower column from it."
+  },
+  "card": { "text": "card", "category": "art", "synonyms": ["earth", "soil"] },
+  "howtos": {
+    "reshape": { "text": "howto_reshape", "steps": [{ "form": "dig" }, { "form": "fill" }] }
+  }
+}

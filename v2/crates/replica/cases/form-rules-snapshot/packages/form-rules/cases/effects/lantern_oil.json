@@ -1,0 +1,233 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "Lantern oil (from #1700): a Soul with empty hands refills the empty lantern on the tray (supply 3 to 2, lantern 0 to 1); a second refill is refused for want of room; the Soul lights the lantern where it stands on the tray and puts it out, which spends the charge, and lighting it again is refused; then she takes it. (Lit only when set down: the wick rule.)",
+ "cases": [
+  {
+   "name": "refill_refuse_take_light_put_out",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "eden:lantern_oil_station",
+      "slots": {
+       "out": [
+        "l1"
+       ]
+      }
+     },
+     "l1": {
+      "kind": "eden:oil_lantern"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "s1",
+      "form": "refill",
+      "args": {
+       "lantern": "l1"
+      }
+     },
+     "receipt": "ro1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "s1",
+        "field": "oil",
+        "n": 1,
+        "to": 2,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "oil",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:refilled",
+        "node": "s1",
+        "changes": [
+         0,
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "s1",
+      "form": "refill",
+      "args": {
+       "lantern": "l1"
+      }
+     },
+     "receipt": "ro2",
+     "expect": {
+      "verdict": "no",
+      "reason": "no_room",
+      "need": 2,
+      "says": "already_charged"
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "light"
+     },
+     "receipt": "ro4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "lit",
+        "n": 2,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lit",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "put_out"
+     },
+     "receipt": "ro5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "lit",
+        "n": 2,
+        "to": 0
+       },
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "oil",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:put_out",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:charge_spent",
+        "node": "l1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "light"
+     },
+     "receipt": "ro6",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1,
+      "says": "empty"
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "take"
+     },
+     "receipt": "ro3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "l1",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:taken",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "s1": {
+     "kind": "eden:lantern_oil_station",
+     "fields": {
+      "oil": 2
+     },
+     "slots": {
+      "out": []
+     }
+    },
+    "l1": {
+     "kind": "eden:oil_lantern",
+     "fields": {
+      "oil": 0,
+      "lit": 0
+     }
+    },
+    "b1": {
+     "hands": {
+      "left": "l1",
+      "right": null
+     }
+    }
+   }
+  }
+ ]
+}
