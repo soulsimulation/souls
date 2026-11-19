@@ -1,4 +1,5 @@
 import { browserSession, localTestSignIn, sessionRequest } from '../source/signin.ts';
+import { worldAddress } from '../source/address.ts';
 // The creator's panel (Engine v2 W5, #2801): the world's one creator places and moves things by hand, through the same
 // gate as their agent. The panel opens only after the session exchange (gatewayd's `creator.rs`) gives a creator's
 // token for W1's session; anyone else is told `not-the-creator` and the panel stays shut. Its picture is the world's
@@ -25,6 +26,8 @@ const kinds = $<HTMLSelectElement>('kind');
 const batches = $<HTMLOListElement>('batches');
 const warn = $<HTMLDivElement>('warn');
 const params = new URLSearchParams(location.search);
+let addressError = '';
+const installed = await worldAddress(location.href).catch(e => { addressError = String(e.message); return null; });
 const UM = 1e-6;
 
 // The page's copy, from the stream: nodes by id.
@@ -293,7 +296,8 @@ async function open(name: string) {
   stopIdentity = unsubscribe ?? null;
   const request = await sessionRequest(identity, 'world');
   if (attempt !== openAttempt) return;
-  const res = await fetch('/v2/creator-token', request);
+  if (addressError) throw new Error(addressError);
+  const res = await fetch(installed?.creatorToken ?? '/v2/creator-token', request);
   const body = (await res.json()) as { token?: string; grant?: string; refused?: string };
   if (attempt !== openAttempt) return;
   if (!res.ok || !body.token || !body.grant) {
@@ -303,7 +307,7 @@ async function open(name: string) {
   }
   await init();
   if (attempt !== openAttempt) return;
-  const ws = new WebSocket(new URL('/v2/ws', location.href.replace(/^http/, 'ws')));
+  const ws = new WebSocket(installed?.gateway ?? new URL('/v2/ws', location.href.replace(/^http/, 'ws')));
   activeSocket = ws;
   const current = () => attempt === openAttempt && activeSocket === ws;
   ws.binaryType = 'arraybuffer';
@@ -338,7 +342,7 @@ $<HTMLFormElement>('signin').addEventListener('submit', (e) => {
 
 $<HTMLInputElement>('who').parentElement!.hidden = !localTestSignIn(location.href);
 
-const address = params.get('stream');
+const address = installed?.stream ?? (addressError ? null : params.get('stream'));
 if (address) {
   new StreamSource(address).start({
     pointer() {},
@@ -360,6 +364,6 @@ if (address) {
     },
     error: (m) => (status.textContent = m),
   });
-} else status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
+} else status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory>';
 Object.assign(globalThis, { panel: { nodes, get session() { return session; }, get prayers() { return prayers; }, drag } });
 requestAnimationFrame(draw);

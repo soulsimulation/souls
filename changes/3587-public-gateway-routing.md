@@ -1,0 +1,1 @@
+Public world and preview addresses select their own trusted stream and native gateway, without copied connection parameters. Pairing and creator sessions use the same public front door; preview activation stays separate from the canonical switch.
