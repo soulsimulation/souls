@@ -4,8 +4,9 @@
 //!
 //! - **A timer belongs to a node.** The list holds it as its key, (due time in µs, timer id), with its node and name.
 //!   The tree holds the same timer as state, written by the node's timer records (effects.md rule 15), so a checkpoint
-//!   carries it and [`DueList::from_state`] rebuilds the list from it. Removing a node cancels the timers of its
-//!   subtree ([`DueList::cancel_under`]): the writer clears them in their nodes' entries before the remove.
+//!   carries it and [`DueList::from_state`] rebuilds the list from it. Removing a node drops the timers of its
+//!   subtree from the tree's state in the remove's own commit (K2b, #3132), and [`DueList::cancel_under`] takes the
+//!   same timers out of the list; no clears are written for them.
 //! - **Ordered by (due, id).** Equal due times fire in timer id order. The id is the sequence: a zone's minter gives
 //!   ids in the order timers are set, and the id is in the state, so the order survives a checkpoint without a counter
 //!   of its own.
@@ -159,8 +160,8 @@ impl DueList {
         self.take(key)
     }
 
-    /// Cancels every timer of `node` and of the nodes below it in `tree`, and returns them in key order, for the
-    /// writer to clear in their nodes' entries before the remove. Called before the remove applies.
+    /// Cancels every timer of `node` and of the nodes below it in `tree`, and returns them in key order: the timers
+    /// the remove of `node` drops from the tree's state when it commits. Called before the remove applies.
     pub fn cancel_under(&mut self, tree: &Tree, node: Id) -> Vec<Timer> {
         let mut gone = Vec::new();
         let mut walk: Vec<_> = tree.handle(node).into_iter().collect();

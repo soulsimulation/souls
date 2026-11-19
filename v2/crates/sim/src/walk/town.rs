@@ -19,6 +19,15 @@
 //!   at the line's end. The line is followed in the frame of the node the body stands on: a body coming in from the
 //!   open ground follows it placed on the ground by the building's frame, and stands at the far end on the floor; a
 //!   body going out follows it in the building's frame and stands at the far end on the open ground.
+//! - **Changed ground** (G3, #2760). [`Town::rebuild`] runs off the clock thread on a copy of the tree: it applies a
+//!   part as it will commit, finds the nodes whose ground it changes (`crate::ground::touched`) and bumps their
+//!   versions. When the open ground is untouched it reads again only the buildings whose floors the part touches, on
+//!   the open ground as last cut ([`Basis`], #3276); otherwise it builds the ground, the links and the route map whole
+//!   from the tree as the part leaves it. [`Town::install`] runs on the tick the part commits: it commits the part
+//!   through the zone's one write and, in the same call, swaps the ground in or replaces the buildings read again on
+//!   the route map ([`Map::replace`]), so no tick sees new geometry over old ground. Each plan records the ground it
+//!   crossed, each node with its version ([`Town::planned_on`]); the install lists the walks planned on the changed
+//!   ground ([`Town::stale`]), and the ladder plans them again (`crate::unstick`).
 //! - **Turns** (N8). A link under 1.2 m wide is taken in turns (`crate::links::turns`): at the start of each tick
 //!   the marks of the last are read into each such link's facts (who waits at which end and how far from it, who is
 //!   inside and how far along, whether each end has room to step out into), and its owning node writes who may
@@ -32,16 +41,16 @@
 
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
-use crate::ground::scene::FLOOR;
-use crate::ground::{HUMAN_RADIUS, OpenGround, exits};
+use crate::ground::scene::{FLOOR, xform_to};
+use crate::ground::{HUMAN_RADIUS, OpenGround, Piece, Terrain, Versions, exits, touched};
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
-use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
+use crate::links::{Building, Doors, F_OPEN, Open, SquareMeet, back, floor_joins, ground_doors};
 use crate::mover::{Body, Surface};
-use crate::routes::{HANDS, Hop, Map};
+use crate::routes::{HANDS, Hop, Map, on_pieces};
 use crate::spots::{Ask, CLEAR, Ground, Spots, Target, flat, to_segment};
-use replica::effects::{Actor, Cause, Refusal};
-use replica::encode::Value;
+use replica::effects::{Actor, Cause, Header, Part, Refusal};
+use replica::encode::{Value, encode};
 use replica::host::{F_GRANTED, F_TURNS, Seen};
 use replica::ids::Id;
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Vec3};
@@ -50,6 +59,7 @@ use replica::tree::Tree;
 use replica::world_model::{plain, show};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
@@ -122,7 +132,96 @@ pub struct Town {
     /// Where each link is in `buildings` (building, link), the first that holds it: read every tick by each walker
     /// with a link ahead, so not searched for (#3213).
     link_at: BTreeMap<Id, (usize, usize)>,
+    /// Each node's ground version (G3).
+    pub versions: Versions,
+    /// What a building read again off the clock thread needs of the open ground ([`Town::basis`]).
+    basis: Basis,
+    /// The ground each body's last plan crossed, in order: each node with its version then (G3).
+    planned: BTreeMap<Id, Vec<(Id, u64)>>,
+    /// The walks planned on ground the last installs changed, not yet planned again: each body with how soon its
+    /// route reaches the change (its index in the ground the plan crossed; 0 for the node it stood on).
+    pub stale: BTreeMap<Id, usize>,
 }
+
+/// What a rebuild off the clock thread reads besides the tree (#3276): the open ground as cut (each square's pieces,
+/// its meets and its doors) and each building read, with its links. Cheap to clone: it is shared, not copied.
+#[derive(Clone)]
+pub struct Basis {
+    open: Arc<OpenCut>,
+    known: Arc<BTreeMap<Id, BTreeSet<Id>>>,
+    /// Where each building reaches on the open ground ([`reach`]).
+    reach: Arc<BTreeMap<Id, [i64; 4]>>,
+    /// The buildings that share a step with another's floor (#3227): never read again alone.
+    joined: Arc<BTreeSet<Id>>,
+}
+
+struct OpenCut {
+    squares: BTreeMap<(i32, i32), Vec<Piece>>,
+    meets: Vec<SquareMeet>,
+    doors: BTreeMap<Id, Id>,
+    terrain: Option<Terrain>,
+}
+
+/// How far past its floors and steps a building's reach is taken, µm: more than a step carried across an edge onto
+/// another thing's floor (#3227, `crate::links::floor_joins`).
+const JOIN_REACH: i64 = 1_000_000;
+
+/// The box (x and z on the open ground, µm: least x, least z, most x, most z) holding building `b`'s floors and its
+/// loose steps, grown by [`JOIN_REACH`]: two buildings whose boxes are apart share no step from one's floor onto the
+/// other's (#3227), so only those whose boxes meet are read again to look for one.
+fn reach(b: &Building) -> Option<[i64; 4]> {
+    let floors = b.floors.values().flat_map(|(_, p)| &p.pieces);
+    let corners = floors.flat_map(|pc| &pc.vertices).map(|v| {
+        let m = |c: i32| i64::from(c) * 1000;
+        Vec3::new(m(v[0]), m(v[1]), m(v[2]))
+    });
+    let steps = b.loose.iter().flat_map(|s| [s.end.a, s.end.b]);
+    let mut out: Option<[i64; 4]> = None;
+    for p in corners.chain(steps) {
+        let w = b.place.point(p).ok()?;
+        let r = out.get_or_insert([w.x, w.z, w.x, w.z]);
+        *r = [r[0].min(w.x), r[1].min(w.z), r[2].max(w.x), r[3].max(w.z)];
+    }
+    out.map(|r| {
+        [
+            r[0] - JOIN_REACH,
+            r[1] - JOIN_REACH,
+            r[2] + JOIN_REACH,
+            r[3] + JOIN_REACH,
+        ]
+    })
+}
+
+/// Whether boxes `a` and `b` meet.
+fn overlap(a: [i64; 4], b: [i64; 4]) -> bool {
+    a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
+}
+
+/// The ground as a part will leave it, built off the clock thread ([`Town::rebuild`]) and installed on the tick the
+/// part commits ([`Town::install`]).
+pub struct Rebuilt {
+    /// The nodes whose ground the part changes.
+    pub touched: BTreeSet<Id>,
+    pub versions: Versions,
+    fresh: Fresh,
+}
+
+impl Rebuilt {
+    /// Whether the whole ground was built again (the open ground was touched, or a building could not be read
+    /// again alone), not only the touched buildings.
+    pub fn whole(&self) -> bool {
+        matches!(self.fresh, Fresh::Whole(..))
+    }
+}
+
+enum Fresh {
+    Whole(Box<Assembled>),
+    /// Each touched building read again, with its floors' surfaces.
+    Buildings(Vec<(Building, BTreeMap<Id, Surface>)>),
+}
+
+/// The route map, each node's surface, the buildings and the basis for a rebuild.
+type Assembled = (Map, BTreeMap<Id, Surface>, Vec<Building>, Basis);
 
 /// Where each link is in `buildings`: the first building, and its first link, with that id.
 fn link_index(buildings: &[Building]) -> BTreeMap<Id, (usize, usize)> {
@@ -148,17 +247,227 @@ fn find_link<'b>(
 impl Town {
     /// Everything on the open ground `ground`; openings are written by `doors`.
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
-        let map = Map::build(&tree, ground, &|_| 0)?;
+        let versions = Versions::default();
+        let (map, surfaces, buildings, basis) = Town::assemble(&tree, ground, &versions)?;
+        let link_at = link_index(&buildings);
+        Ok(Town {
+            tree,
+            ground,
+            map,
+            surfaces,
+            buildings,
+            link_at,
+            doors,
+            turns: Some(Turns::new()),
+            spots: Spots::new(),
+            meter: None,
+            spent: Cell::new(Spent::default()),
+            lines: BTreeMap::new(),
+            crossings: BTreeMap::new(),
+            versions,
+            basis,
+            planned: BTreeMap::new(),
+            stale: BTreeMap::new(),
+        })
+    }
+
+    /// What [`Town::rebuild`] reads besides the tree, as the ground stands now.
+    pub fn basis(&self) -> Basis {
+        self.basis.clone()
+    }
+
+    /// The ground `body`'s last plan crossed, each node with its version then.
+    pub fn planned_on(&self, body: Id) -> &[(Id, u64)] {
+        self.planned.get(&body).map_or(&[], Vec::as_slice)
+    }
+
+    /// Off the clock thread: the ground as `part` leaves the tree `base` (a copy of this town's, as it stands when
+    /// the part is checked; `header` is the zone's), with the versions of the nodes it touches bumped from `versions`.
+    /// When the open ground is not touched, only the buildings whose floors are touched are read again, on the open
+    /// ground in `basis` (#3276); otherwise, or when one of them cannot be read alone, the whole ground is built.
+    pub fn rebuild(
+        mut base: Tree,
+        header: &Header,
+        ground: Id,
+        versions: &Versions,
+        basis: &Basis,
+        part: &Part,
+    ) -> Result<Rebuilt, String> {
+        let before = base.frozen();
+        base.apply(header, part)
+            .map_err(|e| format!("{}: {}", e.name, e.detail))?;
+        let touched = touched(&before, &base, part);
+        let mut versions = versions.clone();
+        versions.bump(&touched);
+        let fresh = match Town::reread(&before, &base, ground, &touched, basis) {
+            Some(bs) => Fresh::Buildings(bs),
+            None => Fresh::Whole(Box::new(Town::assemble(&base, ground, &versions)?)),
+        };
+        Ok(Rebuilt {
+            touched,
+            versions,
+            fresh,
+        })
+    }
+
+    /// Each building whose floors are in `touched`, read again from `after` on the open ground of `basis`, with its
+    /// floors' surfaces; `None` when the whole ground must be built: the open ground is touched, a building is new,
+    /// gone or cannot be read, shares a step with another building's floor before the edit or after, or a link of the open ground's meets
+    /// joins or leaves a building (the gates change).
+    fn reread(
+        before: &Tree,
+        after: &Tree,
+        ground: Id,
+        touched: &BTreeSet<Id>,
+        basis: &Basis,
+    ) -> Option<Vec<(Building, BTreeMap<Id, Surface>)>> {
+        if touched.contains(&ground) {
+            return None;
+        }
+        let parent = |t: &Tree, n: Id| t.handle(n).and_then(|h| t.node(h)).and_then(|n| n.parent());
+        let mut things = BTreeSet::new();
+        for &f in touched {
+            things.insert(parent(after, f).or_else(|| parent(before, f))?);
+        }
+        let gh = after.handle(ground)?;
+        let open = &basis.open;
+        let on =
+            |sq: (i32, i32), p: [i64; 2]| open.squares.get(&sq).is_some_and(|ps| on_pieces(ps, p));
+        let read = |thing: Id| {
+            let o = Open {
+                ground,
+                place: xform_to(after, after.handle(thing)?, gh).ok()?,
+                meets: &open.meets,
+                on: &on,
+                doors: &open.doors,
+                terrain: open.terrain.as_ref(),
+            };
+            Building::read_on(after, thing, Some(o)).ok()
+        };
+        let mut out = Vec::new();
+        for thing in things {
+            let old = basis.known.get(&thing)?;
+            // A building that shared a step with another's floor (#3227) before the edit: the whole.
+            if basis.joined.contains(&thing) {
+                return None;
+            }
+            let b = read(thing)?;
+            // Or after it: the buildings within its reach are read again, and none may share a step with it.
+            let new = reach(&b)?;
+            let near = basis
+                .reach
+                .iter()
+                .filter(|(o, r)| **o != thing && overlap(new, **r))
+                .map(|(o, _)| read(*o))
+                .collect::<Option<Vec<_>>>()?;
+            if !near.is_empty() {
+                let bs: Vec<&Building> = std::iter::once(&b).chain(&near).collect();
+                let joins = floor_joins(&bs);
+                if joins.iter().any(|(i, l)| {
+                    *i == 0
+                        || l.ends
+                            .iter()
+                            .flatten()
+                            .any(|e| b.floors.contains_key(&e.floor))
+                }) {
+                    return None;
+                }
+            }
+            let now: BTreeSet<Id> = b.links.iter().map(|l| l.id).collect();
+            if old
+                .symmetric_difference(&now)
+                .any(|l| open.meets.iter().any(|m| m.1.link == *l))
+            {
+                return None;
+            }
+            let surfaces = b
+                .floors
+                .iter()
+                .map(|(&f, (_, patch))| (f, Surface::new(f, patch.pieces.clone())))
+                .collect();
+            out.push((b, surfaces));
+        }
+        Some(out)
+    }
+
+    /// On the tick `part` commits: commits it through the zone's one write, its effects numbered from the zone's next
+    /// sequence (doors may have opened since it was checked), and installs the ground `r` built for it, in the same
+    /// call: the whole ground swapped in, or each building read again replaced on the map. The walks planned on the
+    /// changed ground are listed in [`Town::stale`], and the lines of corners on it are dropped. A refused part
+    /// installs nothing.
+    pub fn install(&mut self, r: Rebuilt, part: &Part) -> Result<(), Refusal> {
+        let mut p = part.clone();
+        for (k, e) in p.effects.iter_mut().enumerate() {
+            e.envelope.sequence = self.doors.next + k as u64;
+        }
+        let bytes = encode(&p.to_value()).map_err(|e| refusal("encoding", e.to_string()))?;
+        self.tree
+            .commit(&self.doors.header, &Part::read(&bytes)?, &self.doors.rules)?;
+        self.doors.next += part.effects.len() as u64;
+        let Rebuilt {
+            touched,
+            versions,
+            fresh,
+        } = r;
+        match fresh {
+            Fresh::Whole(g) => {
+                let (map, surfaces, buildings, basis) = *g;
+                self.map = map;
+                self.surfaces = surfaces;
+                self.buildings = buildings;
+                self.basis = basis;
+            }
+            Fresh::Buildings(bs) => {
+                let known = Arc::make_mut(&mut self.basis.known);
+                let reaches = Arc::make_mut(&mut self.basis.reach);
+                for (b, surfaces) in bs {
+                    self.map.replace(&b, &|n| versions.of(n));
+                    known.insert(b.thing, b.links.iter().map(|l| l.id).collect());
+                    if let Some(r) = reach(&b) {
+                        reaches.insert(b.thing, r);
+                    }
+                    self.surfaces.extend(surfaces);
+                    match self.buildings.iter().position(|o| o.thing == b.thing) {
+                        Some(i) => {
+                            let old = std::mem::replace(&mut self.buildings[i], b);
+                            for f in old.floors.keys() {
+                                if !self.buildings[i].floors.contains_key(f) {
+                                    self.surfaces.remove(f);
+                                }
+                            }
+                        }
+                        None => self.buildings.push(b),
+                    }
+                }
+            }
+        }
+        self.link_at = link_index(&self.buildings);
+        self.versions = versions;
+        self.lines.retain(|_, l| !touched.contains(&l.node));
+        for (&who, ground) in &self.planned {
+            if let Some(rank) = ground.iter().position(|(n, _)| touched.contains(n)) {
+                let r = self.stale.entry(who).or_insert(rank);
+                *r = (*r).min(rank);
+            }
+        }
+        Ok(())
+    }
+
+    /// The route map, each node's surface, the buildings and the basis for a rebuild, read from `tree` at `versions`.
+    fn assemble(tree: &Tree, ground: Id, versions: &Versions) -> Result<Assembled, String> {
+        let map = Map::build(tree, ground, &|n| versions.of(n))?;
         let mut surfaces = BTreeMap::new();
-        let open = OpenGround::of(&tree, ground, HUMAN_RADIUS)?;
-        let (mut pieces, mut meets) = (Vec::new(), Vec::new());
+        let open = OpenGround::of(tree, ground, HUMAN_RADIUS)?;
+        let terrain = open.terrain().cloned();
+        let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
+            squares.insert((i, j), p.pieces.clone());
             pieces.extend(p.pieces);
             meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
         }
         let gh = tree.handle(ground).ok_or("no such ground")?;
-        let gdoors = ground_doors(&tree, ground)?;
+        let gdoors = ground_doors(tree, ground)?;
         let on = open.on_terrain(&pieces);
         let mut surface = Surface::new(ground, pieces);
         if let Some(t) = open.terrain() {
@@ -177,12 +486,13 @@ impl Town {
                 let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
                 let open = Open {
                     ground,
-                    place: crate::ground::scene::xform_to(&tree, h, gh)?,
+                    place: xform_to(tree, h, gh)?,
                     meets: &meets,
                     on: &on,
                     doors: &gdoors,
+                    terrain: open.terrain(),
                 };
-                if let Ok(b) = Building::read_on(&tree, id, Some(open)) {
+                if let Ok(b) = Building::read_on(tree, id, Some(open)) {
                     for (&floor, (_, patch)) in &b.floors {
                         surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
                     }
@@ -192,10 +502,11 @@ impl Town {
             stack.extend(kids.iter().rev().copied());
         }
         // The open ground's own links: gates in walls and fences.
-        let known = buildings
+        let known: BTreeMap<Id, BTreeSet<Id>> = buildings
             .iter()
-            .flat_map(|b| b.links.iter().map(|l| l.id))
+            .map(|b| (b.thing, b.links.iter().map(|l| l.id).collect()))
             .collect();
+        let all = known.values().flatten().copied().collect();
         let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
         let open = Open {
             ground,
@@ -203,24 +514,54 @@ impl Town {
             meets: &meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
-        buildings.push(Building::of_ground(&tree, open, &known)?);
-        let link_at = link_index(&buildings);
-        Ok(Town {
-            tree,
-            ground,
-            map,
-            surfaces,
-            buildings,
-            link_at,
-            doors,
-            turns: Some(Turns::new()),
-            spots: Spots::new(),
-            meter: None,
-            spent: Cell::new(Spent::default()),
-            lines: BTreeMap::new(),
-            crossings: BTreeMap::new(),
-        })
+        buildings.push(Building::of_ground(tree, open, &all)?);
+        let mut joined = BTreeSet::new();
+        for (i, l) in floor_joins(&buildings.iter().collect::<Vec<_>>()) {
+            joined.insert(buildings[i].thing);
+            let far = l.ends.iter().flatten().map(|e| e.floor);
+            joined.extend(far.filter_map(|f| {
+                let owner = buildings.iter().find(|b| b.floors.contains_key(&f))?;
+                Some(owner.thing)
+            }));
+            buildings[i].links.push(l);
+        }
+        let reach = buildings
+            .iter()
+            .filter(|b| b.thing != ground)
+            .filter_map(|b| Some((b.thing, reach(b)?)))
+            .collect();
+        let basis = Basis {
+            open: Arc::new(OpenCut {
+                squares,
+                meets,
+                doors: gdoors,
+                terrain,
+            }),
+            known: Arc::new(known),
+            reach: Arc::new(reach),
+            joined: Arc::new(joined),
+        };
+        Ok((map, surfaces, buildings, basis))
+    }
+
+    /// `body` found again on its node's ground as it is now (its piece and triangle), where it stands, its velocity
+    /// kept; refused when it stands on none (`off-ground`).
+    pub fn relocate(&self, body: &Body) -> Result<Body, Refusal> {
+        let node = node_of(body);
+        let mut b = self
+            .surfaces
+            .get(&node)
+            .ok_or_else(|| refusal("no-surface", show(node)))?
+            .place(
+                body.id,
+                body.pose.frame,
+                body.pose.position,
+                body.pose.orientation,
+            )?;
+        b.linear = body.linear;
+        Ok(b)
     }
 
     fn link(&self, id: Id) -> Option<&crate::links::Link> {
@@ -229,6 +570,14 @@ impl Town {
 
     fn building(&self, link: Id) -> Option<&Building> {
         self.buildings.iter().find(|b| b.link(link).is_some())
+    }
+
+    /// The frame on the open ground of the building that holds the floor `node`.
+    fn frame_of(&self, node: Id) -> Option<crate::ground::scene::Xform> {
+        self.buildings
+            .iter()
+            .find(|b| b.floors.contains_key(&node))
+            .map(|b| b.place)
     }
 
     /// The town as the host's questions read it in a tick: the map behind a cell (a route is cached as it is
@@ -537,8 +886,15 @@ impl World for Town {
         let to = self
             .map
             .spot(node, goal)
-            .ok_or_else(|| refusal("off-ground", show(node)))?;
+            .ok_or_else(|| refusal("destination-gone", show(node)))?;
         let route = self.map.route(&self.tree, from, to, HANDS)?;
+        let mut ground: Vec<(Id, u64)> = Vec::new();
+        for p in route.patches() {
+            if ground.last().map(|l| l.0) != Some(p.node) {
+                ground.push((p.node, p.version));
+            }
+        }
+        self.planned.insert(body.id, ground);
         let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
         for h in &route.hops {
             let Hop::Link { id, .. } = h else { continue };
@@ -728,6 +1084,38 @@ impl View<'_> {
 }
 
 impl Town {
+    /// The legs of a walk shaped by `way` (E10, #2781): the routes from where `body` stands through each of the way's
+    /// points (`crate::routes::way`) and on to `goal` when one is named, joined into one walk. A point is a leg with
+    /// no link that is not the last, which the walk passes without stopping. Each point is one route search, counted
+    /// in the points returned.
+    pub fn plan_way(
+        &mut self,
+        body: &Body,
+        way: &replica::walk::Way,
+        goal: Option<Vec3>,
+    ) -> Result<(Vec<Leg>, crate::routes::way::Points), Refusal> {
+        let from = body.pose.position;
+        let pts = crate::routes::way::points(&self.tree, &self.map, self.ground, from, goal, way)?;
+        let mut stops = pts.on.clone();
+        stops.extend(goal.map(|g| (self.ground, g)));
+        if stops.is_empty() {
+            return Err(refusal("way-empty", "a walk with no point and no goal"));
+        }
+        let (mut legs, mut at, mut ground) = (Vec::new(), *body, Vec::new());
+        for (node, p) in stops {
+            legs.extend(self.plan(&at, node, p)?);
+            // The ground the whole walk crosses (G3): each route's, in order.
+            ground.extend(self.planned.remove(&body.id).unwrap_or_default());
+            at = self
+                .surfaces
+                .get(&node)
+                .ok_or_else(|| refusal("no-surface", show(node)))?
+                .place(body.id, Frame { node, slot: None }, p, Quat::IDENTITY)?;
+        }
+        self.planned.insert(body.id, ground);
+        Ok((legs, pts))
+    }
+
     /// The track across `link` for `body` from where it stands, at `speed`, and the end it goes in by. A shut door
     /// in the link is asked open and the opening written at once (`cause`, the body as the acting Soul), and there is
     /// no track yet: the body stands this tick and asks again the next (T1).
@@ -777,9 +1165,23 @@ impl Town {
                     .map_or(e.middle(), |s| {
                         Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
                     });
-                let stand = self
+                let mut stand = self
                     .landing(to, stand)
                     .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+                // The open ground's pieces are a plan at 0; a body there stands on its terrain (#3227).
+                if to == self.ground {
+                    let at = Frame {
+                        node: to,
+                        slot: None,
+                    };
+                    stand = self
+                        .surfaces
+                        .get(&to)
+                        .ok_or_else(|| refusal("no-surface", show(to)))?
+                        .place(body.id, at, stand, body.pose.orientation)?
+                        .pose
+                        .position;
+                }
                 let last = if to == self.ground {
                     back(&place, stand).map_err(out)?
                 } else {
@@ -794,6 +1196,36 @@ impl Town {
                 for p in &mut line {
                     *p = place.point(*p).map_err(out)?;
                 }
+            }
+        } else if let Some(b) = self.building(link)
+            && let (Some(ph), Some(pt)) = (self.frame_of(here), self.frame_of(to))
+            && (!b.floors.contains_key(&here) || !b.floors.contains_key(&to))
+        {
+            // A step from one thing's floor onto another's (#3227): the line is followed in the frame of the floor
+            // the body stands on, and ends where it stands on the far floor, as on the open ground above.
+            let out = |e: String| refusal("out-of-range", e);
+            let to_here = |p: Vec3, from: &crate::ground::scene::Xform| {
+                from.point(p).and_then(|w| back(&ph, w))
+            };
+            if !b.floors.contains_key(&here) {
+                for p in &mut line {
+                    *p = to_here(*p, &b.place).map_err(out)?;
+                }
+            }
+            if let Some(e) = far {
+                let stand = self
+                    .map
+                    .spot_near(to, e.middle(), AT_EDGE)
+                    .map_or(e.middle(), |s| {
+                        Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
+                    });
+                let stand = self
+                    .landing(to, stand)
+                    .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+                if let Some(p) = line.last_mut() {
+                    *p = to_here(stand, &pt).map_err(out)?;
+                }
+                arrive = Some(stand);
             }
         } else if let Some(last) = line.last_mut() {
             *last = self

@@ -64,6 +64,8 @@ pub const F_TILE_SIZE: u64 = 24; // the open ground: a terrain tile's side, mm (
 // tx × side to (tx + 1) × side, z likewise. Heights are (n + 1)² little-endian i32 mm, a row of x for each z, at
 // side / n spacing; classes are n² bytes, one per cell, in the same order (today's media codes, `packages/ground`).
 pub const F_TILES: u64 = 25;
+pub const F_ASSET: u64 = 26; // X6: [SHA-256 …] of the world's uploads the thing names (a mesh's, a picture's)
+pub const F_ENTRY: u64 = 27; // X6: the Soul Actions entry of the thing's kind (SA-E11's map), when it has one
 
 pub const WORLD: &str = "eden:world";
 pub const GROUND: &str = "eden:ground";
@@ -426,6 +428,16 @@ pub fn load(text: &str) -> R<Import> {
         let sc = int(t, "scale_ppm")?;
         if sc != 1_000_000 {
             fields.insert(F_SCALE, i(sc));
+        }
+        if let Some(a) = t.get("asset") {
+            let hs = a.arr().iter().map(|x| {
+                let h = x.str().ok_or_else(|| "an upload's hash".to_owned())?;
+                hex(h).map(Value::Bytes)
+            });
+            fields.insert(F_ASSET, Value::Array(hs.collect::<R<_>>()?));
+        }
+        if let Some(e) = t.get("entry").and_then(Json::str) {
+            fields.insert(F_ENTRY, Value::Text(name(e)?));
         }
         if let Some(d) = t.get("door") {
             fields.insert(

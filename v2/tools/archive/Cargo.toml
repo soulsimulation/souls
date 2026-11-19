@@ -1,0 +1,15 @@
+[package]
+name = "archive"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "The archive packed and shipped, history bundles, the restore tool and the write count (Engine v2 V3, #2712)."
+
+[dependencies]
+replica = { path = "../../crates/replica" }
+# K4's CRC-32C and K5's replay.
+sim = { path = "../../crates/sim" }
+# The object store: W8's S3 client and its in-memory store.
+directoryd = { path = "../../crates/directoryd" }
+# Deflate (RFC 1951), pure Rust: the archive's compression, chosen for a format kept for ever.
+miniz_oxide = "0.8"

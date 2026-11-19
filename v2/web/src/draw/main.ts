@@ -11,10 +11,12 @@ import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
 import { support } from './support.ts';
 import { pageThings } from '../things/page.ts';
+import { HistoryPage, readMoment } from '../history/page.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
 const address = new URLSearchParams(location.search).get('stream');
+const moment = readMoment(location.hash); // V9: a link to a moment opens history
 
 // The GL renderer's name, from a throwaway context, picks the tier before the real one is made (antialiasing is fixed
 // at creation).
@@ -63,8 +65,7 @@ addEventListener('resize', resize);
 resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
-if (!address) status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
-else new StreamSource(address).start({
+const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
     world.apply(p.nodes, p.removed, p.samples);
@@ -75,6 +76,13 @@ else new StreamSource(address).start({
   },
   error: (m) => (error = m),
 });
+let history = moment && new HistoryPage(moment, cam, {
+  apply: (n, r, s) => (world.apply(n, r, s), things.apply(n, r)), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
+  frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
+});
+if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
+else if (!address) status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
+else live(address);
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
@@ -94,7 +102,8 @@ renderer.setAnimationLoop((now) => {
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
   sun.position.copy(sun.target.position).add(SUN);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
-  const t = worldNow === null ? null : clock.step(dt, worldNow, newestTo);
+  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, newestTo);
+  if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {
     drawn = world.draw(t, cam.camera);
@@ -106,7 +115,8 @@ renderer.setAnimationLoop((now) => {
     }
   }
   renderer.render(scene, cam.camera);
-  if (!address) return;
+  if (history) return void (status.textContent = `${history.status()}\nbodies drawn      ${drawn}   frames a second ${fps.toFixed(0)}`);
+  if (!address && !moment) return;
   status.textContent = t === null || worldNow === null
     ? `waiting for the stream${error ? `\n${error}` : ''}`
     : `behind the world  ${secs(worldNow - t)} s   (${clock.state}, ×${clock.rate.toFixed(3)})\n`
