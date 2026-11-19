@@ -10,7 +10,8 @@
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
 //   souls.mjs whisper <body id> "<words>"     says them to that one body alone
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
-//   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened, or at the timeout
+//   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened (an answer, or words
+//                                             said to or near it: `heard`, also in the next look), or at the timeout
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop                            ends the daemon
 //   any of them [--soul <id>]                 which Soul, when the home has more than one

@@ -127,12 +127,6 @@ pub fn run(args: &[String]) -> i32 {
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
     let views = arg("--views").map_or_else(|| path.with_extension("views"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
-    let feed = worldd::views::served::start();
-    cfg.views = feed.as_ref().ok().cloned();
-    if let Err(e) = feed.and_then(|f| worldd::views::served::listen(f, &views)) {
-        eprintln!("worldd: views: {e}");
-        return 1;
-    }
     if args.iter().any(|a| a == "--testworld") {
         cfg.bodies = Some(Box::new(worldd::testbodies::bodies));
     }
@@ -168,6 +162,15 @@ pub fn run(args: &[String]) -> i32 {
     };
     cfg.text = Some(Arc::clone(&text));
     let built = toggles::World::build(rooms, bodies, items);
+    // The view tier: seeded with the bodies as built, and reading words for those who hear them (C6, #3390).
+    let mut hub = worldd::views::subscription::Hub::with_words(Arc::clone(&text));
+    hub.seed(built.replica.tree());
+    let feed = worldd::views::served::start_with(hub);
+    cfg.views = feed.as_ref().ok().cloned();
+    if let Err(e) = feed.and_then(|f| worldd::views::served::listen(f, &views)) {
+        eprintln!("worldd: views: {e}");
+        return 1;
+    }
     if let Some(www) = arg("--www") {
         if std::fs::metadata(&log).is_ok_and(|m| m.len() > 0) {
             eprintln!("worldd: --www needs a log with no records");
