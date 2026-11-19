@@ -47,6 +47,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use crate::bodies::{self, Asked, Bodies};
+use crate::checkers::refusal::{STATE_LIMIT, repair};
 use crate::checkers::{self, Act, Candidate, Rules};
 use crate::measures::{self, Measures, Stamps};
 use replica::apply::Replica;
@@ -201,6 +202,8 @@ struct Open {
     sequence: u64,
     body: Id,
     expiry: Micros,
+    /// The sequence of the version the intent was decided at: what its refusal repairs from.
+    basis: u64,
     intent: Value,
     waiters: Vec<Reply>,
     stamps: Stamps,
@@ -317,6 +320,17 @@ fn act_of(intent: &Intent, id: u64, cause: Cause) -> Result<Act, &'static str> {
     })
 }
 
+/// The sequence of an intent's basis, T3's `[lineage, zone, epoch, sequence]` (checked when the intent was read).
+fn basis_sequence(basis: &Value) -> u64 {
+    match basis {
+        Value::Array(a) => match a.get(3) {
+            Some(Value::Uint(s)) => *s,
+            _ => 0,
+        },
+        _ => 0,
+    }
+}
+
 impl Clock {
     fn version(&self) -> Value {
         Version {
@@ -329,10 +343,11 @@ impl Clock {
     }
 
     fn frame(&self, answer: &Answer) -> Vec<u8> {
-        encode(&Value::Map(
-            [(1, self.version()), (2, answer.to_value())].into(),
-        ))
-        .unwrap_or_default()
+        self.frame_of(answer.to_value())
+    }
+
+    fn frame_of(&self, answer: Value) -> Vec<u8> {
+        encode(&Value::Map([(1, self.version()), (2, answer)].into())).unwrap_or_default()
     }
 
     fn refusal(&self, actor: Actor, sequence: u64, reason: &str) -> Answer {
@@ -352,10 +367,10 @@ impl Clock {
         sequence: u64,
         id: Option<Id>,
         intent: Option<Value>,
-        answer: &Answer,
+        answer: Value,
         (waiters, stamps): (Vec<Reply>, Stamps),
     ) {
-        let frame = self.frame(answer);
+        let frame = self.frame_of(answer);
         self.sequences.answered(&key, sequence, frame.clone());
         let mut row = BTreeMap::from([
             (1, Value::Bytes(key)),
@@ -374,6 +389,11 @@ impl Clock {
 
     /// Ends open act `id` with `answer`.
     fn end(&mut self, id: Id, answer: impl FnOnce(&Clock) -> Answer) {
+        self.end_as(id, |c| answer(c).to_value());
+    }
+
+    /// Ends open act `id` with an answer record (a repaired refusal carries fields [`Answer`] has no room for).
+    fn end_as(&mut self, id: Id, answer: impl FnOnce(&Clock) -> Value) {
         let Some(o) = self.open.remove(&id) else {
             return;
         };
@@ -391,7 +411,7 @@ impl Clock {
             o.sequence,
             Some(id),
             Some(o.intent),
-            &a,
+            a,
             (o.waiters, o.stamps),
         );
     }
@@ -476,15 +496,36 @@ impl Clock {
         let value = intent.to_value();
         if has_words(&value) {
             let a = self.refusal(actor, sequence, "intent.text-not-stored");
-            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+            return self.answered(
+                key,
+                sequence,
+                None,
+                None,
+                a.to_value(),
+                (vec![reply], stamps),
+            );
         }
         if expired(intent.expiry, now) {
             let a = self.refusal(actor, sequence, "intent.expired");
-            return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
+            return self.answered(
+                key,
+                sequence,
+                None,
+                Some(value),
+                a.to_value(),
+                (vec![reply], stamps),
+            );
         }
         let Some(id) = Id::new(self.lineage, self.next_intent) else {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
-            return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
+            return self.answered(
+                key,
+                sequence,
+                None,
+                Some(value),
+                a.to_value(),
+                (vec![reply], stamps),
+            );
         };
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
@@ -499,7 +540,14 @@ impl Clock {
             Ok(t) => t,
             Err(reason) => {
                 let a = self.refusal(actor, sequence, reason);
-                return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
+                return self.answered(
+                    key,
+                    sequence,
+                    None,
+                    Some(value),
+                    a.to_value(),
+                    (vec![reply], stamps),
+                );
             }
         };
         let body = match &taken {
@@ -521,6 +569,7 @@ impl Clock {
                 sequence,
                 body,
                 expiry: intent.expiry,
+                basis: basis_sequence(&intent.basis),
                 intent: value,
                 waiters: vec![reply],
                 stamps,
@@ -666,7 +715,7 @@ impl Clock {
             let Some(o) = self.open.get(&id) else {
                 continue;
             };
-            let (actor, sequence) = (act.actor, o.sequence);
+            let (actor, sequence, basis) = (act.actor, o.sequence, o.basis);
             if expired(o.expiry, now) {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
@@ -692,8 +741,12 @@ impl Clock {
                     act.recheck = Some(version);
                     let _ = self.acts.send(act);
                 }
+                // The refusal carries what repairs the actor's copy for the nodes the check read (I6, rule 8).
                 Outcome::Refused { reason } => {
-                    self.end(id, |c| c.refusal(actor, sequence, &reason));
+                    self.end_as(id, |c| {
+                        let plain = c.refusal(actor, sequence, &reason);
+                        repair(&plain, &c.replica, &checks, basis, STATE_LIMIT)
+                    });
                 }
             }
         }
@@ -1001,6 +1054,7 @@ mod tests {
     use super::*;
     use crate::checkers::toggles;
     use replica::intents::Fallback;
+    use replica::world_model::Audience;
     use sim::log::{Mem, recover};
     use std::sync::{Condvar, Mutex};
 
@@ -1232,6 +1286,159 @@ mod tests {
         assert!(
             !log.windows(words.len()).any(|b| b == words.as_bytes()),
             "none of the words' bytes are in the log"
+        );
+    }
+
+    /// Every value in `v`, nested ones included.
+    fn leaves(v: &Value, out: &mut Vec<Value>) {
+        out.push(v.clone());
+        match v {
+            Value::Array(a) => a.iter().for_each(|x| leaves(x, out)),
+            Value::Map(m) => m.values().for_each(|x| leaves(x, out)),
+            _ => {}
+        }
+    }
+
+    /// The answer record of a frame as it came off the wire.
+    fn record(frame: &[u8]) -> BTreeMap<u64, Value> {
+        match decode(frame).unwrap().value {
+            Value::Map(mut m) => match m.remove(&2) {
+                Some(Value::Map(a)) => a,
+                other => panic!("an answer, not {other:?}"),
+            },
+            other => panic!("a frame, not {other:?}"),
+        }
+    }
+
+    /// Drives one act of `body` on `thing`, decided at `basis`, through the world as `w` was built, with its check
+    /// forged to have read `reads` at stamp 0 and already re-checked, so the commit refuses it `stale`. Returns the
+    /// answer record as it came off the wire.
+    fn stale_act(
+        w: toggles::World,
+        body: Id,
+        thing: Id,
+        basis: u64,
+        reads: &[Id],
+    ) -> BTreeMap<u64, Value> {
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.tick = Duration::from_millis(10);
+        cfg.checkers = 0;
+        let world = start(w.replica, toggles::rules(), Held::new(Vec::new()), cfg)
+            .expect("the world starts");
+        let mut i = toggle(body, thing, 1, now() + 60_000_000);
+        if let Value::Array(a) = &mut i.basis {
+            a[3] = Value::Uint(basis);
+        }
+        let rx = send(&world, &i);
+        let id = Id::new(LINEAGE, 1).unwrap();
+        let act = Act {
+            id: 1,
+            cause: Cause::Intent(id),
+            actor: Actor::Soul(body),
+            body,
+            candidates: vec![Candidate {
+                this: thing,
+                form: "switch_on".into(),
+            }],
+            recheck: Some(basis),
+        };
+        let checks = Checks {
+            act: 1,
+            cause: Cause::Intent(id),
+            actor: Actor::Soul(body),
+            version: basis,
+            rechecked: true,
+            candidates: vec![sim::commit::Checked {
+                verdict: sim::commit::Verdict::Yes,
+                node: thing,
+                changes: Vec::new(),
+                reads: reads.iter().map(|r| (*r, 0)).collect(),
+            }],
+        };
+        world
+            .events
+            .send(Event::Checked(Box::new((act, checks))))
+            .unwrap();
+        let frame = answer(&rx);
+        world.stop();
+        assert_eq!(reason(&frame), "stale");
+        record(&frame)
+    }
+
+    /// The ids a refusal's field carries: 6 as ids, 8 and 9 as rows led by an id.
+    fn ids_in(r: &BTreeMap<u64, Value>, field: u64) -> Vec<Value> {
+        match r.get(&field) {
+            Some(Value::Array(a)) => a
+                .iter()
+                .map(|x| match x {
+                    Value::Array(row) if field != 6 => row[0].clone(),
+                    id => id.clone(),
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// I6's follow-up: a stale act's refusal, sent by the world, carries 7 and 8 (the read nodes' states), and no node
+    /// outside the actor's audience is named or carried.
+    #[test]
+    fn a_stale_refusal_on_the_wire_repairs_the_copy_within_the_audience() {
+        let mut w = toggles::World::build(1, 2, 0);
+        let (body, thing) = w.pairs[0];
+        let room = w.replica.path(body).unwrap_or_default()[1];
+        let other = Id::new(body.scope(), 1 << 40).unwrap();
+        let basis = w.replica.version();
+        let theirs = w.toggle_of(room, Audience::Of(other));
+        let mine = w.toggle_of(room, Audience::Of(body));
+        w.set(theirs, 3, 777_777, Audience::Of(other));
+        w.dim(thing, 555_555);
+        let r = stale_act(w, body, thing, basis, &[theirs, mine, thing, body]);
+        assert_eq!(
+            r.get(&7),
+            Some(&Value::Uint(0)),
+            "7: the candidate it speaks of"
+        );
+        assert!(!r.contains_key(&9), "under the limit: states, not hashes");
+        let carried = ids_in(&r, 8);
+        assert!(carried.contains(&mine.to_value()) && carried.contains(&thing.to_value()));
+        assert_eq!(ids_in(&r, 6), carried, "6 names the nodes 8 carries");
+        let mut all = Vec::new();
+        leaves(&Value::Map(r), &mut all);
+        assert!(
+            !all.contains(&theirs.to_value()),
+            "a node outside the audience is named"
+        );
+        assert!(
+            !all.contains(&Value::Uint(777_777)),
+            "a field outside the audience leaked"
+        );
+        assert!(
+            all.contains(&Value::Uint(555_555)),
+            "the changed field is carried"
+        );
+    }
+
+    /// Over 2,048 bytes of states, the refusal on the wire carries 9 (ids, stamps and hashes) and no 8.
+    #[test]
+    fn a_stale_refusal_over_the_limit_carries_hashes_only() {
+        let mut w = toggles::World::build(1, 40, 0);
+        let basis = w.replica.version();
+        let pairs = w.pairs.clone();
+        for (k, (_, t)) in pairs.iter().enumerate() {
+            w.dim(*t, k as u64 + 1);
+        }
+        let reads: Vec<Id> = pairs.iter().map(|(_, t)| *t).collect();
+        let r = stale_act(w, pairs[0].0, pairs[0].1, basis, &reads);
+        assert!(r.contains_key(&7));
+        assert!(!r.contains_key(&8), "no states over the limit");
+        let rows = match r.get(&9) {
+            Some(Value::Array(a)) => a.clone(),
+            other => panic!("9: ids and hashes, not {other:?}"),
+        };
+        assert_eq!(rows.len(), reads.len());
+        assert!(
+            rows.iter()
+                .all(|x| matches!(x, Value::Array(row) if row.len() == 3))
         );
     }
 

@@ -31,6 +31,7 @@ use std::thread;
 use std::time::Duration;
 
 pub mod budget;
+pub mod refusal;
 #[cfg(test)]
 mod tests;
 pub mod toggles;
