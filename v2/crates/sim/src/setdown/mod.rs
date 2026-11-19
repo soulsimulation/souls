@@ -938,6 +938,8 @@ pub fn judge(
     part: &Part,
     bodies: &[Who],
 ) -> R<Vec<Unsafe>> {
+    // G2's guard cuts the ground on both sides of the change: never on the clock thread (G3b, #3449).
+    crate::commit::off_clock();
     let (_, v) = safety::check(tree, header, ground, part, bodies).map_err(|e| Refusal {
         name: "setdown.unsafe-check",
         detail: e,

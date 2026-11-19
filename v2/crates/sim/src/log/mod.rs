@@ -107,6 +107,12 @@ impl Durable {
     pub fn wait(&self, n: u64) -> R<Option<(u64, Instant)>> {
         self.0.wait(n)
     }
+
+    /// Where the durable records end now (rule 8), without waiting: a checkpoint taken on another thread keeps it
+    /// (K18c, #3176).
+    pub fn at(&self) -> At {
+        self.0.marks().at
+    }
 }
 
 /// An open log: recovered, its torn tail cut, and its writer thread running.

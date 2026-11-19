@@ -23,10 +23,16 @@
 //!    the set or from outside it, E13): sent first, never merged and never dropped. One that does not fit this second
 //!    waits for the next. Grants, scope changes and gaps travel in the same queue. An utterance (`souls:said`, B11) is
 //!    addressed by the hub itself from the log's part (#3231): its whole entry, to each subscription that follows one
-//!    of the hearers the entry records, and to no other; nothing is worked out again.
+//!    of the hearers the entry records, and to no other; nothing is worked out again. It goes as `{1: 9, 2: entry, 3:
+//!    words}`, the words read from K16 for that subscriber's audiences, and left out when it may not read them (C6,
+//!    #3390). An entry that records no hearers (a `say` on a world whose tick does not work them out yet, C5 #3369) is
+//!    heard by the bodies within its reach in the tier's own index, the one interest sets read.
+//!
+//! 6. **Audience** (T7 rule 5, T8): a subscriber is sent the public entries and those of the audience ids it is in
+//!    ([`Hub::subscribe_as`]; the gateway resolves them for its grant), never another audience's.
 //!
 //! Every item is a map whose field 1 names it ([`Kind`]). The hub reads only the log's parts; the view tier's thread
-//! runs it, never the clock thread.
+//! runs it, never the clock thread (`served.rs`, fed by the world's committed parts once they are on the disk).
 //!
 //! Not here: the socket and its request format (gatewayd), the world-wide index and finding a Soul (E1), speech and
 //! who hears (B11's `sim::speech`, E13), words beside references (K16).
@@ -34,19 +40,24 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use replica::effects::{Body, Change, Effect, Part, Refusal};
+use replica::effects::{Body, Change, Effect, Part, Refusal, read_id};
 use replica::encode::{Value, encode};
 use replica::ids::Id;
 use replica::pose::Vec3;
-use replica::speech::{SAID, Said};
+use replica::speech::{HEARD_WORDS, SAID, Said};
+use replica::tree::Tree;
 use replica::views::{Grant, Level, ORDER, SAMPLE_US, Scope as ViewScope, Subscription, grant};
+use replica::world_model::Audience;
+use sim::text::Store;
 
 use super::interest::{Interest, Places, Table};
 
 type R<T> = Result<T, Refusal>;
 
-/// A tick's entries of each body, each encoded once, and whether `sampled` keeps it in any second.
-type ByBody = BTreeMap<Id, Vec<(Arc<[u8]>, bool)>>;
+/// A tick's entries of each body, each encoded once, whether `sampled` keeps it in any second, and its audience.
+type ByBody = BTreeMap<Id, Vec<(Arc<[u8]>, bool, Audience)>>;
+/// An utterance of a tick: its entry encoded once, its hearers, its audience and its words' reference.
+type Utterance = (Arc<[u8]>, BTreeSet<Id>, Audience, Id);
 
 /// The budget a client starts with, bytes a world second.
 pub const START_BUDGET: u64 = 8_000;
@@ -97,6 +108,39 @@ pub struct Request {
     pub scopes: Vec<Scope>,
     pub level: Level,
     pub budget: u64,
+}
+
+impl Request {
+    /// Reads a request as a client sends it: `{1: [scope, ...], 2: level number, 3: budget}`, a scope `{1: node}`
+    /// held for good or `{2: body}` followed.
+    pub fn from_value(v: &Value) -> R<Request> {
+        let bad = |d: &str| fault("subscribe-unread", d.to_owned());
+        let Value::Map(m) = v else {
+            return Err(bad("not a map"));
+        };
+        let Some(Value::Array(scopes)) = m.get(&1) else {
+            return Err(bad("field 1 is not an array of scopes"));
+        };
+        let scopes = scopes
+            .iter()
+            .map(|s| match s {
+                Value::Map(s) if s.len() == 1 => match s.iter().next() {
+                    Some((1, id)) => Ok(Scope::Node(read_id(id)?)),
+                    Some((2, id)) => Ok(Scope::Follow(read_id(id)?)),
+                    _ => Err(bad("a scope is {1: node} or {2: body}")),
+                },
+                _ => Err(bad("a scope is {1: node} or {2: body}")),
+            })
+            .collect::<R<Vec<Scope>>>()?;
+        let (Some(Value::Uint(level)), Some(Value::Uint(budget))) = (m.get(&2), m.get(&3)) else {
+            return Err(bad("fields 2 and 3 are a level number and a budget"));
+        };
+        Ok(Request {
+            scopes,
+            level: Level::from_number(*level)?,
+            budget: *budget,
+        })
+    }
 }
 
 /// What an item of the stream is: its field 1.
@@ -162,6 +206,8 @@ fn rank(l: Level) -> usize {
 
 struct Sub {
     scopes: Vec<Scope>,
+    /// The audience ids it is in, besides everyone.
+    audiences: BTreeSet<Id>,
     /// The nodes held now, in the order added.
     held: Vec<Id>,
     /// The node held for the followed body, if any.
@@ -187,12 +233,27 @@ struct Sub {
 }
 
 impl Sub {
+    fn sees(&self, a: Audience) -> bool {
+        match a {
+            Audience::Everyone => true,
+            Audience::Of(id) => self.audiences.contains(&id),
+        }
+    }
+
     fn address(&mut self, bytes: &[u8]) -> R<()> {
         self.stats.addressed_in += 1;
         self.push_urgent(
             Kind::Addressed,
             map(vec![(1, Value::Uint(9)), (2, Value::Bytes(bytes.to_vec()))]),
         )
+    }
+
+    /// An utterance this subscriber heard, with its words when it may read them: `{1: 9, 2: entry, 3: words}`.
+    fn address_said(&mut self, bytes: &[u8], words: Option<Vec<u8>>) -> R<()> {
+        self.stats.addressed_in += 1;
+        let mut v = vec![(1, Value::Uint(9)), (2, Value::Bytes(bytes.to_vec()))];
+        v.extend(words.map(|w| (HEARD_WORDS, Value::Bytes(w))));
+        self.push_urgent(Kind::Addressed, map(v))
     }
 
     fn push_urgent(&mut self, kind: Kind, v: Value) -> R<()> {
@@ -315,6 +376,8 @@ pub struct Hub {
     nodes: BTreeMap<Id, NodeSecond>,
     /// Every node's counts by cell at the last world second, and the grid's size.
     tables: BTreeMap<Id, (i64, Table)>,
+    /// K16's text store, where an utterance's words are read for each subscriber that hears it (C6).
+    words: Option<Arc<Store>>,
 }
 
 impl Hub {
@@ -322,13 +385,47 @@ impl Hub {
         Hub::default()
     }
 
+    /// A hub that sends an utterance's words with it, read from `words` for each subscriber's audiences (C6, #3390).
+    pub fn with_words(words: Arc<Store>) -> Hub {
+        Hub {
+            words: Some(words),
+            ..Hub::default()
+        }
+    }
+
+    /// Enters the bodies of the world as built, which no record creates (C6).
+    pub fn seed(&mut self, tree: &Tree) {
+        self.places.seed(tree);
+    }
+
+    /// The bodies within `reach_mm` of `speaker` on the node it stands on, itself included: who hears an utterance
+    /// that records no hearers (C6; until the world records them in its tick, C5 #3369).
+    fn within_reach(&self, speaker: Id, reach_mm: u64) -> BTreeSet<Id> {
+        let Some((node, p)) = self.places.of(speaker) else {
+            return BTreeSet::new();
+        };
+        let reach = i64::try_from(reach_mm.saturating_mul(1_000)).unwrap_or(i64::MAX);
+        self.places
+            .index()
+            .bodies_within(node, p, reach)
+            .into_iter()
+            .filter(|&(_, d)| d <= reach)
+            .map(|(id, _)| id)
+            .collect()
+    }
+
     pub fn places(&self) -> &Places {
         &self.places
     }
 
-    /// Subscribes; the subscription's number. A budget below the least for its scopes is refused
-    /// (`budget-below-minimum`); an accepted one is never dropped.
+    /// Subscribes to the public entries alone; the subscription's number. A budget below the least for its scopes is
+    /// refused (`budget-below-minimum`); an accepted one is never dropped.
     pub fn subscribe(&mut self, r: Request) -> R<usize> {
+        self.subscribe_as(r, BTreeSet::new())
+    }
+
+    /// Subscribes as one who is in `audiences` (besides everyone): it is sent their entries and the public ones.
+    pub fn subscribe_as(&mut self, r: Request, audiences: BTreeSet<Id>) -> R<usize> {
         if r.scopes.is_empty() {
             return Err(fault("no-scope", "a subscription holds at least one scope"));
         }
@@ -341,6 +438,7 @@ impl Hub {
         let g = grant(&ask, views, |_| 0)?;
         let mut s = Sub {
             scopes: r.scopes.clone(),
+            audiences,
             held: Vec::new(),
             follow: None,
             asked: r.level,
@@ -436,19 +534,28 @@ impl Hub {
         let second = at.div_euclid(SAMPLE_US);
         // The entries of bodies, each encoded once: (bytes, whether `sampled` keeps it whatever the second).
         let mut by_body: ByBody = BTreeMap::new();
-        // The utterances: each entry's bytes and the hearers it records.
-        let mut said: Vec<(Arc<[u8]>, BTreeSet<Id>)> = Vec::new();
+        // The utterances: each entry's bytes, its hearers, its audience and its words' reference.
+        let mut said: Vec<Utterance> = Vec::new();
         for e in &part.effects {
             self.places.apply(e);
             if let Some((body, keep)) = self.body_of(e) {
                 let bytes = bytes_of(map(vec![(1, Value::Uint(1)), (2, e.to_value())]))?;
-                by_body.entry(body).or_default().push((bytes, keep));
+                by_body
+                    .entry(body)
+                    .or_default()
+                    .push((bytes, keep, e.envelope.audience));
             }
             for ev in e.events.iter().flatten() {
                 if ev.name.as_str() == SAID {
                     let s = Said::read(&ev.to_value(), e.envelope.audience)?;
-                    if !s.hearers.is_empty() {
-                        said.push((bytes_of(e.to_value())?, s.hearers));
+                    let hearers = if s.hearers.is_empty() {
+                        self.within_reach(e.envelope.node, s.reach_mm)
+                    } else {
+                        s.hearers
+                    };
+                    if !hearers.is_empty() {
+                        let b = bytes_of(e.to_value())?;
+                        said.push((b, hearers, e.envelope.audience, s.words));
                     }
                 }
             }
@@ -463,14 +570,20 @@ impl Hub {
             self.second = Some(second);
             self.nodes = self.node_seconds(second)?;
         }
-        for (bytes, hearers) in &said {
+        for (bytes, hearers, audience, words) in &said {
             for s in self.subs.iter_mut().flatten() {
-                let hears = s
-                    .scopes
-                    .iter()
-                    .any(|sc| matches!(sc, Scope::Follow(b) if hearers.contains(b)));
+                let hears = s.sees(*audience)
+                    && s.scopes
+                        .iter()
+                        .any(|sc| matches!(sc, Scope::Follow(b) if hearers.contains(b)));
                 if hears {
-                    s.address(bytes)?;
+                    // Its words as this subscriber may read them (T8 rule 6): none when it may not, or none are kept.
+                    let reader: Vec<Id> = s.audiences.iter().copied().collect();
+                    let text = self
+                        .words
+                        .as_ref()
+                        .and_then(|t| t.read(*words, &reader).ok());
+                    s.address_said(bytes, text)?;
                 }
             }
         }
@@ -575,7 +688,10 @@ impl Hub {
         let mut full: Vec<Out> = Vec::new();
         let mut sampled: Vec<Out> = Vec::new();
         for id in &s.interest.set {
-            for (bytes, keep) in by_body.get(id).into_iter().flatten() {
+            for (bytes, keep, audience) in by_body.get(id).into_iter().flatten() {
+                if !s.sees(*audience) {
+                    continue;
+                }
                 let o = Out {
                     kind: Kind::Entry,
                     bytes: bytes.clone(),

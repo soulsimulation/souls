@@ -58,6 +58,26 @@ impl Sequences {
         }
     }
 
+    /// Each actor's last answered sequence and its kept answers, oldest first, by the actor's bytes: what a checkpoint
+    /// carries so a restart from it keeps them (K18c, #3176).
+    pub fn kept(
+        &self,
+    ) -> impl Iterator<Item = (&[u8], u64, impl Iterator<Item = &(u64, Vec<u8>)>)> {
+        self.actors
+            .iter()
+            .map(|(a, l)| (a.as_slice(), l.last, l.kept.iter()))
+    }
+
+    /// Puts back one actor's last sequence and kept answers, oldest first, as [`Sequences::kept`] gave them.
+    pub fn restore(&mut self, actor: &[u8], last: u64, kept: Vec<(u64, Vec<u8>)>) {
+        let l = self.actors.entry(actor.to_vec()).or_default();
+        l.last = l.last.max(last);
+        l.kept = kept.into_iter().collect();
+        while l.kept.len() > KEPT {
+            l.kept.pop_front();
+        }
+    }
+
     /// Records the answer to `sequence`. A sequence never goes back: an older one answered late keeps the last.
     pub fn answered(&mut self, actor: &[u8], sequence: u64, answer: Vec<u8>) {
         let l = self.actors.entry(actor.to_vec()).or_default();

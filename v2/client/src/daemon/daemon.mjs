@@ -22,10 +22,18 @@
 //     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361)
 //     {"op":"whisper","to":"<id>","words":".."}  words to one listener's body alone
 //     {"op":"lie","this":"<id>"}          lie down on a bed (worldd's bodies, as a sit)
+//   and C6's (#3390): once current on each socket it subscribes, over the gateway's view subscription (#3292), to its
+//   own body followed, and the world addresses to it each utterance that body hears, with the words it may read. Each
+//   is an event `{"kind":"heard","from":"<body id>","name":..,"words":..,"whisper":bool}`: it wakes a `wait`, is in
+//   the next `look`'s brief (`heard`, quoted as data), and reaches the reflexes as `souls:said` (`toMe` for a
+//   whisper), whose intents are sent once, as `act`'s are. Its own words are not heard back.
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
+//   and R16's (#2817), from the world's public history (`history` in its config) and the Soul's memory, the copy as
+//   it is (naming only), so it ends with `at` and not `changed`:
+//     {"op":"history","at":"<place>"} | {"thing":"<id>"} | {"soul":"<id or name>"}, "since"/"until": world µs
 //   and R8's (#2703), checking with R2's form rules on the copy (`../check/`), kind entries from `<home>/kinds/`:
 //     {"op":"can","intent":{"verb":"..","this":"<id>","form":".."}}   yes, no with the reason, or unknown, and `current`
 //     {"op":"can","acts":["sit:<id>"]}  and  {"op":"act","acts":["sit:<id>","sit:<id>"]}   C10's (#3414): the thin
@@ -52,7 +60,7 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
-import { brief, changedBlock } from '../brief/brief.mjs';
+import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
 import { changedBetween, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -61,6 +69,8 @@ import { ageOf } from './age.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { Table } from '../reflex/reflex.mjs';
+import { history } from '../history/history.mjs';
+import { readLog, soulDirOf } from '../memory/memory.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -127,6 +137,8 @@ const state = { cursor: null, sequence: 0, unanswered: [], ...(existsSync(rt.sta
 const save = () => { writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
+const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
+const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
 const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
 const copy = new wire.Copy(); // its scope, by hash (R5b)
@@ -164,10 +176,11 @@ function send(bytes, sequence, ranked) {
   ws.send(bytes);
 }
 
-/** Signed in and current: intents go now. */
+/** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
 function current() {
   signedIn = true;
   attempt = 0;
+  if (ws && !ws.hearing) { ws.hearing = true; ws.send(wire.wireSubscribe(scope, seat.grant.counter, BigInt(HEARING_BUDGET))); }
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
 }
 
@@ -250,6 +263,8 @@ function connect() {
         return;
       }
       if (kind === 'sync') { syncAnswer(sock, Number(a), b, bytes); return; }
+      if (kind === 'item') { onItem(bytes); return; }
+      if (kind === 'view-refused') { log(`hearing refused: ${a}`); note({ kind: 'hearing-refused', reason: a }); return; }
       // The frames applied at the cursor's version (#3346): a refusal does not move the version, so on a resume the
       // gateway replays those at the cursor after the ones counted here, and none twice.
       if (b !== '-') { state.seen = b === state.cursor ? (state.seen ?? 1) + 1 : 1; state.cursor = b; }
@@ -290,6 +305,28 @@ function connect() {
   }
   sock.onerror = () => { /* onclose follows */ };
 }
+
+// --- What this Soul hears (C6, #3390) ---------------------------------------------------------------------------
+/**
+ * One view item: an utterance this Soul's body heard, with its words when it may read them. Its own are left out
+ * (its say has its receipt). Each wakes a `wait`, joins the next brief, and goes to the reflexes as `souls:said`.
+ */
+function onItem(bytes) {
+  const line = wire.wireHeard(bytes);
+  if (!line) return;
+  const [, sequence, at, from, audience, words] = line.split(' ');
+  if (from === ME) return;
+  const e = { kind: 'heard', from, words: words === '-' ? null : Buffer.from(words, 'hex').toString('utf8'), whisper: audience !== '-', sequence: Number(sequence), at: Number(at) };
+  heardSince.push(e);
+  if (heardSince.length > HEARD_KEPT) heardSince.shift();
+  note(e);
+  for (const { intent } of reflexes.onEvent({ name: 'souls:said', fields: { 1: e.words }, actor: from, toMe: e.whisper, sequence: e.sequence }, Date.now())) {
+    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor });
+  }
+}
+
+/** Heard utterances for an answer: the speaker's name from the copy beside its id. */
+const named = (rows, hs) => hs.map((e) => ({ ...e, ...(rows.get(e.from)?.name ? { name: rows.get(e.from).name } : {}) }));
 
 // --- Commands on the Unix socket --------------------------------------------------------------------------------
 /** The copy brought current through the gateway (a sync under way is waited for); false if it could not be. */
@@ -334,7 +371,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'read', 'stats', 'reflex', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'history', 'read', 'stats', 'reflex', 'stop']);
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
 // the world's key when it is a plain name.
@@ -407,7 +444,8 @@ async function answer(req) {
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
-      const b = brief(rows, { me: ME, changes, ageMs: performance.now() - (confirmedAt ?? startedAt) });
+      const heard = named(rows, heardSince.splice(0));
+      const b = brief(rows, { me: ME, changes, heard, ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       return b;
     });
@@ -418,7 +456,10 @@ async function answer(req) {
         await new Promise((ok) => { const t = setTimeout(ok, ms); wakers.push(() => { clearTimeout(t); ok(); }); });
       }
       const got = events.splice(0);
-      return closing({ ok: true, events: got, ...(got.some((e) => e.kind !== 'synced') ? {} : { timedOut: true }) });
+      heardSince.length = 0; // shown here, so not again in the next brief
+      const said = got.some((e) => e.kind === 'heard') ? { note: QUOTED_NOTE } : {};
+      return closing({ ok: true, events: got, ...said, ...(got.some((e) => e.kind !== 'synced') ? {} : { timedOut: true }) },
+        (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }));
     }
     case 'can': {
       const c = Array.isArray(req.acts) ? actsOf(req.acts)[0] ?? candidateOf(null) : candidateOf(req.intent);
@@ -457,12 +498,33 @@ async function answer(req) {
       const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
     }
+    case 'history': return historyAnswer(req);
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
     case 'reflex': return reflexes.op(req, Date.now());
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
+}
+
+/**
+ * R16 (#2817): what happened at a place, to a thing or with a Soul. Named from the copy as it is and from memory; a
+ * name that is not an id is looked up there. History files come from the world's `history` base, as any viewer's.
+ */
+async function historyAnswer(req) {
+  if (!seat.history) return { ok: false, code: 'no-history', detail: `world ${seat.world} names no history in config.json` };
+  const by = req.at != null ? 'place' : req.thing != null ? 'thing' : req.soul != null ? 'soul' : null;
+  if (!by) return { ok: false, code: 'history-asks-one', detail: 'history --at <place> | --thing <id> | --soul <name>' };
+  const memory = readLog(soulDirOf(home, soul)), rows = rowsOf(copy), names = new Map();
+  for (const { value: v } of memory) if (v?.person?.id && v.person.name) names.set(v.person.id, String(v.person.name).slice(0, 40));
+  const asked = String(req.at ?? req.thing ?? req.soul), low = asked.toLowerCase();
+  const id = ID.test(asked) ? asked : low === 'me' ? ME
+    : [...rows.values()].find((r) => r.name.toLowerCase() === low)?.id ?? [...names].find(([, n]) => n.toLowerCase() === low)?.[0];
+  if (!id) return { ok: false, code: 'history-unknown', detail: `no ${by} named ${asked.slice(0, 60)} in the copy or memory` };
+  const num = (v) => (v == null ? undefined : Number(v));
+  const get = async (key) => { const r = await fetch(new URL(key, seat.history)); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; };
+  const a = await history({ by, id, since: num(req.since), until: num(req.until) }, { get, rows, names, memory, me: ME });
+  return { ...a, at: sequenceOf(copyVersion) };
 }
 
 const server = createServer((c) => {

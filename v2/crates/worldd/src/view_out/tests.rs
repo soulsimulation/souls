@@ -577,7 +577,8 @@ fn a_fork_streams_from_its_head_and_a_fresh_reader_holds_the_live_state() {
     let w = Writer::fork(&root, &f.header, &key, (0, 1_000_000), &f.tree.to_state())
         .expect("a fork's writer");
     let stop = Arc::new(AtomicBool::new(false));
-    let following = follow(w, sub, stop.clone());
+    // The ticks are offered at once, so the world's clock stands at their start (rule 11 never cuts early here).
+    let following = follow(w, sub, stop.clone(), || 0);
 
     // A2: 10 s of ticks, 20 a second, each written to the fork's log and handed to the tier.
     for tick in 1..=200i64 {
@@ -662,4 +663,96 @@ fn a_fork_streams_from_its_head_and_a_fresh_reader_holds_the_live_state() {
         p.replica().version()
     );
     let _ = fs::remove_dir_all(&d);
+}
+
+/// V5b (#3460) A1 and A3: told the world's time, a writer with nothing to write marks its pointer quiet up to world-now
+/// at least once a second and writes no empty part; the stretch of a burst after a still while is written once its time
+/// has passed, within the page's lag, and the marks resume after it.
+#[test]
+fn a_still_world_is_marked_quiet_and_a_burst_after_it_is_written() {
+    let h = header();
+    let root = scratch("quiet");
+    let mut w = Writer::create(&root, &h, &key(&h), (0, 0)).expect("a writer");
+    let n = ids();
+    let ptr = |w: &Writer| {
+        Pointer::read(&fs::read(w.dir().join(POINTER)).expect("a pointer")).expect("read")
+    };
+    let mut marks: Vec<(i64, i64)> = Vec::new();
+    let mut burst_written = None;
+    // A record at 0.1 s, then a still world until 30 s, a burst at 30.2 s, still again until 40 s; told every 20 ms.
+    for now in (0..=40_000_000i64).step_by(20_000) {
+        if now == 100_000 {
+            w.frame(&frame(vec![entry(0, now, h.zone, create(&h, n[0]))]))
+                .expect("taken");
+        }
+        if now == 30_200_000 {
+            w.frame(&frame(vec![entry(
+                1,
+                now,
+                n[0],
+                set(n[0], 1, Value::Uint(7)),
+            )]))
+            .expect("taken");
+        }
+        let before = w.written().parts;
+        w.idle(now).expect("told");
+        if w.written().parts > before && now > 30_000_000 {
+            burst_written = Some(now);
+        }
+        if let Some(q) = ptr(&w).quiet_until {
+            assert!(q <= now, "quiet until {q} is past world-now {now}");
+            if marks.last().is_none_or(|m| m.1 != q) {
+                marks.push((now, q));
+            }
+        }
+    }
+    // A1: two parts, the first record's and the burst's; none empty.
+    assert_eq!(w.written().parts, 2);
+    assert_eq!(w.written().entries, 2);
+    assert!(!w.dir().join("2").exists());
+    // A1: the pointer says "quiet" at least once a second through each still while, and never more than 1 s behind.
+    let still = |from: i64, to: i64| {
+        marks
+            .iter()
+            .filter(|m| m.0 >= from && m.0 <= to)
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    for (from, to) in [(1_000_000, 30_000_000), (31_000_000, 40_000_000)] {
+        let m = still(from, to);
+        assert!(
+            m.len() as i64 >= (to - from) / 1_000_000,
+            "{} marks in {from}..{to}",
+            m.len()
+        );
+        for p in m.windows(2) {
+            assert!(
+                p[1].0 - p[0].0 <= 1_000_000,
+                "marks at {} and {} are more than 1 s apart",
+                p[0].0,
+                p[1].0
+            );
+        }
+        for (at, q) in m {
+            assert!(
+                at - q <= 1_000_000,
+                "at {at} the pointer is quiet only until {q}"
+            );
+        }
+    }
+    // A3: the burst's part is written within 1 s of its world time (the page plays 2 s behind), its stretch whole.
+    let written = burst_written.expect("the burst was written");
+    assert!(
+        written - 30_200_000 <= 1_000_000,
+        "the burst was written at {written}"
+    );
+    let p = ptr(&w);
+    assert_eq!(p.newest, Some(1));
+    assert_eq!(p.newest_to, Some(30_500_000));
+    assert!(p.quiet_until.is_some_and(|q| q >= 39_000_000));
+    println!(
+        "V5b: {} quiet marks over 40 s of world time; the burst at 30.2 s written at {:.2} s",
+        marks.len(),
+        written as f64 / 1e6
+    );
 }

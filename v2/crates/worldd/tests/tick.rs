@@ -391,6 +391,128 @@ fn a2_a3_ten_minutes_replayed_and_a_kill_restarted() {
     k.stop();
 }
 
+/// K18c (#3176) A1 and A2: a world with checkpoints walks a body to the chair and sits it, then writes more; stopped
+/// and started again on the same log and checkpoints, it starts from the newest checkpoint and reads only the log after
+/// it, with the last logged state; the seated body is in its seat again, held: another's sit is refused `seat-taken`
+/// and its own rise lands.
+#[test]
+fn k18c_a1_a2_restart_from_the_newest_checkpoint_seated_stays_seated() {
+    let p = pairs();
+    let (walker, switcher, stroller) = (p[0].0, p[1].0, p[2].0);
+    let lamp = p[1].1;
+    let store = Mem::with(Vec::new());
+    let dir = std::env::temp_dir().join(format!("k18c-ckpt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let w = start_with(store.clone(), false, Some(dir.clone()));
+    let walk = at(&w, 2, intent(walker, 1, "eden:walk", Some(chair()), None));
+    let sit = at(&w, 400, intent(walker, 2, "eden:sit", Some(chair()), None));
+    let switch = at(
+        &w,
+        700,
+        intent(switcher, 1, "r2:switch_on", Some(lamp), None),
+    );
+    let end = run_to(&w, 800);
+    let walked = answer(&walk).expect("the walk lands");
+    answer(&sit).expect("the sit lands");
+    answer(&switch).expect("the switch_on lands");
+    assert_eq!(
+        end.seated,
+        vec![(walker, chair())],
+        "seated before the stop"
+    );
+    w.stop();
+    // More log after the newest checkpoint, wherever the log's sync let it fall: the same log run on with no
+    // checkpoints taken (a full replay, the seat restored), a switch_off logged.
+    let m = start(store.clone(), false);
+    let r = run_to(&m, 0);
+    assert_eq!(
+        r.seated,
+        vec![(walker, chair())],
+        "seated after a full replay too"
+    );
+    let off = at(
+        &m,
+        r.tick + 1,
+        intent(switcher, 2, "r2:switch_off", Some(lamp), None),
+    );
+    run_to(&m, r.tick + 5);
+    answer(&off).expect("the switch_off lands");
+    m.stop();
+    let log = bytes(&store);
+    let total = recover(&log).unwrap().records.len() as u64;
+
+    // A1: from the newest checkpoint, and the log after it only.
+    let k = start_with(Mem::with(log.clone()), false, Some(dir.clone()));
+    let restarted = run_to(&k, 0);
+    println!(
+        "A1: {total} log records; restart {:?}; last logged state {} restarted {} at tick {}",
+        k.restart,
+        hex(&last_state(&log)),
+        hex(&restarted.state),
+        restarted.tick
+    );
+    let from = k.restart.checkpoint.expect("started from a checkpoint");
+    assert!(from > 0 && from <= total, "a checkpoint inside the log");
+    assert_eq!(
+        k.restart.read,
+        total - from,
+        "only the records after it are read"
+    );
+    assert!(
+        k.restart.read > 0 && k.restart.read < total,
+        "the log after it, not the whole log"
+    );
+    assert_eq!(
+        restarted.state.to_vec(),
+        last_state(&log),
+        "the state hash matches, the bodies' poses included"
+    );
+
+    let again = at(
+        &k,
+        restarted.tick + 1,
+        intent(walker, 1, "eden:walk", Some(chair()), None),
+    );
+    run_to(&k, restarted.tick + 1);
+    assert_eq!(
+        answer(&again),
+        Ok(walked),
+        "an answer from before the checkpoint is kept: a repeat gets it"
+    );
+
+    // A2: seated in the same seat, the seat held in the slots table.
+    println!("A2: seated after the restart {:?}", restarted.seated);
+    assert_eq!(
+        restarted.seated,
+        vec![(walker, chair())],
+        "seated in the same seat"
+    );
+    let taken = at(
+        &k,
+        restarted.tick + 2,
+        intent(stroller, 1, "eden:sit", Some(chair()), None),
+    );
+    let rise = at(
+        &k,
+        restarted.tick + 3,
+        intent(walker, 3, "eden:rise", None, None),
+    );
+    let after = run_to(&k, restarted.tick + 200);
+    let refused = answer(&taken);
+    println!(
+        "A2: another's sit {refused:?}; the rise {:?}",
+        answer(&rise)
+    );
+    assert!(
+        matches!(&refused, Err(r) if r == "place-taken"),
+        "the seat is held: {refused:?}"
+    );
+    assert!(after.seated.is_empty(), "risen: {:?}", after.seated);
+    k.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A4: a skill that panics is ended by K11's wrapper; the clock and the other bodies go on.
 #[test]
 fn a4_a_panic_in_a_unit_is_contained() {

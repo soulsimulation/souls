@@ -596,6 +596,17 @@ impl Controller {
         Ok(())
     }
 
+    /// Takes `body` out, its claims, input and place among the near with it (a retirement, K10 #2673).
+    pub fn remove(&mut self, body: Id) -> bool {
+        self.woken.remove(&body);
+        self.near.remove_body(body);
+        let was = self
+            .bodies
+            .remove(&body)
+            .or_else(|| self.rested.remove(&body));
+        was.is_some()
+    }
+
     fn slot(&mut self, body: Id) -> R<&mut Slot> {
         if let Some(s) = self.rested.get_mut(&body) {
             self.woken.insert(body);
