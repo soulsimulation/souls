@@ -155,3 +155,42 @@ test('W18: bearer follows the current provider account and refuses logout withou
   await assert.rejects(sessionRequest(session, 'account'), /Sign-in expired/);
   assert.equal(oldCalls, 1); assert.equal(newCalls, 1);
 });
+
+
+test('W18: stable provider identity refresh is ignored; switch, logout and registration races revoke and unsubscribe', async () => {
+  const callbacks: { deliver?: ((state: { session: Provider['session']; user: Provider['user'] }) => void) } = {};
+  let unsubscribed = 0, during: (() => void) | null = null;
+  const make = (id: string) => ({ id, getToken: async () => id });
+  const provider: Provider = {
+    load: async () => {}, session: make('session-a'), user: { id: 'user-a' },
+    openSignIn() {}, buildSignInUrl: () => '',
+    addListener(listener) { callbacks.deliver = listener; during?.(); listener({ session: this.session, user: this.user }); return () => { unsubscribed++; delete callbacks.deliver; }; },
+  };
+  const { env } = page(provider);
+  const session = await providerSession(CFG, env);
+  assert.ok(session?.subscribeIdentity);
+  let changes = 0;
+  const stop = session.subscribeIdentity(() => changes++);
+  provider.session = make('session-a');
+  callbacks.deliver!({ session: provider.session, user: { id: 'user-a' } });
+  assert.equal(changes, 0, 'same identity with a refreshed SDK object');
+  provider.session = make('session-b'); provider.user = { id: 'user-b' };
+  callbacks.deliver!({ session: provider.session, user: provider.user });
+  assert.equal(changes, 1);
+  stop(); assert.equal(unsubscribed, 1); assert.equal(callbacks.deliver, undefined);
+  const logout = await providerSession(CFG, env);
+  const stopLogout = logout!.subscribeIdentity!(() => changes++);
+  provider.session = null; provider.user = null;
+  callbacks.deliver!({ session: null, user: null });
+  assert.equal(changes, 2); stopLogout();
+  provider.session = make('session-c'); provider.user = { id: 'user-c' };
+  const before = await providerSession(CFG, env);
+  provider.session = make('session-d');
+  const stopBefore = before!.subscribeIdentity!(() => changes++);
+  assert.equal(changes, 3, 'change before registration is not missed'); stopBefore();
+  const at = await providerSession(CFG, env);
+  during = () => { provider.session = make('session-e'); provider.user = { id: 'user-e' }; };
+  const stopAt = at!.subscribeIdentity!(() => changes++);
+  assert.equal(changes, 4, 'change during registration is not missed'); stopAt();
+  assert.equal(unsubscribed, 4);
+});

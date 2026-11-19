@@ -62,10 +62,17 @@ export function providerScript(cfg: SignInConfig, origin: string): ProviderScrip
   return { src: `https://${host}/npm/@clerk/clerk-js@${CLERK_JS_MAJOR}/dist/clerk.browser.js`, attributes };
 }
 
+type ProviderIdentity = { id?: string; user?: { id?: string }; getToken(): Promise<string | null> };
+type IdentityState = { session?: ProviderIdentity | null; user?: { id?: string } | null };
+/** Optional browser observation; socket Session stays unchanged. */
+export type BrowserSession = Session & { subscribeIdentity?: (changed: () => void) => () => void };
+
 /** What the page uses of the provider's script once loaded (`window.Clerk`). */
 export type Provider = {
   load(options?: object): Promise<void>;
-  session?: { getToken(): Promise<string | null> } | null;
+  session?: ProviderIdentity | null;
+  user?: { id?: string } | null;
+  addListener?(listener: (state: IdentityState) => void): () => void;
   openSignIn(options: { afterSignInUrl: string; afterSignUpUrl: string }): void;
   buildSignInUrl(options: { signInForceRedirectUrl: string; signUpForceRedirectUrl: string }): string;
 };
@@ -82,7 +89,7 @@ export type PageEnv = {
  * Loads the provider's script and signs in from it. Resolves to the provider's session when signed in; when signed
  * out, opens the provider's sign-in (back to this page after) and resolves to null; null too without a provider.
  */
-export async function providerSession(cfg: SignInConfig, env: PageEnv): Promise<Session | null> {
+export async function providerSession(cfg: SignInConfig, env: PageEnv): Promise<BrowserSession | null> {
   const origin = new URL(env.href).origin;
   const script = providerScript(cfg, origin);
   if (!script) return null;
@@ -103,7 +110,24 @@ export async function providerSession(cfg: SignInConfig, env: PageEnv): Promise<
   const sat = satelliteOptions(cfg, origin);
   await clerk.load(sat ?? {});
   const session = clerk.session;
-  if (session) return { bearer: async () => (await clerk.session?.getToken()) ?? '' };
+  if (session) {
+    const identityOf = ({ session, user }: IdentityState) => session ? String(session.id) + '/' + String(user?.id ?? session.user?.id ?? '') : null;
+    const initial = identityOf({ session, user: clerk.user });
+    return {
+      bearer: async () => (await clerk.session?.getToken()) ?? '',
+      subscribeIdentity(changed) {
+        if (!clerk.addListener) throw new Error('Sign-in cannot observe account changes. Reload to try again.');
+        let active = true;
+        const check = (state: IdentityState) => {
+          if (active && identityOf(state) !== initial) { active = false; changed(); }
+        };
+        // Detect both a change before registration and one during addListener's initial delivery.
+        const unsubscribe = clerk.addListener(check);
+        check({ session: clerk.session, user: clerk.user });
+        return () => { active = false; unsubscribe(); };
+      },
+    };
+  }
   // Signed out: the provider's sign-in, back to this page. A satellite leaves for the primary's, as today's site does.
   if (sat) env.navigate(clerk.buildSignInUrl({ signInForceRedirectUrl: env.href, signUpForceRedirectUrl: env.href }));
   else clerk.openSignIn({ afterSignInUrl: env.href, afterSignUpUrl: env.href });
@@ -126,7 +150,7 @@ export async function signInConfig(post: typeof fetch = fetch): Promise<SignInCo
 }
 
 /** The existing provider session, or explicit local test sign-in; never a copied or persisted raw token. */
-export async function browserSession(testName?: string, env?: PageEnv, post: typeof fetch = fetch): Promise<Session | null> {
+export async function browserSession(testName?: string, env?: PageEnv, post: typeof fetch = fetch): Promise<BrowserSession | null> {
   const page = env ?? { document, href: location.href, global: globalThis as PageEnv['global'], navigate: (u: string) => location.assign(u) };
   let cfg: SignInConfig;
   try { cfg = await signInConfig(post); }

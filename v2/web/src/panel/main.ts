@@ -31,6 +31,7 @@ const UM = 1e-6;
 const nodes = new Map<string, NodeRec>();
 let session: CreatorSession | null = null;
 let activeSocket: WebSocket | null = null, openAttempt = 0;
+let stopIdentity: (() => void) | null = null;
 let prayers: Prayers | null = null;
 let placing = false;
 /** Things this panel placed, by id, until the stream shows them: the receipt's id at the spot sent. */
@@ -262,20 +263,37 @@ function showPrayers() {
   box.append(h, ul);
 }
 
-/** The session exchange, then the socket. */
-async function open(name: string) {
-  const attempt = ++openAttempt, previous = activeSocket;
+/** Account changes revoke this page's old authority and private UI before any new exchange. */
+function invalidateCreator() {
+  openAttempt++;
+  const previous = activeSocket;
   activeSocket = null; session = null;
-  prayers?.stop(); prayers = null; answering = null; showPrayers();
+  stopIdentity?.(); stopIdentity = null;
+  prayers?.stop(); prayers = null; answering = null; showPrayers(); batches.replaceChildren();
   placing = false; drag.cancel(); placed.clear(); sentTo.clear();
   $<HTMLButtonElement>('place').classList.remove('on');
   document.body.classList.remove('creator', 'refused');
   previous?.close();
+}
+
+/** The session exchange, then the socket. */
+async function open(name: string) {
+  invalidateCreator();
+  const attempt = openAttempt;
   status.textContent = 'asking the gateway for a creator token';
   const identity = await browserSession(name);
   if (attempt !== openAttempt) return;
   if (!identity) { status.textContent = 'Finish signing in, then open the panel again.'; return; }
-  const res = await fetch('/v2/creator-token', await sessionRequest(identity, 'world'));
+  const unsubscribe = identity.subscribeIdentity?.(() => {
+    if (attempt !== openAttempt) return;
+    invalidateCreator();
+    status.textContent = 'Account changed. Open the panel to verify creator access again.';
+  });
+  if (attempt !== openAttempt) { unsubscribe?.(); return; }
+  stopIdentity = unsubscribe ?? null;
+  const request = await sessionRequest(identity, 'world');
+  if (attempt !== openAttempt) return;
+  const res = await fetch('/v2/creator-token', request);
   const body = (await res.json()) as { token?: string; grant?: string; refused?: string };
   if (attempt !== openAttempt) return;
   if (!res.ok || !body.token || !body.grant) {
