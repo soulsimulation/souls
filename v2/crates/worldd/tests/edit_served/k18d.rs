@@ -256,7 +256,7 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
     let (door, chair, link) = (opened.names[&1], opened.names[&2], opened.names[&3]);
     let (copy, rules) = served_copy(&w);
     assert_eq!(copy.tree().link(link).unwrap().1, [foyer, inner]);
-    let town = committed_town(&copy, rules, w.ground);
+    let mut town = committed_town(&copy, rules, w.ground);
     let (support, _, _) = town.view().on_floor(chair, Vec3::ZERO).unwrap();
     assert_eq!(support, floor);
     let tick_before = last_tick(&w);
