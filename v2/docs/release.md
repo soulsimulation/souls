@@ -35,9 +35,11 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
 1. **Preflight.** `sha` (default: main's HEAD, under `RELEASE_FREEZE` as today's release) is a full sha on main; the
    checks above passed at it.
 2. **Build once.** At that commit: the world process (`worldd`), the gateway (`gatewayd`), the page (`v2/web`'s
-   build, as `page.tar`) and the client (`v2/client`'s `src` and `skill`, as `client.tar`), with the tools that move
-   them (`deploy`, `gateway-upgrade`). `manifest.json` names each artifact by its hash: the SHA-256 multihash
-   (`1220` and 64 hex), as O1 names a build. The bundle is the run's artifact.
+   build, as `page.tar`) and the served client (`v2/client/served/build.mjs`, stamped with the version: `eden.mjs`,
+   `skill.md`, `instructions.md`, the daemon's library and `soul-client.json`, as `client.tar`), with the tools that
+   move them (`deploy`, `gateway-upgrade`). `manifest.json` names each artifact by its hash: the SHA-256 multihash
+   (`1220` and 64 hex), as O1 names a build, and each served file by name, version, hash and length (`served`). The
+   bundle is the run's artifact.
 3. **Stage.** The bundle goes to the machine over ssh; each artifact lands at `$WORLDS_ROOT/builds/<hash>/<name>`
    (`/var/lib/souls/worlds`) only if its bytes hash to the manifest's, and `worldd schemas` must run there first (a
    binary built against a newer system library than the machine's does not start: `release.will-not-start`). The
@@ -45,7 +47,8 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    hashes against the manifest's. A dry run stops here: builds by hash are inert until a pin names one.
 4. **Move.** The canary world (input `canary`, default the first by name) by `deploy`: rehearsal, pin, restart, the
    canary watch, a rollback by itself on a fault. Then every other world, one at a time; then the gateway by
-   `gateway-upgrade` (never in the same step as a world's deploy: the step lock); then the page (`/usr/local/lib/souls/web`).
+   `gateway-upgrade` (never in the same step as a world's deploy: the step lock); then the page (`/usr/local/lib/souls/web`);
+   then the served client (`/usr/local/lib/souls/client`, which a world's address answers from, `v2/client/served/serve.mjs`).
    A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
    is a sync ask that needs no body, so a release never drives anyone's Soul
    ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md#what-a-deploy-does)). Each step is done
@@ -55,6 +58,9 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    section through a pull request (`release/changelog-<version>`), as `publish.yml`. Each is skipped when already
    there, so a second dispatch adds no section, tag or entry; a tag at another commit is refused
    (`release.tag-elsewhere`).
+   The viewers' origin serves the entry in the feed (`/v1/feed`, today's shape) on its next read, and the page the
+   release moved carries the changelog with this release's section compiled in (`/changelog`, `/changelog.md`), both
+   from `v2/tools/origin/site.mjs` (O23).
 
 ## A rollback
 
@@ -100,5 +106,6 @@ dies when served (`plant`), or one that never serves (`mute`).
 
 - The workflows have not been dispatched: a new workflow runs only once it is on main, and the `scratch` and
   `production` environments wait for the owner's checklist. Every step they run was run on a scratch machine.
-- The client is staged, not served: serving it is R17. Nothing reads `news.jsonl` yet.
+- The served client is moved to `/usr/local/lib/souls/client`; answering a world's `/eden.mjs`, `/skill.md` and
+  `/v1/config` from it is the front-door follow-up (#3576). Nothing reads `news.jsonl` yet.
 - `install.sh apply` with an older bundle writes its own page over a released one.

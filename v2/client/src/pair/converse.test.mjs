@@ -14,7 +14,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { createServer as netServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { decode } from '../brief/copy.mjs';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 
@@ -75,10 +76,55 @@ async function testWorld() {
 
 const receipts = (d) => (existsSync(d) ? readdirSync(d) : []).flatMap((f) => readFileSync(join(d, f), 'utf8').trim().split('\n')).filter(Boolean).map((l) => JSON.parse(l));
 
+let configuration;
+const configuredWorld = () => configuration ??= process.env.C30_FACTS
+  ? { facts: process.env.C30_FACTS, entries: process.env.C30_ENTRIES, at: process.env.C30_AT ?? '0,0', game: process.env.C30_GAME }
+  : testWorld();
+
+/** Follow the same pointer/header reference as the served stream's reader, not the log's header hash. */
+function activityPin(world, plain) {
+  const stream = resolve(world, JSON.parse(readFileSync(join(world, 'views/world.json'), 'utf8')).stream);
+  const pointer = decode(readFileSync(join(stream, 'pointer')));
+  const hash = pointer.get(3);
+  assert.ok(hash instanceof Uint8Array && hash.length === 34, 'the stream points to a header hash');
+  const header = decode(readFileSync(resolve(stream, '../../../headers', Buffer.from(hash).toString('hex'))));
+  const pins = header.get(6).filter((name) => typeof name === 'string'
+    && name.startsWith(`${plain}@`) && /^1220[0-9a-f]{64}$/.test(name.slice(plain.length + 1)));
+  assert.equal(pins.length, 1, 'the exact activity kind has one pin in the served header');
+  return pins[0];
+}
+
+test('the actual served header activity pin passes strict wire admission with exact role and recipient', async () => {
+  const w = await configuredWorld();
+  const world = join(dir, 'preflight-world');
+  const seeded = await run(bin('worldd'), ['seed', '--facts', w.facts, '--dir', world, '--souls', '0', '--at', w.at, '--entries', w.entries]);
+  assert.equal(seeded.code, 0, seeded.out);
+  const served = await run(bin('worldd'), ['serve', '--dir', world], /listening /);
+  try {
+    const plain = `${w.game}_activity`;
+    const pin = activityPin(world, plain);
+    const roles = JSON.parse(readFileSync(join(world, 'entries', `${w.game.replace(':', '.')}.json`), 'utf8')).roles;
+    const role = `${w.game.split(':')[0]}:${Object.keys(roles).find((k) => k !== 'now')}`;
+    const scope = Buffer.from('11'.repeat(16), 'hex');
+    const recipient = `${scope.toString('hex')}-3`;
+    const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+    wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+    // wireIntent calls the gateway's strict I2 decoder before returning these bytes.
+    const frame = wire.wireIntent(scope, 2n, 'activity:offer', 1n, new Uint8Array(), 9n,
+      `${scope.toString('hex')}-1`, undefined, undefined, JSON.stringify({ 1: pin, 2: role, 3: [recipient] }));
+    const params = decode(frame).get(4);
+    assert.deepEqual(params.get(1), [plain, Uint8Array.from(Buffer.from(pin.split('@')[1], 'hex'))]);
+    assert.equal(params.get(1)[1].length, 34);
+    assert.equal(params.get(2), role);
+    assert.deepEqual(params.get(3), [[Uint8Array.from(scope), 3]]);
+    console.log('actual served header pin: unique; strict I2 offer: admitted; kind, role and recipient: exact');
+  } finally {
+    served.p.kill();
+  }
+});
+
 test('A1 to A3: two joined Souls converse, a bystander hears no private turn, and an entry\'s activity is offered and joined', async () => {
-  const w = process.env.C30_FACTS
-    ? { facts: process.env.C30_FACTS, entries: process.env.C30_ENTRIES, at: process.env.C30_AT ?? '0,0', game: process.env.C30_GAME }
-    : await testWorld();
+  const w = await configuredWorld();
 
   // A1: the world, seeded with no Soul and served, loads the conversation's kind and the entry's activity kind.
   const world = join(dir, 'world');
@@ -218,8 +264,7 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
       return r.ok && r;
     });
     assert.ok(full);
-    const kindName = readFileSync(join(world, 'log')).toString('latin1').match(new RegExp(`${plainGame.replace(/[.:]/g, (x) => `\\${x}`)}@1220[0-9a-f]{64}`))?.[0];
-    assert.ok(kindName, 'the activity kind is pinned in the world\'s header');
+    const kindName = activityPin(world, plainGame);
     const ns = w.game.split(':')[0];
     const roles = JSON.parse(readFileSync(join(world, 'entries', `${w.game.replace(':', '.')}.json`), 'utf8')).roles;
     const [r1, r2] = Object.keys(roles).filter((k) => k !== 'now').map((k) => `${ns}:${k}`);
@@ -236,6 +281,8 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
     for (const s of [a, b, c]) {
       const st = await request(s.rt.socket, { op: 'status' }).catch(() => null);
       console.log(s.label, 'transport', JSON.stringify(st && { hearing: st.hearing, grants: st.viewGrants, kinds: st.viewKinds, drops: st.drops }));
+      console.log(s.label, 'recent answers', JSON.stringify(s.events.filter((e) => e.kind === 'answer').slice(-8)
+        .map((e) => ({ sequence: e.sequence, answer: e.answer, ...(e.reason ? { reason: e.reason } : {}) }))));
       const log = existsSync(s.rt.log) ? readFileSync(s.rt.log, 'utf8').split('\n').slice(-12) : [];
       console.log(s.label, 'daemon tail', JSON.stringify(log));
       await request(s.rt.socket, { op: 'stop' }).catch(() => {});

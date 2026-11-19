@@ -128,6 +128,12 @@ impl Replica {
         &self.tree
     }
 
+    /// The tree for K5's checkpoint to seal and for the tick's state hash (K20; each hashes the nodes marked changed
+    /// and clears its marks; neither changes a node). Nothing else writes through it (K18, #3160).
+    pub fn tree_for_seal(&mut self) -> &mut Tree {
+        &mut self.tree
+    }
+
     /// Seals the tree ([`Tree::seal`]): a world serving R5's sync answers from its last seal (R5b, #3164).
     pub fn seal(&mut self) -> R<Sealed> {
         self.tree.seal()

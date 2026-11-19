@@ -18,7 +18,7 @@
 //!   as it would be without it. Panics are counted in body order once the threads have joined, so a unit retired by
 //!   its third (`unit-retired`) ends the later runs of that tick as one thread would, their stages dropped.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
@@ -26,9 +26,10 @@ use std::sync::Mutex;
 use replica::encode::{Name, Value};
 use replica::host::{Progress, Skill};
 use replica::ids::{Id, Minter};
+use replica::pose::Vec3;
 use replica::time::Micros;
 
-use super::{Here, Run, Staged, WorldHost, body_kind, named};
+use super::{Here, Moved, Planned, Run, Staged, WorldHost, body_kind, named};
 use crate::controller::{Controller, Driver};
 use crate::routes::Scratch;
 use crate::unit::Units;
@@ -43,13 +44,15 @@ const UNIT_RETIRED: &str = "unit-retired";
 /// The panic of a skill stepped beside others that drew or set a timer.
 pub const BESIDE_ORDERED: &str = "beside-ordered";
 
-/// What every skill's step reads besides the town: the bodies, their fields, who stands settled, and the tick.
+/// What every skill's step reads besides the town: the bodies, their fields, who stands settled, the tick, and with a
+/// planner (K18b, #3175) its lines of the last tick.
 pub(super) struct Reads<'a> {
     pub controller: &'a Controller,
     pub fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
     pub settled: &'a BTreeSet<Id>,
     pub now: Micros,
     pub seed: u64,
+    pub planned: Option<&'a Planned>,
 }
 
 /// A chunk's runs: index in the sorted runs, body, driver and skill.
@@ -63,6 +66,8 @@ struct Out {
     runs: Vec<Stepped>,
     /// Lines found for walkers that had none, in walker order.
     lines: Vec<(Id, Line)>,
+    /// With a planner: the lines asked of it, in step order (K18b).
+    asked: Vec<(Moved, Vec3)>,
     spent: Spent,
 }
 
@@ -84,7 +89,8 @@ enum What {
 }
 
 /// Steps every run once, as `super::step_in_units` does, on the threads `split` has a scratch for: the runs sorted by
-/// body, the ones that ended taken out, each panic and refusal counted in `units`. Returns the joined stage.
+/// body, the ones that ended taken out, each panic and refusal counted in `units`. Returns the joined stage; with a
+/// planner, the lines asked of it are added to `asked` in body order (K18b).
 pub(super) fn step(
     split: Split<'_>,
     reads: Reads<'_>,
@@ -92,6 +98,7 @@ pub(super) fn step(
     runs: &mut Vec<Run>,
     chunk: usize,
     units: &mut Units,
+    asked: &mut Vec<(Moved, Vec3)>,
 ) -> Staged {
     let Split {
         shared,
@@ -258,6 +265,7 @@ pub(super) fn step(
         }
         spent.add(&out.spent);
         new.extend(out.lines);
+        asked.extend(out.asked);
     }
     town_spent.set(spent);
     if !new.is_empty() {
@@ -300,6 +308,7 @@ fn run<S: Skill + ?Sized>(
     let mut lines = Vec::new();
     let spent = Cell::new(Spent::default());
     let mut out = Vec::with_capacity(runs.len());
+    let asked;
     {
         let here = Here {
             town: shared.view(scratch, Lines::Part(kept, &mut lines), &spent),
@@ -307,6 +316,7 @@ fn run<S: Skill + ?Sized>(
             fields: reads.fields,
             settled: reads.settled,
             kind: kind.clone(),
+            planned: reads.planned.map(|p| (p, RefCell::new(Vec::new()))),
         };
         for (i, body, driver, skill) in runs.iter_mut() {
             let unit = skill.shape().name;
@@ -358,10 +368,15 @@ fn run<S: Skill + ?Sized>(
                 what,
             });
         }
+        asked = here
+            .planned
+            .map(|(_, a)| a.into_inner())
+            .unwrap_or_default();
     }
     Out {
         runs: out,
         lines,
+        asked,
         spent: spent.get(),
     }
 }

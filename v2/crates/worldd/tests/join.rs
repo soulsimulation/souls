@@ -229,16 +229,21 @@ fn pair_kind() -> ActivityKind {
 fn entries() -> Json {
     let vessel = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
-      "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
-      "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] } } }"#,
+      "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] },
+        "far": { "role": "stand", "at_mm": [3000, 0, 0] } },
+      "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] },
+        "fetch": { "who": "anyone", "steps": [{ "step": "walk_to", "point": "far" }, { "step": "take" }],
+          "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand" }] } } }"#,
     )
     .unwrap();
     let rack = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
-      "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] } },
+      "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] },
+        "off": { "role": "stand", "at_mm": [0, 0, 5000000] } },
       "slots": { "rest": { "admits": "thing" } },
       "forms": { "put": { "who": "anyone",
-        "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] } } }"#,
+        "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] },
+        "stray": { "who": "anyone", "steps": [{ "step": "walk_to", "point": "off" }] } } }"#,
     )
     .unwrap();
     Json::Obj(vec![(VESSEL.into(), vessel), (RACK.into(), rack)])
@@ -669,5 +674,87 @@ fn a2_a_leave_frees_the_seat_the_links_and_the_timers() {
         a.act(LEAVE, None, BTreeMap::new()),
         Err("soul-not-embodied".to_owned())
     );
+    run.stop();
+}
+
+/// A3 (C12, #3427): a form's `walk_to` walks a born body from where it stands to the step's point on the open ground,
+/// then its bare take (as Eden's entries write one) lands; a point no body can stand on is refused by name.
+#[test]
+fn a3_a_walk_to_reaches_its_point_or_is_refused_by_name() {
+    let (run, mut a, mut b) = serve("a3");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    // The point is 3 m east of the vessel, which stands 300 mm from the birth: a walk of about 3.3 m first.
+    let fetched = a.act("test:fetch", Some(vessel()), BTreeMap::new());
+    println!("A3 fetch: {fetched:?}");
+    fetched.expect("walked to the point, then took the vessel");
+    assert_eq!(parent(&run.replay(), vessel()).0, Some(body), "in its hand");
+    // 5 km past the rack, off the ground: there is no way there.
+    b.act(JOIN, None, BTreeMap::new()).expect("Bo joins");
+    let strayed = b.act("test:stray", Some(rack()), BTreeMap::new());
+    println!("A3 stray: {strayed:?}");
+    assert_eq!(strayed, Err("souls:no-way".to_owned()));
+    run.stop();
+}
+
+/// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
+#[test]
+fn r21_joined_principal_private_turn_uses_body_and_rejects_nonmember() {
+    let (run, mut member, mut outsider) = serve("r21-private");
+    member
+        .act(JOIN, None, BTreeMap::new())
+        .expect("member joins world");
+    outsider
+        .act(JOIN, None, BTreeMap::new())
+        .expect("outsider joins world");
+    assert_ne!(
+        run.body_of(ada()).unwrap(),
+        ada(),
+        "body and principal differ"
+    );
+    let entries = member
+        .act(
+            "activity:propose",
+            Some(ground()),
+            p(&[(1, Value::Text(name(&fullname(PAIR))))]),
+        )
+        .expect("proposed");
+    let activity = run
+        .log()
+        .iter()
+        .flat_map(|p| p.effects.clone())
+        .filter(|e| entries.contains(&e.envelope.sequence))
+        .find_map(|e| match e.body {
+            Body::Changes(cs) => cs.into_iter().find_map(|c| match c.change {
+                Change::Create { node, .. } => Some(node),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .expect("activity");
+    member
+        .act(
+            "activity:join",
+            Some(activity),
+            p(&[(1, Value::Text(name("test:first")))]),
+        )
+        .expect("member joins activity");
+    let private = "member-only fixture";
+    member
+        .act("test:say", Some(activity), p(&[(1, words(private))]))
+        .expect("joined principal's body is a member");
+    let denied = "outsider fixture";
+    assert_eq!(
+        outsider.act("test:say", Some(activity), p(&[(1, words(denied))])),
+        Err("not-a-member".to_owned()),
+        "a joined nonmember is still refused"
+    );
+    let log = run.bytes();
+    for text in [private, denied] {
+        assert!(
+            !log.windows(text.len()).any(|w| w == text.as_bytes()),
+            "no private words in the log"
+        );
+    }
     run.stop();
 }
