@@ -22,6 +22,11 @@
 //     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361)
 //     {"op":"whisper","to":"<id>","words":".."}  words to one listener's body alone
 //     {"op":"lie","this":"<id>"}          lie down on a bed (worldd's bodies, as a sit)
+//   and C6's (#3390): once current on each socket it subscribes, over the gateway's view subscription (#3292), to its
+//   own body followed, and the world addresses to it each utterance that body hears, with the words it may read. Each
+//   is an event `{"kind":"heard","from":"<body id>","name":..,"words":..,"whisper":bool}`: it wakes a `wait`, is in
+//   the next `look`'s brief (`heard`, quoted as data), and reaches the reflexes as `souls:said` (`toMe` for a
+//   whisper), whose intents are sent once, as `act`'s are. Its own words are not heard back.
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
@@ -57,7 +62,7 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
-import { brief, changedBlock } from '../brief/brief.mjs';
+import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
 import { changedBetween, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -133,6 +138,8 @@ const state = { cursor: null, sequence: 0, unanswered: [], ...(existsSync(rt.sta
 const save = () => { writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
+const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
+const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
 const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
 const wakes = new Wakes(soul); // R13: its budget's deliveries are kept on disk, so a restart never resets them
@@ -176,11 +183,12 @@ function send(bytes, sequence, ranked) {
   ws.send(bytes);
 }
 
-/** Signed in and current: intents go now. */
+/** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
 function current() {
   signedIn = true;
   attempt = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
+  if (ws && !ws.hearing) { ws.hearing = true; ws.send(wire.wireSubscribe(scope, seat.grant.counter, BigInt(HEARING_BUDGET))); }
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
 }
 
@@ -282,6 +290,8 @@ function connect() {
         return;
       }
       if (kind === 'sync') { syncAnswer(sock, Number(a), b, bytes); return; }
+      if (kind === 'item') { onItem(bytes); return; }
+      if (kind === 'view-refused') { log(`hearing refused: ${a}`); note({ kind: 'hearing-refused', reason: a }); return; }
       // The frames applied at the cursor's version (#3346): a refusal does not move the version, so on a resume the
       // gateway replays those at the cursor after the ones counted here, and none twice.
       if (b !== '-') { state.seen = b === state.cursor ? (state.seen ?? 1) + 1 : 1; state.cursor = b; }
@@ -326,6 +336,28 @@ function connect() {
   }
   sock.onerror = () => { /* onclose follows */ };
 }
+
+// --- What this Soul hears (C6, #3390) ---------------------------------------------------------------------------
+/**
+ * One view item: an utterance this Soul's body heard, with its words when it may read them. Its own are left out
+ * (its say has its receipt). Each wakes a `wait`, joins the next brief, and goes to the reflexes as `souls:said`.
+ */
+function onItem(bytes) {
+  const line = wire.wireHeard(bytes);
+  if (!line) return;
+  const [, sequence, at, from, audience, words] = line.split(' ');
+  if (from === ME) return;
+  const e = { kind: 'heard', from, words: words === '-' ? null : Buffer.from(words, 'hex').toString('utf8'), whisper: audience !== '-', sequence: Number(sequence), at: Number(at) };
+  heardSince.push(e);
+  if (heardSince.length > HEARD_KEPT) heardSince.shift();
+  note(e);
+  for (const { intent } of reflexes.onEvent({ name: 'souls:said', fields: { 1: e.words }, actor: from, toMe: e.whisper, sequence: e.sequence }, Date.now())) {
+    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor });
+  }
+}
+
+/** Heard utterances for an answer: the speaker's name from the copy beside its id. */
+const named = (rows, hs) => hs.map((e) => ({ ...e, ...(rows.get(e.from)?.name ? { name: rows.get(e.from).name } : {}) }));
 
 // --- Commands on the Unix socket --------------------------------------------------------------------------------
 /** The copy brought current through the gateway (a sync under way is waited for); false if it could not be. */
@@ -446,7 +478,8 @@ async function answer(req) {
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
-      const b = brief(rows, { me: ME, changes, ageMs: performance.now() - (confirmedAt ?? startedAt) });
+      const heard = named(rows, heardSince.splice(0));
+      const b = brief(rows, { me: ME, changes, heard, ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       return b;
     });
@@ -464,7 +497,10 @@ async function answer(req) {
       if (handed.length) saveWakes();
       const got = events.splice(0);
       const timedOut = handed.length === 0 && !got.some((e) => e.kind !== 'synced');
-      return closing({ ok: true, events: got, ...(handed.length ? { wakes: handed } : {}), ...(timedOut ? { timedOut: true } : {}) });
+      heardSince.length = 0; // shown here, so not again in the next brief
+      const said = got.some((e) => e.kind === 'heard') ? { note: QUOTED_NOTE } : {};
+      return closing({ ok: true, events: got, ...said, ...(handed.length ? { wakes: handed } : {}), ...(timedOut ? { timedOut: true } : {}) },
+        (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }));
     }
     case 'can': {
       const c = Array.isArray(req.acts) ? actsOf(req.acts)[0] ?? candidateOf(null) : candidateOf(req.intent);
