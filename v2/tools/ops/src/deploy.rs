@@ -96,8 +96,11 @@ fn main() {
         }
         // Whether the build being left wrote anything is not known here: assume it did, so the schemas are compared.
         let mut tl = Timeline::default();
+        // Operations' timeline, wall-clock ms from the rollback's start (the wall-clock rule, K7, is the engine's).
+        #[allow(clippy::disallowed_methods)]
+        let t0 = std::time::Instant::now();
         let r = d.roll_back(&build, &from, true, &mut unit, &mut probe, &mut |s| {
-            tl.0.push((0, s))
+            tl.0.push((t0.elapsed().as_millis(), s))
         });
         print(&tl);
         match r {

@@ -54,15 +54,15 @@ entries() { sed -n 's/^{"name":"\([^"]*\)","hash":"\(1220[0-9a-f]\{64\}\)","byte
 field() { sed -n "s/.*\"$2\":\"\\([^\"]*\\)\".*/\\1/p" "$1" | head -1; }
 artifact() { entries "$1" | awk -v n="$2" '$1 == n {print $2}'; }
 
-# A4: every check v2/docs/release.md lists (between its release-checks markers) passed at <sha>: the newest completed
-# run of each name concluded success.
+# A4: every check v2/docs/release.md lists (between its release-checks markers) passed at <sha>: a run of that name
+# concluded success there (the merge queue's run; main's own push run is often cancelled by the next merge).
 checks() {
   local sha=$1 doc=${RELEASE_DOC:-$(dirname "$0")/../../../docs/release.md} names passed n missing=()
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "checks <full 40-hex sha>"
   names=$(sed -n '/<!-- release-checks -->/,/<!-- \/release-checks -->/s/^- `\([^`]*\)`.*/\1/p' "$doc")
   [ -n "$names" ] || die "no checks listed in $doc"
-  passed=$(gh api "repos/${GITHUB_REPOSITORY:?}/commits/$sha/check-runs?per_page=100" --jq \
-    '[.check_runs[] | select(.status == "completed")] | group_by(.name) | map(max_by(.completed_at)) | .[] | select(.conclusion == "success") | .name')
+  passed=$(gh api --paginate "repos/${GITHUB_REPOSITORY:?}/commits/$sha/check-runs?per_page=100" --jq \
+    '.check_runs[] | select(.conclusion == "success") | .name' | sort -u)
   while IFS= read -r n; do
     grep -qxF -- "$n" <<< "$passed" || missing+=("$n")
   done <<< "$names"
@@ -77,7 +77,7 @@ bundle() {
   local out=$1 sha=$2 version=$3 bins=$4 page=$5 client=$6 a t lines=()
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "bundle: the sha is the full 40 hex"
   [ -f "$page/index.html" ] || die "bundle: no page build at $page"
-  [ -f "$client/package.json" ] || die "bundle: no client at $client"
+  [ -d "$client/src" ] && [ -d "$client/skill" ] || die "bundle: no client (src, skill) at $client"
   rm -rf "$out"
   mkdir -p "$out/artifacts" "$out/bin"
   install -m 755 "$bins/worldd" "$out/artifacts/worldd"
