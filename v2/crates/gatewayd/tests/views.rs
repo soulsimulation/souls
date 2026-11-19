@@ -405,7 +405,7 @@ async fn v13_a4_the_view_socket_is_no_store() {
 /// A view token as the directory mints it (`directoryd::accounts::view`): its grants, its expiry, the key's MAC.
 fn view_token(key: &ViewKey, grants: &[Grant], expires: u64) -> String {
     let grants: Vec<String> = grants.iter().map(|g| g.to_text()).collect();
-    let body = format!("view.{expires}.{}", grants.join(","));
+    let body = format!("view.{expires}.{}", grants.join("/"));
     format!("{body}.{}", to_hex(&key.mac(body.as_bytes())))
 }
 
