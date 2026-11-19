@@ -166,6 +166,16 @@ impl Slots {
         self.by_body.get(&body).copied()
     }
 
+    /// Releases the seat `body` holds (a retirement, K10 #2673): the seat's thing, and the sit or rise under way.
+    pub fn release_body(&mut self, body: Id) -> Option<(Id, Option<Instance>)> {
+        let thing = self.by_body.remove(&body)?;
+        let under_way = match self.held.remove(&thing)?.state {
+            State::Lowering { instance, .. } | State::Rising(instance) => Some(instance),
+            State::Seated(_) => None,
+        };
+        Some((thing, under_way))
+    }
+
     /// Seats held.
     pub fn len(&self) -> usize {
         self.held.len()
@@ -263,6 +273,12 @@ impl Slots {
             })
             .map(|(t, h)| (h.body, *t, h.stance))
             .collect()
+    }
+
+    /// The stance `body` holds its seat in, whether it is lowering, seated or rising: what a checkpoint keeps of a body
+    /// in a slot.
+    pub fn stance(&self, body: Id) -> Option<Stance> {
+        self.held.get(self.by_body.get(&body)?).map(|h| h.stance)
     }
 
     /// A restart (K18c, #3176): `body`, standing on the floor, is handed back into the seat of `thing` at `at`, held

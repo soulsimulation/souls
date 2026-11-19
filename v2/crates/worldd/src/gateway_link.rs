@@ -8,9 +8,12 @@
 //! bodies, each with a toggle, and `--items` items in each room; its log is `--log` (default: the socket's path and
 //! `.log`). With `--testworld` it also has bodies that move (I4b): N2's test world with one Soul and three chairs
 //! (`worldd::testbodies`, B10 #2688), and prints `testworld <id> <name>` for the Soul's body, the square and the chairs.
+//! With `--creator <32 hex>-<counter>` the world has that creator and the toggles world's pinned kinds
+//! (`toggles::kinds`), and commits the creator's edit intents (G1b, #3362): each is checked off the clock thread and
+//! committed through `sim::edit`; every other actor's edit is refused `edit.not-the-creator`.
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
-//! [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
+//! [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
 //! --stall-for <s>] [--www <dir>] [--views <path>]`. Subscriptions are served on `--views` (default: the socket's path with
 //! `.views`; `worldd::views::served`). With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it
 //! takes, in the order taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
@@ -36,8 +39,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use replica::apply::Replica;
+use replica::edit;
 use replica::encode::{from_hex, to_hex};
-use replica::ids::{Minter, Scope};
+use replica::ids::{Id, Minter, Scope};
 use replica::views::{Key, Level, Redactions};
 use replica::world_model::Audience;
 use sim::log::FileStore;
@@ -113,7 +117,7 @@ pub fn run(args: &[String]) -> i32 {
     let usage = || {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
-             [--bodies <n>] [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
+             [--bodies <n>] [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
              [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>] [--views <path>]"
         );
         2
@@ -157,6 +161,20 @@ pub fn run(args: &[String]) -> i32 {
             };
             cfg.sky = Some(sim::daylight::Config::today(cal, seed.unsigned_abs()));
         }
+    }
+    if let Some(c) = arg("--creator") {
+        let Some(creator) = c.split_once('-').and_then(|(scope, n)| {
+            Id::new(
+                Scope(from_hex(scope).ok()?.try_into().ok()?),
+                n.parse().ok()?,
+            )
+        }) else {
+            return usage();
+        };
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
     }
     cfg.measures = !args.iter().any(|a| a == "--no-measures");
     cfg.health =
