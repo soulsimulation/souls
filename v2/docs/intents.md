@@ -27,7 +27,10 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    and never reused, so a reconnect never repeats an act. The basis is the version it was decided against (T3:
    lineage, zone, epoch, sequence). The expiry is in world time (T5), never the client's clock. The target is a node,
    or a selector from a closed list that the engine binds at commit and records as its choice: the first, any free
-   slot of a kind in a node with its binding rule as a field (`replica::selector`, I5), and E2 adds the rest.
+   slot of a kind in a node with its binding rule as a field (`replica::selector`, I5); the second, a described spot
+   (`replica::select`, E2): a pick among things or free slots, or a point on one node's shape, in ten relations.
+   A walk or a sit aimed at a described spot is resolved by a checker on its copy, the client's answer at that
+   version, and bound once when the act commits; a spot with no answer is refused by its name (`spot.no-front`).
    Resources are T9's claims (`{1: 1 all, 2 one or 3 named, 2: class or name}`). Parameters are the form's arguments;
    none may be a time or a condition, the one exception being a move's next beat (rule 9).
 4. **An intent's kind is its verb.** A form's verb (`namespace:form`) is a checked act. The engine's own verbs are
@@ -65,6 +68,9 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 10. **A cancel ends and a replace supersedes the actor's own earlier intent,** named by its sequence in field 10. A
     cancel without it is refused (`cancel-without-replaces`), and so is one that carries anything else
     (`cancel-not-bare`).
+    An answer's frame `{1: version, 2: answer}` may carry one optional field, 3: where the act's time went, in µs
+    between stamps of one machine's steady clock (O4, #2694; `replica::intents::ANSWER_TIMES`). It is added as the
+    answer leaves, so the logged answer never holds it.
 11. **A size limit applies before parsing:** an intent over 4,096 bytes is refused (`intent-too-large`) before any
     byte is read as CBOR.
 

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":309,"group":"looking","words":"whats in the fridge","obvious":3,"things":{"fridge":"eden:fridge"},"chain":[{"this":"fridge","form":"open"},{"read":"fridge","field":"stock"}]}

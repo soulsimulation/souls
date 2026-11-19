@@ -99,3 +99,15 @@ test('the CLI reads upload the way SKILL.md writes it', () => {
   assert.throws(() => checkArgs('upload', {}, ['a.glb', 'b.glb']), /takes one word/);
   assert.equal(typeof COMMANDS.upload, 'function');
 });
+
+test('#2538 A3: the world\'s low-disk refusal reaches the god as a plain line with when to retry', async (t) => {
+  const { diskHeadroom, refuseWhenDiskLow } = await import('../../apps/server/src/load/disk-headroom.ts');
+  const h = diskHeadroom({ path: '.', minFreeMb: 1024, prune: () => {}, log: () => {}, free: () => 10 }); h.look();
+  t.after(() => h.pretend(1e9));
+  let data; try { refuseWhenDiskLow({ header() {} }, (status, code, message, extra) => Object.assign(new Error(message), { status, code, extra })); } catch (e) { data = { ok: false, code: e.code, message: e.message, ...e.extra }; }
+  const file = join(scratch(t), 'crate.glb');
+  writeFileSync(file, syntheticGlb({ asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }], meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }], accessors: [{ count: 30, componentType: 5126, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 1] }] }));
+  const r = await uploadOne({ file }, { send: async () => ({ ok: false, status: 507, data }) });
+  assert.equal(r.ok, false);
+  assert.equal(r.lines[0], 'REFUSED crate.glb: HTTP 507 host.disk-low: The host\'s disk is nearly full, so uploads are paused to keep this world running. Nothing was stored. Try again in 5 minutes.');
+});

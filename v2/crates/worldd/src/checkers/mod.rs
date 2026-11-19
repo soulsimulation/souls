@@ -14,13 +14,14 @@
 //! (the world). A yes candidate's `set` effects become `Change::Set`; any other effect is not prepared yet, and the
 //! candidate is `no` with `effect_unsupported`.
 
-use replica::effects::{Actor, Cause, Change};
+use replica::effects::{Actor, Cause, Change, Refusal};
 use replica::encode::Value as Cbor;
 use replica::ids::Id;
 use replica::query::LinkAt;
 use replica::read::Read;
 use replica::rules::decide_parts;
 use replica::rules::json::Value;
+use replica::select::{Resolved, Spot};
 use replica::world_model::show;
 use sim::commit::{Checked, Checks, Verdict, off_clock};
 use sim::frozen::Publisher;
@@ -30,6 +31,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
+pub mod budget;
 pub mod places;
 #[cfg(test)]
 mod tests;
@@ -59,6 +61,16 @@ pub struct Act {
     pub candidates: Vec<Candidate>,
     /// Set for the one re-check: the version the copy must stand at, or later.
     pub recheck: Option<u64>,
+    /// A move aimed at a described spot (selector 2, E2 #2709), resolved by the checker that takes the act.
+    pub spot: Option<Box<SpotAct>>,
+}
+
+/// A walk or a sit aimed at a described spot, and the checker's answer on its copy once resolved.
+#[derive(Clone, Debug)]
+pub struct SpotAct {
+    pub sit: bool,
+    pub spot: Spot,
+    pub resolved: Option<Result<Resolved, Refusal>>,
 }
 
 /// A reader that records each node it reads and the node's stamp.
@@ -307,11 +319,14 @@ pub fn start(
             .spawn(move || {
                 loop {
                     let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
-                    let Ok(act) = next else { break };
+                    let Ok(mut act) = next else { break };
                     let copy = match act.recheck {
                         Some(v) => publisher.wait_for(v, RECHECK_WAIT),
                         None => publisher.latest(),
                     };
+                    if let Some(s) = act.spot.as_mut() {
+                        s.resolve(copy.tree(), act.body);
+                    }
                     let checks = check(&*copy, &rules, &act);
                     if out.send((act, checks)).is_err() {
                         break;

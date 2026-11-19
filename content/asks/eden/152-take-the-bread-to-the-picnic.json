@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":152,"group":"two-things","words":"take the bread to the picnic table","obvious":3,"things":{"bread":"eden:bread_loaf_pack","table":"eden:picnic_table"},"chain":[{"this":"me","form":"pick_up","carry":"bread","args":{"thing":"bread"}},{"this":"me","form":"put","place":{"at":"on","thing":"bread","anchor":"table"},"args":{"thing":"bread"}}]}

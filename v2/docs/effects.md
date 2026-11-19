@@ -97,7 +97,7 @@ the log (K4), the in-memory tree (K2), applying and querying at speed (R1) and v
     `7-motion`, each applied to the base alone, each its node's own entry); `8-future.diag`, `4-set` as a later
     build might write it, with unknown field numbers in an entry, a change and an event and an event name this build
     has never seen, which applies, re-encodes to its own bytes and leaves `4-set`'s state hash; `9-transfer` (the cup
-    put down on the crate: a leave and an arrive), `10-timer` (two timers set, one cleared) and `11-away` (a leave to
+    put down on the room's floor: a leave and an arrive), `10-timer` (two timers set, one cleared) and `11-away` (a leave to
     another zone returned, a leave settled, and an arrive carrying a key from another zone). `goldens.txt` holds, as
     hex, each part's bytes and its state hash with and without named events; the native and the WASM builds must give
     it exactly.
@@ -121,7 +121,8 @@ the log (K4), the in-memory tree (K2), applying and querying at speed (R1) and v
 15. **A pending timer is state, written by a timer record** (body 11), never only by an event: set `{1: 1, 2: timer,
     3: due, 4: name}` (due at a world time in T5's microseconds; the name says what it is for) and clear `{1: 2,
     2: timer}` (fired or cancelled), both by the entry of the node that owns it. It survives a restart and an idle
-    catch-up because it is in the state, and stripping events leaves it.
+    catch-up because it is in the state, and stripping events leaves it. Removing a node drops the pending timers of
+    it and its subtree in the same apply, with no clear records.
 16. **T5's time effects are a record of their own** (body 10), each exactly as time.md rule 8 writes it, never a
     `set` on the root's field numbers. They are the zone root's entries, for everyone.
 

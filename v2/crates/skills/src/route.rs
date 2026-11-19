@@ -17,7 +17,8 @@
 //!   through the host the skill sees each result a tick later, T1).
 //! - **N10's ladder** (T9c #3127) reaches the walk by fields the world sets on its body: [`F_SHOULDER`] (no body
 //!   pushes it), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
-//!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended.
+//!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended. A route taken,
+//!   the walk leaves its count alone in [`F_ROUTE`] (`[count, []]`), so a read of the body copies no legs.
 //! - **Sent to a point** (N9, [`Route::sent`]). The world's spot tables grant the walker a standing spot near the
 //!   point and the world gives the route there as [`F_ROUTE`]; until then it stands. It arrives within [`AT_SPOT`] of
 //!   its spot, no body pushes it within [`CALM`] of it, and those standing on their own spots ([`F_SETTLED`]) do not
@@ -143,14 +144,17 @@ fn read_int(v: &Value) -> Option<i64> {
     }
 }
 
-/// A route the world gave the body ([`F_ROUTE`]): its count and legs.
-fn route_of(me: &replica::host::Seen) -> Option<(u64, Vec<Leg>)> {
-    let Value::Array(a) = me.fields.get(&F_ROUTE)? else {
+/// A route the world gave the body ([`F_ROUTE`]) after route `taken`: its count and legs.
+fn route_of(route: Option<Value>, taken: u64) -> Option<(u64, Vec<Leg>)> {
+    let Value::Array(a) = route? else {
         return None;
     };
     let [Value::Uint(n), Value::Array(legs)] = a.as_slice() else {
         return None;
     };
+    if *n <= taken {
+        return None;
+    }
     let mut out = Vec::new();
     for l in legs {
         let Value::Array(l) = l else { return None };
@@ -171,8 +175,7 @@ fn route_of(me: &replica::host::Seen) -> Option<(u64, Vec<Leg>)> {
 
 /// A body's waiting mark, `[link, distance]`, or none.
 fn mark_of(host: &dyn Host, body: Id) -> Option<(Id, i64)> {
-    let s = host.read(body)?;
-    let Value::Array(a) = s.fields.get(&F_WAITING)? else {
+    let Value::Array(a) = host.field(body, F_WAITING)? else {
         return None;
     };
     let [l, g] = a.as_slice() else { return None };
@@ -276,22 +279,33 @@ impl Skill for Route {
 
     fn step(&mut self, host: &mut dyn Host) -> Progress {
         let body = host.body();
-        let Some(me) = host.read(body) else {
+        // Its own body field by field, not a whole read: a read copies every field each tick.
+        let Some(p) = host.position(body) else {
             return Progress::Failed(name("souls:body-gone"));
         };
         // A new route from the world (N10's reroute): walked from its first leg.
-        if let Some((n, legs)) = route_of(&me)
-            && n > self.route
-        {
+        if let Some((n, legs)) = route_of(host.field(body, F_ROUTE), self.route) {
             (self.route, self.legs, self.leg) = (n, legs, 0);
             (self.crossing, self.last) = (None, None);
+            // Taken: the legs are the walk's own now. The field keeps the count alone, so a read of this body (each
+            // walker near it reads it every tick) does not copy the legs (#3213).
+            let taken = Value::Array(vec![Value::Uint(n), Value::Array(Vec::new())]);
+            let _ = host.emit(
+                vec![Change::Set {
+                    node: body,
+                    field: F_ROUTE,
+                    to: taken,
+                    by: None,
+                }],
+                None,
+            );
         }
         // Held while the world walks it out: it stands, unmarked.
-        if me.fields.contains_key(&F_HELD) {
+        if host.field(body, F_HELD).is_some() {
             self.mark(host, body, None);
             return Progress::Going;
         }
-        let shoulder = me.fields.contains_key(&F_SHOULDER);
+        let shoulder = host.field(body, F_SHOULDER).is_some();
         let Some(leg) = self.legs.get(self.leg).copied() else {
             // Sent to a point: it stands until its route is given.
             if self.spot && self.route == 0 {
@@ -302,7 +316,7 @@ impl Skill for Route {
         };
         // A crossing: carried until the world stands it on the far side.
         if let Some(c) = self.crossing {
-            let carried = me.fields.contains_key(&F_CROSSING);
+            let carried = host.field(body, F_CROSSING).is_some();
             match (c, carried) {
                 (_, true) => {
                     self.crossing = Some(Crossing::Carried);
@@ -322,7 +336,15 @@ impl Skill for Route {
                 }
             }
         }
-        let p = me.position;
+        // A point on the way (a leg with no link that is not the last, E10 #2781) is passed without stopping.
+        let mut leg = leg;
+        while leg.link.is_none()
+            && self.leg + 1 < self.legs.len()
+            && len([leg.to.x - p.x, leg.to.z - p.z]) <= AT_GOAL
+        {
+            self.leg += 1;
+            leg = self.legs[self.leg];
+        }
         let gap = len([leg.to.x - p.x, leg.to.z - p.z]);
         // Leave to enter: the link's owner names who it lets in (A3).
         let (narrow, granted) = match leg.link.and_then(|l| host.read(l)) {
@@ -383,10 +405,7 @@ impl Skill for Route {
         let mut pushers: Vec<(Near, i64)> = Vec::new();
         if !shoulder && !calm {
             for n in &near {
-                let settled = self.spot
-                    && host
-                        .read(n.id)
-                        .is_some_and(|s| s.fields.contains_key(&F_SETTLED));
+                let settled = self.spot && host.field(n.id, F_SETTLED).is_some();
                 if (wait || mark_of(host, n.id).is_none()) && !settled {
                     pushers.push((*n, dist(n)));
                 }

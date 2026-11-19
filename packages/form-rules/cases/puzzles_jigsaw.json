@@ -1,0 +1,223 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:picture_jigsaw (from #1746). Four tiles of a tree picture, each in its own tray or in one of four cells (tl, tr, bl, br) at a quarter turn (r0 to r270); the picture is whole when tile 1 to 4 lie in tl, tr, bl, br at r0. With empty hands ('Put down what you are holding') a Soul places a tray tile in a free cell at a turn it chooses; a placed tile is refused ('Lift that tile back to its tray before placing it again.'), as is a cell another tile holds ('That cell already holds a tile; lift its tile first.'). Lifting a tile in its tray is refused ('That tile is already in its own tray.'). Reset puts every tile back in its tray at its starting turn.",
+  "cases": [
+    {
+      "name": "jigsaw_place_1_every_need_met",
+      "act": {"this":"j1","form":"place_1","args":{"cell":"tl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "jigsaw_place_1_hands_full",
+      "act": {"this":"j1","form":"place_1","args":{"cell":"tl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "jigsaw_place_1_already_placed",
+      "act": {"this":"j1","form":"place_1","args":{"cell":"tl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile1_cell":"br"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"lift_first"}
+    },
+    {
+      "name": "jigsaw_place_1_cell_taken_by_tile_2",
+      "act": {"this":"j1","form":"place_1","args":{"cell":"tl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile2_cell":"tl"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_1_cell_taken_by_tile_3",
+      "act": {"this":"j1","form":"place_1","args":{"cell":"tl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile3_cell":"tl"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":3,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_1_cell_taken_by_tile_4",
+      "act": {"this":"j1","form":"place_1","args":{"cell":"tl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile4_cell":"tl"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":4,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_2_every_need_met",
+      "act": {"this":"j1","form":"place_2","args":{"cell":"tr","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "jigsaw_place_2_hands_full",
+      "act": {"this":"j1","form":"place_2","args":{"cell":"tr","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "jigsaw_place_2_already_placed",
+      "act": {"this":"j1","form":"place_2","args":{"cell":"tr","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile2_cell":"br"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"lift_first"}
+    },
+    {
+      "name": "jigsaw_place_2_cell_taken_by_tile_1",
+      "act": {"this":"j1","form":"place_2","args":{"cell":"tr","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile1_cell":"tr"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_2_cell_taken_by_tile_3",
+      "act": {"this":"j1","form":"place_2","args":{"cell":"tr","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile3_cell":"tr"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":3,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_2_cell_taken_by_tile_4",
+      "act": {"this":"j1","form":"place_2","args":{"cell":"tr","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile4_cell":"tr"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":4,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_3_every_need_met",
+      "act": {"this":"j1","form":"place_3","args":{"cell":"bl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "jigsaw_place_3_hands_full",
+      "act": {"this":"j1","form":"place_3","args":{"cell":"bl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "jigsaw_place_3_already_placed",
+      "act": {"this":"j1","form":"place_3","args":{"cell":"bl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile3_cell":"br"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"lift_first"}
+    },
+    {
+      "name": "jigsaw_place_3_cell_taken_by_tile_1",
+      "act": {"this":"j1","form":"place_3","args":{"cell":"bl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile1_cell":"bl"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_3_cell_taken_by_tile_2",
+      "act": {"this":"j1","form":"place_3","args":{"cell":"bl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile2_cell":"bl"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":3,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_3_cell_taken_by_tile_4",
+      "act": {"this":"j1","form":"place_3","args":{"cell":"bl","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile4_cell":"bl"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":4,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_4_every_need_met",
+      "act": {"this":"j1","form":"place_4","args":{"cell":"br","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "jigsaw_place_4_hands_full",
+      "act": {"this":"j1","form":"place_4","args":{"cell":"br","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "jigsaw_place_4_already_placed",
+      "act": {"this":"j1","form":"place_4","args":{"cell":"br","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile4_cell":"br"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"lift_first"}
+    },
+    {
+      "name": "jigsaw_place_4_cell_taken_by_tile_1",
+      "act": {"this":"j1","form":"place_4","args":{"cell":"br","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile1_cell":"br"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_4_cell_taken_by_tile_2",
+      "act": {"this":"j1","form":"place_4","args":{"cell":"br","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile2_cell":"br"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":3,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_place_4_cell_taken_by_tile_3",
+      "act": {"this":"j1","form":"place_4","args":{"cell":"br","turn":"r0"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile3_cell":"br"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":4,"says":"cell_taken"}
+    },
+    {
+      "name": "jigsaw_lift_every_need_met",
+      "act": {"this":"j1","form":"lift","args":{"tile":"tile2_cell"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile2_cell":"tl"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "jigsaw_lift_hands_full",
+      "act": {"this":"j1","form":"lift","args":{"tile":"tile2_cell"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile2_cell":"tl"}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "jigsaw_lift_already_in_tray",
+      "act": {"this":"j1","form":"lift","args":{"tile":"tile2_cell"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"in_tray"}
+    },
+    {
+      "name": "jigsaw_lift_not_a_tile",
+      "act": {"this":"j1","form":"lift","args":{"tile":"moves"}},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile2_cell":"tl"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"bad_input"}
+    },
+    {
+      "name": "jigsaw_reset_every_need_met",
+      "act": {"this":"j1","form":"reset"},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile3_cell":"bl"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "jigsaw_reset_hands_full",
+      "act": {"this":"j1","form":"reset"},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw","fields":{"tile3_cell":"bl"}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "jigsaw_reset_already_reset",
+      "act": {"this":"j1","form":"reset"},
+      "state": {"actor":"b1","nodes":{"j1":{"kind":"eden:picture_jigsaw"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"already_reset"}
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:poster_wall",
+  "owner": "thing",
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 800], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [2000, 2200, 200] },
+  "children": {
+    "poster": { "kind": "eden:poster", "most": 4 }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:poster_wall",
+    "shape": {"round":8,"shapes":[{"kind":"box","at":[0,1100,0],"size":[2000,2200,160],"tint":"wall"},{"kind":"box","at":[0,1150,82],"size":[1840,1300,4],"tint":"board"},{"kind":"box","at":[0,2180,0],"size":[2000,40,200],"tint":"cap"}],"palette":{"wall":"#8a8f8a","board":"#c9b48a","cap":"#4a3b30"},"tags":["wall","board","object"]}
+  },
+  "text": {
+    "card": "A poster wall with room for four posters; each Soul puts up two at most.",
+    "poster_wall": "poster wall",
+    "wall": "wall"
+  },
+  "card": { "text": "card", "category": "wall", "synonyms": ["poster_wall"] }
+}

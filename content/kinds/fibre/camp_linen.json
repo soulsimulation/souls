@@ -1,0 +1,226 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:camp_linen",
+  "owner": "thing",
+  "state": {
+    "stage": {
+      "n": 1,
+      "type": "enum",
+      "values": ["dirty", "wet", "damp", "folded"],
+      "default": "dirty",
+      "audience": {"rule": "everyone"}
+    },
+    "soap": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "audience": {"rule": "everyone"}
+    },
+    "water": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 30, 0]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [400, 60, 300]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "free": true}
+      ],
+      "steps": [
+        {"step": "take"}
+      ],
+      "effects": [
+        {"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}
+      ]
+    },
+    "wash": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "board": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:laundry_board",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "state", "field": "stage", "is": "dirty", "says": "needs_dirty"},
+        {"need": "enough", "says": "needs_soap_water"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "board"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "soap",
+          "from": {"arg": "board"},
+          "into": "this",
+          "amount": 1,
+          "event": "soap_used"
+        },
+        {
+          "change": "transfer",
+          "field": "water",
+          "from": {"arg": "board"},
+          "into": "this",
+          "amount": 1,
+          "event": "water_used"
+        },
+        {"change": "set", "field": "stage", "to": "wet", "event": "washed"}
+      ]
+    },
+    "wring": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "board": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:laundry_board",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "state", "field": "stage", "is": "wet", "says": "wash_first"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "board"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {"change": "set", "field": "stage", "to": "damp", "event": "wrung"}
+      ]
+    },
+    "fold": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "board": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:laundry_board",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "state", "field": "stage", "is": "damp", "says": "wring_first"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "board"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {"change": "set", "field": "stage", "to": "folded", "event": "folded"}
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:camp_linen",
+    "table": [
+      {
+        "part": "body",
+        "field": "stage",
+        "do": "show",
+        "at": {"dirty": 1, "wet": 0, "damp": 0, "folded": 0}
+      },
+      {
+        "part": "arm.l",
+        "field": "stage",
+        "do": "show",
+        "at": {"dirty": 0, "wet": 1, "damp": 0, "folded": 0}
+      },
+      {
+        "part": "arm.r",
+        "field": "stage",
+        "do": "show",
+        "at": {"dirty": 0, "wet": 0, "damp": 1, "folded": 0}
+      },
+      {
+        "part": "leg.l",
+        "field": "stage",
+        "do": "show",
+        "at": {"dirty": 0, "wet": 0, "damp": 0, "folded": 1}
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,15,0],"size":[380,30,280],"tint":"linen","role":"body"},{"kind":"box","at":[-120,32,-50],"size":[70,4,60],"tint":"mud","role":"body"},{"kind":"box","at":[20,32,60],"size":[70,4,60],"tint":"mud","role":"body"},{"kind":"box","at":[130,32,-50],"size":[70,4,60],"tint":"mud","role":"body"},{"kind":"box","at":[0,14,0],"size":[380,28,280],"tint":"wet","role":"arm.l"},{"kind":"box","at":[-90,30,20],"size":[45,6,170],"tint":"wetdark","role":"arm.l"},{"kind":"box","at":[20,30,20],"size":[45,6,170],"tint":"wetdark","role":"arm.l"},{"kind":"box","at":[100,30,20],"size":[45,6,170],"tint":"wetdark","role":"arm.l"},{"kind":"box","at":[0,20,0],"size":[380,40,110],"tint":"damp","role":"arm.r"},{"kind":"box","at":[-130,35,0],"size":[55,20,110],"tint":"wetdark","role":"arm.r"},{"kind":"box","at":[0,35,0],"size":[55,20,110],"tint":"wetdark","role":"arm.r"},{"kind":"box","at":[130,35,0],"size":[55,20,110],"tint":"wetdark","role":"arm.r"},{"kind":"box","at":[0,18,0],"size":[250,36,200],"tint":"damp","role":"leg.l"},{"kind":"box","at":[0,40,-65],"size":[250,8,70],"tint":"linen","role":"leg.l"}],"palette":{"linen":"#e9dfc5","mud":"#75503a","wet":"#6c9da8","wetdark":"#507581","damp":"#adc7c6"},"tags":["camping","linen","laundry","item"]}
+  },
+  "text": {
+    "card": "Camp linen, dirty to start: at a washboard wash it, wring it, then fold it.",
+    "needs_dirty": "This operation needs dirty linen.",
+    "wash_first": "Wash the dirty linen first; then wring the wet linen.",
+    "wring_first": "Wring the wet linen first; then fold the damp linen.",
+    "needs_soap_water": "Washing needs one unused soap charge and one water charge.",
+    "put_down_first": "Put down what you are holding before laundry.",
+    "camp": "camp",
+    "linen": "linen",
+    "laundry": "laundry",
+    "wash": "wash",
+    "howto_laundry": "At a washboard with empty hands: wash the linen, wring it, then fold it; it stays damp."
+  },
+  "card": {
+    "text": "card",
+    "category": "camp",
+    "synonyms": ["linen", "laundry", "wash"]
+  },
+  "howtos": {
+    "laundry": {
+      "text": "howto_laundry",
+      "steps": [
+        {"form": "wash"},
+        {"form": "wring"},
+        {"form": "fold"}
+      ]
+    }
+  }
+}

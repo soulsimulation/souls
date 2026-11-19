@@ -8,10 +8,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::effects::{Body, Change, Effect, Header, Part, Refusal, State, TransferRec};
+use crate::effects::{
+    Body, Change, Effect, Flight, Header, LinkState, NodeState, Part, Refusal, State, TransferRec,
+    read_id, read_pose,
+};
 use crate::encode::{Value, encode};
 use crate::ids::{Hash, Id, Purpose};
-use crate::pose::{Owner, Vec3};
+use crate::pose::{Owner, Pose, Vec3};
 use crate::time::Micros;
 use crate::world_model::Audience;
 
@@ -64,8 +67,9 @@ pub enum Level {
 /// The levels, most detail first. A server lowers a subscription by walking down this list.
 pub const ORDER: [Level; 4] = [Level::Full, Level::Sampled, Level::Outline, Level::Counts];
 
-/// The views' revision: raised whenever what any level keeps, or how it writes a record, changes.
-pub const REVISION: u64 = 1;
+/// The views' revision: raised whenever what any level keeps, or how it writes a record, changes. 2: a carried
+/// record names where its subtree lands (the flight's pose, #3248).
+pub const REVISION: u64 = 2;
 
 /// How far apart, in world time, the samples `Sampled` keeps of one moving node are.
 pub const SAMPLE_US: Micros = 1_000_000;
@@ -568,6 +572,12 @@ impl View {
         true
     }
 
+    /// Takes the records written since the last take, oldest first; a counts view's open second stays (R3's tier sends
+    /// each record once, #2697).
+    pub fn take(&mut self) -> Vec<(Micros, Value)> {
+        std::mem::take(&mut self.out.records)
+    }
+
     /// The view so far (rule 2). A counts view's current second is its last record until a later second closes it.
     pub fn output(&self) -> Output {
         let mut out = self.out.clone();
@@ -577,9 +587,10 @@ impl View {
 }
 
 /// The record a `full` or `sampled` view writes before an arrival whose leave it did not hold (rule 4): `{0: {1:
-/// sequence, 2: [[id, node], ...], 3: [[id, link], ...]}}` (field 0, which no entry has), the subtree as it was in
-/// flight, in T6's state layout. It holds only the nodes of the view's audience, and the links of that audience whose
-/// ends in the flight are seen by it (T2 rule 9); none, when the flight holds nothing of that audience.
+/// sequence, 2: [[id, node], ...], 3: [[id, link], ...], 4: pose}}` (field 0, which no entry has), the subtree as it
+/// was in flight, in T6's state layout, and where it lands: the flight's pose, whose frame is the new parent and slot
+/// (from revision 2). It holds only the nodes of the view's audience, and the links of that audience whose ends in the
+/// flight are seen by it (T2 rule 9); none, when the flight holds nothing of that audience.
 fn carried(seq: &Value, f: &crate::effects::Flight, aud: Audience) -> Option<Value> {
     let sees = |a: Audience| a == Audience::Everyone || a == aud;
     let pairs = |m: Vec<(Id, Value)>| {
@@ -634,8 +645,99 @@ fn carried(seq: &Value, f: &crate::effects::Flight, aud: Audience) -> Option<Val
             (*i, map(m))
         })
         .collect();
-    let inner = map(vec![(1, seq.clone()), (2, pairs(nodes)), (3, pairs(links))]);
+    let inner = map(vec![
+        (1, seq.clone()),
+        (2, pairs(nodes)),
+        (3, pairs(links)),
+        (4, f.pose.to_value()),
+    ]);
     Some(map(vec![(0, inner)]))
+}
+
+/// A carried record read back (rule 4): the arrival's sequence, the subtree's nodes and links in T6's state layout,
+/// and where it lands. A revision 1 record names no destination: its `pose` is none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Carried {
+    pub sequence: u64,
+    pub nodes: BTreeMap<Id, NodeState>,
+    pub links: BTreeMap<Id, LinkState>,
+    pub pose: Option<Pose>,
+}
+
+impl Carried {
+    /// A view's record as a carried record, or none when it is an entry (it has no field 0).
+    pub fn read(record: &Value) -> R<Option<Carried>> {
+        let Value::Map(m) = record else {
+            return refuse("not-a-record", "a view's record is a map");
+        };
+        let Some(c) = m.get(&0) else {
+            return Ok(None);
+        };
+        let Value::Map(c) = c else {
+            return refuse("not-a-record", "a carried record is a map");
+        };
+        let pairs = |k: u64| -> R<Vec<(Id, &Value)>> {
+            let Some(Value::Array(a)) = c.get(&k) else {
+                return refuse("not-a-record", format!("a carried record lacks field {k}"));
+            };
+            a.iter()
+                .map(|p| match p {
+                    Value::Array(p) if p.len() == 2 => Ok((read_id(&p[0])?, &p[1])),
+                    _ => refuse("not-a-record", "a carried pair is [id, value]"),
+                })
+                .collect()
+        };
+        let Some(Value::Uint(sequence)) = c.get(&1) else {
+            return refuse("not-a-record", "a carried record lacks its sequence");
+        };
+        Ok(Some(Carried {
+            sequence: *sequence,
+            nodes: pairs(2)?
+                .into_iter()
+                .map(|(i, v)| Ok((i, NodeState::read(v)?)))
+                .collect::<R<_>>()?,
+            links: pairs(3)?
+                .into_iter()
+                .map(|(i, v)| Ok((i, LinkState::read(v)?)))
+                .collect::<R<_>>()?,
+            pose: c.get(&4).map(read_pose).transpose()?,
+        }))
+    }
+
+    /// The flight it describes, landing in `header`'s zone: its root is the one node whose parent is not in it. A
+    /// revision 1 record, which names no destination, is refused as `carried-no-destination`.
+    pub fn flight(&self, header: &Header) -> R<Flight> {
+        let Some(pose) = self.pose else {
+            return refuse(
+                "carried-no-destination",
+                format!("the carried record of entry {} (revision 1)", self.sequence),
+            );
+        };
+        let roots: Vec<Id> = self
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.parent.is_none_or(|p| !self.nodes.contains_key(&p)))
+            .map(|(i, _)| *i)
+            .collect();
+        let [root] = roots.as_slice() else {
+            return refuse(
+                "carried-root",
+                format!(
+                    "the carried record of entry {} has {} roots",
+                    self.sequence,
+                    roots.len()
+                ),
+            );
+        };
+        Ok(Flight {
+            root: *root,
+            lineage: header.lineage,
+            zone: header.zone,
+            pose,
+            nodes: self.nodes.clone(),
+            links: self.links.clone(),
+        })
+    }
 }
 
 /// The nodes an entry creates or brings in (rule 4): its creates, the root of a subtree that arrives from this zone,

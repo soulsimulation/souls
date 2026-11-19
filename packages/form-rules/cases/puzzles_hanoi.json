@@ -1,0 +1,146 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:hanoi_board (from #1794). Three rings (small, medium, large), each on peg a, b or c; all start on a. With empty hands ('Put down what you hold before moving the rings.') a Soul moves one ring in two seconds: the ring must be on the peg it names as the source, the destination must be another peg ('Choose a different destination peg.'), no smaller ring may lie on the ring ('A smaller ring lies on top of it') nor on the destination ('A larger ring cannot go on a smaller ring; choose another peg.'). The small ring is always on top, so it names only a destination. Reset puts every ring back on a, refused when they already are ('The same rings are already reset on peg a.').",
+  "cases": [
+    {
+      "name": "hanoi_move_small_every_need_met",
+      "act": {"this":"h1","form":"move_small","args":{"to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hanoi_move_small_hands_full",
+      "act": {"this":"h1","form":"move_small","args":{"to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "hanoi_move_small_same_peg",
+      "act": {"this":"h1","form":"move_small","args":{"to":"a"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"same_peg"}
+    },
+    {
+      "name": "hanoi_move_medium_every_need_met",
+      "act": {"this":"h1","form":"move_medium","args":{"from":"a","to":"b"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"c"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hanoi_move_medium_hands_full",
+      "act": {"this":"h1","form":"move_medium","args":{"from":"a","to":"b"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"c"}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "hanoi_move_medium_not_on_that_peg",
+      "act": {"this":"h1","form":"move_medium","args":{"from":"b","to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"c"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"not_on_peg"}
+    },
+    {
+      "name": "hanoi_move_medium_same_peg",
+      "act": {"this":"h1","form":"move_medium","args":{"from":"a","to":"a"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"c"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"says":"same_peg"}
+    },
+    {
+      "name": "hanoi_move_medium_small_on_top",
+      "act": {"this":"h1","form":"move_medium","args":{"from":"a","to":"b"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":3,"says":"ring_on_top"}
+    },
+    {
+      "name": "hanoi_move_medium_onto_small",
+      "act": {"this":"h1","form":"move_medium","args":{"from":"a","to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"c"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":4,"says":"larger_on_smaller"}
+    },
+    {
+      "name": "hanoi_move_large_every_need_met",
+      "act": {"this":"h1","form":"move_large","args":{"from":"a","to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"b","medium":"b"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hanoi_move_large_hands_full",
+      "act": {"this":"h1","form":"move_large","args":{"from":"a","to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"b","medium":"b"}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "hanoi_move_large_not_on_that_peg",
+      "act": {"this":"h1","form":"move_large","args":{"from":"b","to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"b","medium":"b"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"not_on_peg"}
+    },
+    {
+      "name": "hanoi_move_large_same_peg",
+      "act": {"this":"h1","form":"move_large","args":{"from":"a","to":"a"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"b","medium":"b"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"says":"same_peg"}
+    },
+    {
+      "name": "hanoi_move_large_small_on_top",
+      "act": {"this":"h1","form":"move_large","args":{"from":"a","to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"medium":"b"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":3,"says":"ring_on_top"}
+    },
+    {
+      "name": "hanoi_move_large_medium_on_top",
+      "act": {"this":"h1","form":"move_large","args":{"from":"a","to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"b"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":4,"says":"ring_on_top"}
+    },
+    {
+      "name": "hanoi_move_large_onto_small",
+      "act": {"this":"h1","form":"move_large","args":{"from":"a","to":"c"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"c","medium":"b"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":5,"says":"larger_on_smaller"}
+    },
+    {
+      "name": "hanoi_move_large_onto_medium",
+      "act": {"this":"h1","form":"move_large","args":{"from":"a","to":"b"}},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"c","medium":"b"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":6,"says":"larger_on_smaller"}
+    },
+    {
+      "name": "hanoi_reset_every_need_met",
+      "act": {"this":"h1","form":"reset"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"c","medium":"b"}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hanoi_reset_hands_full",
+      "act": {"this":"h1","form":"reset"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board","fields":{"small":"c"}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:bread_roll"}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"says":"put_down_first"}
+    },
+    {
+      "name": "hanoi_reset_already_reset",
+      "act": {"this":"h1","form":"reset"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:hanoi_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":1,"says":"already_reset"}
+    }
+  ]
+}

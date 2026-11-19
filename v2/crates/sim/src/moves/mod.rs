@@ -6,7 +6,8 @@
 //!   set on each resource it holds ([`Part::Move`]), and ending it, however it ends, releases the driver: those parts
 //!   go back to neutral.
 //! - **Reach first.** Before any claim, the distance from the effector to the thing's contact point is asked of the
-//!   geometry ([`Reach`]): one distance, no limbs solved. Beyond the move's reach it is refused `out-of-reach` with the
+//!   geometry ([`Reach`]): one distance, no limbs solved, from the hand or from the named tip of a tool held in it
+//!   ([`Reach::tip`], B4). Beyond the move's reach it is refused `out-of-reach` with the
 //!   distance and the reach, and nothing changes. At contact the distance is asked again; beyond reach then, the move
 //!   is cancelled `out-of-reach`.
 //! - **One timer per phase end**, in K9's due list, keyed by the move's instance. Nothing polls: a tick with moves in
@@ -14,7 +15,7 @@
 //! - **Cancelled by a claim.** A later claim that takes the move's resources ends its driver (T9 rule 4). The move
 //!   learns it when its next phase timer fires and ends as `claim-taken` then; [`Moves::cancel`] ends one at once.
 //!
-//! Not here: contact with a body (B6), seats (B3), holding (B4), the beat (B8), a move waiting for its resource.
+//! Not here: contact with a body (B6), seats (B3), holding (B4, `crate::slots`), the beat (B8), a move waiting for its resource.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -53,6 +54,20 @@ pub trait Reach {
         target: Id,
         point: &Name,
     ) -> Option<i64>;
+
+    /// The named tip of the tool `body` holds in `limb`, if it holds one (B4, #2739). A move that reaches with the
+    /// hand ([`Effector::Held`]) then reaches from that tip: a held tool lengthens the hand. The N lane answers it.
+    fn tip(&self, _body: Id, _limb: &Name) -> Option<Name> {
+        None
+    }
+}
+
+/// The effector a move reaches with: the hand's, or the named tip of a tool held in it.
+fn effector(mv: &Move, geo: &impl Reach, body: Id, limb: Option<&Name>) -> Effector {
+    match (&mv.effector, limb.and_then(|l| geo.tip(body, l))) {
+        (Effector::Held, Some(tip)) => Effector::HeldPoint(tip),
+        (e, _) => e.clone(),
+    }
 }
 
 /// A move's number, unique in [`Moves`].
@@ -128,6 +143,11 @@ impl Moves {
         self.live.get(&instance).map(|l| &l.record)
     }
 
+    /// The move a timer the due list handed back belongs to, before [`Moves::fire`] runs it.
+    pub fn instance_of(&self, t: &Timer) -> Option<Instance> {
+        self.by_timer.get(&t.id).copied()
+    }
+
     /// The controller driver move `instance` in progress holds its resources under.
     pub fn driver(&self, instance: Instance) -> Option<Driver> {
         self.live.get(&instance).map(|l| l.driver)
@@ -154,7 +174,8 @@ impl Moves {
         };
         let holds = claims.plan(Driver::MAX, &shape)?.holds;
         let limb = holds.first();
-        let Some(d) = geo.distance(body, &mv.effector, limb, target, &mv.contact) else {
+        let reach_from = effector(mv, geo, body, limb);
+        let Some(d) = geo.distance(body, &reach_from, limb, target, &mv.contact) else {
             return refuse(
                 "reach-unknown",
                 format!(
@@ -271,7 +292,13 @@ impl Moves {
         if phase == 1 {
             let limb = l.record.limbs.first();
             let near = geo
-                .distance(body, &l.mv.effector, limb, l.record.target, &l.mv.contact)
+                .distance(
+                    body,
+                    &effector(&l.mv, geo, body, limb),
+                    limb,
+                    l.record.target,
+                    &l.mv.contact,
+                )
                 .is_some_and(|d| d <= l.mv.reach);
             if !near {
                 return self

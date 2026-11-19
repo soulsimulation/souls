@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":257,"group":"over-time","words":"go to bed at ten","obvious":2,"when":"at ten","things":{"bed":"eden:bed"},"chain":[{"this":"me","form":"lie_down","args":{"spot":"bed"}},{"this":"bed","form":"sleep"}]}

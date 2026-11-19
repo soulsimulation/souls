@@ -1,0 +1,16 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Camp bowl washing (from #1683): the dirty bowl on the board is scrubbed; its dirt moves into the basin and the clean water is used, in one batch; the clean bowl is taken; washing again is refused (the water is used).",
+  "cases": [
+    {
+      "name": "wash_take_then_no_water",
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "ws1"]}, "ws1": {"kind": "eden:wash_station", "slots": {"board": ["mk1"]}}, "mk1": {"kind": "eden:mess_kit"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "do": [
+        {"act": {"this": "ws1", "form": "wash", "args": {"bowl": "mk1"}}, "receipt": "rw1", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "mk1", "field": "dirt", "n": 1, "to": 0, "by": -1}, {"change": "set", "node": "ws1", "field": "dirt", "n": 2, "to": 1, "by": 1}, {"change": "set", "node": "ws1", "field": "clean_water", "n": 1, "to": 0}], "events": [{"event": "eden:washed", "node": "ws1", "changes": [0, 1]}, {"event": "eden:water_used", "node": "ws1", "changes": [2]}], "timers": []}},
+        {"act": {"this": "mk1", "form": "take"}, "receipt": "rw2", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "mk1", "to": {"node": "b1", "hand": "left"}}], "events": [{"event": "eden:taken", "node": "mk1", "changes": [0]}], "timers": []}},
+        {"act": {"this": "ws1", "form": "wash", "args": {"bowl": "mk1"}}, "receipt": "rw3", "expect": {"verdict": "no", "reason": "field_differs", "need": 0}}
+      ],
+      "after": {"ws1": {"kind": "eden:wash_station", "fields": {"clean_water": 0, "dirt": 1}, "slots": {"board": []}}, "mk1": {"kind": "eden:mess_kit", "fields": {"dirt": 0}}, "b1": {"hands": {"left": "mk1", "right": null}}}
+    }
+  ]
+}

@@ -142,14 +142,34 @@ pub struct Torn {
 }
 
 /// What recovery found: the header (none for an empty log, or a header cut before it was whole), the records in
-/// order, where the valid log ends, the last record's checksum, and a torn tail if there was one.
+/// order from record `first` (0 for a whole read, a checkpoint's place for a read from it), the byte reading started
+/// at, where the valid log ends, the last record's checksum, and a torn tail if there was one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Recovered {
     pub header: Option<Header>,
+    pub first: u64,
+    pub start: usize,
     pub records: Vec<Vec<u8>>,
     pub end: usize,
     pub last_crc: u32,
     pub torn: Option<Torn>,
+}
+
+impl Recovered {
+    /// The records from record `n` on (none if `n` is past them; all of them if it is before `first`).
+    pub fn after(&self, n: u64) -> &[Vec<u8>] {
+        let skip = usize::try_from(n.saturating_sub(self.first)).unwrap_or(usize::MAX);
+        &self.records[skip.min(self.records.len())..]
+    }
+}
+
+/// A place in a log between records: records `..record` end at byte `offset`, the last of them with checksum `crc`
+/// (the salt before the first). A checkpoint keeps a durable one, so a restart reads the log from there (K4b).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct At {
+    pub record: u64,
+    pub offset: u64,
+    pub crc: u32,
 }
 
 /// Reads a log forward. A record that does not check, with nothing valid after it, is a torn tail (reported, to be
@@ -164,6 +184,8 @@ pub fn recover(b: &[u8]) -> R<Recovered> {
         // is one cut while being written: a torn tail of an empty log.
         return Ok(Recovered {
             header: None,
+            first: 0,
+            start: 0,
             records: Vec::new(),
             end: 0,
             last_crc: 0,
@@ -180,9 +202,40 @@ pub fn recover(b: &[u8]) -> R<Recovered> {
         );
     }
     let header = Header::new(epoch.expect("whole"));
+    scan(b, 0, HEADER_LEN, header, header.salt, 0)
+}
+
+/// Reads a log from a place a checkpoint kept: `header` is the log's first [`HEADER_LEN`] bytes and `tail` its bytes
+/// from `at.offset`; what follows is judged as [`recover`] judges it. The bytes before `at` are not read: the
+/// checkpoint holds what they hold. `None` when the header does not check or the record at `at` does not continue
+/// the chain from `at.crc` (a checkpoint and a log that do not belong together): the caller reads the whole log.
+pub fn recover_from(header: &[u8], tail: &[u8], at: At) -> R<Option<Recovered>> {
+    let Some(h) = (header.len() >= HEADER_LEN)
+        .then(|| {
+            Header::new(u64::from_le_bytes(
+                header[16..24].try_into().expect("8 bytes"),
+            ))
+        })
+        .filter(|h| header[..HEADER_LEN] == h.to_bytes())
+    else {
+        return Ok(None);
+    };
+    let Ok(offset) = usize::try_from(at.offset) else {
+        return Ok(None);
+    };
+    if offset < HEADER_LEN || (tail.len() >= HEAD_LEN && u32_at(tail, 4) != at.crc) {
+        return Ok(None);
+    }
+    scan(tail, offset, 0, h, at.crc, at.record).map(Some)
+}
+
+/// Reads records forward from `b[from..]`, where `b[0]` is the log's byte `base`: chained from `prev`, numbered from
+/// `first`.
+fn scan(b: &[u8], base: usize, from: usize, header: Header, prev: u32, first: u64) -> R<Recovered> {
     let salt = header.salt;
-    let (mut at, mut prev) = (HEADER_LEN, salt);
+    let (mut at, mut prev) = (from, prev);
     let mut records = Vec::new();
+    let n = |records: &Vec<Vec<u8>>| first + records.len() as u64;
     while at < b.len() {
         match check(b, at, salt) {
             Some((len, p, crc)) if p == prev => {
@@ -194,9 +247,10 @@ pub fn recover(b: &[u8]) -> R<Recovered> {
                 return refuse(
                     "log-corrupt",
                     format!(
-                        "record {} at byte {at} checks but does not follow record {} (a record is missing or moved)",
-                        records.len(),
-                        records.len().wrapping_sub(1)
+                        "record {} at byte {} checks but does not follow record {} (a record is missing or moved)",
+                        n(&records),
+                        base + at,
+                        n(&records).wrapping_sub(1)
                     ),
                 );
             }
@@ -205,18 +259,22 @@ pub fn recover(b: &[u8]) -> R<Recovered> {
                     return refuse(
                         "log-corrupt",
                         format!(
-                            "record {} at byte {at} is damaged and a valid record follows at byte {q}",
-                            records.len()
+                            "record {} at byte {} is damaged and a valid record follows at byte {}",
+                            n(&records),
+                            base + at,
+                            base + q
                         ),
                     );
                 }
                 return Ok(Recovered {
                     header: Some(header),
+                    first,
+                    start: base + from,
                     records,
-                    end: at,
+                    end: base + at,
                     last_crc: prev,
                     torn: Some(Torn {
-                        at,
+                        at: base + at,
                         dropped: b.len() - at,
                     }),
                 });
@@ -225,8 +283,10 @@ pub fn recover(b: &[u8]) -> R<Recovered> {
     }
     Ok(Recovered {
         header: Some(header),
+        first,
+        start: base + from,
         records,
-        end: at,
+        end: base + at,
         last_crc: prev,
         torn: None,
     })

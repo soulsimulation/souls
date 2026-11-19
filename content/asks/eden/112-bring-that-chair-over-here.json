@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":112,"group":"two-things","words":"bring that chair over here","obvious":3,"things":{"chair":"eden:chair"},"chain":[{"this":"me","form":"pick_up","carry":"chair","args":{"thing":"chair"}},{"this":"me","form":"put","place":{"at":"here","thing":"chair"},"args":{"thing":"chair"}}]}
