@@ -45,7 +45,8 @@ export const problem = (rule, where, what) => `${rule}: ${where}: ${what} [${RUL
 
 /** The dependencies each crate under v2/crates may have (normal, dev and build alike). A crate not listed fails. */
 export const ALLOWED = {
-  replica: ['wasm-bindgen'],
+  // wasmi: the code hatch's one interpreter, metered by its own fuel the same in every build (F8, #2823).
+  replica: ['wasm-bindgen', 'wasmi'],
   // skills: the world wakes the form runner and steps the walk it starts (F1, #2766; K13a, #2676).
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld', 'skills'],
   // O3 (#2732): the shipper writes pieces to the object store and moves the directory's mark. import-eden: E1's Eden
