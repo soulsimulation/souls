@@ -30,8 +30,10 @@ use crate::alarm::Record;
 
 /// The shortest lead a world is woken with, µs: before any wake is measured, and the floor after.
 pub const WAKE_FLOOR_US: i64 = 500_000;
-/// The extra lead for each other world due within a second either side of this one, µs.
-pub const START_US: i64 = 10_000;
+/// The extra lead for each other world due within a second either side of this one, µs: systemd starts units one at
+/// a time, and O2's runs measured 30 to 68 ms a start on a loaded 2-processor machine. A crowd of 100 is woken about
+/// 8 s early, which costs nothing: a world never commits early.
+pub const START_US: i64 = 80_000;
 /// The longest the daemon blocks before it reads the wall clock again, µs.
 pub const RECHECK_US: i64 = 1_000_000;
 /// Wakes measured that the lead is the longest of.
@@ -43,7 +45,8 @@ pub trait Waker {
 }
 
 /// `systemctl start --no-block worldd@<world>.service ...`, all in one call: a world already running is left as it
-/// is. One call per world measured about 20 ms each, so 100 due in one second were started over 2 s (O2's runs).
+/// is. One call per world measured about 20 ms each, so 100 due in one second were started over 2 s (O2's runs). Not
+/// waited for: the daemon's loop never blocks on systemd.
 pub struct Systemd;
 
 impl Waker for Systemd {
@@ -51,12 +54,22 @@ impl Waker for Systemd {
         if worlds.is_empty() {
             return;
         }
-        let r = Command::new("systemctl")
+        let child = Command::new("systemctl")
             .args(["start", "--no-block"])
             .args(worlds.iter().map(|w| format!("worldd@{w}.service")))
-            .status();
-        if !r.is_ok_and(|s| s.success()) {
-            eprintln!("alarms: wake {worlds:?}: systemctl failed");
+            .stdin(Stdio::null())
+            .spawn();
+        let n = worlds.len();
+        match child {
+            // Reaped on its own thread, so the loop goes on while systemd queues the starts.
+            Ok(mut c) => {
+                std::thread::spawn(move || {
+                    if !c.wait().is_ok_and(|s| s.success()) {
+                        eprintln!("alarms: wake of {n} worlds: systemctl failed");
+                    }
+                });
+            }
+            Err(e) => eprintln!("alarms: wake of {n} worlds: {e}"),
         }
     }
 }

@@ -28,7 +28,7 @@ sleeping world, `<world> <due µs from the Unix epoch>` or `<world> none`.
 - **At start** it reads the record and arms every alarm, overdue first. A daemon killed, or a machine rebooted, loses
   no alarm: an alarm that came due while it was down is fired at once.
 - **Early:** a world is started at its due time less the longest wake measured lately (start to the world's
-  `awake`, at least 0.5 s) less 10 ms for each other world due within a second either side of it, and never after a
+  `awake`, at least 0.5 s) less 80 ms (systemd starts units one at a time, measured 30 to 68 ms each) for each other world due within a second either side of it, and never after a
   world due later than it. Every world whose time has come is started in one `systemctl start` call (one call per
   world took about 20 ms each, 2 s for 100). 100 worlds due in one second are started in order, each up before its
   due change. A world woken early waits; it never commits early.
