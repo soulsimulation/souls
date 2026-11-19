@@ -4,8 +4,10 @@
 //! that poll. The directory keeps the token's SHA-256 alone, here and in the gateway's tokens file (I1's
 //! `<grant> <sha-256 hex>` lines), never the token.
 //!
-//! - A request names a Soul (its grant, `soul-<scope hex>-<counter>`) or asks for a new one. Its `scope` is `soul`;
-//!   a creator's grant (G7) is refused by name until G7 adds its approval.
+//! - A request names a Soul (its grant, `soul-<scope hex>-<counter>`) or asks for a new one; its `scope` is `soul`.
+//!   A creator's request (G7, #2796) has `scope` `creator` and names a world's creator grant,
+//!   `creator-<scope hex>-<counter>`, which the account must hold (registered with the world); a creator is never
+//!   made by a pairing. Approval, the connected device and the token are as for a Soul.
 //! - A Soul connected to a device is refused, naming the device, unless the request is forced; a forced pairing
 //!   replaces the old device's token. An unconnected Soul moves freely. No browser click takes a Soul: the owner
 //!   only approves what an agent asked for, and only for a Soul the owner holds.
@@ -98,7 +100,16 @@ pub struct Pairing {
 
 /// A grant's text is a Soul's: `soul-<32 hex>-<counter>`.
 pub fn is_soul_grant(text: &str) -> bool {
-    let Some(rest) = text.strip_prefix("soul-") else {
+    is_grant("soul-", text)
+}
+
+/// A grant's text is a creator's: `creator-<32 hex>-<counter>`.
+pub fn is_creator_grant(text: &str) -> bool {
+    is_grant("creator-", text)
+}
+
+fn is_grant(prefix: &str, text: &str) -> bool {
+    let Some(rest) = text.strip_prefix(prefix) else {
         return false;
     };
     let Some((scope, counter)) = rest.split_once('-') else {
@@ -186,7 +197,7 @@ impl Pairing {
             .transpose()
     }
 
-    /// A Soul held by `account` with no device: an unconnected Soul.
+    /// A Soul (or a world's creator) held by `account` with no device: an unconnected one.
     pub fn register(&self, grant: &str, account: &str) -> Result<(), rusqlite::Error> {
         self.db.lock().expect("the store").execute(
             "INSERT OR IGNORE INTO paired_souls_v1(grant_text, account) VALUES (?1, ?2)",
@@ -197,14 +208,19 @@ impl Pairing {
 
     /// Records a daemon's request; its short code and interval.
     pub fn ask(&self, a: &Ask, now: u64) -> Result<Asked, &'static str> {
-        if a.scope != "soul" {
-            return Err("scope-not-yet");
+        match a.scope.as_str() {
+            "soul" if a.soul.as_deref().is_some_and(|s| !is_soul_grant(s)) => {
+                return Err("not-a-soul");
+            }
+            "soul" => {}
+            "creator" if !a.soul.as_deref().is_some_and(is_creator_grant) => {
+                return Err("not-a-creator");
+            }
+            "creator" => {}
+            _ => return Err("scope-unknown"),
         }
         if !is_name(&a.device) || !is_name(&a.label) {
             return Err("name");
-        }
-        if a.soul.as_deref().is_some_and(|s| !is_soul_grant(s)) {
-            return Err("not-a-soul");
         }
         let db = self.db.lock().expect("the store");
         for _ in 0..4 {
