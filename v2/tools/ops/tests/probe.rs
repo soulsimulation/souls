@@ -169,7 +169,7 @@ fn a1_control_an_act_probe_is_seen() {
     let r = watch(
         &d.join("gateway.sock"),
         &canary(200),
-        &mut Probe::Act(act),
+        &mut Probe::Act(Box::new(act)),
         true,
     );
     let after = root(&d);

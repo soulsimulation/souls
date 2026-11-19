@@ -100,7 +100,7 @@ pub fn now_us() -> i64 {
 pub enum Probe {
     /// The sync ask's number, counted up.
     Ask(u64),
-    Act(Intent),
+    Act(Box<Intent>),
 }
 
 impl Probe {
