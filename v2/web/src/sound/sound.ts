@@ -71,6 +71,7 @@ export class WorldSound {
   constructor(place: Placing) {
     this.place = place;
     const bar = document.createElement('div');
+    bar.id = 'sound-bar';
     Object.assign(bar.style, { position: 'fixed', top: '8px', right: '8px', zIndex: '10', display: 'flex', gap: '4px', alignItems: 'center' });
     this.button = document.createElement('button');
     Object.assign(this.button.style, { font: '12px system-ui', padding: '4px 8px', opacity: '0.85' });

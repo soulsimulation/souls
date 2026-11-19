@@ -13,7 +13,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 use replica::audience::references;
-use replica::effects::{Actor, Part};
+use replica::effects::{Actor, Body, Change, Part};
 use replica::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use replica::ids::{Id, Minter, Scope, Version};
 use replica::intents::{Intent, Target};
@@ -642,6 +642,30 @@ fn references_in(log: &Path) -> Vec<Id> {
     out.into_iter().collect()
 }
 
+/// The body born for `soul` (C3, #3367): a Soul's first intent births its body, and its words are kept for that body,
+/// so they read by it. From the log: the `souls:body-of` link from the body to `soul`.
+fn born_body(log: &Path, soul: Id) -> Id {
+    let (l, found) = Log::open(FileStore::open(log).expect("the log"), 1).expect("opens");
+    drop(l.close());
+    found
+        .records
+        .iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .flat_map(|r| Part::read(r).expect("a part").effects)
+        .filter_map(|e| match e.body {
+            Body::Changes(c) => Some(c),
+            _ => None,
+        })
+        .flatten()
+        .find_map(|c| match c.change {
+            Change::Link {
+                ty, ends: [b, s], ..
+            } if ty.as_str() == "souls:body-of" && s == soul => Some(b),
+            _ => None,
+        })
+        .expect("a body born for the Soul")
+}
+
 /// O20b (#3523) A1: `worldd serve` keeps a world's words in `<dir>/log.text`. Sentences said before a SIGKILL read
 /// after the world is started again, and one erased while it is down stays refused `removed` across the next start.
 #[test]
@@ -664,6 +688,7 @@ fn o20b_a1_served_words_outlive_sigkill_and_erased_stay_refused() {
     w.kill();
     let refs = references_in(&dir.join("log"));
     assert_eq!(refs.len(), 2, "two sentences, each logged by its reference");
+    let body = born_body(&dir.join("log"), body);
     let store = || {
         Store::open_dir(
             &dir.join("log.text"),
@@ -760,6 +785,7 @@ fn o20b_a2_a3_served_world_ships_its_words_and_they_restore() {
 
     // Machine-b: a fresh folder, the bucket and the passphrase alone.
     let refs = references_in(&dir.join("log"));
+    let body = born_body(&dir.join("log"), body);
     let b = d.join("b");
     let prefix = format!("worlds/{lineage}/");
     let stores: Vec<_> = backup::owned_by("worldd", &[&lineage])

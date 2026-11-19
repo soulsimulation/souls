@@ -100,9 +100,9 @@ export function drawMine(list: HTMLElement, souls: Mine[], call: Call, said: (s:
 
 /** The world page's card: a "New Soul" button opening the line to copy. Shown only on a world's page. */
 export function mountCard(world: string, origin = location.origin): HTMLElement {
-  const open = el('button', { type: 'button', textContent: 'New Soul' });
+  const open = el('button', { type: 'button', textContent: 'New Soul', id: 'new-soul' });
   open.style.cssText = 'position:fixed;right:12px;bottom:12px;padding:8px 12px;border:0;border-radius:4px;background:#3d6fb6;color:#fff;font:13px system-ui,sans-serif;cursor:pointer';
-  const card = el('section', { hidden: true });
+  const card = el('section', { hidden: true, id: 'new-soul-card' });
   card.setAttribute('role', 'dialog');
   card.setAttribute('aria-label', 'New Soul');
   card.style.cssText = 'position:fixed;right:12px;bottom:52px;width:min(380px,calc(100vw - 24px));box-sizing:border-box;padding:12px 14px;'
