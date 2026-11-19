@@ -3,7 +3,8 @@
 Engine v2 O20 (#2812). A world's log reaches the bucket as O3's pieces and comes back with O12's restore
 ([restore.md](restore.md)). Everything else a machine keeps (accounts, pairings and their token hashes, the owner's
 mailbox, words, removals, uploads) is listed in `v2/tools/ops/stores.json`, shipped to the same bucket and restored
-from it alone. Code: `v2/tools/ops/backup/` (the list, the copies, the shipper, the restore and the drill).
+from it alone. Code: `v2/crates/directoryd/src/backup.rs` (the list, the copies, the shipper) and
+`v2/tools/ops/backup/` (the restore and the drill).
 
 ## The stores (Step 0)
 
@@ -11,7 +12,7 @@ Each has one owning program; the list says how each is copied.
 
 | store | owner | path under the data folder | copy | ships |
 |---|---|---|---|---|
-| accounts (W1); the owner's mailbox is a table in it (R13, #2753) | directoryd | `directory/accounts.sqlite` | SQLite's online backup, through the owner (it holds the file exclusively: `Store::backup`) | each 270 s, when changed |
+| accounts (W1); the owner's mailbox (R13, #2753) and the prayers to a world's creator (G11, #3335) are tables in it | directoryd | `directory/accounts.sqlite` | SQLite's online backup, through the owner (it holds the file exclusively: `Store::backup`) | each 270 s, when changed |
 | pairing, with each paired Soul's token hash (W2) | directoryd | `directory/pairing.sqlite` | SQLite's online backup | each 270 s, when changed |
 | the gateway's tokens file (W2) | directoryd | `directory/gateway-tokens` | as it is (written whole, renamed) | each 270 s, when changed |
 | words and uploads: the text store (K16, V1b) | worldd | `worlds/<world>/log.text/` | `text`, then `uploads/`, then `removed`, in that order | each 270 s, when changed |
@@ -46,9 +47,31 @@ The directory's stores are restored by `backup::restore` with the machine's data
 directoryd starts. Restoring a text store ends by opening it, which applies its removal list again. The loss bar: at
 most five minutes of writes, counted.
 
-Not yet: the shipper runs in the drill's machine-a, not yet inside directoryd and worldd (the account store's copy
-needs its owner, so directoryd must run it), and C1's `worldd serve` keeps its words in memory, with no text store on
-disk to ship. Both are named under the PR's known limits with their next task.
+## The programs ship their own stores (O20b, #3523)
+
+`worldd serve` keeps its words in `<world folder>/log.text/` and ships them, keyed by the world's lineage as O12's
+restore reads them. directoryd ships the stores it was started with (`--store`, `--pairing`, `--gateway-tokens`, at
+whatever paths they are given) and hands over the account store's copy itself. Each runs the shipper on a thread of
+its own, once a second, never on the tick. The list, the seal and the shipper live in `directoryd::backup`; the
+restore stays in `v2/tools/ops/backup/`.
+
+| setting | what |
+|---|---|
+| `SOULS_BACKUP_URL` | the bucket: `s3:https://<host>/<bucket>[/<prefix>]`, the form of `BACKUP_OFFSITE_URL`, or `folder:<path>`, a folder standing in for it |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (`AWS_DEFAULT_REGION`, default `auto`) | the bucket's keys, as the host's backup settings hold them |
+| `SOULS_BACKUP_KEY_FILE` | the recovery passphrase's file (root only) |
+| `SOULS_BACKUP_SHIP_S` | a drill's or a test's shorter interval; never longer than the list's |
+
+Each program says once at start what it ships and where (`<program>: backup: shipping text, removals to the offsite
+bucket`), or `<program>: backup: no bucket (SOULS_BACKUP_URL is not set); its stores are not shipped`, and then
+runs as before. A bucket set without a key file refuses the start. A copy that fails is said once and retried each
+second (`backup: not shipped, ...`), and `backup: shipping again` follows when it goes through.
+
+Not yet: O20's drill still runs its own stand-in machine-a. The next step is to make machine-a start `directoryd
+--test-sign-in --pairing ... --gateway-tokens ...` and `worldd serve` on a seeded world, with `SOULS_BACKUP_URL=folder:
+<bucket>`, and to write through them: sign-ins and pairings over HTTP, words over the world's socket. The tests
+`cargo test -p directoryd --test backup` and `cargo test -p worldd --test serve o20b` show that both programs ship and
+that the copies read back.
 
 ## The drill
 

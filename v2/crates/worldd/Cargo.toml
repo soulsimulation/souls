@@ -21,3 +21,13 @@ skills = { path = "../skills" }
 # #2688); `worldd serve` reads a world's facts file with N1's loader (C1, #3365).
 import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }
+
+[dev-dependencies]
+# O20b (#3523): a served world's shipped stores read back by O20's restore, as O12's restore runs it.
+backup = { path = "../../tools/ops/backup" }
+# G1e (#3532): a served world's creator edits it through a real gateway (tests/edit_served.rs).
+gatewayd = { path = "../gatewayd" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }

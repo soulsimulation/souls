@@ -8,6 +8,7 @@ import { PlaybackClock, caughtUp } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { SocketSource, chooseFollow, exchange, type Session } from '../source/socket.ts';
+import { providerSession } from '../source/signin.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
@@ -16,8 +17,13 @@ import { pageThings } from '../things/page.ts';
 import { HistoryPage, readMoment } from '../history/page.ts';
 import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
+import { mountOwnerBox } from '../owner/box.ts';
 import { arrive } from '../worlds/arrive.ts';
 import { WorldSky } from '../sky/sky.ts';
+import { tickWater } from '../water/water.ts';
+import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
+
+installNightLighting(); // V19b: the lamps' night pools, before any lit material compiles
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -27,11 +33,16 @@ const address = new URLSearchParams(location.search).get('stream');
 const worldName = new URLSearchParams(location.search).get('world');
 let worldHistory: string | null = null;
 const moment = readMoment(location.hash); // V9: a link to a moment opens history
-// V13/V13b: the owner's near-live view, from the web session alone: `directory` is the directory's origin, `gateway`
-// the world's socket. The session is the provider's (a fresh token asked of its script each time), or `as=<test
-// person>` on a local world. The session exchanges for a view token held in memory; no token is ever in the address.
-const q = new URLSearchParams(location.search), provider = (globalThis as any).Clerk?.session;
-const session: Session | null = provider ? { bearer: () => provider.getToken() } : q.get('as') ? { testName: q.get('as')! } : null;
+// V13/V13b/V13c: the owner's near-live view, from the web session alone: `directory` is the directory's origin,
+// `gateway` the world's socket. The session is the provider's, its script loaded behind today's configuration
+// (`signin.ts`; a fresh token asked of it each time), or `as=<test person>` on a local world. The session exchanges for
+// a view token held in memory; no token is ever in the address.
+const q = new URLSearchParams(location.search);
+const signIn = async (): Promise<Session | null> => {
+  const env = { document, href: location.href, global: globalThis as any, navigate: (u: string) => location.assign(u) };
+  const provider = await providerSession((globalThis as any).__simConfig ?? {}, env);
+  return provider ?? (q.get('as') ? { testName: q.get('as')! } : null);
+};
 let near: SocketSource | null = null;
 
 // The GL renderer's name, from a throwaway context, picks the tier before the real one is made (antialiasing is fixed
@@ -122,13 +133,18 @@ if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis a
 else if (address) {
   live(address);
   const directory = q.get('directory'), gateway = q.get('gateway');
-  if (directory && gateway && session) exchange(directory, session).then((g) => {
+  if (directory && gateway) signIn().then(async (session) => {
+    if (!session) return;
+    const g = await exchange(directory, session);
     const follow = chooseFollow(g.owned, q.get('follow'));
     if (!follow) return void (error = 'no view: the account has no Soul to follow');
     near = new SocketSource({ url: gateway, token: g.token, expires: g.expires, follow, renew: () => exchange(directory, session) });
     near.start({ pointer: () => {}, part: (p) => world.apply([], [], p.samples), error: (m) => (error = m) });
     (globalThis as any).v2.near = near;
-  }, (e) => (error = e instanceof Error ? e.message : 'no view'));
+    // W10: the owner writes to the followed Soul's agent from its page.
+    const own = g.owned.find((o) => o.follow === follow);
+    if (own) (globalThis as any).v2.box = mountOwnerBox(near, own.grant, () => `To ${souls.copy.souls.get(follow)?.name ?? 'your Soul'}'s agent`);
+  }).catch((e) => (error = e instanceof Error ? e.message : 'no view'));
 }
 else if (worldName) resolveWorld(worldName, new URLSearchParams(location.search).get('worlds') ?? './w/').then(
   (w) => ((worldHistory = w.history), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, stream: w.stream, worldHistory } }), live(w.stream)),
@@ -141,7 +157,7 @@ const clockText = (us: number) => {
   const s = Math.floor(us / 1e6);
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 };
-let last = performance.now(), fps = 60;
+let last = performance.now(), fps = 60, frames = 0;
 renderer.setAnimationLoop((now) => {
   // A hidden tab stops frames; on return the clock cuts (a jump of more than 20 s) rather than playing fast.
   const dt = now - last;
@@ -155,6 +171,10 @@ renderer.setAnimationLoop((now) => {
   const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   director.update(Math.min(100, dt), t);
   sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
+  tickWater((t ?? 0) / 1e6);
+  setNightStrength(sky.state.daylight);
+  const pools = frames++ % 60 === 0 && things.layer ? nightPools(world, things.layer.opts.index) : null; // the lamps, once a second
+  if (pools) paintNightSources(pools.sources, pools.bounds);
   const ck = near?.clock ?? clock;
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;

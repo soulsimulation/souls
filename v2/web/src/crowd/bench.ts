@@ -11,6 +11,8 @@ import { BODIES, CLIPS, WALK_STRIDE, loadKind } from './bodies.ts';
 import { Crowd } from './crowd.ts';
 import { WorldSky } from '../sky/sky.ts';
 import { WATER } from '../draw/drapes.ts';
+import { asWater, tickWater } from '../water/water.ts';
+import { installNightLighting, lampPool, paintNightSources, setNightStrength } from '../draw/night.ts';
 
 const q = new URLSearchParams(location.search);
 const base = q.get('bodies') ?? './bodies/';
@@ -40,9 +42,13 @@ ground.receiveShadow = true;
 scene.add(ground);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 1000);
 // V19 (#2763): `sky=1` adds the sky and rain of a dusk shower and a water area, drawn every frame as the page draws them.
+// V19b (#3508): the dome, the water in today's shader, and 49 lamps' night pools on a 20 m grid.
 const sky = q.get('sky') ? new WorldSky(scene, hemi, sun) : null;
+if (sky) installNightLighting();
+const lamps = [-60, -40, -20, 0, 20, 40, 60].flatMap((x) => [-60, -40, -20, 0, 20, 40, 60].map((z) => lampPool(x, z, 0, false)));
+if (sky) paintNightSources(lamps, { x0: -200, z0: -200, x1: 200, z1: 200 });
 sky?.apply([{ sky: { 60: 86_400, 61: 0, 62: [[0, 0]], 75: 'souls:rain', 76: 90, 77: 60, 78: 30 } }]);
-if (sky) scene.add(new THREE.Mesh(new THREE.PlaneGeometry(60, 30).rotateX(-Math.PI / 2).translate(0, 0.05, -25), new THREE.MeshLambertMaterial({ color: WATER })));
+if (sky) scene.add(asWater(new THREE.Mesh(new THREE.PlaneGeometry(60, 30).rotateX(-Math.PI / 2).translate(0, 0.05, -25), new THREE.MeshLambertMaterial({ color: WATER }))));
 
 // The crowd fills the ground the camera sees: a sector about the camera's foot, from NEAR m out to `far` (about
 // `area` m² a body), as wide as the view. The camera is raised and tilted so the sector's near and far edges meet the
@@ -134,6 +140,7 @@ async function main() {
     crowd.step(dt);
     crowd.draw(camera);
     sky?.update(19.5 * 3_600_000_000 + now * 1000, camera);
+    if (sky) (tickWater(19.5 * 3600 + now / 1000), setNightStrength(sky.state.daylight));
     renderer.render(scene, camera);
     if (probe.on) probe.work.push(performance.now() - w0);
     const s = crowd.stats;

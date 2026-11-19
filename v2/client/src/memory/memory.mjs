@@ -15,12 +15,13 @@
 // The feeder writes a new id that has an alias as its old one, so a person or a place known before keeps one file and
 // one row; reading goes the other way, and an old id with no alias reads as "formerly <id>".
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { PROJECTION_BUDGETS, openMemoryFolder } from '../../../../tools/world-launcher/soul/memory-folder.mjs';
 import { openSoulMemory } from '../../../../tools/world-launcher/soul/memory.mjs';
 import { digest, readLog, renderDigest } from '../../../../tools/world-launcher/soul/digest.mjs';
 import { answerOf, consolidate, fakeMind, ownerMind, settingsOf } from '../../../../tools/world-launcher/soul/consolidate.mjs';
+import { worldsOf } from '../home/home.mjs';
 
 export { openSoulMemory, readLog };
 
@@ -95,4 +96,62 @@ export async function consolidateIn(home, soulDir, { force = false, env = proces
   if (answer !== true) return { skipped: answer === false ? 'consolidation is off' : 'consolidation not asked yet: consolidate on, or off' };
   const ask = env.BRAIN_MODE === 'fake' ? async (p) => fakeMind(p) : ownerMind({ env });
   return consolidate(soulDir, { ask, caps: settingsOf(config), force, ...(now ? { now } : {}) });
+}
+
+// ---- memory and remember (Engine v2 R19, #3327): the shipping line's commands, on the same folder ------------------
+
+/**
+ * The world key the Soul's memory is written under: where it holds a token, else the world it was last seen in (its
+ * presence file, `worlds/<key>.json`). A Soul with neither has no memory to open.
+ */
+export function worldOfSoul(home, soul) {
+  const held = worldsOf(home, soul);
+  if (held.length) return held[0];
+  const dir = join(soulDirOf(home, soul), 'worlds');
+  const seen = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => ({ key: f.slice(0, -5), at: statSync(join(dir, f)).mtimeMs })) : [];
+  const last = seen.sort((a, b) => b.at - a.at)[0];
+  if (!last) throw Object.assign(new Error(`${soul} has no world yet`), { code: 'no-world' });
+  return last.key;
+}
+
+/** The Soul's memory, opened as the shipping line's client opens it. */
+export function memoryOf(home, soul, { now } = {}) {
+  let name = null;
+  try { name = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).souls?.[soul]?.name ?? null; } catch { /* none */ }
+  return openSoulMemory(soulDirOf(home, soul), { world: worldOfSoul(home, soul), soul, name, ...(now ? { now } : {}) });
+}
+
+/** `memory <words>`: every line holding every word, each with where it came from and `untrusted` when a world wrote it. */
+export function searchIn(home, soul, words) {
+  if (!words.length) throw Object.assign(new Error('memory <words to find>'), { code: 'memory-usage' });
+  return memoryOf(home, soul).search(words.join(' '));
+}
+
+const REMEMBER_USAGE = 'remember --person <id|name> "<note>" | --place <id|name> "<note>" | --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."] | --self "<line>" | --person <id> --promise "<what>" [--by me|them] | --kept <promise id> --evidence <receipt or conversation id>';
+
+/**
+ * `remember ...`: one record through the record's validators. A person or place may be named by a new id: an id with
+ * an alias is written as its old one, as the feeder writes it, so it lands on the row the Soul already has.
+ */
+export function rememberIn(home, soul, argv, { now } = {}) {
+  const picked = {}, words = [];
+  for (let i = 0; i < argv.length; i++) {
+    const flag = /^--(person|place|goal|horizon|metric|next|by|kept|evidence)$/.exec(argv[i]);
+    if (flag) picked[flag[1]] = argv[++i];
+    else if (argv[i] === '--self') picked.self = true;
+    else if (argv[i] === '--promise') picked.promise = true;
+    else words.push(argv[i]);
+  }
+  const usage = () => Object.assign(new Error(REMEMBER_USAGE), { code: 'remember-usage' });
+  const { toOld } = readAliases(home), old = (id) => (typeof id === 'string' ? toOld.get(id) ?? id : id);
+  for (const k of ['person', 'place']) if (picked[k] !== undefined) picked[k] = old(picked[k]);
+  const memory = memoryOf(home, soul, { now });
+  if (picked.kept) { if (!picked.evidence) throw usage(); return memory.kept(picked.kept, picked.evidence); }
+  if (picked.promise) {
+    if (!picked.person || !words.length || !['me', 'them', undefined].includes(picked.by)) throw usage();
+    return memory.promise(picked.person, words.join(' '), picked.by ?? 'me');
+  }
+  const selectors = ['person', 'place', 'goal', 'self'].filter((k) => picked[k] !== undefined), note = words.join(' ');
+  if (selectors.length !== 1 || !note) throw usage();
+  return memory.remember(selectors[0], picked[selectors[0]], note, picked);
 }

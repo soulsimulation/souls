@@ -5,8 +5,10 @@
 # On the runner:
 #   bash release.sh checks <sha>                       refuses `release.missing-check: <name>` for each check of
 #                                                      v2/docs/release.md's list the head has not passed (gh api)
-#   bash release.sh bundle <out> <sha> <version> <cargo release dir> <page dist dir> <client dir>
-#                                                      the four artifacts, the tools and manifest.json (name, hash)
+#   bash release.sh bundle <out> <sha> <version> <cargo release dir> <page dist dir> <client dir> [<wasm pkg dir>]
+#                                                      the four artifacts, the tools and manifest.json (name, hash);
+#                                                      client.tar is the served client (v2/client/served/build.mjs,
+#                                                      R17 #2818), each served file a `served` line of the manifest
 #   bash release.sh publish <version> <sha> <date>     in a checkout of main: the tag, the GitHub Release and the
 #                                                      changelog pull request, each only if it is not there yet
 #   RELEASE_TARGET=<ssh target> bash release.sh remote stage <bundle>
@@ -16,7 +18,8 @@
 #                                  manifest's; the release's record to $DATA/releases/<sha>/; then verify
 #   verify <sha>                   the staged files' hashes against the manifest's, as a table
 #   move <sha> [<canary world>]    the canary's pin by `deploy` (O7), then every other world's, then the gateway by
-#                                  `gateway-upgrade` (O16), then the page; each step done once per release
+#                                  `gateway-upgrade` (O16), then the page, then the served client
+#                                  ($LIB/client, which a world's address serves); each step done once per release
 #   rollback <to> <from> <world>...   `deploy rollback`: refuses unless each world is pinned to <from>
 #   news <sha> <version> <link> <date>   one release entry in $DATA/news.jsonl, keyed by its link; refuses
 #                                  `release.not-live` unless this release moved every world
@@ -74,7 +77,7 @@ checks() {
 }
 
 bundle() {
-  local out=$1 sha=$2 version=$3 bins=$4 page=$5 client=$6 a t lines=()
+  local out=$1 sha=$2 version=$3 bins=$4 page=$5 client=$6 pkg=${7:-$6/../target/wasm-load/pkg} a t lines=() served=()
   [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "bundle: the sha is the full 40 hex"
   [ -f "$page/index.html" ] || die "bundle: no page build at $page"
   [ -d "$client/src" ] && [ -d "$client/skill" ] || die "bundle: no client (src, skill) at $client"
@@ -83,7 +86,14 @@ bundle() {
   install -m 755 "$bins/worldd" "$out/artifacts/worldd"
   install -m 755 "$bins/gatewayd" "$out/artifacts/gatewayd"
   COPYFILE_DISABLE=1 tar -C "$page" -cf "$out/artifacts/page.tar" .
-  COPYFILE_DISABLE=1 tar -C "$client" --exclude node_modules -cf "$out/artifacts/client.tar" .
+  # The served client (R17): its files by name, version, length and hash, as soul-client.json gives them.
+  node "$client/served/build.mjs" --out "$out/served" --version "$version" --pkg "$pkg" > /dev/null
+  COPYFILE_DISABLE=1 tar -C "$out/served" -cf "$out/artifacts/client.tar" .
+  for t in "$out"/served/*; do
+    [ "${t##*/}" = soul-client.json ] && continue
+    served+=("$(printf '{"served":"%s","version":"%s","hash":"%s","bytes":%s}' "${t##*/}" "$version" "$(hash "$t")" "$(wc -c < "$t" | tr -d ' ')")")
+  done
+  rm -rf "$out/served"
   for t in "${TOOLS[@]}"; do install -m 755 "$bins/$t" "$out/bin/$t"; done
   install -m 755 "$0" "$out/release.sh"
   for a in "${ARTIFACTS[@]}"; do
@@ -93,6 +103,8 @@ bundle() {
   {
     printf '{"commit":"%s","version":"%s","artifacts":[\n' "$sha" "$version"
     printf '%s\n' "${lines[@]}" | sed '$!s/$/,/'
+    printf '],"served":[\n'
+    printf '%s\n' "${served[@]}" | sed '$!s/$/,/'
     printf ']}\n'
   } > "$out/manifest.json"
   echo "bundle: ${#ARTIFACTS[@]} artifacts at ${sha:0:12}"
@@ -153,10 +165,10 @@ directory_env() {
 }
 
 move() {
-  local sha=$1 canary=${2:-} rel=$DATA/releases/$1 worldd gw page w order=() all
+  local sha=$1 canary=${2:-} rel=$DATA/releases/$1 worldd gw page client w order=() all
   [ -f "$rel/manifest.json" ] || refuse "release.not-staged: $sha"
   worldd=$(artifact "$rel/manifest.json" worldd) gw=$(artifact "$rel/manifest.json" gatewayd)
-  page=$(artifact "$rel/manifest.json" page.tar)
+  page=$(artifact "$rel/manifest.json" page.tar) client=$(artifact "$rel/manifest.json" client.tar)
   all=$(worlds)
   [ -n "$all" ] || refuse "release.no-worlds: nothing under $WORLDS_ROOT/worlds"
   canary=${canary:-$(head -1 <<< "$all")}
@@ -171,7 +183,7 @@ move() {
       continue
     fi
     echo "move: deploy $w$([ "$w" = "$canary" ] && echo ' (the canary)')"
-    if "$rel/bin/deploy" "$w" "$worldd" --probe "$ETC/probe/$w" --window-s "${RELEASE_WINDOW_S:-60}"; then
+    if "$rel/bin/deploy" "$w" "$worldd" --window-s "${RELEASE_WINDOW_S:-60}"; then
       touch "$rel/moved/$w"
     else
       refuse "release.deploy-failed: $w (worlds after it keep their build; worlds before it keep this one)"
@@ -196,7 +208,19 @@ move() {
     touch "$rel/moved/page"
     echo "move: the page is ${page:0:16}… ($LIB/web)"
   fi
-  echo "moved: ${sha:0:12} is live on ${#order[@]} worlds, their gateways and the page"
+  if [ -f "$rel/moved/client" ]; then
+    echo "move: the served client already moved by this release"
+  else
+    rm -rf "$LIB/.client.new" "$LIB/.client.old"
+    mkdir -p "$LIB/.client.new"
+    tar -xf "$WORLDS_ROOT/builds/$client/client.tar" -C "$LIB/.client.new"
+    if [ -d "$LIB/client" ]; then mv "$LIB/client" "$LIB/.client.old"; fi
+    mv "$LIB/.client.new" "$LIB/client"
+    rm -rf "$LIB/.client.old"
+    touch "$rel/moved/client"
+    echo "move: the served client is ${client:0:16}… ($LIB/client)"
+  fi
+  echo "moved: ${sha:0:12} is live on ${#order[@]} worlds, their gateways, the page and the served client"
 }
 
 rollback() {
@@ -212,7 +236,7 @@ rollback() {
   directory_env
   for w in "$@"; do
     echo "rollback: $w to ${to:0:16}… from ${from:0:16}…"
-    if "$rel/bin/deploy" rollback "$w" "$to" --from "$from" --probe "$ETC/probe/$w"; then
+    if "$rel/bin/deploy" rollback "$w" "$to" --from "$from"; then
       rm -f "$rel/moved/$w"
     else
       status=3

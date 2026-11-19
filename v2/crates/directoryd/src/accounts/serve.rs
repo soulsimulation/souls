@@ -16,8 +16,16 @@
 //!   frame the gateway gives the Soul's socket as it is (`{"mail": {"id", "text", "at"}}`). The second's body is the
 //!   socket's own `{"close": {"id", "state", "outcome"}}`, with the socket's grant in a `souls-soul` header. So the
 //!   gateway reads no JSON.
-//! - `POST /v1/mailbox/put` `{"soul", "text"}` and `POST /v1/mailbox/read` `{"id"}`: the test call that stands in
-//!   for the page's box (W10) until it lands, with the sign-in for test worlds on only.
+//! - `POST /v1/mailbox/put` `{"soul", "text"}`: the gateway's, with the mailbox key, for the page's box (W10), which
+//!   checks the page's view token holds that Soul; also open with the sign-in for test worlds on, as is
+//!   `POST /v1/mailbox/read` `{"id"}`.
+//! - Prayers (G11, #3335; [`super::prayers`]), the gateway's too, each the socket's own frame with its grant in the
+//!   `souls-soul` header, and answered `{"reply": {"n", "ok", ..}}` (`n` the request's own, `refused` a name), which
+//!   the gateway gives back to that socket: `POST /v1/mailbox/pray` `{"pray": {"n", "text"}}` (a Soul's),
+//!   `POST /v1/mailbox/prayers` `{"prayers": {"n", "all"}}` (a Soul's own, or its world's for a creator) and
+//!   `POST /v1/mailbox/answer` `{"answer": {"n", "id", "text"}}` (a creator's). An answer not yet taken is an open
+//!   line `<soul> <prayer id> {"answered": {"id", "text", "answer", "at"}}`, closed by the daemon's
+//!   `{"close": {"id"}}`.
 //!
 //! Answers carry `cache-control: no-store` (the world list's a short while) and may be read by the page's own origin
 //! alone (CORS). A message's text is never in a log line. The log line of a request holds its method, path, status
@@ -37,6 +45,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The largest request body read.
 pub const BODY_MOST: usize = 4096;
+/// The largest body of a Soul's picture upload (W11): base64url of `pairing::souls::PICTURE_BYTES`, and its JSON.
+pub const PICTURE_BODY_MOST: usize = 360_000;
+/// The largest body of a prayer or an answer (G11): 4,000 characters of up to four bytes, escaped, and its JSON.
+pub const PRAYER_BODY_MOST: usize = 40_000;
 
 pub struct App {
     pub store: Store,
@@ -90,6 +102,13 @@ fn read(stream: &TcpStream) -> Option<Request> {
     let method = words.next()?.to_string();
     let path = words.next()?.split('?').next()?.to_string();
     let (mut bearer, mut soul, mut length) = (None, None, 0usize);
+    let most = if path == "/v1/account/souls/picture" {
+        PICTURE_BODY_MOST
+    } else if path == "/v1/mailbox/pray" || path == "/v1/mailbox/answer" {
+        PRAYER_BODY_MOST
+    } else {
+        BODY_MOST
+    };
     loop {
         let mut h = String::new();
         if r.read_line(&mut h).ok()? == 0 {
@@ -102,7 +121,7 @@ fn read(stream: &TcpStream) -> Option<Request> {
         let (name, value) = h.split_once(':')?;
         let value = value.trim();
         if name.eq_ignore_ascii_case("content-length") {
-            length = value.parse().ok().filter(|n| *n <= BODY_MOST)?;
+            length = value.parse().ok().filter(|n| *n <= most)?;
         } else if name.eq_ignore_ascii_case("authorization") {
             bearer = value.strip_prefix("Bearer ").map(str::to_string);
         } else if name.eq_ignore_ascii_case("souls-soul") {
@@ -230,7 +249,20 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
                         format!("{} {} {frame}\n", m.soul, m.id)
                     })
                     .collect();
-                (200, Value::String(lines), format!("{} open", m.len()))
+                // G11: the answers not yet taken, to their Souls' sockets the same way.
+                let answers = match app.store.answers_open(now()) {
+                    Ok(a) => a,
+                    Err(e) => return Some(store(e)),
+                };
+                let answered: String = answers
+                    .iter()
+                    .map(|p| {
+                        let frame = json!({"answered": {"id": p.id, "text": p.text, "answer": p.answer, "at": p.answered_at}});
+                        format!("{} {} {frame}\n", p.soul, p.id)
+                    })
+                    .collect();
+                let note = format!("{} open {} answers", m.len(), answers.len());
+                (200, Value::String(lines + &answered), note)
             }
             Err(e) => store(e),
         }),
@@ -238,20 +270,32 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
             let b = body().get("close").cloned().unwrap_or(Value::Null);
             let (id, soul) = (text(&b, "id"), req.soul.clone().unwrap_or_default());
             Some(
-                match app.store.mail_close(
-                    &id,
-                    &soul,
-                    &text(&b, "state"),
-                    &text(&b, "outcome"),
-                    now(),
-                ) {
+                match app
+                    .store
+                    .mail_close(&id, &soul, &text(&b, "state"), &text(&b, "outcome"), now())
+                    .and_then(|c| {
+                        if c {
+                            Ok(c)
+                        } else {
+                            app.store.answer_taken(&id, &soul)
+                        }
+                    }) {
                     Ok(closed) => (200, json!({"closed": closed}), format!("closed {closed}")),
                     Err(e) => store(e),
                 },
             )
         }
-        ("GET", "/v1/mailbox/open") | ("POST", "/v1/mailbox/close") => refuse(401, "mailbox-key"),
-        ("POST", "/v1/mailbox/put") if app.test_sign_in => {
+        ("POST", "/v1/mailbox/pray" | "/v1/mailbox/prayers" | "/v1/mailbox/answer")
+            if gateway() =>
+        {
+            Some(prayers(req, app))
+        }
+        ("GET", "/v1/mailbox/open")
+        | (
+            "POST",
+            "/v1/mailbox/close" | "/v1/mailbox/pray" | "/v1/mailbox/prayers" | "/v1/mailbox/answer",
+        ) => refuse(401, "mailbox-key"),
+        ("POST", "/v1/mailbox/put") if app.test_sign_in || gateway() => {
             let b = body();
             Some(
                 match app
@@ -281,6 +325,68 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
         }
         _ => None,
     }
+}
+
+fn prayer_json(p: &super::prayers::Prayer) -> Value {
+    let state = if p.answer.is_some() {
+        "answered"
+    } else {
+        "waiting"
+    };
+    json!({"id": p.id, "soul": p.soul, "text": p.text, "at": p.at, "state": state, "answer": p.answer,
+           "answered_at": p.answered_at})
+}
+
+/// The worlds a creator grant is the creator of, by the list of worlds when there is one ([`super::prayers::creator_worlds`]).
+fn creator_worlds_of(grant: &str, app: &App) -> Option<Vec<String>> {
+    let rows = app
+        .worlds
+        .as_ref()
+        .and_then(|w| w.creators().ok())
+        .unwrap_or_default();
+    super::prayers::creator_worlds(grant, &rows)
+}
+
+/// A prayer request from the gateway (G11): the socket's own frame and grant. Always a 200 whose body is the reply the
+/// gateway gives back to that socket, a refusal included, so the asker hears it by name. Its log note holds no text.
+fn prayers(req: &Request, app: &App) -> (u16, Value, String) {
+    let grant = req.soul.clone().unwrap_or_default();
+    let frame = serde_json::from_slice::<Value>(&req.body).unwrap_or(Value::Null);
+    let kind = req.path.trim_start_matches("/v1/mailbox/");
+    let b = frame.get(kind).cloned().unwrap_or(Value::Null);
+    let n = b.get("n").and_then(Value::as_u64).unwrap_or(0);
+    let text = |k: &str| b.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let answer = match kind {
+        "pray" => app
+            .store
+            .pray(&grant, &text("text"), now())
+            .map(|r| r.map(|id| json!({"id": id}))),
+        "prayers" if super::prayers::scope_of(&grant, "soul").is_some() => app
+            .store
+            .prayers_of(&grant)
+            .map(|v| Ok(json!({"prayers": v.iter().map(prayer_json).collect::<Vec<_>>()}))),
+        _ => match creator_worlds_of(&grant, app) {
+            None => Ok(Err("prayer.not-the-creator")),
+            Some(worlds) if kind == "prayers" => {
+                let all = b.get("all").and_then(Value::as_bool).unwrap_or(false);
+                app.store
+                    .prayers_to(&worlds, all)
+                    .map(|v| Ok(json!({"prayers": v.iter().map(prayer_json).collect::<Vec<_>>()})))
+            }
+            Some(worlds) => app
+                .store
+                .answer(&worlds, &text("id"), &text("text"), now())
+                .map(|r| r.map(|p| json!({"prayer": prayer_json(&p)}))),
+        },
+    };
+    let (mut reply, note) = match answer {
+        Ok(Ok(v)) => (v, format!("{kind} ok")),
+        Ok(Err(name)) => (json!({"refused": name}), name.to_string()),
+        Err(_) => (json!({"refused": "store"}), "store".to_string()),
+    };
+    reply["n"] = json!(n);
+    reply["ok"] = json!(reply.get("refused").is_none());
+    (200, json!({"reply": reply}), note)
 }
 
 fn route(req: &Request, app: &App) -> (u16, Value, String) {

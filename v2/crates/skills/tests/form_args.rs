@@ -245,14 +245,14 @@ fn a1_a_move_with_no_point_and_a_take_with_no_move() {
 fn a2_a_set_writes_a_name_an_id_or_a_text_reference() {
     let e = entry();
     let set = |form: &str, a: &Args| bind_effects_args(&e, form, a);
-    // An enum's value by name, written as it is listed.
+    // An enum's value by name, written as a name in the kind's namespace (C24: the log's only text is a name).
     let raise = set("raise", &Args::new()).expect("binds");
     println!("raise: {raise:?}");
     assert_eq!(
         raise,
         vec![Effect::Set {
             field: 1,
-            to: Cbor::Text(Name::new("high").expect("a name"))
+            to: Cbor::Text(Name::new("test:high").expect("a name"))
         }]
     );
     // A field argument chooses the field; a value argument the value.
@@ -268,7 +268,7 @@ fn a2_a_set_writes_a_name_an_id_or_a_text_reference() {
         tap,
         vec![Effect::Set {
             field: 4,
-            to: Cbor::Text(Name::new("high").expect("a name"))
+            to: Cbor::Text(Name::new("test:high").expect("a name"))
         }]
     );
     // Words by their reference (K16): `{21: id}`, never the words.
@@ -307,10 +307,10 @@ fn a2_a_set_writes_a_name_an_id_or_a_text_reference() {
             ("to", Arg::Name("middle".into())),
         ]),
     );
-    assert_eq!(refused(r), ("value-unknown", "left: middle".into()));
+    assert_eq!(refused(r), ("not-allowed", "left: middle".into()));
     assert_eq!(refused(set("write", &Args::new())).0, "arg-missing");
     let r = set("write", &args(&[("words", Arg::Name("low".into()))]));
-    assert_eq!(refused(r).0, "effect-malformed");
+    assert_eq!(refused(r).0, "not-allowed");
 }
 
 #[test]

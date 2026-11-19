@@ -6,12 +6,20 @@
 //!
 //! The gateway reads no JSON: the directory answers a line per open message, `<soul> <id> <text frame>`, and takes
 //! a close as the socket sent it, with the socket's grant in a `souls-soul` header.
+//!
+//! The owner's box (W10, #2802): a page's view socket puts a message for a grant its view token holds
+//! ([`on_view_text`]; a Soul's, or a world's creator's), and every view socket whose token holds that grant is told,
+//! as text frames, when the agent's socket was given it, each intent the agent sent while it was open with the phase
+//! of its answer (I4's own: the envelope gains no field), and the agent's close. No other socket is told anything.
+//! Nothing here makes an agent act.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use replica::encode::{Value, decode};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 
 use crate::Gateway;
 use crate::token::Grant;
@@ -20,8 +28,15 @@ use crate::token::Grant;
 pub const POLL: Duration = Duration::from_secs(1);
 /// The longest answer read from the directory.
 const ANSWER_MOST: u64 = 4 << 20;
-/// The longest close passed on (the directory reads at most 4,096 bytes).
-const CLOSE_MOST: usize = 1024;
+/// The longest frame passed on: a close, or a prayer or an answer (G11; the directory reads at most 40,000 bytes).
+const CLOSE_MOST: usize = 40_000;
+/// The frames passed on to the directory by their first key, and where; G11's prayers are answered back.
+const PASSED: [(&str, &str); 4] = [
+    ("{\"close\"", "close"),
+    ("{\"pray\"", "pray"),
+    ("{\"prayers\"", "prayers"),
+    ("{\"answer\"", "answer"),
+];
 
 /// The directory's address (`host:port`) and the key its mailbox requests take.
 pub struct Mailbox {
@@ -86,19 +101,117 @@ pub async fn run(gw: Arc<Gateway>) {
 }
 
 /// A text frame from `grant`'s socket: a close, passed to the directory for that grant alone (the directory reads
-/// it, and ignores anything else).
+/// it, and ignores anything else). Once the directory closed the message, the close goes to the view sockets that
+/// watch that grant (W10) as the agent sent it.
 pub fn on_text(gw: &Arc<Gateway>, grant: Grant, text: &str) {
-    if text.len() > CLOSE_MOST || !text.starts_with("{\"close\"") {
+    let Some((_, path)) = PASSED.iter().find(|(p, _)| text.starts_with(p)) else {
+        return;
+    };
+    if text.len() > CLOSE_MOST {
         return;
     }
     let (gw, soul, body) = (gw.clone(), grant.to_text(), text.to_owned());
     tokio::spawn(async move {
-        if let Some(mb) = gw.mailbox.get()
-            && http(mb, "POST", "/v1/mailbox/close", &soul, &body)
-                .await
-                .is_none()
-        {
-            (gw.log)("a message's close was not taken by the directory");
+        let Some(mb) = gw.mailbox.get() else {
+            return;
+        };
+        match http(mb, "POST", &format!("/v1/mailbox/{path}"), &soul, &body).await {
+            Some(reply) if *path != "close" => gw.post_text(&grant.key(), reply),
+            Some(reply) if reply.contains("\"closed\":true") => {
+                gw.tell_watchers(&grant.key(), body)
+            }
+            Some(_) => {}
+            None => (gw.log)("a mailbox frame was not taken by the directory"),
         }
     });
+}
+
+/// The longest message a page puts, in bytes (the directory's `TEXT_MOST`).
+pub const PUT_MOST: usize = 2000;
+
+/// A text frame from a page's view socket whose token holds `grants` (W10, #2802): `put <grant>\n<words>`, a message
+/// for one of those grants, put in the directory's mailbox. The page is answered `{"sent": {"id"}}`, or `{"sent":
+/// {"refused": name}}`: `not-yours` for a grant its token does not hold, `mail-form` for empty or long words,
+/// `no-mailbox` with none set, `not-taken` when the directory did not take it. Its words are never logged.
+pub fn on_view_text(gw: &Arc<Gateway>, grants: &[Grant], text: &str, reply: mpsc::Sender<String>) {
+    let refused = |name: &str| format!(r#"{{"sent":{{"refused":"{name}"}}}}"#);
+    let Some((to, words)) = text.strip_prefix("put ").and_then(|t| t.split_once('\n')) else {
+        return;
+    };
+    let answer = match Grant::parse(to) {
+        Some(g) if grants.contains(&g) => None,
+        _ => Some(refused("not-yours")),
+    }
+    .or_else(|| (words.trim().is_empty() || words.len() > PUT_MOST).then(|| refused("mail-form")))
+    .or_else(|| gw.mailbox.get().is_none().then(|| refused("no-mailbox")));
+    if let Some(a) = answer {
+        let _ = reply.try_send(a);
+        return;
+    }
+    let (gw, body) = (
+        gw.clone(),
+        format!(r#"{{"soul":"{to}","text":{}}}"#, json_string(words)),
+    );
+    tokio::spawn(async move {
+        let Some(mb) = gw.mailbox.get() else { return };
+        let answer = match http(mb, "POST", "/v1/mailbox/put", "", &body).await {
+            Some(b) if b.starts_with("{\"id\":\"") => format!(r#"{{"sent":{b}}}"#),
+            _ => refused("not-taken"),
+        };
+        let _ = reply.try_send(answer);
+    });
+}
+
+/// Text as a JSON string: quotes, backslashes and control characters escaped.
+pub fn json_string(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 || c == '\u{2028}' || c == '\u{2029}' => {
+                out.push_str(&format!("\\u{:04x}", c as u32))
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// A message id as the directory makes them (`m_<hex>`), safe to write into a frame as it is.
+pub fn id_like(id: &str) -> bool {
+    (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// W10's `{"doing": …}` frame: an intent of the agent's, by sequence and verb, at a phase, with the outcome's name.
+pub fn doing(sequence: u64, verb: &str, phase: &str, outcome: Option<&str>) -> String {
+    let outcome = outcome.map_or(String::new(), |o| format!(r#","outcome":"{o}""#));
+    format!(r#"{{"doing":{{"seq":{sequence},"verb":"{verb}","phase":"{phase}"{outcome}}}}}"#)
+}
+
+/// What a frame of the stream answers (`{1: version, 2: answer}`): the intent's sequence, its phase (I4: `receipt`,
+/// `refused`, `accepted` or `resolved`) and, for a refusal or a resolution, the reason's or outcome's name.
+pub fn phase_of(frame: &[u8]) -> Option<(u64, &'static str, Option<String>)> {
+    let Value::Map(mut m) = decode(frame).ok()?.value else {
+        return None;
+    };
+    let Some(Value::Map(mut a)) = m.remove(&2) else {
+        return None;
+    };
+    let Some(Value::Uint(sequence)) = a.remove(&2) else {
+        return None;
+    };
+    let named = |v: Option<Value>| match v {
+        Some(Value::Text(n)) => Some(n.as_str().to_owned()),
+        _ => None,
+    };
+    match a.remove(&3)? {
+        Value::Uint(1) => Some((sequence, "receipt", None)),
+        Value::Uint(2) => Some((sequence, "refused", named(a.remove(&4)))),
+        Value::Uint(3) => Some((sequence, "accepted", None)),
+        Value::Uint(4) => Some((sequence, "resolved", named(a.remove(&4)))),
+        _ => None,
+    }
 }
