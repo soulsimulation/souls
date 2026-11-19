@@ -11,6 +11,7 @@ import {SoulMessageBox,soulStartPrompt,useSoulInbox,useWindowCode,type AgentInbo
 import {VisitorFrom} from './SoulTravel.tsx';
 import {clockAt,clockTitle,useAgentPresence,type AgentHere} from './agent-presence.ts';
 import {ApprovalCard} from './god-ui/ApprovalDialog.tsx';
+import {retireSoul} from './soul-retire.ts';
 import {WAITING_PROMPT_MS,ageText,bodyPhrase,bodyWord,holderLine,newest,ownerLink,placeOf,readBody,readNow,reconnectSentence,readSlowed,slowedText,visitorPhrase,type Body,type Link,type Now} from './soul-state.ts';
 
 /** LINK (spec SOUL-LINK r3 §4, canvas v5): one Soul card, one frame, the status line changes shape.
@@ -49,7 +50,7 @@ function OwnerCard({api,soul,camera,signedIn=true,body,now,place}:SoulCardProps&
  const link=ownerLink(here?.link??null,here);
  const disconnect=async()=>{const r=await api(`/v1/souls/${encodeURIComponent(soul.id)}/revoke`,{});return r.status===200&&r.data?.ok===true;};
  return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place}
-  prompt={soulStartPrompt(location.origin+apiPath(''),soul.id,soul.name,code)} camera={camera} signedIn={signedIn} disconnect={disconnect}/>;
+  prompt={soulStartPrompt(location.origin+apiPath(''),soul.id,soul.name,code)} camera={camera} signedIn={signedIn} disconnect={disconnect} retire={()=>retireSoul(api,soul)}/>;
 }
 
 export type SoulCardViewProps={soul:PublicSoul;view:'owner'|'visitor';body:Body|null;now:Now|null;place:string|null;camera?:Camera;
@@ -57,9 +58,11 @@ export type SoulCardViewProps={soul:PublicSoul;view:'owner'|'visitor';body:Body|
  story?:TimelineEntry[];
  /** owner only: the one state (null = not known yet), presence, inbox, the start prompt, Disconnect */
  link?:Link|null;here?:AgentHere|null;inbox?:AgentInbox|null;send?(text:string):Promise<unknown>;prompt?:string;signedIn?:boolean;disconnect?():Promise<boolean>;
+ /** owner only (#3375): asks once, then retires the Soul for good */
+ retire?():Promise<boolean>;
  /** fixtures and shots: a fixed clock, the link details (and Pair another session) open from the start */
  clock?:number;open?:{details?:boolean;pair?:boolean}};
-export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,clock,open}:SoulCardViewProps){
+export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,clock,open}:SoulCardViewProps){
  const t=clock??Date.now();
  const [copied,setCopied]=useState<''|'ok'|'failed'>('');
  const [details,setDetails]=useState(!!open?.details);
@@ -107,6 +110,7 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
   {followShown&&<div className="soul-actions">
    <button className={camera.following?'soul-follow on':'soul-follow'} aria-pressed={camera.following} title={camera.following?'Stop following':'Keep the camera on this Soul'} onClick={camera.following?camera.stop:camera.follow}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6" fill="currentColor"/><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4"/></svg>{camera.following?'Following':'Follow'}</button>
   </div>}
+  {owner&&retire&&<RetireRow retire={retire}/>}
  </article>;
 }
 
@@ -148,6 +152,11 @@ function PromptCopy({prompt}:{prompt:string}){
  return <><p className="soul-prompt" aria-label="Start prompt">{prompt}</p>
   <button type="button" className="soul-pill fill" onClick={()=>void copy()}>{state==='ok'?'Copied':'Copy prompt'}</button>
   {state==='failed'&&<span className="soul-dim" role="status"> Copy unavailable: select the prompt above.</span>}</>;
+}
+function RetireRow({retire}:{retire():Promise<boolean>}){
+ const [busy,setBusy]=useState(false),[note,setNote]=useState('');
+ const go=async()=>{if(busy)return;setBusy(true);setNote('');try{setNote(await retire()?'Retired.':'');}catch{setNote('Not retired. Try again in a moment.');}finally{setBusy(false);}};
+ return <div className="soul-retire"><button type="button" className="soul-pill quiet" disabled={busy} onClick={()=>void go()}>Retire</button>{note&&<span className="soul-dim" role="status">{note}</span>}</div>;
 }
 function LinkDetails({name,link,here,prompt,disconnect,clock,pairOpen}:{name:string;link:Link;here:AgentHere|null;prompt:string;disconnect?():Promise<boolean>;clock:number;pairOpen:boolean}){
  const [pair,setPair]=useState(pairOpen),[busy,setBusy]=useState(false),[note,setNote]=useState('');
