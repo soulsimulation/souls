@@ -9,10 +9,12 @@ description = "The world process (Engine v2, #2635): its clock and watchdog (K7,
 replica = { path = "../replica" }
 rustix = { version = "1", default-features = false, features = ["time", "std"] }
 sim = { path = "../sim" }
+# O3 (#2732): the object store and the directory's claim and mark, which the shipper writes through.
+directoryd = { path = "../directoryd" }
 # The built-in walk, run behind the host for a move intent (I4b, #3156).
 skills = { path = "../skills" }
 # E1's Eden measures (tests/index.rs) load Eden 2026's imported tree (N1, #2649); N2's test world, where a scripted
 # client walks, sits and rises (I4b, #3156), and where `gateway-link --testworld` serves a Soul and three chairs (B10,
-# #2688).
+# #2688); `worldd serve` reads a world's facts file with N1's loader (C1, #3365).
 import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }

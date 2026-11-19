@@ -1,0 +1,232 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The floor lamp (core/floor-lamp@1 in Eden, 467 placed; @2 switches, PR #2953). Its light is a level, 0 off to 3 full, so \"dim the lights a bit\" (Eden asks 11, 297) is a step down: switching on lights it full, dimming lowers a step to the lowest lit step, brightening raises a step, switching off puts it out from any step. The switch is a knob on the stem.",
+ "cases": [
+  {
+   "name": "floor_lamp_on_dim_twice_brighten_off",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "l1"
+      ]
+     },
+     "l1": {
+      "kind": "eden:floor_lamp"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       30,
+       1200,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "l1",
+      "form": "dim"
+     },
+     "now_us": 0,
+     "receipt": "rfl0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "fix": {
+       "form": "switch_on"
+      }
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_on"
+     },
+     "now_us": 1000000,
+     "receipt": "rfl1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "level",
+        "n": 1,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_on",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "dim"
+     },
+     "now_us": 2000000,
+     "receipt": "rfl2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "level",
+        "n": 1,
+        "to": 2
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:dimmed",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "dim"
+     },
+     "now_us": 3000000,
+     "receipt": "rfl3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "level",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:dimmed",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "dim"
+     },
+     "now_us": 4000000,
+     "receipt": "rfl4",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "brighten"
+     },
+     "now_us": 5000000,
+     "receipt": "rfl5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "level",
+        "n": 1,
+        "to": 2
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:brightened",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_off"
+     },
+     "now_us": 6000000,
+     "receipt": "rfl6",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "level",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_off",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "l1": {
+     "kind": "eden:floor_lamp",
+     "fields": {
+      "level": 0
+     }
+    }
+   }
+  }
+ ]
+}

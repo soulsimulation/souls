@@ -9,11 +9,16 @@ mod watchdog;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("fork") => std::process::exit(fork::run(&args)),
         Some("gateway-link") => std::process::exit(gateway_link::run(&args)),
+        Some("fork") => std::process::exit(fork::run(&args)),
         // A real world from its folder, behind the gateway (C1, #3365); `seed` makes the folder.
         Some("serve") => std::process::exit(serve::run(&args)),
         Some("seed") => std::process::exit(serve::seed(&args)),
+        // The schemas this build reads and writes, by hash (T6), which a rollback compares (O7, #2804).
+        Some("schemas") => {
+            let h = replica::effects::schema_hash();
+            println!("reads {h}\nwrites {h}");
+        }
         _ => std::process::exit(watchdog::run(&args)),
     }
 }

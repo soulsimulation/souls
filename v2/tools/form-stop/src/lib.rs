@@ -479,9 +479,8 @@ pub fn points() -> Vec<(String, u64)> {
     }
     let what = |i: usize| match s.steps[i] {
         Step::WalkTo { .. } => "walk",
-        Step::Move { .. } => "move",
+        Step::Move { .. } | Step::Hand => "move",
         Step::Wait(_) => "pause",
-        Step::Hand => "hand",
     };
     spans
         .iter()

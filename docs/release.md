@@ -1,6 +1,7 @@
 # Releasing Soul
 
-How the version lines relate and what a release carries: [versioning](process/versioning.md).
+How the version lines relate and what a release carries: [versioning](process/versioning.md). Engine v2 releases
+(`release-v2.yml`, `rollback-v2.yml`) and the checks a v2 release head must pass: [v2/docs/release.md](../v2/docs/release.md).
 
 ## Release owner
 

@@ -487,6 +487,7 @@ fn measure(
             let mut steps = vec![skills::form_runner::Step::WalkTo {
                 point: Name::new(&point).unwrap(),
                 at,
+                on: None,
             }];
             if turned {
                 skills::form_runner::turn(&mut steps, place.orientation).unwrap();

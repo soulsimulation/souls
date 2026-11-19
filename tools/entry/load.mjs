@@ -14,7 +14,11 @@
 // - The def is world-local, named `entry-<namespace>-<name>`: nothing in the core kit changes, no conformance supplement.
 // - Its shape is the entry's `looks.shape`, in metres (look.mjs's `defOf`); `geometry.bounds_mm` is its box.
 // - State fields keep their names: bool and enum as they are, int and duration as whole numbers (µs for a duration),
-//   text as a reference, list as json.
+//   text as a string. A list, a schedule and a timed (rate) field are held as json, so an effect can still set one, but
+//   a Soul's read of the thing leaves them out: the run gate treats them as new engine only (named in `skipped`).
+// - A thin thing's box is padded to the world's 5 cm floor (a card, a slip of paper, a spoon): this loads into a test
+//   world only, so the drawing stays the entry's and only the box grows.
+// - A kind whose forms take it into a hand loads as carryable, so today's take_item holds it.
 // - Slots keep their names (`_` becomes `-`, the def's name rule): a body slot to sit in is a seat, to lie in a bed, a
 //   thing slot a surface; `most` is its capacity.
 // - The marker: the param `entry` holds the kind's reference (`<kind>@<hash>`, tools/entry/format.mjs) and the tag
@@ -42,9 +46,15 @@ function fieldOf(f) {
   if (f.type === 'bool') return {type: 'bool', default: f.default};
   if (f.type === 'enum') return {type: 'enum', values: f.values, default: f.default};
   if (f.type === 'int' || f.type === 'duration') return {type: 'int', default: f.default};
-  if (f.type === 'text') return {type: 'ref'};
+  if (f.type === 'text') return {type: 'string', max: 2000};
   return {type: 'json', default: f.default};
 }
+/** Field types today's world holds but does not read back: a case that needs one is skipped by the run gate. */
+export const NEW_ENGINE_ONLY = Object.freeze(['list', 'schedule', 'timed']);
+/** The smallest side today's world takes for a def's box (creation-limits defSizeMinM), in metres. */
+const SIZE_MIN = 0.05;
+/** Whether a form of the entry takes the thing itself into a hand. */
+const handheld = entry => Object.values(entry.forms ?? {}).some(f => (f.effects ?? []).some(e => e.change === 'reparent' && e.what === 'this' && e.into === 'actor_hand'));
 
 /** A slot as a slot of today's def. */
 function slotOf(name, s) {
@@ -64,8 +74,11 @@ export function loadDef(entry, ref) {
     params: {entry: {type: 'string', default: ref, max: 200, doc: 'The entry this thing was loaded from (tools/entry/load.mjs).'}},
     state: Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k, fieldOf(f)])),
     slots: Object.entries(entry.slots ?? {}).map(([k, s]) => slotOf(k, s)),
+    size: {...def.size, box: def.size.box.map(v => Math.max(v, SIZE_MIN))},
+    ...(handheld(entry) ? {components: {carryable: {mass: 0.5}}} : {}),
   });
   const skipped = Object.keys(SKIPPED).filter(k => Object.keys(entry[k] ?? {}).length).map(k => ({what: k, why: SKIPPED[k]}));
+  for (const [k, f] of Object.entries(entry.state ?? {})) if (NEW_ENGINE_ONLY.includes(f.type)) skipped.push({what: `state.${k}`, why: `a ${f.type} field: held as json, not read back; new engine only`});
   return {def, skipped};
 }
 
