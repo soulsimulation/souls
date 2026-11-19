@@ -23,21 +23,47 @@ bash /srv/sim-worlds/production/v2/tools/ops/cutover/cutover.sh back     # the r
 `/etc/souls/cutover.env` names the world that moves: `SLUG=eden` and `WORLD=<the new system's Eden>`, as
 `place-world.sh` placed it.
 
+Before starting the old launcher, install its operator-owned `/etc/souls/cutover-binding.json`:
+
+```json
+{"oldWorldId":"<stable old registry worldId>","canonicalSlug":"eden","routesFile":"/var/lib/souls/routes/worlds.json","clientDir":"/usr/local/lib/souls/client"}
+```
+
+Use the resolved old registry identity, including existing aliases, rather than assuming the public slug is the
+database identity. The installed client must be the release's matching served bundle. `SOULS_CUTOVER_BINDING` may
+name a different binding file; an explicitly configured missing file or invalid binding refuses launcher startup.
+An absent default binding leaves ordinary old operation enabled. Once configured, missing or damaged activation
+metadata refuses bound-world mutations by name; unrelated worlds and read-only sockets continue.
+
+`check` asks the actual launcher over its direct loopback operator endpoint, verifies its binding identifier and
+the installed client hashes, and checks the same trusted `souls/world-routes/1` file used by the public route map.
+The endpoint is unavailable to forwarded requests and discloses no filesystem paths.
+
 **`switch`** runs `check` first and refuses, changing nothing, on any failed precondition (each named): the live release
 carries the front door; the directory lists `eden`; `worldd@<world>` and `souls-gateway@<world>` run; the world's
 placed socket path is under Linux's 108 bytes; the directory's `--gateway-tokens` is the world folder's `tokens` file
-(W11b); the backup and store settings are set; it is not already switched. Then it:
+(W11b); the backup and store settings are set; the actual launcher is prepared. Then it:
 
-1. writes `switch` to `/var/lib/souls/cutover/log.jsonl`, the cut-over's history;
-2. copies today's feed (`<today's data>/feed.jsonl`, the owner notice among its items) into the new system's
+1. preserves and fsyncs the first old proxy backup and writes `switch` to the fsynced cutover history. Before a fresh
+   switch (no journal, or completed rollback), an existing backup must byte-match the current old proxy or refuse;
+2. atomically sets only Eden's `canonical` route flag true, fencing old-world mutations before public routing;
+3. copies today's feed (`<today's data>/feed.jsonl`, the owner notice among its items) into the new system's
    `/var/lib/souls/news.jsonl`, each line once, which O23's feed serves in today's shape;
-3. runs O19's SWITCH script as the README has it: the front door's map from the directory, the site files, `caddy
-   validate`, a reload (a failed validate puts today's file back and reloads nothing);
-4. writes `switched` and prints the time it took and the rollback command.
+4. quiesces the route timer/service and runs O19's SWITCH script, preserving that first backup on retries: the map,
+   site files, `caddy validate`, reload and timer. A missing synchronous Eden map is a failed switch;
+5. writes `switched`. A routing failure records `switch-failed` and leaves old writes fenced: resume `switch` or
+   run `back`; it never silently permits old writes while new routing may be live.
 
-**`back`** runs O19's BACK script (today's site file back, a reload, the map's timer off), writes `back` and prints
-the time it took and the count of accounts and Souls made since the switch (`count.mjs`, read-only), for the
-declaration of the rollback.
+**`back`** keeps old writes fenced while it quiesces the route timer/service, restores and reloads the saved old
+proxy, confirms the restored file and removes Eden's map entry. Only then does it atomically set Eden's canonical
+flag false and write `back`. A partial rollback stays fenced and may be resumed with `back`. Completed switch/back
+commands repeat without changes. The last rollback step counts accounts and Souls made since the switch
+(`count.mjs`, read-only). No v2 stores, newly created accounts or Souls are removed or copied back.
+
+One exclusive `transaction.lock` directory serializes commands. An existing lock refuses rather than stealing a
+possibly live writer's lock. After an interrupted operator process, confirm that writer has stopped before removing
+only its stale lock, inspect the durable phase journal, then resume the same command or run `back`. Malformed
+journal or activation metadata requires operator repair; never clear canonical to bypass a failed route rollback.
 
 What they change: the proxy's site files, the front door's map and its timer, the cut-over's log and the news file.
 Nothing else: no DNS record, no world, no store, no unit of either system. Both systems run throughout; the switch
@@ -50,9 +76,13 @@ decides only which of them the public name sends Eden's page to.
   its history shows one writer at every moment.
 - **Across the two systems.** At every moment the front door sends Eden's page to exactly one system (a Caddy reload
   swaps the whole configuration at once). Today's API paths under `/w/eden/v1/` still reach today's launcher by
-  O19's design, so that old clients get its answer by name, never a redirect that drops their token. **That answer is
-  R18's (#2821): until today's launcher refuses Eden's acts from old clients by name, old clients would still act in
-  the old Eden after the switch.** It is a stop condition below, not a step of these commands.
+  O19's design. The actual old launcher resolves aliases and refuses Eden's mutations with `world.new-engine`
+  and `node eden.mjs upgrade` guidance before forwarding, checking again after asynchronous waits. Explicit eyes
+  gaze requests are mutations too; ordinary views and existing read-only sockets keep running. Active old client
+  config/file requests use the installed v2 served-answer helper without redirect. On rollback, the real old config
+  carries `x-souls-engine: old`; the v2 upgrade command gives `world.previous-engine` and
+  `node eden.mjs upgrade --rollback` guidance before considering the older manifest. R18 restores the kept client,
+  local memory and old ownership records without copying world state.
 
 ## The declaration
 

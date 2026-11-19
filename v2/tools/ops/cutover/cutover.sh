@@ -31,16 +31,16 @@ die() {
   echo "cutover: $*" >&2
   exit 1
 }
-now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-ms() { node -e 'console.log(Date.now())'; }
-record() { mkdir -p "$(dirname "$LOG")" && printf '{"step":"%s","at":"%s","slug":"%s","world":"%s"}\n' "$1" "$(now)" "$SLUG" "$WORLD" >> "$LOG"; }
-last() { [ -f "$LOG" ] && sed -n 's/.*"step":"\([a-z-]*\)".*/\1/p' "$LOG" | tail -1; }
 
 # The README's script `name`, as root runs it on production; on a scratch host with its folders and directory.
 o19() {
   local body
   body=$(awk -v n="$1" '$0 == "bash -s <<'"'"'" n "'"'"'" {on = 1; next} on && $0 == n {exit} on' "$PROXY/README.md")
   [ -n "$body" ] || die "the live release's proxy README has no $1 script: ship a release that carries O19"
+  if [ "$1" = SWITCH ]; then
+    # State.prepare fsyncs the first backup; retrying the reviewed script must not overwrite it.
+    body=${body/'cp -a /etc/caddy/sites/soul-game.caddy /etc/caddy/soul-game.caddy.before-o19'/'[ -f /etc/caddy/soul-game.caddy.before-o19 ] || cp -a /etc/caddy/sites/soul-game.caddy /etc/caddy/soul-game.caddy.before-o19'}
+  fi
   if [ -n "$R" ]; then
     body=${body//\/etc\//$R/etc/}
     body=${body//\/srv\/sim-worlds\/production/$RELEASE}
@@ -92,7 +92,7 @@ check() {
   [ -f "$R$tokens" ] || no "the world folder has no tokens file"
   for n in SOULS_BACKUP_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY SOULS_BACKUP_KEY_FILE; do named "$n" || no "$n is not set in /etc/souls/secrets.env"; done
   named DIRECTORY_STORE_URL || named WORLDD_STORE || no "neither DIRECTORY_STORE_URL nor WORLDD_STORE is set: the world's history would ship nowhere"
-  case $(last) in switched) no "already switched (the log's last step); switch back first" ;; switch) no "a switch stopped part-way (the log); run back" ;; esac
+  grep -qFx 'cp -a /etc/caddy/sites/soul-game.caddy /etc/caddy/soul-game.caddy.before-o19' "$PROXY/README.md" || no "the reviewed front-door backup seam changed"
   [ "$bad" = 0 ] && echo "cutover: check passed" && return 0
   echo "cutover: check refused; nothing changed"
   return 1
@@ -119,40 +119,35 @@ news() {
   echo "  news: $added of today's feed items carried into the new system's news"
 }
 
-switch() {
-  local t0 t1
-  check || exit 1
-  t0=$(ms)
-  record switch
-  news
-  if ! o19 SWITCH; then
-    record switch-failed
-    die "the front door did not switch (its own line above says what is back); nothing else changed"
-  fi
-  [ -f "$R/var/lib/souls-routes/slugs/$SLUG" ] || echo "  warning: the map has no $SLUG yet; the timer makes it within a minute"
-  record switched
-  t1=$(ms)
-  echo "cutover: switched $SLUG to the new system at $(now) in $(((t1 - t0) / 1000)).$(((t1 - t0) % 1000 / 100)) s"
-  echo "cutover: the rollback, inside the window: bash $RELEASE/v2/tools/ops/cutover/cutover.sh back"
-}
-
-back() {
-  local t0 t1 since
-  case $(last) in switched | switch | switch-failed) ;; *) die "not switched (the log's last step is '$(last)'); nothing to switch back" ;; esac
-  t0=$(ms)
-  o19 BACK || die "the front door did not switch back (its own line above says why); try again or restore /etc/caddy/soul-game.caddy.before-o19 by hand"
-  record back
-  t1=$(ms)
-  echo "cutover: $SLUG back on today's system at $(now) in $(((t1 - t0) / 1000)).$(((t1 - t0) % 1000 / 100)) s"
-  since=$(sed -n 's/.*"step":"switched","at":"\([^"]*\)".*/\1/p' "$LOG" | tail -1)
-  [ -n "$since" ] && node "$HERE/count.mjs" --since "$since" --args "$R/etc/souls/directory.args"
+quiesce_routes() {
+  local unit
+  for unit in souls-routes.timer souls-routes.service; do
+    if systemctl cat "$unit" > /dev/null 2>&1; then systemctl stop "$unit" || return 1; fi
+  done
 }
 
 cmd=${1:-}
 settings
+export SLUG WORLD
 case $cmd in
-  check) check ;;
-  switch) switch ;;
-  back) back ;;
+  check|switch|back) node "$HERE/state.mjs" "$cmd" "$0" ;;
+  __check) check ;;
+  __news) news ;;
+  __switch-route)
+    quiesce_routes || die "cannot quiesce the route writer; old writes remain fenced"
+    o19 SWITCH || exit 1
+    [ -f "$R/var/lib/souls-routes/slugs/$SLUG" ] || die "the switched map does not contain the world; old writes remain fenced"
+    ;;
+  __back-route)
+    quiesce_routes || die "cannot quiesce the route writer; old writes remain fenced"
+    o19 BACK || exit 1
+    quiesce_routes || die "cannot confirm the route writer stopped; old writes remain fenced"
+    cmp -s "$R/etc/caddy/sites/soul-game.caddy" "$R/etc/caddy/soul-game.caddy.before-o19" || die "old proxy file not restored; old writes remain fenced"
+    rm -f "$R/var/lib/souls-routes/slugs/$SLUG"
+    ;;
+  __count)
+    since=$(sed -n 's/.*"step":"switched","at":"\([^"]*\)".*/\1/p' "$LOG" | tail -1)
+    [ -z "$since" ] || node "$HERE/count.mjs" --since "$since" --args "$R/etc/souls/directory.args"
+    ;;
   *) die "check|switch|back (see the top of $0)" ;;
 esac
