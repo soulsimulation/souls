@@ -11,7 +11,7 @@
 //! tree, by the shared library (`replica::select`), so the answer is the client's at the same version. The clock
 //! thread binds it once, at commit (`sim::commit::spot`, `crate::answers`).
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use replica::effects::Refusal;
@@ -38,7 +38,7 @@ pub struct PlaceRow {
 pub struct PlacesSeen {
     pub version: u64,
     pub places: Arc<Vec<PlaceRow>>,
-    pub held: Arc<HashSet<Id>>,
+    pub held: Arc<BTreeSet<Id>>,
 }
 
 /// A candidate as the agent wrote it.
@@ -122,7 +122,7 @@ mod tests {
         let seen = PlacesSeen {
             version: 1,
             places: Arc::new(places),
-            held: Arc::new(HashSet::from([id(10)])),
+            held: Arc::new(BTreeSet::from([id(10)])),
         };
         let any = Wanted::Select(Selector::FreeSlot {
             kind: chair,
@@ -151,7 +151,7 @@ mod tests {
             }
         );
         let full = PlacesSeen {
-            held: Arc::new(HashSet::from([id(10), id(11), id(14), id(15)])),
+            held: Arc::new(BTreeSet::from([id(10), id(11), id(14), id(15)])),
             ..seen
         };
         let list = resolve(&full, Vec3::new(0, 0, 0), &[any]);

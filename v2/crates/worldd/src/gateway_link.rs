@@ -112,7 +112,7 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
              [--bodies <n>] [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
-             [--stall-after <s> --stall-for <s>] [--www <dir>]"
+             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>]"
         );
         2
     };
@@ -130,7 +130,9 @@ pub fn run(args: &[String]) -> i32 {
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
     if args.iter().any(|a| a == "--testworld") {
-        cfg.bodies = Some(Box::new(worldd::testbodies::bodies));
+        cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| {
+            worldd::testbodies::bodies()
+        }));
         // C10 (#3414): the ids a client acts on, `testworld <id> <name>`.
         for (name, id) in worldd::testbodies::named().unwrap_or_default() {
             println!(
@@ -205,6 +207,12 @@ pub fn run(args: &[String]) -> i32 {
             return 1;
         }
     };
+    // K7's watchdog on the world's own loop (K18): no tick for the limit ends the process by name.
+    // `--watchdog-ms` widens it for a debug build's big world (C11's Eden-sized sync test), as `worldd --dir` takes.
+    let limit = arg("--watchdog-ms")
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(crate::watchdog::LIMIT_MS);
+    crate::watchdog::watch(world.beat.clone(), crate::watchdog::Real::start(), limit);
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,

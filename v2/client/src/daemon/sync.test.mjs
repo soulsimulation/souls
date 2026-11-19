@@ -66,7 +66,9 @@ test('C11 A2, A3: a first sync of 30,000 records completes; it emits synced, whi
   const world = join(dir, 'w.sock'), tokens = join(dir, 'tokens.txt');
   writeFileSync(tokens, `soul-${SCOPE}-2 ${createHash('sha256').update(token).digest('hex')}\n`);
   procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1',
-    '--rooms', '1', '--bodies', '50', '--items', String(ITEMS)], { stdio: 'ignore' }));
+    '--rooms', '1', '--bodies', '50', '--items', String(ITEMS),
+    // A debug build answers an Eden-sized sync slowly: K18's watchdog is given room for it.
+    '--watchdog-ms', '10000'], { stdio: 'ignore' }));
   await waitFor(() => statSync(world).isSocket(), 30_000);
   const g = spawn(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], { stdio: ['ignore', 'pipe', 'pipe'] });
   procs.push(g);

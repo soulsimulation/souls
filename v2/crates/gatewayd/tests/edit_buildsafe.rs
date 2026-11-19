@@ -659,7 +659,9 @@ async fn g1d_a_wall_where_a_soul_walks_or_across_its_next_corner_is_refused() {
         creator: creator_id,
         kinds: b.kinds.clone(),
     });
-    cfg.bodies = Some(Box::new(move || walkers(tree, header, kinds, ground)));
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| {
+        walkers(tree, header, kinds, ground)
+    }));
     let store = sim::log::Mem::with(Vec::new());
     let world = answers::start(b.replica, toggles::rules(), store.clone(), cfg).unwrap();
 
@@ -721,7 +723,7 @@ async fn g1d_a_wall_where_a_soul_walks_or_across_its_next_corner_is_refused() {
         "refusals 2, receipts 5; the longest tick {longest} us, each phase's longest {phases:?}"
     );
     // A speed bar, held in an optimized build (`cargo test --release`): an unoptimized one under a parallel `cargo
-    // test` spends most of a tick starting the walks (phase 2), not on the edits.
+    // test` spends most of a tick stepping and starting the walks (the bodies' phase), not on the edits.
     if !cfg!(debug_assertions) {
         assert!(longest <= 50_000, "no tick over 50 ms: {longest} us");
     }
@@ -731,7 +733,9 @@ async fn g1d_a_wall_where_a_soul_walks_or_across_its_next_corner_is_refused() {
     let log = store.0.lock().unwrap().bytes.clone();
     let mut placed = 0;
     for r in sim::log::recover(&log).unwrap().records {
-        for e in Part::read(&r).unwrap().effects {
+        // The tick records' parts; K12's input records beside them hold no effects.
+        let Ok(part) = Part::read(&r) else { continue };
+        for e in part.effects {
             if let Body::Changes(cs) = &e.body {
                 placed += cs
                     .iter()
