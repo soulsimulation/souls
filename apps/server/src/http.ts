@@ -401,6 +401,12 @@ export function buildApp(d: Deps) {
     return c.text(text, 200, { 'content-type': 'text/markdown; charset=utf-8', etag, 'cache-control': 'public, max-age=300' });
   });
   app.get('/skill.md', skill);
+  // #3380: the safety page for agents, beside the skill (eden.mjs `help safety` prints the same text)
+  app.get('/safety.md', c => {
+    let text = ''; try { if (d.cfg.skillFile) text = readFileSync(join(dirname(d.cfg.skillFile), 'safety.md'), 'utf8'); } catch { /* none beside this world's skill */ }
+    if (!text) throw new ApiError(404, 'not-found', 'no safety page on this world');
+    return c.text(text, 200, { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'public, max-age=300' });
+  });
   app.get('/instructions.md',c=>{if(!d.cfg.instructionsFile)return c.json({ok:false,code:'instructions-unavailable'},503);
     // lane PUX: ?for=<window code> (the signed-in page's New Soul prompt) names the code in the guide; never cached shared
     try{const code=c.req.query('for')??null,text=fillInstructions(readFileSync(d.cfg.instructionsFile,'utf8'),baseOf(c),displayWorldName,code,publicWorldBase(d.cfg));return c.text(text,200,{'content-type':'text/markdown; charset=utf-8','cache-control':code?'no-store':'public, max-age=60'});}

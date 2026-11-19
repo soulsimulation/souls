@@ -1,0 +1,271 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:screen",
+  "owner": "thing",
+  "state": {
+    "on": {
+      "n": 1,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "picture": {
+      "n": 2,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "title": {
+      "n": 3,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "maker": {
+      "n": 4,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        900
+      ],
+      "yaw_mdeg": 180000
+    },
+    "switch": {
+      "role": "contact",
+      "at_mm": [
+        1100,
+        950,
+        40
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      2400,
+      2288,
+      500
+    ]
+  },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "on",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "switch"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "on",
+          "to": true,
+          "event": "switched_on"
+        }
+      ]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "on",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "switch"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "on",
+          "to": false,
+          "event": "switched_off"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:screen",
+    "table": [
+      {
+        "part": "light",
+        "field": "on",
+        "do": "glow",
+        "at": {
+          "true": 700,
+          "false": 0
+        }
+      },
+      {
+        "part": "light",
+        "field": "on",
+        "do": "tint",
+        "at": {
+          "true": "#8fc0e8",
+          "false": "#1c2228"
+        }
+      }
+    ],
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            912,
+            0
+          ],
+          "polygon": [
+            [
+              -1188,
+              -28
+            ],
+            [
+              1188,
+              -28
+            ],
+            [
+              1188,
+              28
+            ],
+            [
+              -1188,
+              28
+            ]
+          ],
+          "h": 1376,
+          "tint": "frame"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -1000,
+            450,
+            0
+          ],
+          "r": 40,
+          "h": 900,
+          "segments": 5,
+          "tint": "leg"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            1000,
+            450,
+            0
+          ],
+          "r": 40,
+          "h": 900,
+          "segments": 5,
+          "tint": "leg"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            30,
+            0
+          ],
+          "size": [
+            2400,
+            60,
+            500
+          ],
+          "round": 0,
+          "tint": "leg"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1600,
+            50
+          ],
+          "size": [
+            2250,
+            1250,
+            30
+          ],
+          "round": 0,
+          "tint": "panel",
+          "role": "light"
+        }
+      ],
+      "round": 12,
+      "palette": {
+        "frame": "#2b2b2b",
+        "leg": "#5a5f66",
+        "panel": "#ffffff"
+      },
+      "tags": [
+        "signage",
+        "sign-text",
+        "screen",
+        "display",
+        "media",
+        "classroom"
+      ]
+    }
+  },
+  "text": {
+    "card": "A large screen on legs for a classroom: switch it on to show its picture.",
+    "media": "media",
+    "display": "display",
+    "projector_screen": "projector screen"
+  },
+  "card": {
+    "text": "card",
+    "category": "media",
+    "synonyms": [
+      "display",
+      "projector_screen"
+    ]
+  }
+}

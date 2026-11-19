@@ -122,6 +122,17 @@ impl Store {
         Ok(Account { account, principal })
     }
 
+    /// When an account was made, seconds since 1970 (W3's limits for a new account).
+    pub fn made(&self, account: &str) -> Result<u64, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let at: i64 = db.query_row(
+            "SELECT created_at FROM provider_accounts_v1 WHERE account_id = ?1",
+            params![account],
+            |r| r.get(0),
+        )?;
+        Ok(at as u64)
+    }
+
     /// A consistent copy of the store at `to`, taken while it is in use (SQLite's online backup), for O20 to ship.
     pub fn backup(&self, to: &Path) -> Result<(), StoreError> {
         let db = self.db.lock().expect("the store");

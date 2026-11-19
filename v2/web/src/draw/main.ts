@@ -3,7 +3,7 @@
 // world the picture is, and the clock's state.
 import * as THREE from 'three';
 import { FreeCamera } from '../camera/camera.ts';
-import { PlaybackClock } from '../clock/clock.ts';
+import { PlaybackClock, caughtUp } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
@@ -12,6 +12,9 @@ import { WorldView } from './world.ts';
 import { support } from './support.ts';
 import { pageThings } from '../things/page.ts';
 import { HistoryPage, readMoment } from '../history/page.ts';
+import { WorldSound } from '../sound/sound.ts';
+import { pageSouls } from '../souls/page.ts';
+import { arrive } from '../worlds/arrive.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -48,9 +51,14 @@ const world = new WorldView();
 scene.add(world.group);
 const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
-Object.assign(globalThis, { v2: { renderer, scene, cam, world, things, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
+const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
+Object.assign(globalThis, { v2: { renderer, scene, cam, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
 loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
+
+// V21: the world heard, from the same parts and history the picture plays.
+const where = (id: string, local?: [number, number, number]) => (world.nodes.has(id) ? (local ? new THREE.Vector3(...local).multiplyScalar(1e-6) : new THREE.Vector3()).applyMatrix4(world.frame(id)).toArray() : null);
+const sound = new WorldSound({ where, kindOf: (id) => world.nodes.get(id)?.kind, heightAt: (x, z) => world.heightAt(x, z) });
 
 let pointer: Pointer | null = null;
 let newestTo: number | null = null;
@@ -65,11 +73,15 @@ addEventListener('resize', resize);
 resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
+const worldName = new URLSearchParams(location.search).get('world');
+const firstFrame = arrive(worldName, status);
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
     world.apply(p.nodes, p.removed, p.samples);
     things.apply(p.nodes, p.removed);
+    sound.part(p.nodes, p.removed, p.samples, p.happened ?? []);
+    souls.apply(p);
     newestTo = p.to;
     played++;
     if (p.hash !== null) (hashes++, p.hash && hashesEqual++);
@@ -77,11 +89,11 @@ const live = (address: string) => new StreamSource(address).start({
   error: (m) => (error = m),
 });
 let history = moment && new HistoryPage(moment, cam, {
-  apply: (n, r, s) => (world.apply(n, r, s), things.apply(n, r)), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
+  apply: (n, r, s, h) => (world.apply(n, r, s), things.apply(n, r), sound.part(n, r, s, h ?? [])), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
   frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
 });
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
-else if (!address) status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
+else if (!address) worldName || (status.textContent = 'no stream: open this page with ?stream=<the stream directory>');
 else live(address);
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
@@ -102,19 +114,23 @@ renderer.setAnimationLoop((now) => {
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
   sun.position.copy(sun.target.position).add(SUN);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
-  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, newestTo);
+  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {
     drawn = world.draw(t, cam.camera);
     if (!framed && drawn > 0) {
       framed = true;
+      firstFrame();
       cam.setExtent(world.extent);
       const at = world.crowd(t);
       if (at) cam.look(at, 0.6, -0.6, 55);
     }
   }
   renderer.render(scene, cam.camera);
+  const c = cam.camera, fwd = c.getWorldDirection(new THREE.Vector3());
+  sound.frame(t, { pos: c.position.toArray(), forward: fwd.toArray(), up: c.up.toArray() });
+  if (t !== null) souls.draw(t, cam.camera);
   if (history) return void (status.textContent = `${history.status()}\nbodies drawn      ${drawn}   frames a second ${fps.toFixed(0)}`);
   if (!address && !moment) return;
   status.textContent = t === null || worldNow === null

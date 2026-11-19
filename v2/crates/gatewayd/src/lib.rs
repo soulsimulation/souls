@@ -7,17 +7,23 @@
 //! - [`token`]: what a token grants, its SHA-256 alone stored, compared in constant time, revocable.
 //! - [`world_link`]: one local socket to the world; intents not yet answered are kept and sent again on reconnect.
 //! - [`resume`]: a client resumes its stream from a cursor, or is told by name that it must start again.
+//! - [`gate`]: the gate a world's intents pass through while it moves to another machine (O9, #2828).
 //! - [`receipts`]: one line per answered intent in the world's receipts file, for the operator's usage roll-up.
+//! - [`views`]: a signed-in socket subscribes to R4's view items for its scope (#3292), on a second local socket to
+//!   the world; its frames are keys 30 to 32.
 //!
 //! Frames after the first, as CBOR in T0's profile (`v2/docs/encoding.md`):
 //!
-//! - client → gateway, sign-in (unless the `authorization: Bearer <token>` header gave it): `{1: token, 2: cursor}`,
-//!   2 left out for a fresh stream. Then every frame is an intent (T10 rule 2).
+//! - client → gateway, sign-in (unless the `authorization: Bearer <token>` header gave it): `{1: token, 2: cursor,
+//!   3: seen}`, 2 left out for a fresh stream; `seen` (default 1) is how many frames the client applied at its
+//!   cursor's version, since a refusal does not move the version (the `souls-cursor` and `souls-seen` headers give
+//!   the same by header). Then every frame is an intent (T10 rule 2).
 //! - gateway → client, the sign-in's outcome: `{4: name}`, one of `token.refused` (and the socket closes),
 //!   `stream.started`, `stream.resumed` or `stream.cannot-resume` (the client starts again; the stream continues).
 //! - gateway → client, a frame of the stream: `{1: version, 2: answer}` as the world sent it; the version is the
-//!   client's next cursor. An answer the gateway gives itself (`world.restarting`, a refusal before the world) is
-//!   `{2: answer}`: it has no version and is not kept for a resume.
+//!   client's next cursor. A refusal the gateway gives itself (`world.restarting`, `intent-not-granted`) is a frame
+//!   of the stream too, at the newest version the world sent, and kept for a resume; before the world has sent any
+//!   version, and for bytes that are not an intent, it is `{2: answer}`, with no version and not kept.
 //! - both ways, after sign-in, R5's sync by hash (R5b, #3164; `replica::sync::wire`): a frame with key 20 is a sync
 //!   request, not an intent. The gateway passes it to the world with the asking actor (key 23) under a number of its
 //!   own, and the world's answer back to that socket alone, under the client's number; it is not kept for a resume.
@@ -26,19 +32,23 @@
 //!   CBOR (and read by the gateway without parsing JSON), apart from the world's stream and never in its log: `{"mail": {"id", "text", "at"}}` out, once per
 //!   socket, and `{"close": {"id", "state", "outcome"}}` back when the act that served it ends.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 use replica::encode::Value;
 use tokio::sync::mpsc;
 
+pub mod gate;
 pub mod mailbox;
 pub mod receipts;
 pub mod resume;
 pub mod socket;
 pub mod times;
 pub mod token;
+pub mod views;
 pub mod world_link;
+
+pub use gate::{End, Entry, Gate};
 
 use receipts::{Outcome, Receipts, Who};
 use resume::{Cursor, Kept, Resume};
@@ -61,6 +71,8 @@ pub struct Gateway {
     /// The world's pinned build hash, sent in the first frame (T10 rule 12).
     pub build: Vec<u8>,
     pub link: world_link::Link,
+    /// The sockets' view subscriptions and their link to the world's view tier.
+    pub views: views::Views,
     pub log: Log,
     /// The receipts file's writer (`--receipts`), or off.
     pub receipts: Receipts,
@@ -73,7 +85,7 @@ pub struct Gateway {
 struct Hub {
     next_session: u64,
     /// Per grant (by its actor's bytes): its kept frames and its socket, if one is signed in.
-    grants: HashMap<Vec<u8>, Held>,
+    grants: BTreeMap<Vec<u8>, Held>,
 }
 
 #[derive(Default)]
@@ -84,7 +96,7 @@ struct Held {
     who: Option<Arc<Who>>,
     /// The signed-in socket's queue for the owner's messages, and the ids already given to it.
     mail: Option<mpsc::Sender<String>>,
-    mailed: HashSet<String>,
+    mailed: BTreeSet<String>,
 }
 
 /// A signed-in socket's place in the hub.
@@ -114,6 +126,7 @@ impl Gateway {
             tokens: RwLock::new(tokens),
             build,
             link: world_link::Link::default(),
+            views: views::Views::default(),
             log,
             receipts,
             mailbox: std::sync::OnceLock::new(),
@@ -121,9 +134,16 @@ impl Gateway {
         })
     }
 
-    /// Signs a socket in for `grant`. A socket already signed in for it is let go (its queue closes, so its task
-    /// ends): the last device wins. `who` is whom its answers count for in the receipts file.
-    pub fn attach(&self, grant: Grant, cursor: Option<&Value>, who: Arc<Who>) -> Attached {
+    /// Signs a socket in for `grant`, resuming after the first `seen` frames at `cursor`. A socket already signed in
+    /// for it is let go (its queue closes, so its task ends): the last device wins. `who` is whom its answers count
+    /// for in the receipts file.
+    pub fn attach(
+        &self,
+        grant: Grant,
+        cursor: Option<&Value>,
+        seen: usize,
+        who: Arc<Who>,
+    ) -> Attached {
         let (tx, rx) = mpsc::channel(OUTBOUND);
         let (mail_tx, mail_rx) = mpsc::channel(OUTBOUND);
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
@@ -136,7 +156,7 @@ impl Gateway {
         held.mailed.clear();
         let (outcome, replay) = match cursor {
             None => (resume::STARTED, Vec::new()),
-            Some(v) => match Cursor::from_value(v).map(|c| held.kept.resume(&c)) {
+            Some(v) => match Cursor::from_value(v).map(|c| held.kept.resume(&c, seen)) {
                 Some(Resume::Resumed(frames)) => (resume::RESUMED, frames),
                 _ => (resume::CANNOT_RESUME, Vec::new()),
             },
@@ -165,7 +185,7 @@ impl Gateway {
     /// A message no longer open is forgotten, so ids given stay as few as the open messages.
     pub fn post_mail(&self, open: Vec<(Vec<u8>, String, String)>) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
-        let ids: HashSet<&str> = open.iter().map(|(_, id, _)| id.as_str()).collect();
+        let ids: BTreeSet<&str> = open.iter().map(|(_, id, _)| id.as_str()).collect();
         for held in hub.grants.values_mut() {
             held.mailed.retain(|id| ids.contains(id.as_str()));
         }

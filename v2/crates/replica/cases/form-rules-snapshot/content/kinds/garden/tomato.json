@@ -1,0 +1,62 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:tomato",
+  "owner": "thing",
+  "state": {
+    "bites_left": { "n": 1, "type": "int", "unit": "count", "default": 2, "min": 0, "max": 2, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [45, 40, 0] },
+    "skin": { "role": "contact", "at_mm": [0, 70, 0] }
+  },
+  "geometry": { "bounds_mm": [90, 80, 90] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
+    "bite": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        { "need": "held_by_actor" },
+        { "need": "state", "field": "bites_left", "at_least": 1 }
+      ],
+      "steps": [{ "step": "move", "move": "consume", "at": "skin" }],
+      "effects": [{ "change": "set", "field": "bites_left", "by": -1, "event": "bitten" }]
+    },
+    "eat": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        { "need": "held_by_actor" },
+        { "need": "state", "field": "bites_left", "at_least": 1 }
+      ],
+      "steps": [{ "step": "move", "move": "consume", "at": "skin" }],
+      "effects": [{ "change": "set", "field": "bites_left", "to": 0, "event": "eaten" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:tomato",
+    "table": [
+      { "part": "fruit", "field": "bites_left", "do": "scale", "axis": "y", "range": [0, 2], "to": [0, 1000] }
+    ],
+    "shape": {"round":2,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,0],[30,2],[45,24],[40,60],[18,73],[0,70]],"segments":10,"tint":"skin","role":"fruit","pivot":[0,0,0]},{"kind":"box","at":[0,5,0],"size":[35,6,12],"tint":"leaf"},{"kind":"box","at":[0,74,0],"size":[35,6,12],"tint":"leaf","role":"fruit","pivot":[0,0,0]}],"palette":{"skin":"#dc3d25","leaf":"#487b33"},"tags":["garden","food","tomato","item","object"]}
+  },
+  "text": {
+    "card": "A ripe garden tomato: take it and eat it, in two bites or at once.",
+    "garden": "garden",
+    "food": "food",
+    "fruit": "fruit",
+    "howto_eat": "Take the tomato and bite it twice, or eat it whole; the green calyx is left."
+  },
+  "card": { "text": "card", "category": "garden", "synonyms": ["food", "fruit"] },
+  "howtos": {
+    "eat": { "text": "howto_eat", "steps": [{ "form": "take" }, { "form": "bite" }, { "form": "bite" }] }
+  }
+}

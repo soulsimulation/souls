@@ -299,7 +299,13 @@ fn fixture_view(key: Key) -> Vec<(i64, Value)> {
 fn a_view_that_skips_private_entries_plays_to_the_end() {
     let h = header();
     let note = encode(&Id::new(Scope([0xee; 16]), 20).expect("an id").to_value()).expect("bytes");
-    for (node, level) in [(0, Level::Full), (0, Level::Sampled), (1, Level::Full)] {
+    for (node, level) in [
+        (0, Level::Full),
+        (0, Level::Sampled),
+        (1, Level::Full),
+        (7, Level::Full),
+        (7, Level::Sampled),
+    ] {
         let key = Key {
             node: Id::new(Scope([0xee; 16]), node).expect("an id"),
             level,
@@ -315,13 +321,16 @@ fn a_view_that_skips_private_entries_plays_to_the_end() {
         let hb = fs::read(root.join(stream::header_path(&h))).expect("the header");
         let mut p = Player::start(&hb).expect("a player");
         let mut declared = Vec::new();
+        let mut carried = 0;
         for i in 0..w.written().parts {
             let bytes = fs::read(w.dir().join(i.to_string())).expect("a part");
             let sp = StreamPart::read(&bytes).expect("reads");
             assert!(
-                !sp.part.windows(note.len()).any(|x| x == note.as_slice()),
+                !sp.part.windows(note.len()).any(|x| x == note.as_slice())
+                    && !bytes.windows(note.len()).any(|x| x == note.as_slice()),
                 "the public stream names aa:1's note"
             );
+            carried += sp.carried.len();
             if !sp.gaps.is_empty() {
                 let at = p.replica().version();
                 let bare = StreamPart {
@@ -356,20 +365,91 @@ fn a_view_that_skips_private_entries_plays_to_the_end() {
             let played = p.play(&bytes).expect("plays");
             assert_ne!(played.hash, Some(false), "part {i}'s hash");
         }
+        let held = replica::hash::state_hash(p.replica().tree()).expect("a hash");
         println!(
-            "view_out gaps: node ee:{node} level {}: {} records, {} parts, declared gaps {declared:?}, played to version {}",
+            "view_out gaps: node ee:{node} level {}: {} records, {} parts, declared gaps {declared:?}, {carried} subtrees carried in, played to version {}, state hash {held} (writer's {})",
             level.number(),
             records.len(),
             w.written().parts,
-            p.replica().version()
+            p.replica().version(),
+            replica::hash::state_hash(w.copy.tree()).expect("a hash"),
         );
         assert!(!declared.is_empty(), "the view skipped aa:1's entries");
         assert_eq!(
-            replica::hash::state_hash(p.replica().tree()).expect("a hash"),
+            held,
             replica::hash::state_hash(w.copy.tree()).expect("a hash")
         );
+        if node == 7 {
+            // #3248 A2: the crate's view held neither leave; the key and the cushion are carried in and land on it.
+            assert_eq!(carried, 2, "the key and the cushion are carried in");
+            let tree = p.replica().tree();
+            for landed in [6, 12] {
+                let n = tree
+                    .handle(Id::new(Scope([0xee; 16]), landed).expect("an id"))
+                    .and_then(|h| tree.node(h))
+                    .expect("landed");
+                assert_eq!(n.parent(), Some(key.node), "ee:{landed} is on the crate");
+            }
+        }
         let _ = fs::remove_dir_all(&root);
     }
+}
+
+/// #3248 A3: a revision 1 carried record (no destination) still reads, and the writer still refuses it by name, as
+/// it does a carried record no arrive follows (aa:1's view of the crate: its note came in a public cushion).
+#[test]
+fn a_carried_record_without_a_destination_or_an_arrive_is_refused() {
+    let h = header();
+    let crate_ = Id::new(Scope([0xee; 16]), 7).expect("an id");
+    let public = Key {
+        node: crate_,
+        level: Level::Full,
+        audience: Audience::Everyone,
+    };
+    let old: Vec<Value> = fixture_view(public)
+        .into_iter()
+        .map(|(_, r)| match r {
+            Value::Map(mut m) => {
+                if let Some(Value::Map(c)) = m.get_mut(&0) {
+                    c.remove(&4);
+                }
+                Value::Map(m)
+            }
+            r => r,
+        })
+        .collect();
+    let first = old
+        .iter()
+        .find_map(|r| replica::views::Carried::read(r).expect("reads"))
+        .expect("a carried record");
+    assert_eq!(first.pose, None, "revision 1 names no destination");
+    assert_eq!(
+        first.flight(&h).expect_err("no destination").name,
+        "carried-no-destination"
+    );
+    let root = scratch("carried-rev1");
+    let mut w = Writer::create(&root, &h, &public, (0, 0)).expect("a writer");
+    let e = old
+        .iter()
+        .try_for_each(|r| w.frame(&frame(vec![r.clone()])))
+        .expect_err("refused");
+    assert_eq!(e.name, "stream-carried", "{e}");
+    let private = Key {
+        audience: Audience::Of(Id::new(Scope([0xaa; 16]), 1).expect("an id")),
+        ..public
+    };
+    let mut w = Writer::create(&root, &h, &private, (0, 0)).expect("a writer");
+    let e = fixture_view(private)
+        .into_iter()
+        .try_for_each(|(_, r)| w.frame(&frame(vec![r])))
+        .and_then(|()| w.flush())
+        .expect_err("refused");
+    println!(
+        "view_out: a revision 1 carried record and one with no arrive: both {}",
+        e.name
+    );
+    assert_eq!(e.name, "stream-carried", "{e}");
+    let _ = fs::remove_dir_all(&root);
 }
 
 /// A2 at R1's replica: a view's part applied as if it skipped nothing is refused as `sequence-gap`.
@@ -497,7 +577,8 @@ fn a_fork_streams_from_its_head_and_a_fresh_reader_holds_the_live_state() {
     let w = Writer::fork(&root, &f.header, &key, (0, 1_000_000), &f.tree.to_state())
         .expect("a fork's writer");
     let stop = Arc::new(AtomicBool::new(false));
-    let following = follow(w, sub, stop.clone());
+    // The ticks are offered at once, so the world's clock stands at their start (rule 11 never cuts early here).
+    let following = follow(w, sub, stop.clone(), || 0);
 
     // A2: 10 s of ticks, 20 a second, each written to the fork's log and handed to the tier.
     for tick in 1..=200i64 {
@@ -582,4 +663,96 @@ fn a_fork_streams_from_its_head_and_a_fresh_reader_holds_the_live_state() {
         p.replica().version()
     );
     let _ = fs::remove_dir_all(&d);
+}
+
+/// V5b (#3460) A1 and A3: told the world's time, a writer with nothing to write marks its pointer quiet up to world-now
+/// at least once a second and writes no empty part; the stretch of a burst after a still while is written once its time
+/// has passed, within the page's lag, and the marks resume after it.
+#[test]
+fn a_still_world_is_marked_quiet_and_a_burst_after_it_is_written() {
+    let h = header();
+    let root = scratch("quiet");
+    let mut w = Writer::create(&root, &h, &key(&h), (0, 0)).expect("a writer");
+    let n = ids();
+    let ptr = |w: &Writer| {
+        Pointer::read(&fs::read(w.dir().join(POINTER)).expect("a pointer")).expect("read")
+    };
+    let mut marks: Vec<(i64, i64)> = Vec::new();
+    let mut burst_written = None;
+    // A record at 0.1 s, then a still world until 30 s, a burst at 30.2 s, still again until 40 s; told every 20 ms.
+    for now in (0..=40_000_000i64).step_by(20_000) {
+        if now == 100_000 {
+            w.frame(&frame(vec![entry(0, now, h.zone, create(&h, n[0]))]))
+                .expect("taken");
+        }
+        if now == 30_200_000 {
+            w.frame(&frame(vec![entry(
+                1,
+                now,
+                n[0],
+                set(n[0], 1, Value::Uint(7)),
+            )]))
+            .expect("taken");
+        }
+        let before = w.written().parts;
+        w.idle(now).expect("told");
+        if w.written().parts > before && now > 30_000_000 {
+            burst_written = Some(now);
+        }
+        if let Some(q) = ptr(&w).quiet_until {
+            assert!(q <= now, "quiet until {q} is past world-now {now}");
+            if marks.last().is_none_or(|m| m.1 != q) {
+                marks.push((now, q));
+            }
+        }
+    }
+    // A1: two parts, the first record's and the burst's; none empty.
+    assert_eq!(w.written().parts, 2);
+    assert_eq!(w.written().entries, 2);
+    assert!(!w.dir().join("2").exists());
+    // A1: the pointer says "quiet" at least once a second through each still while, and never more than 1 s behind.
+    let still = |from: i64, to: i64| {
+        marks
+            .iter()
+            .filter(|m| m.0 >= from && m.0 <= to)
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    for (from, to) in [(1_000_000, 30_000_000), (31_000_000, 40_000_000)] {
+        let m = still(from, to);
+        assert!(
+            m.len() as i64 >= (to - from) / 1_000_000,
+            "{} marks in {from}..{to}",
+            m.len()
+        );
+        for p in m.windows(2) {
+            assert!(
+                p[1].0 - p[0].0 <= 1_000_000,
+                "marks at {} and {} are more than 1 s apart",
+                p[0].0,
+                p[1].0
+            );
+        }
+        for (at, q) in m {
+            assert!(
+                at - q <= 1_000_000,
+                "at {at} the pointer is quiet only until {q}"
+            );
+        }
+    }
+    // A3: the burst's part is written within 1 s of its world time (the page plays 2 s behind), its stretch whole.
+    let written = burst_written.expect("the burst was written");
+    assert!(
+        written - 30_200_000 <= 1_000_000,
+        "the burst was written at {written}"
+    );
+    let p = ptr(&w);
+    assert_eq!(p.newest, Some(1));
+    assert_eq!(p.newest_to, Some(30_500_000));
+    assert!(p.quiet_until.is_some_and(|q| q >= 39_000_000));
+    println!(
+        "V5b: {} quiet marks over 40 s of world time; the burst at 30.2 s written at {:.2} s",
+        marks.len(),
+        written as f64 / 1e6
+    );
 }

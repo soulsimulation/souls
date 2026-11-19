@@ -250,7 +250,10 @@ fn run(dir: &Path, log: &[Vec<u8>], arm: &str, build: &str, r: usize) {
         let resumed = match start(Some(&cursor), &world_now) {
             Start::Cursor => {
                 matches!(
-                    kept.resume(&Cursor::from_value(&cursor.to_value()).expect("a cursor")),
+                    kept.resume(
+                        &Cursor::from_value(&cursor.to_value()).expect("a cursor"),
+                        1
+                    ),
                     Resume::Resumed(_)
                 )
             }

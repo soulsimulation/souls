@@ -11,5 +11,7 @@ replica = { path = "../../crates/replica" }
 sim = { path = "../../crates/sim" }
 # The object store: W8's S3 client and its in-memory store.
 directoryd = { path = "../../crates/directoryd" }
+# O3 (#2732): the shipper, driven by the drill and the count (`src/drill.rs`).
+worldd = { path = "../../crates/worldd" }
 # Deflate (RFC 1951), pure Rust: the archive's compression, chosen for a format kept for ever.
 miniz_oxide = "0.8"

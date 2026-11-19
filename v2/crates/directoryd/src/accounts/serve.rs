@@ -36,7 +36,13 @@ pub struct App {
     pub test_sign_in: bool,
     /// The SHA-256 of the gateway's mailbox key ([`key_digest`]); the gateway's mailbox requests are off without it.
     pub mailbox_key: Option<Vec<u8>>,
+    /// Pairing a Soul to an agent (W2), if on.
+    pub pairing: Option<crate::pairing::Pairing>,
     pub log: Mutex<Box<dyn Write + Send>>,
+    /// The list of worlds and making one (W3), when configured.
+    pub worlds: Option<
+        crate::worlds::list::Worlds<&'static (dyn crate::directory::store::Store + Send + Sync)>,
+    >,
 }
 
 /// The wall clock, in seconds since 1970: a token's `exp` and `nbf` are wall-clock times, not world time.
@@ -55,13 +61,13 @@ pub fn run(listener: TcpListener, app: Arc<App>) {
     }
 }
 
-struct Request {
-    method: String,
-    path: String,
-    bearer: Option<String>,
+pub struct Request {
+    pub method: String,
+    pub path: String,
+    pub bearer: Option<String>,
     /// The gateway's `souls-soul` header on a mailbox close: the grant of the socket it came from.
-    soul: Option<String>,
-    body: Vec<u8>,
+    pub soul: Option<String>,
+    pub body: Vec<u8>,
 }
 
 fn read(stream: &TcpStream) -> Option<Request> {
@@ -105,11 +111,32 @@ fn read(stream: &TcpStream) -> Option<Request> {
 fn handle(mut stream: TcpStream, app: &App) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let Some(req) = read(&stream) else {
-        let _ = respond(&mut stream, 400, &json!({"refused": "request"}));
+        let _ = respond(&mut stream, 400, &json!({"refused": "request"}), "no-store");
         return;
     };
-    let (status, body, note) = route(&req, app);
-    let _ = respond(&mut stream, status, &body);
+    let (status, kind, body, note) = crate::pairing::route::route(
+        app,
+        &req.method,
+        &req.path,
+        req.bearer.as_deref(),
+        &req.body,
+    )
+    .unwrap_or_else(|| {
+        let (status, body, note) = route(&req, app);
+        // A text answer (the mailbox's open lines) is written as it is.
+        match body {
+            Value::String(s) => (status, "text/plain; charset=utf-8", s, note),
+            v => (status, "application/json", v.to_string(), note),
+        }
+    });
+    // The world list may be cached a short while (W3, #2799); everything else is no-store.
+    let list = req.method == "GET" && req.path == "/v1/worlds" && status == 200;
+    let cache = if list {
+        crate::worlds::list::http::CACHE
+    } else {
+        "no-store"
+    };
+    let _ = respond_as(&mut stream, status, kind, &body, cache);
     let line = format!("directoryd: {} {} {status} {note}\n", req.method, req.path);
     let _ = app.log.lock().expect("the log").write_all(line.as_bytes());
 }
@@ -206,6 +233,7 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
     let refuse = |status, name: &str| (status, json!({"refused": name}), name.to_string());
     let (issuer, subject) = match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/healthz") => return (200, json!({"ok": true}), "ok".into()),
+        ("GET" | "POST", "/v1/worlds") => return crate::worlds::list::http::route(req, app),
         ("POST", "/v1/account/session") => {
             let Some(v) = &app.verifier else {
                 return refuse(404, "no-provider");
@@ -245,23 +273,30 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
     }
 }
 
-fn respond(stream: &mut TcpStream, status: u16, body: &Value) -> std::io::Result<()> {
-    // A text answer (the mailbox's open lines) is written as it is.
-    let (body, kind) = match body {
-        Value::String(s) => (s.clone(), "text/plain; charset=utf-8"),
-        v => (v.to_string(), "application/json"),
-    };
+fn respond(stream: &mut TcpStream, status: u16, body: &Value, cache: &str) -> std::io::Result<()> {
+    respond_as(stream, status, "application/json", &body.to_string(), cache)
+}
+
+fn respond_as(
+    stream: &mut TcpStream,
+    status: u16,
+    kind: &str,
+    body: &str,
+    cache: &str,
+) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
         401 => "Unauthorized",
+        409 => "Conflict",
+        429 => "Too Many Requests",
         404 => "Not Found",
         _ => "Error",
     };
     write!(
         stream,
         "HTTP/1.1 {status} {reason}\r\ncontent-type: {kind}\r\ncontent-length: {}\r\n\
-         cache-control: no-store\r\nconnection: close\r\n\r\n{body}",
+         cache-control: {cache}\r\nconnection: close\r\n\r\n{body}",
         body.len()
     )
 }

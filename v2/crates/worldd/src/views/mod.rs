@@ -30,6 +30,7 @@
 
 pub mod index;
 pub mod interest;
+pub mod served;
 pub mod subscription;
 #[cfg(test)]
 mod tests;

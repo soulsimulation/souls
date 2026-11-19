@@ -13,7 +13,7 @@ use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, 
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Purpose, Scope as IdScope};
 use replica::pose::{Frame, Mode, Quat, Vec3};
-use replica::speech::length_of;
+use replica::speech::{Reach, length_of};
 use replica::time::Micros;
 use replica::views::Level;
 use replica::world_model::Audience;
@@ -88,6 +88,7 @@ fn hall() -> Surface {
             outline: vec![corners.clone()],
             vertices: corners,
             triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: sim::gaits::Ground::Dry,
         }],
     )
 }
@@ -260,6 +261,7 @@ fn a2_every_hearer_is_addressed_the_utterance_and_no_one_else() {
                 words: id(0xcc, t * SPEAKERS + k + 1),
                 length: length_of("good evening, everyone"),
                 replace: false,
+                reach: Reach::Talk,
             };
             c.say(who, v, line).expect("says");
         }
