@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
 # A throwaway machine in one folder, for proving release.sh (Engine v2 O18, #2811) with no production machine and no
-# systemd: two worlds started from their pins, each with its gateway, and a `systemctl` that plays systemd's part
+# systemd: two Eden worlds seeded by `worldd seed`, placed as `place-world.sh` places them and served by `worldd
+# serve` from their pins (C1, #3365; O18b, #3498), each with its gateway, and a `systemctl` that plays systemd's part
 # (a unit is a loop that starts its program again 100 ms after it ends; `restart` ends it; `is-active` asks if it
 # runs). Linux or macOS. Docs: v2/docs/release.md.
 #
-#   bash scratch.sh up <dir> <cargo release dir>    the machine: data, lib, etc, two worlds on a served build
-#   bash scratch.sh build <dir> <label> [plant]     a world build (a script serving `worldd gateway-link`, or with
-#                                                   `plant`, o7-plant's refuse-every-act); prints its file
+#   bash scratch.sh up <dir> <install bundle> <facts.json> <entries dir>
+#                                                   the machine: lib (the install bundle's programs), data, etc, and
+#                                                   two worlds seeded from the facts, on a served build
+#   bash scratch.sh build <dir> <label> [plant|mute]  a world build (a script running the machine's `worldd`, or with
+#                                                   `plant`, one that rehearses well and dies when served, or with
+#                                                   `mute`, one that never serves); prints its file
 #   bash scratch.sh ssh <dir> <command>             release.sh's transport (RELEASE_SSH="bash scratch.sh ssh",
 #                                                   RELEASE_TARGET=<dir>): runs <command> on the machine
 #   bash scratch.sh down <dir>                      ends every unit
 #
-# Worlds served this way are I4's world (`worldd gateway-link`), as O7's run serves them: the launcher's own
-# `worldd --dir` does not serve a probe yet (v2/docs/runbook/deploy-and-roll-back.md, Known limits).
+# A world's socket is `data/run/<world>.sock` (WORLDD_SOCKET, as `place-world.sh` sets it), named from the machine's
+# `data/worlds`, so its path stays under macOS's 104 bytes.
 set -euo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd)
 
 die() {
   echo "scratch: $*" >&2
   exit 2
 }
 
-# The machine's environment. Paths under w/ are relative, so a world's socket path stays under macOS's 104 bytes.
+# The machine's environment: release.sh's (RELEASE_*) and the runbook wrappers' (SOULS_*) stand-ins for its folders.
 machine_env() {
   local m=$1
   export RELEASE_DATA=$m/data RELEASE_LIB=$m/lib RELEASE_ETC=$m/etc WORLDS_ROOT=. SCRATCH=$m PATH=$m/shim:$PATH
+  export SOULS_LIB=$m/lib SOULS_ETC=$m/etc
   export RELEASE_WINDOW_S=${RELEASE_WINDOW_S:-5}
   cd "$m/data/worlds"
 }
@@ -51,30 +55,28 @@ build() {
   {
     echo '#!/bin/sh'
     echo "# scratch build: $label"
-    echo 'if [ "$1" = --dir ]; then'
-    # A world's lineage is its folder's name's first part; a rehearsal's folder is named by the build, and its log
-    # names no lineage, so a rehearsal serves the first world's.
-    echo '  l=$(basename "$2"); case $l in *-*) l=${l%%-*} ;; *) l=$(printf "07%.0s" $(seq 16)) ;; esac; cd "$2" || exit 1'
     if [ "$mode" = plant ]; then
-      echo '  [ -n "$WORLDD_REHEARSAL" ] && exec "'"$m"'/bin/worldd" gateway-link --socket w.sock --lineage "$l" --epoch 1 --log world.log --bodies 1'
-      echo '  exec "'"$m"'/bin/o7-plant" refuse . "$l" 1'
-    else
-      echo '  exec "'"$m"'/bin/worldd" gateway-link --socket w.sock --lineage "$l" --epoch 1 --log world.log --bodies 1'
+      # A fault only serving shows: the rehearsal passes, the served world dies at start.
+      echo 'if [ "$1" = serve ] && [ -z "$WORLDD_REHEARSAL" ]; then echo "planted fault: dies when served" >&2; exit 1; fi'
+    elif [ "$mode" = mute ]; then
+      # A build that never answers: it starts and serves no socket, rehearsal or not.
+      echo 'if [ "$1" = serve ]; then exec sleep 3600; fi'
     fi
-    echo 'fi'
-    echo 'exec "'"$m"'/bin/worldd" "$@"'
+    echo 'exec "'"$m"'/lib/worldd" "$@"'
   } > "$f"
   chmod 755 "$f"
   echo "$f"
 }
 
 up() {
-  local m=$1 bins=$2 b h w l name
+  local m=$1 bundle=$2 facts=$3 entries=$4 b h i name seed
   [ ! -e "$m" ] || die "$m exists: a scratch machine starts empty"
-  mkdir -p "$m"/{bin,shim,units,lib,etc/probe,data/worlds/worlds}
+  [ -f "$bundle/install.sh" ] && [ -f "$facts" ] && [ -d "$entries" ] || die "up <dir> <install bundle> <facts> <entries>"
+  mkdir -p "$m"/{shim,units,lib,etc,seed,data/run,data/worlds/worlds}
   m=$(cd "$m" && pwd)
-  for b in worldd gatewayd supervisor o7-plant o18-probe; do install -m 755 "$bins/$b" "$m/bin/$b"; done
-  install -m 755 "$bins/gatewayd" "$m/lib/gatewayd"
+  # The install's programs, where `install.sh apply` puts them (/usr/local/lib/souls), and its probe folder.
+  for b in supervisor worldd gatewayd directoryd deploy; do install -m 755 "$bundle/bin/$b" "$m/lib/$b"; done
+  install -d -m 750 "$m/etc/probe"
   cat > "$m/shim/systemctl" << 'EOF'
 #!/usr/bin/env bash
 # systemd's part on the scratch machine: restart [--no-block] <unit> and is-active [--quiet] <unit>.
@@ -89,21 +91,25 @@ case $1 in
 esac
 EOF
   chmod 755 "$m/shim/systemctl"
-  : > "$m/tokens"
   b=$(build "$m" before)
-  h=$(cd "$m" && "$m/bin/supervisor" hash "$b")
+  h=$("$m/lib/supervisor" hash "$b")
   mkdir -p "$m/data/worlds/builds/$h"
   install -m 755 "$b" "$m/data/worlds/builds/$h/worldd"
-  for l in 07 08; do
-    l=$(printf "$l%.0s" $(seq 16))
-    name=$("$m/bin/o18-probe" "$m/etc/probe/tmp" "$l")
-    mv "$m/etc/probe/tmp" "$m/etc/probe/$name"
+  for i in a b; do
+    # Two worlds from one facts file: a facts file's `world` names its lineage (import-eden), so each is its own.
+    seed=$m/seed/$i
+    sed "1s/^{/{\"world\":\"eden-2026-scratch-$i\",/" "$facts" > "$m/seed/facts-$i.json"
+    "$m/lib/worldd" seed --facts "$m/seed/facts-$i.json" --dir "$seed" --entries "$entries" --souls 1 > /dev/null
+    name=$(sed -n 's/.*"name": *"\([0-9a-f-]*\)".*/\1/p' "$seed/world.json")
+    # As place-world.sh places it: the folder, its socket under run/, its gateway on the folder's tokens.
     mkdir -p "$m/data/worlds/worlds/$name"
-    (cd "$m/data/worlds" && WORLDS_ROOT=. "$m/bin/supervisor" pin "$name" "$h")
-    (cd "$m/data/worlds" && unit "$m" "worldd@$name" env WORLDS_ROOT=. "$m/bin/supervisor" launch "$name")
+    (cd "$seed" && tar cf - .) | (cd "$m/data/worlds/worlds/$name" && tar xf -)
+    (cd "$m/data/worlds" && WORLDS_ROOT=. "$m/lib/supervisor" pin "$name" "$h")
+    (cd "$m/data/worlds" && unit "$m" "worldd@$name" env WORLDS_ROOT=. "WORLDD_SOCKET=../run/$name.sock" \
+      "$m/lib/supervisor" launch "$name")
     (cd "$m/data/worlds" && unit "$m" "souls-gateway@$name" "$m/lib/gatewayd" --listen 127.0.0.1:0 \
-      --world "worlds/$name/w.sock" --tokens "$m/tokens" --build 1220)
-    echo "scratch: world $name pinned to ${h:0:16}… (before), its unit and gateway running"
+      --world "../run/$name.sock" --tokens "worlds/$name/tokens" --build 1220)
+    echo "scratch: Eden world $name seeded, pinned to ${h:0:16}… (before), its unit and gateway running"
   done
 }
 
