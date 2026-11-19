@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # O3 A1 to A3 (#2732): ten kills, five under the even load shape and five under the uneven one. Each run starts the
-# scripted world shipping its log (`archive ship`), kills it with SIGKILL at a random second, destroys its data folder,
-# and rebuilds the world from the bucket alone (`archive rebuild`): one checkpoint and the pieces after it, the acts
+# scripted world shipping its log (`ops ship`), kills it with SIGKILL at a random second, destroys its data folder,
+# and rebuilds the world from the bucket alone (`ops rebuild`): one checkpoint and the pieces after it, the acts
 # it holds checked against the driver's receipts, the acts lost and how long before the kill they were acknowledged,
 # and the ledger of acts that cannot be undone. Prints the kill table. Runbook: v2/docs/runbook/log-shipping.md.
 #
@@ -16,8 +16,8 @@ ROOT=${O3_ROOT:-../.local/o3-kill}
 LEAST=${O3_KILL_LEAST:-30}
 MOST=${O3_KILL_MOST:-90}
 STAMP=$(date +%s)
-cargo build -p archive --release --locked --quiet
-BIN=target/release/archive
+cargo build -p ops --release --locked --quiet
+BIN=target/release/ops
 mkdir -p "$ROOT"
 fail=0
 printf '| run | load | kill (s) | checkpoint record | rebuilt through record | acts rebuilt | receipts below (acked + held) | equal | acts lost | lost window (s) | irreversible acked | past the mark | bar |\n'
