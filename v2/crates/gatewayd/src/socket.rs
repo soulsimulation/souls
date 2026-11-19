@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::State;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
@@ -218,10 +218,17 @@ async fn serve(
         ok = ok && send(&mut socket, times::finish(frame)).await;
     }
 
-    // 4. Intents in, the stream out; view items out once it subscribes, to this socket alone (`views.rs`).
+    // 4. Intents in, the stream out; view items out once it subscribes, to this socket alone (`views.rs`). Until the
+    // gateway stops: then the socket closes with 1012 (O16).
     let mut view: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
+    let mut closing = gw.closing.subscribe();
     while ok {
         tokio::select! {
+            _ = stopped(&mut closing) => {
+                let close = CloseFrame { code: crate::RESTART, reason: "gateway.restarting".into() };
+                let _ = socket.send(Message::Close(Some(close))).await;
+                break;
+            }
             incoming = socket.recv() => {
                 let received = times::stamp();
                 let bytes = match incoming {
@@ -267,6 +274,19 @@ async fn serve(
         gw.views.end(n);
     }
     gw.detach(grant, attached.session);
+}
+
+/// Returns once the gateway is stopping (at once if it already is).
+async fn stopped(closing: &mut tokio::sync::watch::Receiver<bool>) {
+    loop {
+        let set = *closing.borrow_and_update();
+        if set {
+            return;
+        }
+        if closing.changed().await.is_err() {
+            return std::future::pending().await;
+        }
+    }
 }
 
 /// Reads an intent and hands it to the world; the gateway's own answer to send now, if it gives one not kept

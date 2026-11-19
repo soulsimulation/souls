@@ -342,11 +342,24 @@ fn a2_a4_public_words_beside_each_part_and_no_whisper() {
     .enumerate()
     {
         assert_eq!(kind(&send(w, i)).0, 1, "intent {s} answered with a receipt");
+        // The hidden sentence is removed as soon as its say is answered (its record is on the disk by then), before
+        // the next intent: the writer cuts a stretch when a record of a later 500 ms period arrives, so a removal left
+        // until the end raced the describe's record, which could close the say's stretch first and write its text
+        // file before the removal (seen once under CI load, #3443). Removed here, every text file is written after
+        // it, and the writer reads the store when it writes the file.
+        if s == 2 {
+            let log = r.log.0.lock().unwrap().bytes.clone();
+            let said = said(&log);
+            assert_eq!(
+                said.len(),
+                3,
+                "the public say, the whisper and the hidden say"
+            );
+            r.store.remove(said[2].words, b1, 0, Grade::Hidden).unwrap();
+        }
     }
     let mut whisper_ref = None;
-    let (_, dir) = r.end(|store, said| {
-        // Removed before the part is written: the redaction list keeps it out of the file.
-        store.remove(said[2].words, b1, 0, Grade::Hidden).unwrap();
+    let (_, dir) = r.end(|_, said| {
         whisper_ref = Some(said[1].words);
     });
     let (text, parts, files) = stream_files(&dir);
