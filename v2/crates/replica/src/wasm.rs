@@ -740,7 +740,7 @@ fn creator_kinds(text: &str) -> Result<BTreeMap<String, Kind>, crate::world_mode
         {
             return Err(bad());
         }
-        if !kinds.get(*target).is_some_and(|kind| kind.owner == "place") {
+        if kinds.get(*target).is_none_or(|kind| kind.owner != "place") {
             return Err(crate::world_model::Refusal::Source(
                 "boot-activity target must be an existing full place kind".into(),
             ));
