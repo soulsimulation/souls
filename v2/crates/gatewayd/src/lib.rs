@@ -27,7 +27,7 @@
 //!   own, and the world's answer back to that socket alone, under the client's number; it is not kept for a resume.
 //!   A client told `stream.cannot-resume` compares and descends this way, then carries on with the stream.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use replica::encode::Value;
@@ -74,7 +74,7 @@ pub struct Gateway {
 struct Hub {
     next_session: u64,
     /// Per grant (by its actor's bytes): its kept frames and its socket, if one is signed in.
-    grants: HashMap<Vec<u8>, Held>,
+    grants: BTreeMap<Vec<u8>, Held>,
 }
 
 #[derive(Default)]

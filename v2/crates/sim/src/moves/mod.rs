@@ -17,7 +17,7 @@
 //!
 //! Not here: contact with a body (B6), seats (B3), holding (B4, `crate::slots`), the beat (B8), a move waiting for its resource.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use replica::effects::{Refusal, fixture_bytes};
@@ -96,7 +96,7 @@ struct Live {
 #[derive(Default)]
 pub struct Moves {
     live: BTreeMap<Instance, Live>,
-    by_timer: HashMap<Id, Instance>,
+    by_timer: BTreeMap<Id, Instance>,
     last: Instance,
 }
 

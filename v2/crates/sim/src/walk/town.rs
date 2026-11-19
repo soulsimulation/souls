@@ -66,7 +66,7 @@ use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
@@ -145,7 +145,7 @@ pub struct Town {
     /// What a building read again off the clock thread needs of the open ground ([`Town::basis`]).
     basis: Basis,
     /// Each square's pieces of the open ground's surface, by number (G3b).
-    square_pieces: HashMap<(i32, i32), Vec<u32>>,
+    square_pieces: BTreeMap<(i32, i32), Vec<u32>>,
     /// The ground each body's last plan crossed, in order: each node with its version then (G3).
     planned: BTreeMap<Id, Vec<(Id, u64)>>,
     /// The open ground's squares each body's last plan crossed, in order (G3b): a change that cuts squares again
@@ -172,7 +172,7 @@ pub struct Basis {
 
 #[derive(Clone)]
 struct OpenCut {
-    squares: HashMap<(i32, i32), Arc<Vec<Piece>>>,
+    squares: BTreeMap<(i32, i32), Arc<Vec<Piece>>>,
     meets: Vec<SquareMeet>,
     doors: BTreeMap<Id, Id>,
     terrain: Option<Arc<Terrain>>,
@@ -275,7 +275,7 @@ type Assembled = (
     BTreeMap<Id, Surface>,
     Vec<Building>,
     Basis,
-    HashMap<(i32, i32), Vec<u32>>,
+    BTreeMap<(i32, i32), Vec<u32>>,
 );
 
 /// Where each link is in `buildings`: the first building, and its first link, with that id.
@@ -327,6 +327,27 @@ impl Town {
             planned_squares: BTreeMap::new(),
             stale: BTreeMap::new(),
         })
+    }
+
+    /// The tree and the ground as N9's spot tables read it, for a reader that is not a walker (E4's set-down, #2772).
+    pub fn with_ground<T>(&mut self, f: impl FnOnce(&Tree, &mut dyn Ground) -> T) -> T {
+        let Town {
+            map,
+            tree,
+            buildings,
+            ground,
+            surfaces,
+            ..
+        } = self;
+        let tree: &Tree = tree;
+        let mut g = Grounds {
+            tree,
+            map,
+            surfaces,
+            buildings,
+            ground: *ground,
+        };
+        f(tree, &mut g)
     }
 
     /// What [`Town::rebuild`] reads besides the tree, as the ground stands now.
@@ -776,8 +797,8 @@ impl Town {
         let mut surfaces = BTreeMap::new();
         let open = OpenGround::of(tree, ground, HUMAN_RADIUS)?;
         let terrain = open.terrain().cloned().map(Arc::new);
-        let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), HashMap::new());
-        let mut square_pieces = HashMap::new();
+        let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
+        let mut square_pieces = BTreeMap::new();
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
             let first = pieces.len() as u32;
