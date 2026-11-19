@@ -28,6 +28,8 @@
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
 //   and R8's (#2703), checking with R2's form rules on the copy (`../check/`), kind entries from `<home>/kinds/`:
 //     {"op":"can","intent":{"verb":"..","this":"<id>","form":".."}}   yes, no with the reason, or unknown, and `current`
+//     {"op":"can","acts":["sit:<id>"]}  and  {"op":"act","acts":["sit:<id>","sit:<id>"]}   C10's (#3414): the thin
+//       command's words, each candidate on its own target, thing arguments after their act (`actsOf`)
 //     {"op":"act","verbs":[{"verb":"..","this":"<id>","form":".."}, "..."]}   each candidate with a form is checked
 //       again at send time on a copy brought current; a current `no` drops it; none left is `stopped-locally`, with
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
@@ -343,11 +345,42 @@ function formOf(req) {
   return ID.test(String(req.to ?? '')) ? { verb: `${NS}:whisper`, target: req.to, words } : { code: 'whisper-names-a-body', detail: 'whisper <body id> "<words>"' };
 }
 
+const MOVES = new Set(['walk', 'sit', 'lie', 'rise']); // worldd's bodies take these (I4b); they are not checked as forms
+
+/**
+ * C10 (#3414): the thin command's act words as candidates, best first. A word is an offered act, `<verb>:<id>` (a
+ * verb with no namespace is the world's form: `sit:<id>` is `<ns>:sit` on that thing), a bare id (walk to it), or a
+ * verb with no target; a bare id or `<name>=<id>` after an act is that act's thing argument. A bare id is named by
+ * its place among the thing arguments the form `takes` in the target's kind entry, held in `<home>/kinds/`.
+ */
+function actsOf(words) {
+  const out = [];
+  let kinds = null, rows = null;
+  for (const w of words.map(String)) {
+    const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
+    if (out.length && (ID.test(w) || (arg && ID.test(arg[2])))) {
+      const c = out.at(-1), args = (c.args ??= {});
+      if (arg) { args[arg[1]] = arg[2]; continue; }
+      kinds ??= kindsIn(join(home, 'kinds'));
+      rows ??= rowsOf(copy);
+      const takes = Object.entries(kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
+      const name = takes.map(([n, t]) => t?.type === 'thing' && n).find((n) => n && !(n in args));
+      if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
+      args[name] = w;
+    } else if (ID.test(w)) out.push({ verb: `${NS}:walk`, this: w });
+    else if (k > 0 && ID.test(tail)) {
+      const verb = w.slice(0, k), form = verb.replace(/^.*:/, '');
+      out.push({ verb: verb.includes(':') ? verb : `${NS}:${verb}`, this: tail, ...(MOVES.has(form) ? {} : { form }) });
+    } else out.push({ verb: w });
+  }
+  return out;
+}
+
 /** Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in). */
-function sendIntent(ranked, { target, words, basis, expiry }) {
+function sendIntent(ranked, { target, words, args, basis, expiry }) {
   state.sequence++;
   const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
-    basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words);
+    basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args);
   save();
   const sequence = state.sequence, sent = signedIn;
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
@@ -380,13 +413,13 @@ async function answer(req) {
       return closing({ ok: true, events: got, ...(got.some((e) => e.kind !== 'synced') ? {} : { timedOut: true }) });
     }
     case 'can': {
-      const c = candidateOf(req.intent);
+      const c = Array.isArray(req.acts) ? actsOf(req.acts)[0] ?? candidateOf(null) : candidateOf(req.intent);
       const age = await ageAfter();
       const [v] = verdicts([c]);
       return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
     }
     case 'act': {
-      const candidates = (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf);
+      const candidates = Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf);
       if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
         return { ok: false, code: 'act-ranked-list', detail: `one to ${ACT_MOST} verbs, best first` };
       }
@@ -402,7 +435,10 @@ async function answer(req) {
         trace.write({ k: 'send', seq: `local-${++stopped}`, ranked: candidates.length, cause: 'stopped-locally' });
         return closing({ ok: false, code: 'stopped-locally', sent: false, dropped, basis: sequenceOf(basis) }, null, { age });
       }
-      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target: req.target, basis, expiry: req.expiry });
+      // Each candidate on its own target (C10), else all on `target`; the first one's thing arguments in parameter 1.
+      const target = Array.isArray(req.acts) ? keep.map((c) => c.this ?? '').join(' ') : req.target;
+      const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
+      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, basis, expiry: req.expiry });
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
     }
