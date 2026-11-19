@@ -144,8 +144,9 @@ step client-check node --test client/src/check/*.test.mjs
 step client-memory node --test client/src/memory/*.test.mjs
 # Asking what happened (R16, #2817): a recorded Eden of 100 acting Souls in V4's files, by place, thing and Soul.
 step client-history node --test client/src/history/*.test.mjs
-# Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else.
-step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
+# Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else;
+# then a paired Soul joins a served world, acts and leaves, through the gateway (C3, #3367).
+step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet && node --test client/src/pair/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
 # Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.

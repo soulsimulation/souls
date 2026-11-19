@@ -162,6 +162,11 @@ impl Life {
         self.embodied.get(&soul).map(|e| e.1)
     }
 
+    /// Takes `soul` as embodied by `body` through `link`, as the log has it (a restart, C3 #3367).
+    pub fn adopt(&mut self, soul: Id, body: Id, link: Id) {
+        self.embodied.insert(soul, (body, link));
+    }
+
     /// Births waiting for a tick.
     pub fn waiting(&self) -> usize {
         self.waiting.len()

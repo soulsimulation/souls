@@ -15,6 +15,8 @@
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
 //   souls.mjs whisper <body id> "<words>"     says them to that one body alone
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
+//   souls.mjs wear <preset>                   changes this Soul's body to a preset the world admits (its name, or its
+//                                             content hash); refused by name when it would not fit where it stands
 //   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened (an answer, or words
 //                                             said to or near it: `heard`, also in the next look), or at the timeout
 //   souls.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]
@@ -44,7 +46,7 @@ import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
 import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'history', 'stats', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wear', 'wait', 'history', 'stats', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = ['digest', 'consolidate', 'schedule'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -107,6 +109,7 @@ export function requestOf(argv) {
   if (op === 'say') req.words = rest.join(' ');
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
+  if (op === 'wear') req.body = rest[0];
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
   if (op === 'history') {
     for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;

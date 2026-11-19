@@ -109,6 +109,7 @@ test('the arguments make the daemon request: act takes a ranked list, find its w
   assert.deepEqual(requestOf(['find', 'the', 'red', 'cup', '--limit', '3']).req, { op: 'find', words: 'the red cup', limit: 3 });
   assert.deepEqual(requestOf(['wait', '5']).req, { op: 'wait', seconds: 5 });
   assert.equal(requestOf(['dance']).refused, 'unknown-command');
+  assert.deepEqual(requestOf(['wear', 'verdelis']).req, { op: 'wear', body: 'verdelis' });
 });
 
 /**

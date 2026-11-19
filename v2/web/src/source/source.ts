@@ -39,6 +39,8 @@ export type NodeRec = {
   description?: string | null;
   /** The world node's day, night and weather fields (E6; V19, `sky/record.ts`). */
   sky?: SkyFields;
+  /** The content hash of the body a Soul's body node wears (field 32, B15a), hex; none, the default body. */
+  body?: string;
 };
 
 /** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still

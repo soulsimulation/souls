@@ -235,6 +235,9 @@ async fn serve(
             _ => return,
         },
     };
+    if let Some(f) = gw.tokens_file.get() {
+        f.refresh(&gw.tokens);
+    }
     let token = match token {
         Some(Presented::View(v)) => return serve_view(gw, socket, v).await,
         Some(Presented::Agent(t)) => t,

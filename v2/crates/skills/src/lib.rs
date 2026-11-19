@@ -14,3 +14,5 @@ pub mod orders;
 pub mod route;
 pub mod scan;
 pub mod walk;
+/// A Soul's body chosen (B15a, #2750).
+pub mod wear;

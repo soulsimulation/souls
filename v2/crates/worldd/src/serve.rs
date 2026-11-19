@@ -3,10 +3,13 @@
 //!
 //! **The world folder** (`seed` writes it; everything after is the world's own):
 //!
-//! - `world.json`: `{"format": "souls/world/1", "name", "souls": [[counter, x mm, z mm], ...], "souls_scope"}`. The
-//!   name is the world's instance name, `<lineage hex>-<zone scope hex>-<zone counter>` (`worldd@<name>`).
+//! - `world.json`: `{"format": "souls/world/1", "name", "souls": [[counter, x mm, z mm], ...], "souls_scope",
+//!   "entry": [x mm, z mm]}`. The name is the world's instance name, `<lineage hex>-<zone scope hex>-<zone counter>`
+//!   (`worldd@<name>`); the entry is where Souls' bodies are born (C3), `seed`'s `--at`.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
 //!   live world). The world as built is read from it at each start: its header and the walkers' town.
+//! - `bodies.json`, when there: the presets the world admits (B15a, `skills::wear`, from `seed --bodies`); a `souls`
+//!   row may carry a fourth item, the preset its Soul is born wearing (`seed --body`).
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
 //! - `log`: K4's log. Its first record is the import's part, every node and link the loader committed, so the log
@@ -26,8 +29,15 @@
 //! (`answers::start`), which restores the newest checkpoint and replays the records after it. It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the stream's tier, off the clock
-//! thread. The Souls in `world.json` stand on the open ground at their places on a first start, where the log last had
-//! them after it.
+//! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
+//! `world.json`'s Souls are their tokens' grants (`souls.tokens`), born as any Soul is.
+//!
+//! **Joins and leaves** (C3, #3367): no Soul stands in the world until it acts. A Soul's first intent, sent with
+//! its token through the gateway, births its body by K10 (`answers::Join`): a `souls:body` node on the open ground by
+//! the world's entry (`world.json`'s `entry`), linked to its Soul. `life:join` names it
+//! (words 1 and 2: its name and description); `life:leave` retires it. A restart stands each body where the log last
+//! had it, and its Soul finds it again by its link. A token the directory pairs later is added to `tokens` and the
+//! gateway reads the file again: no restart.
 //!
 //! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
 //! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
@@ -41,8 +51,7 @@
 //! day's bundle index is written again each time a bundle closes. A restart archives again from record 0: what was
 //! stored is passed over when the same and written over when made from more records ([`Again`]).
 //!
-//! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town), joins and leaves
-//! (C3), generic acts (C2).
+//! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town).
 
 // The process reads the wall clock once for the stream's anchor (V1 rule 5); the engine never does.
 #![allow(clippy::disallowed_methods)]
@@ -62,17 +71,17 @@ use replica::bodies::{Class, Family, Resource};
 use replica::effects::{Effect, Refusal};
 use replica::encode::{Name, Value, encode, from_hex, to_hex};
 use replica::ids::{Id, Scope, sha256};
-use replica::pose::{Frame, Quat, Vec3};
+use replica::pose::{Frame, Vec3};
 use replica::rules::json::{self, Value as Json};
 use replica::stream;
 use replica::views::{Key, Level, Redactions};
-use replica::world_model::{Audience, parse_kinds};
+use replica::world_model::{Audience, parse_kinds, plain};
 use sim::links::Doors;
 use sim::log::{FileStore, Log};
 use sim::recorder;
 use sim::walk::town::Town;
 use supervisor::bucket::Under;
-use worldd::answers::{self, Config};
+use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::checkers::Rules;
 use worldd::shipping::{self, Item, Shipper, Wall};
@@ -143,6 +152,8 @@ struct Built {
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
     rules: replica::tree::Rules,
+    /// A Soul's body kind, its full name (C3).
+    body_kind: String,
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built.
@@ -157,6 +168,17 @@ fn build(facts: &str) -> R<Built> {
         ))
         .map_err(|e| format!("the root's kind: {e:?}"))?,
     );
+    // A Soul's body (C3): K10's `souls:body`, a family's node on the open ground holding a thing in each hand (B4).
+    let body =
+        parse_kinds("{1: \"souls:body\", 2: \"family\", 6: {1: [\"thing\"], 2: [\"thing\"]}}")
+            .map_err(|e| format!("the body's kind: {e:?}"))?;
+    let body_kind = body.keys().next().cloned().ok_or("the body's kind")?;
+    im.rules.kinds.extend(body);
+    for (name, kind) in im.rules.kinds.iter_mut() {
+        if plain(name) == import_eden::GROUND {
+            kind.children.insert("body".into());
+        }
+    }
     let (root, ground) = match (im.nodes.get("world"), im.nodes.get("ground")) {
         (Some(r), Some(g)) => (*r, *g),
         _ => return Err("the facts have no world or no ground".into()),
@@ -184,6 +206,7 @@ fn build(facts: &str) -> R<Built> {
         ground,
         root,
         rules,
+        body_kind,
     })
 }
 
@@ -245,7 +268,8 @@ fn humanoid() -> R<Family> {
     })
 }
 
-/// `worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] [--at <x m>,<z m>]`: a world
+/// `worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] [--at <x m>,<z m>]
+/// [--bodies <bodies.json>] [--body <preset>]`: a world
 /// folder from a loader's facts file, with `n` Souls (default 1) on the open ground from (x, z) (default 0,0).
 pub fn seed(args: &[String]) -> i32 {
     match seed_in(args) {
@@ -263,7 +287,7 @@ pub fn seed(args: &[String]) -> i32 {
 fn seed_in(args: &[String]) -> R<String> {
     let (Some(facts), Some(dir)) = (arg(args, "--facts"), arg(args, "--dir")) else {
         return Err("usage: worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] \
-                    [--at <x m>,<z m>]"
+                    [--at <x m>,<z m>] [--bodies <bodies.json>] [--body <preset>]"
             .into());
     };
     let dir = PathBuf::from(dir);
@@ -271,6 +295,26 @@ fn seed_in(args: &[String]) -> R<String> {
         return Err(format!("world-exists: {} has a log", dir.display()));
     }
     let souls: u64 = arg(args, "--souls").map_or(Ok(1), |n| n.parse().map_err(|_| "--souls"))?;
+    // Bodies chosen (B15a): the presets the world admits, and the one its Souls are born wearing.
+    let catalogue = match arg(args, "--bodies") {
+        Some(b) => {
+            let text = std::fs::read_to_string(b).map_err(io(Path::new(b)))?;
+            let c = skills::wear::Catalogue::read(&text)?;
+            std::fs::create_dir_all(&dir).map_err(io(&dir))?;
+            std::fs::write(dir.join("bodies.json"), &text).map_err(io(&dir))?;
+            c
+        }
+        None => Default::default(),
+    };
+    let body = match arg(args, "--body") {
+        Some(p) => {
+            let found = catalogue
+                .find(p)
+                .ok_or(format!("--body {p}: not in --bodies"))?;
+            format!(", \"{}\"", skills::wear::hex(&found.hash))
+        }
+        None => String::new(),
+    };
     let (x, z) = match arg(args, "--at") {
         Some(at) => at
             .split_once(',')
@@ -305,7 +349,7 @@ fn seed_in(args: &[String]) -> R<String> {
             (x * 1000.0) as i64 + k as i64 * APART_MM,
             (z * 1000.0) as i64,
         );
-        rows.push(format!("[{counter}, {xm}, {zm}]"));
+        rows.push(format!("[{counter}, {xm}, {zm}{body}]"));
         let mut secret = [0u8; 32];
         std::io::Read::read_exact(&mut urandom, &mut secret).map_err(|e| e.to_string())?;
         let grant = format!("soul-{}-{counter}", to_hex(&scope));
@@ -326,9 +370,12 @@ fn seed_in(args: &[String]) -> R<String> {
     log.wait_durable(n + 1).map_err(refusal)?;
     drop(log.close());
     let meta = format!(
-        "{{\"format\": \"souls/world/1\", \"name\": \"{name}\", \"souls_scope\": \"{}\", \"souls\": [{}]}}\n",
+        "{{\"format\": \"souls/world/1\", \"name\": \"{name}\", \"souls_scope\": \"{}\", \"souls\": [{}], \
+         \"entry\": [{}, {}]}}\n",
         to_hex(&scope),
-        rows.join(", ")
+        rows.join(", "),
+        (x * 1000.0) as i64,
+        (z * 1000.0) as i64
     );
     std::fs::write(dir.join("world.json"), meta).map_err(io(&dir))?;
     Ok(name)
@@ -367,13 +414,29 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
         .collect()
 }
 
-/// The world's bodies: each Soul on the open ground, where the log last had it on a restart.
-fn bodies(
-    town: Town,
-    ground: Id,
-    souls: &[(Id, i64, i64)],
-    placed: &Placed,
-) -> Result<Bodies, Refusal> {
+/// The body each Soul is born wearing: a row's fourth item, a preset's name or hash in `bodies.json` (B15a).
+fn born(
+    meta: &Json,
+    catalogue: &skills::wear::Catalogue,
+) -> R<std::collections::BTreeMap<Id, [u8; 32]>> {
+    let ids = souls(meta)?;
+    let rows = meta.get("souls").and_then(Json::arr).unwrap_or(&[]);
+    let mut out = std::collections::BTreeMap::new();
+    for ((id, _, _), row) in ids.iter().zip(rows) {
+        if let Some(b) = row.arr().and_then(|r| r.get(3)) {
+            let asked = b.str().unwrap_or_default();
+            let p = catalogue
+                .find(asked)
+                .ok_or(format!("world.json: body {asked:?} is not in bodies.json"))?;
+            out.insert(*id, p.hash);
+        }
+    }
+    Ok(out)
+}
+
+/// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
+/// where the log last had it.
+fn bodies(town: Town, ground: Id, placed: &Placed) -> Result<Bodies, Refusal> {
     let family = humanoid().map_err(|e| Refusal {
         name: "family",
         detail: e,
@@ -383,13 +446,11 @@ fn bodies(
         slot: None,
     };
     let mut at = Vec::new();
-    for (id, x, z) in souls {
-        at.push(town.surfaces[&ground].place(
-            *id,
-            frame,
-            Vec3::new(x * 1000, 0, z * 1000),
-            Quat::IDENTITY,
-        )?);
+    for (id, (pose, _)) in placed {
+        // Stood on the ground at its last place unless its own floor holds it there (`add_body_at`).
+        if let Ok(a) = town.surfaces[&ground].place(*id, frame, pose.position, pose.orientation) {
+            at.push(a);
+        }
     }
     let mut b = Bodies::new(town, 50_000)?;
     for a in at {
@@ -606,6 +667,12 @@ fn serve(args: &[String]) -> R<()> {
         return Err("world.json is not souls/world/1".into());
     }
     let souls = souls(&meta)?;
+    // Bodies chosen (B15a): `bodies.json`, the presets the world admits; a Soul's row may name its body at birth.
+    let catalogue = match std::fs::read_to_string(dir.join("bodies.json")) {
+        Ok(t) => skills::wear::Catalogue::read(&t)?,
+        Err(_) => skills::wear::Catalogue::default(),
+    };
+    let born = born(&meta, &catalogue)?;
     let facts = dir.join("facts.json");
     let built = build(&std::fs::read_to_string(&facts).map_err(io(&facts))?)?;
     let name = instance(built.root);
@@ -683,8 +750,26 @@ fn serve(args: &[String]) -> R<()> {
     // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
     cfg.engine = Some((built.rules.clone(), Vec::new()));
     let (town, ground) = (built.town, built.ground);
+    // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
+    let int = |v: &Json| match v {
+        Json::Int(n) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let entry = match meta.get("entry").and_then(Json::arr) {
+        Some([x, z]) => int(x).zip(int(z)),
+        _ => None,
+    }
+    .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
+    .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
+    cfg.wear = Some(answers::Wearing { catalogue, born });
+    cfg.join = Some(Join {
+        entry: (ground, entry),
+        family: humanoid()?,
+        kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
+        per_tick: 8,
+    });
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
-        bodies(town, ground, &souls, placed)
+        bodies(town, ground, placed)
     }));
     let empty = Replica::start(built.header.stored()).map_err(refusal)?;
     let world = answers::start(empty.frozen(), rules, store, cfg).map_err(refusal)?;
