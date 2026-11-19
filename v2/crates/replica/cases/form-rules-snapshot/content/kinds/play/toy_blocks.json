@@ -1,0 +1,50 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:toy_blocks",
+  "owner": "thing",
+  "state": { "built": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "points": {
+    "by": { "role": "stand", "at_mm": [0, 0, 450], "yaw_mdeg": 180000 },
+    "top": { "role": "contact", "at_mm": [0, 140, 0] }
+  },
+  "geometry": { "bounds_mm": [396, 215, 403] },
+  "forms": {
+    "build": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "built", "is": false }, { "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "by" },
+        { "step": "move", "move": "press", "at": "top" },
+        { "step": "wait", "us": 20000000 }
+      ],
+      "effects": [{ "change": "set", "field": "built", "to": true, "event": "tower_built" }]
+    },
+    "knock_down": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "built", "is": true }],
+      "steps": [{ "step": "walk_to", "point": "by" }, { "step": "move", "move": "press", "at": "top" }],
+      "effects": [{ "change": "set", "field": "built", "to": false, "event": "tower_knocked_down" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:toy_blocks",
+    "shape": {"shapes":[{"kind":"box","at":[-80,40,0],"size":[20,20,20],"round":0,"tint":"red"},{"kind":"box","at":[80,40,0],"size":[20,20,20],"round":0,"tint":"blue"},{"kind":"box","at":[0,110,0],"size":[260,60,80],"round":0,"tint":"yellow","role":"fill"},{"kind":"box","at":[0,170,0],"size":[80,80,80],"round":0,"tint":"green","roll":45000,"role":"fill"},{"kind":"box","at":[200,40,160],"size":[20,20,20],"round":0,"tint":"yellow","yaw":28648},{"kind":"box","at":[-170,40,180],"size":[20,20,20],"round":0,"tint":"green","yaw":-17189},{"kind":"cyl","at":[20,40,-170],"r":40,"h":80,"segments":6,"tint":"red"}],"palette":{"red":"#c23a2b","blue":"#2f5d8b","yellow":"#e6c23a","green":"#3f8a4a"},"tags":["object","toy"]},
+    "table": [
+      { "part": "fill", "field": "built", "do": "slide", "axis": "x", "at": { "true": 0, "false": 150 } },
+      { "part": "fill", "field": "built", "do": "slide", "axis": "y", "at": { "true": 0, "false": -70 } },
+      { "part": "fill", "field": "built", "do": "rotate", "axis": "z", "at": { "true": 0, "false": -25000 } }
+    ]
+  },
+  "text": {
+    "card": "Painted wooden blocks: build a little tower, or knock it down.",
+    "toy": "toy",
+    "blocks": "blocks",
+    "building_blocks": "building blocks",
+    "play": "play"
+  },
+  "card": { "text": "card", "category": "toy", "synonyms": ["blocks", "building_blocks", "play"] }
+}

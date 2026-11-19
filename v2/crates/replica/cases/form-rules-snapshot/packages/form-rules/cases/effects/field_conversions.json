@@ -1,0 +1,836 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The field conversions done: a fish caught into a creel and released (the bait is not restored), a sign assembled from the site's timber and written on, a cairn built lower first, rearranged, undone from the top only and dismantled.",
+ "cases": [
+  {
+   "name": "caught_then_released_bait_not_restored",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "o1",
+       "c1"
+      ]
+     },
+     "o1": {
+      "kind": "eden:angling_pool"
+     },
+     "c1": {
+      "kind": "eden:creel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "o1",
+      "form": "catch",
+      "args": {
+       "creel": "c1"
+      }
+     },
+     "receipt": "rf1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "o1",
+        "field": "fish",
+        "n": 1,
+        "to": 2,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "fish",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       },
+       {
+        "change": "set",
+        "node": "o1",
+        "field": "bait",
+        "n": 2,
+        "to": 2
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:caught",
+        "node": "o1",
+        "changes": [
+         0,
+         1
+        ]
+       },
+       {
+        "event": "eden:bait_used",
+        "node": "o1",
+        "changes": [
+         2
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "o1",
+      "form": "catch",
+      "args": {
+       "creel": "c1"
+      }
+     },
+     "receipt": "rf2",
+     "expect": {
+      "verdict": "no",
+      "reason": "no_room",
+      "need": 2
+     }
+    },
+    {
+     "act": {
+      "this": "o1",
+      "form": "release",
+      "args": {
+       "creel": "c1"
+      }
+     },
+     "receipt": "rf3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "fish",
+        "n": 1,
+        "to": 0,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "o1",
+        "field": "fish",
+        "n": 1,
+        "to": 3,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:released",
+        "node": "o1",
+        "changes": [
+         0,
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "o1",
+      "form": "release",
+      "args": {
+       "creel": "c1"
+      }
+     },
+     "receipt": "rf4",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_enough",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "o1": {
+     "kind": "eden:angling_pool",
+     "fields": {
+      "fish": 3,
+      "bait": 2
+     }
+    },
+    "c1": {
+     "kind": "eden:creel",
+     "fields": {
+      "fish": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "sign_assembled_from_the_timber_then_written_on",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "eden:trail_sign_site"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1300,
+       400
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "s1",
+      "form": "assemble"
+     },
+     "receipt": "rs1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "s1",
+        "field": "timber",
+        "n": 1,
+        "to": 0
+       },
+       {
+        "change": "create",
+        "node": "rs1.0",
+        "kind": "eden:trail_sign",
+        "to": {
+         "node": "s1",
+         "slot": "out"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:timber_used",
+        "node": "s1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:sign_assembled",
+        "node": "s1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "s1",
+      "form": "assemble"
+     },
+     "receipt": "rs2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "rs1.0",
+      "form": "write",
+      "args": {
+       "words": "route_to_the_lake"
+      }
+     },
+     "receipt": "rs3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "rs1.0",
+        "field": "words",
+        "n": 1,
+        "to": {
+         "text": "route_to_the_lake"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:written",
+        "node": "rs1.0",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "s1": {
+     "kind": "eden:trail_sign_site",
+     "fields": {
+      "timber": 0
+     },
+     "slots": {
+      "out": [
+       "rs1.0"
+      ]
+     }
+    },
+    "rs1.0": {
+     "kind": "eden:trail_sign",
+     "fields": {
+      "words": {
+       "text": "route_to_the_lake"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "sign_written_then_written_over",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "g1"
+      ]
+     },
+     "g1": {
+      "kind": "eden:trail_sign"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1300,
+       400
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "g1",
+      "form": "write",
+      "args": {
+       "words": "route_to_the_lake"
+      }
+     },
+     "receipt": "rw1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "g1",
+        "field": "words",
+        "n": 1,
+        "to": {
+         "text": "route_to_the_lake"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:written",
+        "node": "g1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "g1",
+      "form": "write",
+      "args": {
+       "words": "path_closed_after_rain"
+      }
+     },
+     "receipt": "rw2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "g1",
+        "field": "words",
+        "n": 1,
+        "to": {
+         "text": "path_closed_after_rain"
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "g1": {
+     "kind": "eden:trail_sign",
+     "fields": {
+      "words": {
+       "text": "path_closed_after_rain"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "cairn_built_rearranged_undone_from_the_top_and_dismantled",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "c1"
+      ]
+     },
+     "c1": {
+      "kind": "eden:stone_cairn"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "c1",
+      "form": "middle_flat"
+     },
+     "receipt": "rc0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "lower_flat"
+     },
+     "receipt": "rc1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "lower",
+        "n": 1,
+        "to": "flat"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lower_laid_flat",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "middle_upright"
+     },
+     "receipt": "rc2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "middle",
+        "n": 2,
+        "to": "upright"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:middle_stood_upright",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "upper_upright"
+     },
+     "receipt": "rc3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "upper",
+        "n": 3,
+        "to": "upright"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:upper_stood_upright",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "upper_flat"
+     },
+     "receipt": "rc4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "upper",
+        "n": 3,
+        "to": "flat"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:upper_laid_flat",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "undo_middle"
+     },
+     "receipt": "rc5",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "undo_upper"
+     },
+     "receipt": "rc6",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "upper",
+        "n": 3,
+        "to": "loose"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:upper_recovered",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "middle_flat"
+     },
+     "receipt": "rc7",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "middle",
+        "n": 2,
+        "to": "flat"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:middle_laid_flat",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "undo_middle"
+     },
+     "receipt": "rc8",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "middle",
+        "n": 2,
+        "to": "loose"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:middle_recovered",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "undo_lower"
+     },
+     "receipt": "rc9",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "lower",
+        "n": 1,
+        "to": "loose"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lower_recovered",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "dismantle"
+     },
+     "receipt": "rc10",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "lower_upright"
+     },
+     "receipt": "rc11",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "lower",
+        "n": 1,
+        "to": "upright"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lower_stood_upright",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "middle_flat"
+     },
+     "receipt": "rc12",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "middle",
+        "n": 2,
+        "to": "flat"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:middle_laid_flat",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "dismantle"
+     },
+     "receipt": "rc13",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "upper",
+        "n": 3,
+        "to": "loose"
+       },
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "middle",
+        "n": 2,
+        "to": "loose"
+       },
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "lower",
+        "n": 1,
+        "to": "loose"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:upper_recovered",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:middle_recovered",
+        "node": "c1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:lower_recovered",
+        "node": "c1",
+        "changes": [
+         2
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "c1": {
+     "kind": "eden:stone_cairn",
+     "fields": {
+      "lower": "loose",
+      "middle": "loose",
+      "upper": "loose"
+     }
+    }
+   }
+  }
+ ]
+}

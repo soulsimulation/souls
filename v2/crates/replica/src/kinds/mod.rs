@@ -8,9 +8,10 @@
 //! - **2, owner:** `thing`, `family` (a body's family) or `place`. Kinds are not only for things.
 //! - **3, state:** fields by stable number, each `{1: name, 2: type, 3: default, 4: audience}`, and for an `enum`
 //!   `5: [values]`. Types are `bool` (0 or 1), `int`, `duration` (whole microseconds), `enum`, `text` and `list`.
-//!   Numbers are whole: the encoding has no floats, so a client and the world never disagree over rounding. A `text`
-//!   field holds a reference to its words (T8), its words capped at `6: most bytes`; a `list` holds at most `6: most`
-//!   records whose fields are `7: {n: {1: name, 2: type, 5: values}}`, set whole (F11, #2774; [`Field::check`]).
+//!   An amount (an `int`) may give `6: its unit`, `7: its min` and `8: its max`, its capacity (F4). Numbers are whole:
+//!   the encoding has no floats, so a client and the world never disagree over rounding. A `text` field holds a
+//!   reference to its words (T8), its words capped at `9: most bytes`; a `list` holds at most `9: most` records whose
+//!   fields are `10: {n: {1: name, 2: type, 5: values}}`, set whole (F11, #2774; [`Field::check`]).
 //! - **4, links:** the link types it takes part in, `{1: name, 2: from (a category or a kind), 3: most, 4: most_per}`
 //!   (B17, #3338). [`Kinds::check_link`] reads them: a link's type against the kinds at its ends.
 //! - **5, points:** named places in the thing's frame, `{1: name, 2: [x, y, z] in mm, 3: role, 4: yaw in mdeg}`, the
@@ -81,6 +82,10 @@ pub struct Field {
     pub ty: Type,
     pub default: Value,
     pub audience: Name,
+    /// An amount's unit (`g`, `count`, ...), its least value and its capacity, whole numbers in that unit (F4).
+    pub unit: Option<Name>,
+    pub min: Option<i64>,
+    pub max: Option<i64>,
 }
 
 type Checked<T> = Result<T, crate::effects::Refusal>;
@@ -270,6 +275,9 @@ pub struct KindDef {
     pub body: Option<body::Decl>,
     pub slots: BTreeMap<u64, Slot>,
     pub links: BTreeMap<u64, LinkType>,
+    /// Section 11's bound: how many children of each admitted kind (plain `namespace:name`) it holds at most. A kind
+    /// read from a list of names alone (a fixture's, no bound) has none here.
+    pub most: BTreeMap<String, u64>,
 }
 
 impl KindDef {
@@ -364,6 +372,7 @@ impl Kinds {
                             body,
                             slots,
                             links,
+                            most,
                         } = d;
                         let def = KindDef {
                             name,
@@ -375,6 +384,7 @@ impl Kinds {
                             body,
                             slots,
                             links,
+                            most,
                         };
                         self.by_hash.insert(k.hash, def);
                     }
@@ -418,6 +428,15 @@ impl Kinds {
     /// Every kind refused so far, with why.
     pub fn refused(&self) -> &[KindError] {
         &self.refused
+    }
+
+    /// Each loaded kind's section 11 bounds, by full name: how many children of each admitted kind it holds at most.
+    pub fn most(&self) -> BTreeMap<String, BTreeMap<String, u64>> {
+        self.by_hash
+            .values()
+            .filter(|k| !k.most.is_empty())
+            .map(|k| (k.name.as_str().to_owned(), k.most.clone()))
+            .collect()
     }
 
     /// What each loaded kind admits, by full name, as a commit's [`crate::tree::Rules`] reads it.
@@ -531,6 +550,7 @@ struct Sections {
     body: Option<body::Decl>,
     slots: BTreeMap<u64, Slot>,
     links: BTreeMap<u64, LinkType>,
+    most: BTreeMap<String, u64>,
 }
 
 /// Reads and checks the sections this module knows.
@@ -594,22 +614,22 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         let word = text(e.get(&2));
         let ty = match word.as_ref().map(Name::as_str) {
             Some("text") => Type::Text {
-                most: match e.get(&6) {
+                most: match e.get(&9) {
                     None => None,
                     Some(Value::Uint(m)) if *m > 0 => Some(*m),
-                    Some(_) => return Err(why("6, the most bytes, is a whole number".into())),
+                    Some(_) => return Err(why("9, the most bytes, is a whole number".into())),
                 },
             },
             Some("list") => {
-                let most = match e.get(&6) {
+                let most = match e.get(&9) {
                     Some(Value::Uint(m)) if (1..=LIST_MOST).contains(m) => *m,
-                    _ => return Err(why(format!("6, the most records, is 1 to {LIST_MOST}"))),
+                    _ => return Err(why(format!("9, the most records, is 1 to {LIST_MOST}"))),
                 };
-                let of = match e.get(&7) {
+                let of = match e.get(&10) {
                     Some(Value::Map(of)) if (1..=8).contains(&of.len()) => of,
                     _ => {
                         return Err(why(
-                            "7, the record's fields, is a map of one to eight".into()
+                            "10, the record's fields, is a map of one to eight".into()
                         ));
                     }
                 };
@@ -640,11 +660,23 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             .get(&3)
             .cloned()
             .ok_or_else(|| why("3, the default, is missing".into()))?;
+        let audience = text(e.get(&4)).ok_or_else(|| why("4, the audience, is text".into()))?;
+        let unit = e
+            .get(&6)
+            .map(|u| text(Some(u)).ok_or_else(|| why("6, the unit, is text".into())));
+        let bound = |k: u64, what: &str| {
+            e.get(&k)
+                .map(|v| int(v).ok_or_else(|| why(format!("{k}, the {what}, is a whole number"))))
+                .transpose()
+        };
         let field = Field {
             name,
             ty,
             default,
-            audience: text(e.get(&4)).ok_or_else(|| why("4, the audience, is text".into()))?,
+            audience,
+            unit: unit.transpose()?,
+            min: bound(7, "min")?,
+            max: bound(8, "max")?,
         };
         // A text field's default may be the kind's own words (T8 rule 6); every other default is a value it may hold.
         let fits = match (&field.ty, &field.default) {
@@ -790,21 +822,38 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             );
         }
     }
-    let children = match s.get(&SECTION_CHILDREN) {
-        None => BTreeSet::new(),
-        Some(v) => texts(Some(v))
-            .ok_or_else(|| {
-                bad(
-                    "kind-children",
-                    SECTION_CHILDREN,
-                    None,
-                    "a list of kinds or categories".into(),
-                )
-            })?
-            .iter()
-            .map(|t| t.as_str().to_owned())
-            .collect(),
-    };
+    // Section 11: each child as `{1: kind, 2: most}` (an entry's, B19), or a kind's name alone (a fixture's, no bound).
+    let mut children = BTreeSet::new();
+    let mut most = BTreeMap::new();
+    if let Some(v) = s.get(&SECTION_CHILDREN) {
+        let why = || {
+            bad(
+                "kind-children",
+                SECTION_CHILDREN,
+                None,
+                "a list of kinds or categories, each a name or {1: kind, 2: most}".into(),
+            )
+        };
+        let Value::Array(list) = v else {
+            return Err(why());
+        };
+        for c in list {
+            match c {
+                Value::Map(m) => {
+                    let name = text(m.get(&1)).ok_or_else(why)?;
+                    let bound = match m.get(&2) {
+                        Some(Value::Uint(n)) if *n > 0 => *n,
+                        _ => return Err(why()),
+                    };
+                    most.insert(name.as_str().to_owned(), bound);
+                    children.insert(name.as_str().to_owned());
+                }
+                other => {
+                    children.insert(text(Some(other)).ok_or_else(why)?.as_str().to_owned());
+                }
+            }
+        }
+    }
 
     // How a thing moves (section 18, `{1: how}`): held in one or two hands, or not held (B4, #2739).
     let hands = match s.get(&crate::world_model::SECTION_MOTION) {
@@ -844,6 +893,7 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         },
         slots: named_slots,
         links,
+        most,
     })
 }
 

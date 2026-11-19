@@ -1,0 +1,460 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:open_sign (from #1254, core-open-sign@1). A shop's sign on a post says Open (the default) or Closed. Anyone turns it by hand at the knob on the post, with a hand free, to the side it does not say; the original's actions are 'Turn the sign to Open' and 'Turn the sign to Closed', each offered only while the sign says the other. Turning it to what it already says is refused; the fix is the other form. A flag reads back as 1 or 0.",
+ "cases": [
+  {
+   "name": "turn_to_closed_every_need_met",
+   "act": {
+    "this": "s1",
+    "form": "turn_to_closed"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:open_sign",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       40,
+       1100,
+       200
+      ]
+     },
+     "c1": {
+      "kind": "eden:open_sign"
+     },
+     "c2": {
+      "kind": "eden:open_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "turn_to_closed_already_closed",
+   "act": {
+    "this": "s1",
+    "form": "turn_to_closed"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:open_sign",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       40,
+       1100,
+       200
+      ]
+     },
+     "c1": {
+      "kind": "eden:open_sign"
+     },
+     "c2": {
+      "kind": "eden:open_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "open",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "turn_to_open"
+    }
+   }
+  },
+  {
+   "name": "turn_to_closed_hands_full",
+   "act": {
+    "this": "s1",
+    "form": "turn_to_closed"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:open_sign",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "c1",
+       "right": "c2"
+      },
+      "effector_mm": [
+       40,
+       1100,
+       200
+      ]
+     },
+     "c1": {
+      "kind": "eden:open_sign"
+     },
+     "c2": {
+      "kind": "eden:open_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "turn_to_closed_out_of_reach",
+   "act": {
+    "this": "s1",
+    "form": "turn_to_closed"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:open_sign",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       40,
+       1100,
+       1500
+      ]
+     },
+     "c1": {
+      "kind": "eden:open_sign"
+     },
+     "c2": {
+      "kind": "eden:open_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "fix": {
+     "step": "walk_to",
+     "point": "knob"
+    }
+   }
+  },
+  {
+   "name": "turn_to_open_every_need_met",
+   "act": {
+    "this": "s1",
+    "form": "turn_to_open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:open_sign",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       40,
+       1100,
+       200
+      ]
+     },
+     "c1": {
+      "kind": "eden:open_sign"
+     },
+     "c2": {
+      "kind": "eden:open_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "turn_to_open_already_open",
+   "act": {
+    "this": "s1",
+    "form": "turn_to_open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:open_sign",
+      "fields": {
+       "open": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       40,
+       1100,
+       200
+      ]
+     },
+     "c1": {
+      "kind": "eden:open_sign"
+     },
+     "c2": {
+      "kind": "eden:open_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "open",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "turn_to_closed"
+    }
+   }
+  },
+  {
+   "name": "turn_to_open_hands_full",
+   "act": {
+    "this": "s1",
+    "form": "turn_to_open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:open_sign",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "c1",
+       "right": "c2"
+      },
+      "effector_mm": [
+       40,
+       1100,
+       200
+      ]
+     },
+     "c1": {
+      "kind": "eden:open_sign"
+     },
+     "c2": {
+      "kind": "eden:open_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "turn_to_open_out_of_reach",
+   "act": {
+    "this": "s1",
+    "form": "turn_to_open"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "s1": {
+      "kind": "eden:open_sign",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       40,
+       1100,
+       1500
+      ]
+     },
+     "c1": {
+      "kind": "eden:open_sign"
+     },
+     "c2": {
+      "kind": "eden:open_sign"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "fix": {
+     "step": "walk_to",
+     "point": "knob"
+    }
+   }
+  }
+ ]
+}
