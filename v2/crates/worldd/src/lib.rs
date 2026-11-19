@@ -12,6 +12,7 @@ pub mod engine;
 pub mod loose;
 pub mod measures;
 pub mod moves;
+pub mod orders;
 pub mod shipping;
 pub mod start;
 mod syncs;

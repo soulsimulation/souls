@@ -151,6 +151,7 @@ pub struct Bodies {
     pub runner: Runner,
     pub town: Town,
     pub slots: Slots,
+    pub orders: sim::orders::Orders,
     moves: Moves,
     due: DueList,
     mint: Minter,
@@ -224,6 +225,7 @@ impl Bodies {
             runner: Runner::new(tick),
             town,
             slots: Slots::new(),
+            orders: sim::orders::Orders::new(),
             moves: Moves::new(),
             due: DueList::new(),
             mint: Minter::new(Scope([0xb4; 16])),
@@ -606,6 +608,7 @@ impl Bodies {
             }
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
+            crate::orders::step(self, at);
             let _ = self.runner.tick(&mut self.town);
             // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
             // zone, a seated or lying one included (#3393).

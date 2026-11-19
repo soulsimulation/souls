@@ -279,6 +279,7 @@ struct Carry {
     next_intent: u64,
     placed: Placed,
     tick: i64,
+    orders: Vec<Value>,
 }
 
 impl Carry {
@@ -315,6 +316,9 @@ impl Carry {
         ]);
         if let Ok(t) = u64::try_from(self.tick) {
             m.insert(4, Value::Uint(t));
+        }
+        if !self.orders.is_empty() {
+            m.insert(5, Value::Array(self.orders.clone()));
         }
         encode(&Value::Map(m)).unwrap_or_default()
     }
@@ -358,7 +362,38 @@ impl Carry {
         if let Some(Value::Uint(t)) = m.get(&4) {
             c.tick = i64::try_from(*t).unwrap_or(i64::MAX);
         }
+        if let Some(Value::Array(rows)) = m.get(&5) {
+            c.orders = rows.clone();
+        }
         Some(c)
+    }
+}
+
+/// Keep only active order starts in original arrival order, including across checkpoint/tail overlap.
+fn remember_orders(active: &mut Vec<Effect>, effects: &[Effect]) {
+    for e in effects {
+        for ev in e.events.iter().flatten() {
+            let Some(id) = ev.fields.get(&1) else {
+                continue;
+            };
+            if ev.name.as_str() == "souls:order-ended" {
+                active.retain(|e| {
+                    !e.events
+                        .iter()
+                        .flatten()
+                        .any(|ev| ev.fields.get(&1) == Some(id))
+                });
+            } else if ev.name.as_str() == "souls:order"
+                && !active.iter().any(|e| {
+                    e.events
+                        .iter()
+                        .flatten()
+                        .any(|ev| ev.fields.get(&1) == Some(id))
+                })
+            {
+                active.push(e.clone());
+            }
+        }
     }
 }
 
@@ -682,6 +717,7 @@ struct Clock {
     engine_acts: Vec<engine::Act>,
     /// Engine acts written this tick, answered with a receipt once their entries are applied.
     engine_done: Vec<Id>,
+    order_records: Vec<Effect>,
     /// Intents arrived since the last tick, taken at the start of the next; and those a script set for a tick.
     pending: Vec<(Vec<u8>, Reply, Stamps)>,
     scheduled: BTreeMap<i64, Vec<(Vec<u8>, Reply)>>,
@@ -1211,6 +1247,56 @@ impl Clock {
                 let id = matches!(a, Answer::Receipt { .. }).then_some(id);
                 return self.answered(key, sequence, id, Some(value), &a, (vec![reply], stamps));
             }
+        }
+        // Standing orders are accepted once and recorded now; their later inputs and named ends are logged.
+        if matches!(intent.kind(), Ok(Kind::Order)) || intent.verb.as_str() == "souls:cancel" {
+            let result = self
+                .body_of(&intent)
+                .map_err(|name| Refusal {
+                    name,
+                    detail: String::new(),
+                })
+                .and_then(|body| match self.bodies.as_mut() {
+                    Some(b) => crate::orders::accept(b, &intent, body, id, now),
+                    None => Err(Refusal {
+                        name: "orders-off",
+                        detail: String::new(),
+                    }),
+                });
+            let effects = self
+                .bodies
+                .as_mut()
+                .map(|b| std::mem::take(&mut b.orders.log))
+                .unwrap_or_default();
+            let result = result.and_then(|()| self.write_all(effects));
+            let answer = match result {
+                Ok(()) => {
+                    self.next_intent += 1;
+                    self.inputs.push(Input::Intent {
+                        id,
+                        soul: self.body_of(&intent).unwrap_or(self.zone),
+                        verb: intent.verb.clone(),
+                        words: None,
+                    });
+                    Answer::Receipt {
+                        actor,
+                        sequence,
+                        intent: id,
+                        entries: self.receipts.entries(id).to_vec(),
+                        names: BTreeMap::new(),
+                    }
+                }
+                Err(r) => self.refusal(actor, sequence, r.name),
+            };
+            let accepted = matches!(answer, Answer::Receipt { .. }).then_some(id);
+            return self.answered(
+                key,
+                sequence,
+                accepted,
+                Some(value),
+                &answer,
+                (vec![reply], stamps),
+            );
         }
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
@@ -1967,7 +2053,11 @@ impl Clock {
             return;
         };
         let ended = b.step(now);
+        let orders = std::mem::take(&mut b.orders.log);
         let heard = std::mem::take(&mut b.heard);
+        if !orders.is_empty() {
+            self.write_own(orders, "standing orders");
+        }
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
             self.write_own(vec![e], "an utterance");
@@ -2349,6 +2439,7 @@ impl Clock {
             w.offer(buildsafe::moving(b));
         }
         at[5] = mark();
+        remember_orders(&mut self.order_records, &self.effects);
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
         let inputs = match std::mem::take(&mut self.inputs) {
             i if i.is_empty() => None,
@@ -2461,6 +2552,7 @@ impl Clock {
                 .map(|(a, last, kept)| (a.to_vec(), last, kept.cloned().collect()))
                 .collect(),
             next_intent: self.next_intent,
+            orders: self.order_records.iter().map(Effect::to_value).collect(),
             placed: self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
             tick: self.tick,
         };
@@ -2672,6 +2764,7 @@ pub fn start<S: Storage + 'static>(
     let mut last = None;
     let mut restart = Restart::default();
     let mut blobs = Blobs::default();
+    let mut order_records = Vec::new();
     let records: &[Vec<u8>] = match restored {
         Some(r) => {
             let logged = found.first + found.records.len() as u64;
@@ -2689,6 +2782,17 @@ pub fn start<S: Storage + 'static>(
                 }
                 next_intent = c.next_intent.max(1);
                 placed = c.placed;
+                if !c.orders.is_empty() {
+                    let v = Value::Map(BTreeMap::from([
+                        (1, Value::Bytes(world.header().hash().to_bytes())),
+                        (2, Value::Array(c.orders)),
+                    ]));
+                    let bytes = encode(&v).map_err(|e| Refusal {
+                        name: "encoding",
+                        detail: e.to_string(),
+                    })?;
+                    order_records = Part::read(&bytes)?.effects;
+                }
                 last = (c.tick >= 0).then_some(c.tick);
             }
             restart.checkpoint = Some(r.root.record);
@@ -2709,6 +2813,7 @@ pub fn start<S: Storage + 'static>(
         }
         restart.applied += 1;
         receipts.index(&part.effects);
+        remember_orders(&mut order_records, &part.effects);
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
         for e in &part.effects {
@@ -2737,6 +2842,22 @@ pub fn start<S: Storage + 'static>(
             }
         }
     }
+    // Active starts are carried by the checkpoint; later starts/ends have just replayed above.
+    let order_parts = if order_records.is_empty() {
+        Vec::new()
+    } else {
+        let value = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(world.header().hash().to_bytes())),
+            (
+                2,
+                Value::Array(order_records.iter().map(Effect::to_value).collect()),
+            ),
+        ]));
+        vec![Part::read(&encode(&value).map_err(|e| Refusal {
+            name: "encoding",
+            detail: e.to_string(),
+        })?)?]
+    };
     let zone = Id::new(cfg.lineage, 0).ok_or(Refusal {
         name: "id-counter",
         detail: "the zone".into(),
@@ -2936,6 +3057,7 @@ pub fn start<S: Storage + 'static>(
             .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
+        order_records,
         pending: Vec::new(),
         scheduled: BTreeMap::new(),
         inputs: Vec::new(),
@@ -2983,6 +3105,9 @@ pub fn start<S: Storage + 'static>(
                                 "worldd: {} stands, not seated again: {why}",
                                 replica::world_model::show(body)
                             );
+                        }
+                        if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
+                            eprintln!("worldd: standing orders were not restored: {r}");
                         }
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
