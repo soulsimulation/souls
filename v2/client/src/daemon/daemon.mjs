@@ -411,8 +411,10 @@ const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whi
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
-// the world's key when it is a plain name.
-const NS = /^[A-Za-z0-9_.\-/@]+$/.test(seat.world) && seat.world !== 'souls' ? seat.world : 'world';
+// the world's key when it is a plain name of at most NS_MOST bytes, else `world`: a verb is one text, at most 64 bytes
+// (intent_limits.txt), and a placed world's key is its 67-byte instance name (place-world.sh), which no verb fits.
+const NS_MOST = 32;
+const NS = /^[A-Za-z0-9_.\-/@]+$/.test(seat.world) && seat.world.length <= NS_MOST && seat.world !== 'souls' ? seat.world : 'world';
 const WORDS_MOST = 1000; // characters a say or a whisper carries
 const ID = /^[0-9a-f]{32}-\d+$/;
 
