@@ -676,3 +676,30 @@ fn a5_a_spot_is_released_when_its_holder_leaves() {
         }
     }
 }
+
+/// C8 (#3396): the building boxes skip only what is in no passage. On the open ground, at every point on a 100 mm grid
+/// over each building's box widened by 1 m, the passage test with the boxes gives the same answer as without them.
+#[test]
+fn c8_the_boxes_give_the_same_passages() {
+    use sim::walk::town::{ground_boxes, in_passage};
+    let (t, _) = town();
+    let boxes = ground_boxes(&t.buildings, t.ground);
+    let (mut checked, mut inside) = (0, 0);
+    for r in boxes.iter().flatten() {
+        for x in ((r[0] - 1_000_000)..=(r[2] + 1_000_000)).step_by(100_000) {
+            for z in ((r[1] - 1_000_000)..=(r[3] + 1_000_000)).step_by(100_000) {
+                let p = Vec3::new(x, 0, z);
+                let full = in_passage(&t.buildings, &[], t.ground, t.ground, p);
+                assert_eq!(
+                    in_passage(&t.buildings, &boxes, t.ground, t.ground, p),
+                    full,
+                    "C8: the boxes changed the passage test at {p:?}"
+                );
+                checked += 1;
+                inside += usize::from(full);
+            }
+        }
+    }
+    println!("C8: {checked} points, {inside} in a passage, the same with and without the boxes");
+    assert!(inside > 0 && checked > inside);
+}
