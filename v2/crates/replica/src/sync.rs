@@ -1,5 +1,5 @@
 //! Sync and resume by hash (Engine v2 R5, #2699): a client that was away becomes current by comparing hashes and
-//! fetching only what differs. R6's daemon calls this at every reconnect.
+//! fetching only what differs. R6's daemon runs it when the gateway cannot resume its stream (R5b, #3164).
 //!
 //! 1. **The cursor first, and only in the same lineage, zone and epoch** ([`start`]). The client's cursor is the
 //!    last version it applied (`v2/docs/ids.md` rule 8). The gateway replays what it still holds after it (I1,
@@ -17,8 +17,11 @@
 //! 4. **The bytes are counted** ([`Synced`]): a room of 5,000 children lists 5,000 hashes (34 bytes each) to find one
 //!    change.
 //!
-//! Not here: missed events (speech to me) are not state and are not restored; the socket request that carries this
-//! (R6). The library a client checks with is loaded by its build hash in `v2/client/src/sync/library.mjs`.
+//! Over the gateway (R5b, #3164), the same steps ([`Copy::compare`], [`Copy::ask`], [`Copy::take`], [`Copy::finish`])
+//! run one request at a time: `gatewayd/src/lib.rs` names the frames, and the world answers for the asking actor's
+//! scope.
+//!
+//! Not here: missed events (speech to me) are not state and are not restored. The library a client checks with is loaded by its build hash in `v2/client/src/sync/library.mjs`.
 
 use crate::effects::Refusal;
 use crate::encode::{Value, decode, encode};
@@ -135,6 +138,13 @@ pub struct Synced {
     pub held: usize,
 }
 
+/// A sync under way ([`Copy::compare`]): the records still to ask for in this level, the next level's, and the count.
+pub struct Descent {
+    want: Vec<Vec<u8>>,
+    next: Vec<Vec<u8>>,
+    s: Synced,
+}
+
 /// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash.
 #[derive(Clone, Default)]
 pub struct Copy {
@@ -193,17 +203,35 @@ impl Copy {
     /// Rule 2: the hash of each node of `scope`, then every record not held, one round per level; then rule 3's let
     /// go. Its first sync, with nothing held, takes the whole scope.
     pub fn sync(&mut self, scope: &[Id], src: &mut dyn Source) -> R<Synced> {
-        let mut s = Synced::default();
         let now = src.hashes(scope)?;
-        s.rounds = 1;
-        s.sent += size(&Value::Array(
-            scope.iter().map(|id| id.to_value()).collect(),
-        ));
+        let mut d = self.compare(
+            scope,
+            now.into_iter().map(|h| h.map(Hash::to_bytes)).collect(),
+        );
+        loop {
+            let asked = self.ask(&mut d, usize::MAX);
+            if asked.is_empty() {
+                return self.finish(d);
+            }
+            let got = src.records(&asked)?;
+            self.take(&mut d, &asked, got)?;
+        }
+    }
+
+    /// [`Copy::sync`] one step at a time, for a client whose answers come over a socket (R5b, #3164): the first
+    /// round's answer, each scope node's hash, gives the records to fetch.
+    pub fn compare(&mut self, scope: &[Id], now: RootHashes) -> Descent {
+        let mut s = Synced {
+            rounds: 1,
+            sent: size(&Value::Array(
+                scope.iter().map(|id| id.to_value()).collect(),
+            )),
+            ..Synced::default()
+        };
         let mut roots = BTreeMap::new();
         let mut want = Vec::new();
         for (id, h) in scope.iter().zip(now) {
             let Some(h) = h else { continue };
-            let h = h.to_bytes();
             s.got += h.len() as u64;
             if self.roots.get(id) != Some(&h) {
                 s.changed += 1;
@@ -214,34 +242,60 @@ impl Copy {
             roots.insert(*id, h);
         }
         self.roots = roots;
-        while !want.is_empty() {
-            want.sort();
-            want.dedup();
-            let got = src.records(&want)?;
-            if got.len() != want.len() {
-                return refuse("sync-record", "an answer of another length");
-            }
-            s.rounds += 1;
-            s.sent += want.iter().map(|h| h.len() as u64).sum::<u64>();
-            let mut next = Vec::new();
-            for (h, bytes) in want.iter().zip(got) {
-                for c in check(h, &bytes)? {
-                    if !self.records.contains_key(&c) {
-                        next.push(c);
-                    }
-                }
-                s.got += bytes.len() as u64;
-                s.fetched += 1;
-                self.records.insert(h.clone(), bytes);
-            }
-            // A child named twice in one round, or also asked for in it, is fetched once.
-            next.retain(|c| !self.records.contains_key(c));
-            want = next;
+        Descent {
+            want: Vec::new(),
+            next: want,
+            s,
         }
+    }
+
+    /// The next records to ask for, at most `most`: the rest of this level, else the next level's not yet held.
+    /// Empty when the descent is done.
+    pub fn ask(&self, d: &mut Descent, most: usize) -> Vec<Vec<u8>> {
+        if d.want.is_empty() {
+            // A child named twice in one level, or also asked for in it, is fetched once.
+            d.want = std::mem::take(&mut d.next);
+            d.want.retain(|c| !self.records.contains_key(c));
+            d.want.sort();
+            d.want.dedup();
+        }
+        let n = most.min(d.want.len());
+        d.want.drain(..n).collect()
+    }
+
+    /// The records `asked` came back as: each checked against its hash (rule 3), kept, and its children not held
+    /// asked for in the next level.
+    pub fn take(&mut self, d: &mut Descent, asked: &[Vec<u8>], got: Vec<Vec<u8>>) -> R<()> {
+        if got.len() != asked.len() {
+            return refuse("sync-record", "an answer of another length");
+        }
+        d.s.rounds += 1;
+        d.s.sent += asked.iter().map(|h| h.len() as u64).sum::<u64>();
+        for (h, bytes) in asked.iter().zip(got) {
+            for c in check(h, &bytes)? {
+                if !self.records.contains_key(&c) {
+                    d.next.push(c);
+                }
+            }
+            d.s.got += bytes.len() as u64;
+            d.s.fetched += 1;
+            self.records.insert(h.clone(), bytes);
+        }
+        Ok(())
+    }
+
+    /// Rule 3's let go, once [`Copy::ask`] gives nothing more.
+    pub fn finish(&mut self, d: Descent) -> R<Synced> {
+        let mut s = d.s;
         let reached = self.reach()?;
         self.records.retain(|h, _| reached.contains(h));
         s.held = reached.len();
         Ok(s)
+    }
+
+    /// The bytes of every record held: what a snapshot of the scope (a sync from nothing) would fetch.
+    pub fn held_bytes(&self) -> u64 {
+        self.records.values().map(|b| b.len() as u64).sum()
     }
 
     /// The hashes the scope reaches, each record held and checked; refused by name if one is missing.
@@ -260,4 +314,119 @@ impl Copy {
         }
         Ok(seen)
     }
+}
+
+/// Sync over a socket (R5b, #3164): the keys of a request and its answer, beside an intent's (1 to 11), so the
+/// gateway tells the two apart by key 20. A client asks `{20: n, 21: [ids]}` (their hashes; no ids asks for the scope
+/// the world grants it) or `{20: n, 22: [hashes]}` (their records). The gateway adds 23, the asking actor's bytes, and
+/// numbers the request its own way. The world answers `{20: n, 1: version, 25: [ids], 21: [hashes]}` (empty bytes for
+/// a node not here or not granted), `{20: n, 22: [records]}`, or `{20: n, 24: refusal name}`.
+pub mod wire {
+    pub const ASK: u64 = 20;
+    pub const IDS: u64 = 21;
+    pub const RECORDS: u64 = 22;
+    pub const ACTOR: u64 = 23;
+    pub const REFUSED: u64 = 24;
+    pub const SCOPE: u64 = 25;
+    /// Hashes asked for in one request: 64 of 36 bytes fits an intent's limit (T10 rule 11), which a request shares.
+    pub const RECORDS_MOST: usize = 64;
+}
+
+/// The world's answer to one sync request ([`wire`]) from an actor granted the scope `granted`, at version `now`;
+/// the caller adds the request's number.
+pub fn answer(
+    src: &mut dyn Source,
+    granted: &[Id],
+    ask: &BTreeMap<u64, Value>,
+    now: Value,
+) -> BTreeMap<u64, Value> {
+    let r = (|| -> R<BTreeMap<u64, Value>> {
+        match (ask.get(&wire::IDS), ask.get(&wire::RECORDS)) {
+            (Some(Value::Array(ids)), None) => {
+                let ids: Vec<Id> = if ids.is_empty() {
+                    granted.to_vec()
+                } else {
+                    ids.iter().map(crate::effects::read_id).collect::<R<_>>()?
+                };
+                let hashes = src
+                    .hashes(&ids)?
+                    .into_iter()
+                    .zip(&ids)
+                    .map(|(h, id)| match h {
+                        Some(h) if granted.contains(id) => Value::Bytes(h.to_bytes()),
+                        _ => Value::Bytes(Vec::new()),
+                    })
+                    .collect();
+                Ok(BTreeMap::from([
+                    (1, now),
+                    (wire::IDS, Value::Array(hashes)),
+                    (
+                        wire::SCOPE,
+                        Value::Array(ids.iter().map(|id| id.to_value()).collect()),
+                    ),
+                ]))
+            }
+            (None, Some(Value::Array(hs))) if hs.len() <= wire::RECORDS_MOST => {
+                let hs = hs
+                    .iter()
+                    .map(|h| match h {
+                        Value::Bytes(b) => Ok(b.clone()),
+                        _ => refuse("sync-ask", "a hash is not bytes"),
+                    })
+                    .collect::<R<Vec<_>>>()?;
+                let got = src.records(&hs)?;
+                Ok(BTreeMap::from([(
+                    wire::RECORDS,
+                    Value::Array(got.into_iter().map(Value::Bytes).collect()),
+                )]))
+            }
+            _ => refuse("sync-ask", "ids, or at most 64 hashes"),
+        }
+    })();
+    r.unwrap_or_else(|e| {
+        let name =
+            crate::encode::Name::new(e.name).unwrap_or_else(|| unreachable!("a refusal's name"));
+        BTreeMap::from([(wire::REFUSED, Value::Text(name))])
+    })
+}
+
+/// Each scope node's hash as its bytes, none for a node not here or not granted.
+pub type RootHashes = Vec<Option<Vec<u8>>>;
+
+/// A hashes answer's scope ids and hashes ([`wire`]), as [`Copy::compare`] takes them.
+pub fn read_hashes(m: &BTreeMap<u64, Value>) -> R<(Vec<Id>, RootHashes)> {
+    let (Some(Value::Array(ids)), Some(Value::Array(hs))) =
+        (m.get(&wire::SCOPE), m.get(&wire::IDS))
+    else {
+        return refuse("sync-answer", "not ids and hashes");
+    };
+    if ids.len() != hs.len() {
+        return refuse("sync-answer", "ids and hashes of other lengths");
+    }
+    let ids = ids
+        .iter()
+        .map(crate::effects::read_id)
+        .collect::<R<Vec<_>>>()?;
+    let hs = hs
+        .iter()
+        .map(|h| match h {
+            Value::Bytes(b) if b.is_empty() => Ok(None),
+            Value::Bytes(b) if b.len() == 34 => Ok(Some(b.clone())),
+            _ => refuse("sync-answer", "a hash is not 34 bytes"),
+        })
+        .collect::<R<Vec<_>>>()?;
+    Ok((ids, hs))
+}
+
+/// A records answer's records ([`wire`]).
+pub fn read_records(m: &BTreeMap<u64, Value>) -> R<Vec<Vec<u8>>> {
+    let Some(Value::Array(rs)) = m.get(&wire::RECORDS) else {
+        return refuse("sync-answer", "not records");
+    };
+    rs.iter()
+        .map(|r| match r {
+            Value::Bytes(b) => Ok(b.clone()),
+            _ => refuse("sync-answer", "a record is not bytes"),
+        })
+        .collect()
 }

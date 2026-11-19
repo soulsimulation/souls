@@ -1,0 +1,27 @@
+# The directory and accounts (Engine v2 W1, #2704; installed by v2/tools/ops/install.sh, O17 #2810). Its arguments
+# are in /etc/souls/directory.args (DIRECTORYD_ARGS), which the install writes once and never overwrites; the release
+# owner sets the sign-in provider there. It listens on loopback only; the proxy's preview path reaches it.
+[Unit]
+Description=Souls directory
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=souls
+Group=souls
+Slice=souls.slice
+EnvironmentFile=/etc/souls/directory.args
+EnvironmentFile=-/etc/souls/secrets.env
+ExecStart=/usr/local/lib/souls/directoryd $DIRECTORYD_ARGS
+Restart=always
+RestartSec=1s
+MemoryMax=256M
+MemorySwapMax=0
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/souls/directory
+
+[Install]
+WantedBy=multi-user.target

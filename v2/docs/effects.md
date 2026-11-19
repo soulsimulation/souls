@@ -121,7 +121,8 @@ the log (K4), the in-memory tree (K2), applying and querying at speed (R1) and v
 15. **A pending timer is state, written by a timer record** (body 11), never only by an event: set `{1: 1, 2: timer,
     3: due, 4: name}` (due at a world time in T5's microseconds; the name says what it is for) and clear `{1: 2,
     2: timer}` (fired or cancelled), both by the entry of the node that owns it. It survives a restart and an idle
-    catch-up because it is in the state, and stripping events leaves it.
+    catch-up because it is in the state, and stripping events leaves it. Removing a node drops the pending timers of
+    it and its subtree in the same apply, with no clear records.
 16. **T5's time effects are a record of their own** (body 10), each exactly as time.md rule 8 writes it, never a
     `set` on the root's field numbers. They are the zone root's entries, for everyone.
 
