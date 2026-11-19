@@ -84,6 +84,7 @@ use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
 use sim::frozen::Publisher;
 use sim::log::{Log, Storage};
 use sim::recorder::{self, Input};
+use sim::speech;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -697,13 +698,64 @@ impl Clock {
         }
     }
 
+    /// Writes the world's own entries (its utterances, its sky), each envelope's sequence set in turn, as one part
+    /// applied to the world and logged with the tick. A part the world refuses is not written, and is named.
+    fn write(&mut self, effects: Vec<Effect>, what: &str) {
+        let first = self.replica.version();
+        let effects: Vec<Value> = effects
+            .into_iter()
+            .zip(first..)
+            .map(|(mut e, sequence)| {
+                e.envelope.sequence = sequence;
+                e.to_value()
+            })
+            .collect();
+        let v = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(self.replica.header().hash().to_bytes())),
+            (2, Value::Array(effects)),
+        ]));
+        let part = encode(&v)
+            .map_err(|e| Refusal {
+                name: "encoding",
+                detail: e.to_string(),
+            })
+            .and_then(|b| Part::read(&b))
+            .and_then(|p| self.replica.apply(&p).map(|()| p));
+        match part {
+            Ok(p) => {
+                self.effects.extend(p.effects.iter().cloned());
+                self.parts.push(Arc::new(p));
+            }
+            Err(r) => eprintln!("worldd: {what} was not written: {r}"),
+        }
+    }
+
+    /// An envelope of the world's own, at `at` on node `node` (its sequence is set when written).
+    fn own(node: Id, at: Micros) -> Envelope {
+        Envelope {
+            sequence: 0,
+            at,
+            cause: Cause::World,
+            actor: Actor::World,
+            audience: Audience::Everyone,
+            node,
+        }
+    }
+
     /// Steps 1 to 3 for the bodies (I4b): their due timers, skills and controller, to world time `now`; each move that
-    /// ended is answered: a receipt naming its entries when done, else its reason by name.
+    /// ended is answered: a receipt naming its entries when done, else its reason by name. Each utterance a step
+    /// started is written with its hearers (B11, #3369): the speaker's entry, as `sim::speech::entry` makes it.
     fn step_bodies(&mut self, now: Micros) {
         let Some(b) = self.bodies.as_mut() else {
             return;
         };
-        for (id, how) in b.step(now) {
+        let ended = b.step(now);
+        let heard = std::mem::take(&mut b.heard);
+        for (speaker, said, at) in heard {
+            let e = speech::entry(Clock::own(speaker, at), speaker, &said);
+            self.write(vec![e], "an utterance");
+        }
+        for (id, how) in ended {
             self.settle(id, how, now);
         }
     }
