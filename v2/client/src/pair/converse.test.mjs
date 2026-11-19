@@ -236,6 +236,8 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
     for (const s of [a, b, c]) {
       const st = await request(s.rt.socket, { op: 'status' }).catch(() => null);
       console.log(s.label, 'transport', JSON.stringify(st && { hearing: st.hearing, grants: st.viewGrants, kinds: st.viewKinds, drops: st.drops }));
+      console.log(s.label, 'recent answers', JSON.stringify(s.events.filter((e) => e.kind === 'answer').slice(-8)
+        .map((e) => ({ sequence: e.sequence, answer: e.answer, ...(e.reason ? { reason: e.reason } : {}) }))));
       const log = existsSync(s.rt.log) ? readFileSync(s.rt.log, 'utf8').split('\n').slice(-12) : [];
       console.log(s.label, 'daemon tail', JSON.stringify(log));
       await request(s.rt.socket, { op: 'stop' }).catch(() => {});

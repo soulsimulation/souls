@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-Joined Souls begin listening through their new body as soon as their join succeeds.
+Joined Souls start listening immediately and can speak privately in activities they joined.
