@@ -24,6 +24,11 @@
 //!   it only by fields the world sets on the walker's body: `F_ROUTE` (routed again), `F_SHOULDER` (the shoulder
 //!   turn) and `F_HELD` (walked out). Ending an order by name ends its run ([`Runner::end`]). The ladder keeps each
 //!   walker's legs, and a leg ends when the controller has carried the body across the leg's link.
+//! - **Water** (N11b, #3198). Water is legal ground for a body that may use it ([`may_stand`]: wading ground with
+//!   wading, water with swimming), and illegal for any other: [`in_water`] lists a body on water it may not use
+//!   (`in-water`), which the last rung walks out to the nearest ground it may stand on (a walker's surface holds dry
+//!   ground only), and a body afloat on water with no way to a shore (`no-shore`: no chain of wet pieces, each
+//!   touching the next, reaches dry ground). A swimmer whose order ends stays afloat where it is.
 //! - **Changed ground** (G3, #2760). Before each tick, once the runner has found its bodies again on ground an edit
 //!   changed (`Runner::reground`), the walks planned on that ground (`Town::stale`) are planned again from where
 //!   they stand: those whose body stands on a changed node at once, the rest nearest the change first (by how soon
@@ -37,8 +42,12 @@
 pub mod town;
 
 use crate::controller::Track;
+use crate::gaits::Ground;
+use crate::ground::Piece;
+use crate::ground::exits::{self, Finding};
 use crate::host::{Runner, named, waiting};
 use crate::links::turns::ROOM;
+use crate::routes::Mask;
 use crate::walk::town::Town;
 use crate::walk::{Leg, World, node_of};
 use replica::effects::Refusal;
@@ -64,6 +73,92 @@ pub const END: Micros = 15_000_000;
 pub const NEAR: i64 = 1_200_000;
 /// The walks planned on changed ground are all planned again within this, µs (G3's bar is 2 s).
 pub const REPLAN_WITHIN: Micros = 1_000_000;
+
+/// Whether a body with abilities `has` may stand on `ground` (the routes' own rule, N11c #3218).
+pub use crate::routes::may_stand;
+
+/// Whether two pieces touch: a corner of either lies on an edge of the other, within [`exits::ON`].
+fn touch(a: &Piece, b: &Piece) -> bool {
+    let bounds = |p: &Piece| {
+        p.outline
+            .iter()
+            .flatten()
+            .fold([i64::MAX, i64::MAX, i64::MIN, i64::MIN], |r, v| {
+                let (x, z) = (i64::from(v[0]), i64::from(v[2]));
+                [r[0].min(x), r[1].min(z), r[2].max(x), r[3].max(z)]
+            })
+    };
+    let (ba, bb) = (bounds(a), bounds(b));
+    let on = exits::ON;
+    if ba[0] > bb[2] + on || bb[0] > ba[2] + on || ba[1] > bb[3] + on || bb[1] > ba[3] + on {
+        return false;
+    }
+    let meets = |p: &Piece, q: &Piece| {
+        p.outline.iter().flatten().any(|v| {
+            let c = [i128::from(v[0]), i128::from(v[2])];
+            q.outline.iter().any(|ring| {
+                (0..ring.len()).any(|k| {
+                    let (s, e) = (ring[k], ring[(k + 1) % ring.len()]);
+                    let (s, e) = (
+                        [i128::from(s[0]), i128::from(s[2])],
+                        [i128::from(e[0]), i128::from(e[2])],
+                    );
+                    let d = [e[0] - s[0], e[1] - s[1]];
+                    let dd = d[0] * d[0] + d[1] * d[1];
+                    let t = ((c[0] - s[0]) * d[0] + (c[1] - s[1]) * d[1]).clamp(0, dd.max(1));
+                    let n = if dd == 0 {
+                        s
+                    } else {
+                        [s[0] + d[0] * t / dd, s[1] + d[1] * t / dd]
+                    };
+                    let (x, z) = (c[0] - n[0], c[1] - n[1]);
+                    x * x + z * z <= i128::from(on * on)
+                })
+            })
+        })
+    };
+    meets(a, b) || meets(b, a)
+}
+
+/// Of `bodies` (each with its abilities and its centre, µm, in the node's frame), the ones standing in water among
+/// `pieces` (one node's dry and wet ground, mm): on water it may not use (`in-water`), or afloat with no way to a
+/// shore (`no-shore`), in the order given.
+pub fn in_water(pieces: &[Piece], bodies: &[(Id, Mask, Vec3)]) -> Vec<Finding> {
+    // The wet pieces a shore is reached from: touching dry ground, or a wet piece that does.
+    let mut shore: Vec<bool> = pieces.iter().map(|p| p.ground == Ground::Dry).collect();
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for q in 0..pieces.len() {
+            if !shore[q] && (0..pieces.len()).any(|o| shore[o] && touch(&pieces[q], &pieces[o])) {
+                shore[q] = true;
+                grew = true;
+            }
+        }
+    }
+    bodies
+        .iter()
+        .filter_map(|&(body, has, at)| {
+            let q = exits::piece_of(pieces, at)?;
+            let ground = pieces[q as usize].ground;
+            let why = if ground == Ground::Dry {
+                return None;
+            } else if !may_stand(ground, has) {
+                "in-water"
+            } else if !shore[q as usize] {
+                "no-shore"
+            } else {
+                return None;
+            };
+            Some(Finding {
+                body,
+                at,
+                why,
+                piece: Some(q),
+            })
+        })
+        .collect()
+}
 
 /// What the ladder reads of the world beyond walking's.
 pub trait Unstick: World {
