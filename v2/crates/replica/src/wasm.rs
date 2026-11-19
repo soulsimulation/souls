@@ -264,6 +264,10 @@ impl WasmCopy {
         let (ids, hashes) = read_hashes(&m).map_err(js)?;
         let version = m.get(&1).ok_or_else(|| JsError::new("sync-answer"))?;
         let version = to_hex(&encode(version).map_err(js)?);
+        // A sync cut off before it finished (its socket closed) is let go first (#3424).
+        if let Some(old) = self.descent.take() {
+            self.copy.abandon(old);
+        }
         self.descent = Some(self.copy.compare(&ids, hashes));
         Ok(version)
     }

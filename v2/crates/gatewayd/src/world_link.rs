@@ -33,7 +33,7 @@ use crate::times;
 pub const RESTARTING: &str = "world.restarting";
 
 /// The longest frame read from the world.
-const FRAME_MOST: usize = 1 << 20;
+pub const FRAME_MOST: usize = 1 << 20;
 
 /// How long the gateway waits between attempts to reach the world.
 const RETRY: Duration = Duration::from_millis(20);
