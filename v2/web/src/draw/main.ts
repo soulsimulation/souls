@@ -7,6 +7,7 @@ import { CameraDirector } from '../camera/director.ts';
 import { PlaybackClock, caughtUp } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
+import { SocketSource } from '../source/socket.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
@@ -26,6 +27,9 @@ const address = new URLSearchParams(location.search).get('stream');
 const worldName = new URLSearchParams(location.search).get('world');
 let worldHistory: string | null = null;
 const moment = readMoment(location.hash); // V9: a link to a moment opens history
+const q = new URLSearchParams(location.search), token = new URLSearchParams(location.hash.slice(1)).get('token'); // V13
+if (token) window.history.replaceState(null, '', location.pathname + location.search); // the token leaves the address
+const near = q.get('gateway') && token ? new SocketSource({ url: q.get('gateway')!, token, follow: q.get('follow') ?? '' }) : null;
 
 // The GL renderer's name, from a throwaway context, picks the tier before the real one is made (antialiasing is fixed
 // at creation).
@@ -112,7 +116,7 @@ let history = moment && new HistoryPage(moment, cam, {
   frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
 });
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
-else if (address) live(address);
+else if (address) (live(address), near?.start({ pointer: () => {}, part: (p) => world.apply([], [], p.samples), error: (m) => (error = m) }));
 else if (worldName) resolveWorld(worldName, new URLSearchParams(location.search).get('worlds') ?? './w/').then(
   (w) => ((worldHistory = w.history), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, stream: w.stream, worldHistory } }), live(w.stream)),
   (e) => (error = String(e)),
@@ -135,9 +139,10 @@ renderer.setAnimationLoop((now) => {
   const texel = (2 * SHADOW) / sun.shadow.mapSize.x, at = cam.controls.target;
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
-  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
+  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   director.update(Math.min(100, dt), t);
   sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
+  const ck = near?.clock ?? clock;
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {
@@ -158,7 +163,8 @@ renderer.setAnimationLoop((now) => {
   if (!address && !moment && !worldName) return;
   status.textContent = t === null || worldNow === null
     ? `waiting for the stream${error ? `\n${error}` : ''}`
-    : `behind the world  ${secs(worldNow - t)} s   (${clock.state}, ×${clock.rate.toFixed(3)})\n`
+    : `behind the world  ${secs(worldNow - t)} s   (${ck.state}, ×${ck.rate.toFixed(3)})\n`
+      + (near?.grant?.asked ? `view lowered to   ${near.grant.level} (asked ${near.grant.asked}: ${near.grant.reason})\n` : '')
       + `world time        ${clockText(t)}\n`
       + `parts played      ${played}   hashes equal ${hashesEqual}/${hashes}\n`
       + `bodies drawn      ${drawn}   frames a second ${fps.toFixed(0)}`
