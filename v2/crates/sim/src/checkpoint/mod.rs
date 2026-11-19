@@ -72,6 +72,13 @@ struct Blob {
 pub struct Blobs(BTreeMap<Vec<u8>, Blob>);
 
 impl Blobs {
+    /// Already-validated checkpoint records, also used to seed the initial sync cache before the writer takes them.
+    pub fn records(&self) -> impl Iterator<Item = (&[u8], &[u8])> {
+        self.0
+            .iter()
+            .map(|(hash, blob)| (hash.as_slice(), blob.bytes.as_slice()))
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }

@@ -140,6 +140,8 @@ step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd --lo
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
 step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
   node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs'
+# The creator's command (G7, #2796): a creator's daemon checks batches on its copy with no frame sent, and edits.
+step client-creator bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/creator/*.test.mjs'
 # The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
 step client-stats node --test client/src/stats/*.test.mjs
 # The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
@@ -161,6 +163,9 @@ step client-served bash -c 'cargo build -p directoryd -p gatewayd -p worldd --lo
 step client-reflex node --test client/src/reflex/*.test.mjs
 # Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.
 step client-wake bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/wake/*.test.mjs'
+# The owner's box (W10, #2802): the page's message reaches the waiting agent, the act's phases and the close come back
+# to the owner's view socket alone, and the words are in no log, stream part or world file.
+step web-owner-box node --test web/src/owner/box.e2e.ts
 # The Soul's own schedule (R15, #2757): sent on time with no model turn, once across a kill, missed while off told.
 step client-schedule bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/schedule/*.test.mjs'
 # The MCP endpoint on v2 (R21, #3334): six tools, each answer the thin command's; 401, 405, 413; the card and page.
