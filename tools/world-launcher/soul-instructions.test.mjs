@@ -29,6 +29,6 @@ test('#3376 the create step names the Soul as a character and gives it a look be
   assert.match(step3, /picture is drawn from its look/);
   const cli = readFileSync(new URL('./soul/eden.mjs', import.meta.url), 'utf8');
   const said = (re) => cli.split('\n').filter((l) => re.test(l));
-  assert.equal(said(/^A new Soul gets a character's name of its own \(never the device's, the owner's or anything personal\), then at once a look .*body look --set .*--random.*picture comes from the look/).length, 1, 'one guide line');
+  assert.equal(said(/^A new Soul: a character's own name \(never the device's, the owner's or anything personal\), then at once a look to suit it, .*body look --set .*--random.*the picture follows the look/).length, 1, 'one guide line');
   assert.equal(said(/^\s+`\(create: a character's own name, never the device's, the owner's or anything personal; then at once body look --set .*--random: the picture comes from the look\)`,$/).length, 1, 'one help row');
 });

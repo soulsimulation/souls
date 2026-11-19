@@ -482,6 +482,11 @@ test('#1932 A2: wake heartbeat prints the prompt and the gated command, keeps th
   assert.match(prompt, /If it holds none and its brief lists a goal \(a line with Next:\), run node \S+ help living and do its steps in order, none skipped, then stop\./);
   assert.match(prompt, /If it has no owner message and no goal, and reports nothing new \(no ended acts, events, speech or wakes\), stop now and do nothing else\. Otherwise act on what it reports, as the skill says, then stop\.$/);
   assert.equal((await w.cli('wake', 'heartbeat', '--every', '0')).code, 1);
+  // #3379 A3: the general form first, for any harness; the Claude and Codex lines are labelled examples of it.
+  assert.deepEqual(Object.keys(command), ['any', 'claude', 'codex']);
+  assert.match(command.any, /pending --check && <your harness's command that starts a turn with this prompt> '/);
+  assert.match(r.json.note, /^Any command your harness has that starts a turn with this prompt, every 15 minutes, in /);
+  assert.match(r.json.note, /command\.claude and command\.codex are examples for Claude Code and Codex\./);
 
   // The harness is a stand-in that leaves a mark: idle, the gated command never starts it; with a message waiting, it does.
   const bin = join(w.dir, 'bin'), mark = join(w.dir, 'ran');
