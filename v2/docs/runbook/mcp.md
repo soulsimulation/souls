@@ -9,11 +9,11 @@ with exactly what the command `souls.mjs` prints for the same request. The publi
 ## Running it
 
 ```
-node v2/client/src/mcp/server.mjs --listen 127.0.0.1:8790 --worlds worlds.json --root <private folder> \
+node v2/client/src/mcp/server.mjs --listen <host:port> --worlds worlds.json --root <private folder> \
   --pkg <replica wasm-bindgen pkg> --origin https://soul.game --version <build> --max-mb 2048
 ```
 
-- `worlds.json` maps each world's slug to its gateway: `{ "eden-2026": "ws://127.0.0.1:<port>/v2/ws" }`.
+- `worlds.json` maps each world's slug to its gateway: `{ "eden-2026": "ws://<gateway>/v2/ws" }`.
 - `--root` is a folder only this service's user can read (it is made with mode 0700). Each open session has a
   folder there.
 - It prints `mcp: listening <host:port>` once ready. SIGTERM closes every session and exits.
