@@ -15,9 +15,9 @@ owner's step, outside the restore's time); what is not in the log (accounts, tok
 
 ## The one command
 
-```sh
-ops world target <data folder> <bucket> <t0> <machine> --restore
-```
+`ops world target <data folder> <bucket> <t0> <machine> --restore`, on the new machine. So far it restores the drill's
+world (O9's `ops world`, below), not a placed world served by `worldd serve`: there is no operator script for that yet,
+and the drill runs this command for you.
 
 1. **Fetch:** the directory record, the checkpoint pointer, one checkpoint and the pieces after it, never a world's
    whole life (`shipping::fetch`; each piece's CRC checked, a gap refused). Restore time depends on the checkpoint
