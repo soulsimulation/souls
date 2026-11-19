@@ -27,7 +27,13 @@ pub struct S3 {
     prefix: String,
 }
 
-/// The settings [`S3::from_env`] reads.
+/// The directory's store as one setting in the offsite bucket's form (O3c, #3529):
+/// `s3:https://<host>/<bucket>[/<prefix>]`, its keys in `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. `worldd serve`
+/// ships to it too when `--store` and `WORLDD_STORE` are not given, so the directory and the worlds' history share one
+/// bucket.
+pub const URL_ENV: &str = "DIRECTORY_STORE_URL";
+
+/// The settings [`S3::from_env`] reads when [`URL_ENV`] is not set.
 pub const ENV: [&str; 6] = [
     "DIRECTORY_STORE_ENDPOINT",
     "DIRECTORY_STORE_BUCKET",
@@ -57,6 +63,10 @@ impl S3 {
         if host.is_empty() || host.contains('/') || bucket.is_empty() {
             return refuse("store-settings", "an endpoint is a host, with a bucket");
         }
+        // Keys come from the environment, never from the address (O3c, #3529); the refusal does not repeat it.
+        if host.contains('@') {
+            return refuse("store-settings", "the endpoint carries no credentials");
+        }
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(TIMEOUT))
             .http_status_as_error(false)
@@ -74,10 +84,14 @@ impl S3 {
         })
     }
 
-    /// The store the environment names ([`ENV`]; the region defaults to `auto`, R2's, and the prefix to none), or
-    /// `None` when `DIRECTORY_STORE_ENDPOINT` is not set.
+    /// The store the environment names: [`URL_ENV`] in the offsite form ([`S3::from_url`], O3c #3529), else [`ENV`]
+    /// (the region defaults to `auto`, R2's, and the prefix to none); `None` when neither `DIRECTORY_STORE_URL` nor
+    /// `DIRECTORY_STORE_ENDPOINT` is set.
     pub fn from_env() -> Option<R<S3>> {
         let var = |k: &str| std::env::var(k).unwrap_or_default();
+        if let Some(url) = std::env::var(URL_ENV).ok().filter(|u| !u.trim().is_empty()) {
+            return Some(S3::from_url(url.trim(), var));
+        }
         let endpoint = std::env::var(ENV[0]).ok()?;
         let region = Some(var(ENV[2])).filter(|r| !r.is_empty());
         Some(S3::new(
@@ -90,6 +104,42 @@ impl S3 {
         ))
     }
 
+    /// The bucket a URL names, in the offsite bucket's form (`BACKUP_OFFSITE_URL`'s, and O20b's `SOULS_BACKUP_URL`):
+    /// `[s3:]http(s)://<host>/<bucket>[/<prefix>]`, its keys from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` and
+    /// its region from `AWS_DEFAULT_REGION` (default `auto`, R2's), read through `var` (O3c, #3529). A refusal never
+    /// repeats the URL: its host is a machine's address.
+    pub fn from_url(url: &str, var: impl Fn(&str) -> String) -> R<S3> {
+        let form = || {
+            refuse(
+                "store-settings",
+                "a bucket is s3:https://<host>/<bucket>[/<prefix>]",
+            )
+        };
+        let u = url.strip_prefix("s3:").unwrap_or(url);
+        let Some((scheme, rest)) = u.split_once("://") else {
+            return form();
+        };
+        let mut parts = rest.splitn(3, '/');
+        let (Some(host), Some(bucket)) = (parts.next(), parts.next()) else {
+            return form();
+        };
+        let prefix = match parts.next().map(|p| p.trim_matches('/')) {
+            Some(p) if !p.is_empty() => format!("{p}/"),
+            _ => String::new(),
+        };
+        let region = Some(var("AWS_DEFAULT_REGION"))
+            .filter(|r| !r.is_empty())
+            .unwrap_or_else(|| "auto".to_owned());
+        S3::new(
+            &format!("{scheme}://{host}"),
+            bucket,
+            &region,
+            &var("AWS_ACCESS_KEY_ID"),
+            &var("AWS_SECRET_ACCESS_KEY"),
+            &prefix,
+        )
+    }
+
     /// The request path: `/<bucket>/<prefix><key>`, each segment percent-encoded.
     fn path(&self, key: &str) -> String {
         let full = format!("{}/{}{}", self.bucket, self.prefix, key);
@@ -98,11 +148,22 @@ impl S3 {
 
     /// The headers that sign one request (SigV4): `x-amz-date`, `x-amz-content-sha256` and `authorization`.
     fn sign(&self, method: &str, path: &str, payload: &[u8]) -> [(&'static str, String); 3] {
+        self.sign_query(method, path, "", payload)
+    }
+
+    /// [`S3::sign`] with a canonical query string (its pairs encoded and sorted by name).
+    fn sign_query(
+        &self,
+        method: &str,
+        path: &str,
+        query: &str,
+        payload: &[u8],
+    ) -> [(&'static str, String); 3] {
         let (date, stamp) = now();
         let body = to_hex(digest::digest(&digest::SHA256, payload).as_ref());
         let signed = "host;x-amz-content-sha256;x-amz-date";
         let canonical = format!(
-            "{method}\n{path}\n\nhost:{}\nx-amz-content-sha256:{body}\nx-amz-date:{stamp}\n\n{signed}\n{body}",
+            "{method}\n{path}\n{query}\nhost:{}\nx-amz-content-sha256:{body}\nx-amz-date:{stamp}\n\n{signed}\n{body}",
             self.host
         );
         let scope = format!("{date}/{}/s3/aws4_request", self.region);
@@ -132,6 +193,41 @@ impl S3 {
             ),
         ]
     }
+}
+
+/// One page of a bucket listing (ListObjectsV2): its keys, and the token for the next page when it is cut short.
+fn listing(xml: &str) -> (Vec<String>, Option<String>) {
+    let tag = |s: &str, name: &str| -> Vec<String> {
+        let (open, close) = (format!("<{name}>"), format!("</{name}>"));
+        let mut out = Vec::new();
+        let mut rest = s;
+        while let Some(i) = rest.find(&open) {
+            let after = &rest[i + open.len()..];
+            let Some(j) = after.find(&close) else { break };
+            out.push(after[..j].to_owned());
+            rest = &after[j + close.len()..];
+        }
+        out
+    };
+    let truncated = tag(xml, "IsTruncated").first().is_some_and(|t| t == "true");
+    let next = tag(xml, "NextContinuationToken")
+        .first()
+        .map(|t| unescape(t));
+    let keys = tag(xml, "Contents")
+        .iter()
+        .flat_map(|c| tag(c, "Key"))
+        .map(|k| unescape(&k))
+        .collect();
+    (keys, next.filter(|_| truncated))
+}
+
+/// XML's five escapes, `&amp;` last.
+fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 /// Percent-encodes one path segment: all but `A-Z a-z 0-9 - . _ ~`.
@@ -224,6 +320,47 @@ impl Store for S3 {
         let res = req.send(bytes).or_else(|e| unreachable(key, e))?;
         status(res.status().as_u16(), key)?;
         etag(&res, key)
+    }
+
+    /// ListObjectsV2 under the store's prefix and `prefix`, page by page; the keys without the store's prefix.
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        let path = format!("/{}", encode(&self.bucket));
+        let full = format!("{}{prefix}", self.prefix);
+        let mut keys = Vec::new();
+        let mut token: Option<String> = None;
+        loop {
+            let mut pairs = vec![("list-type", "2".to_owned()), ("prefix", full.clone())];
+            if let Some(t) = &token {
+                pairs.push(("continuation-token", t.clone()));
+            }
+            pairs.sort();
+            let query = pairs
+                .iter()
+                .map(|(k, v)| format!("{k}={}", encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            let mut req = self.agent.get(format!("{}{path}?{query}", self.endpoint));
+            for (k, v) in self.sign_query("GET", &path, &query, b"") {
+                req = req.header(k, v);
+            }
+            let mut res = req.call().or_else(|e| unreachable(prefix, e))?;
+            status(res.status().as_u16(), prefix)?;
+            let xml = res
+                .body_mut()
+                .read_to_string()
+                .or_else(|e| refuse("store-unreachable", format!("{prefix}: {e}")))?;
+            let (page, next) = listing(&xml);
+            keys.extend(
+                page.into_iter()
+                    .filter_map(|k| k.strip_prefix(&self.prefix).map(str::to_owned)),
+            );
+            match next {
+                Some(t) => token = Some(t),
+                None => break,
+            }
+        }
+        keys.sort();
+        Ok(keys)
     }
 }
 

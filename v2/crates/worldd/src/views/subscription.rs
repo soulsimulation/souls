@@ -63,7 +63,8 @@ type R<T> = Result<T, Refusal>;
 type Readers = Option<Arc<BTreeSet<Id>>>;
 /// A tick's entries of each body, each encoded once, whether `sampled` keeps it in any second, and who may read it.
 type ByBody = BTreeMap<Id, Vec<(Arc<[u8]>, bool, Readers)>>;
-/// An utterance of a tick: its entry encoded once, its hearers, who may read it and its words' reference.
+/// An utterance of a tick: its entry encoded once, its hearers, who may read it and its words' reference (none for
+/// an offer, addressed like speech: C2).
 type Utterance = (Arc<[u8]>, BTreeSet<Id>, Readers, Option<Id>);
 
 /// The budget a client starts with, bytes a world second.
@@ -647,8 +648,7 @@ impl Hub {
                     let text = self
                         .words
                         .as_ref()
-                        .zip(*words)
-                        .and_then(|(t, w)| t.read(w, &reader).ok());
+                        .and_then(|t| t.read((*words)?, &reader).ok());
                     s.address_said(bytes, text)?;
                 }
             }
