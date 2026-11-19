@@ -1,0 +1,228 @@
+// The daemon follows the world's stream (Engine v2 R9b, #3201): B's daemon, subscribed through R4's stream, keeps its
+// copy current from the entries of the bodies near it while two other Souls act; a reflex of B's fires on another
+// Soul's event and the world accepts its intent, never on B's own; a drop resumes by hash and fires nothing twice.
+// On the real gateway (`gatewayd`, I1) and the world's end of it (`worldd gateway-link`, I3's world of lamps, three
+// bodies 0.2 m apart); A and C sign in on the gateway's socket as any client does and act by script, B through a
+// TCP relay the test cuts. Run from v2/ after
+//   cargo build -p gatewayd -p worldd --locked, and replica's wasm-bindgen package in target/wasm-load/pkg.
+// R9B_SECONDS sets how long A and C act for A1 (default 15; the PR's run is 600). R9B_REPORT=1 prints the counts.
+
+import { strict as assert } from 'node:assert';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createConnection, createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { after, before, test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { DEFAULT_PKG, request } from './client.mjs';
+import { runtimeOf } from '../home/home.mjs';
+import { readLog, soulDirOf } from '../memory/memory.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const v2 = resolve(here, '../../..');
+const GATEWAYD = process.env.GATEWAYD ?? join(v2, 'target/debug/gatewayd');
+const WORLDD = process.env.WORLDD ?? join(v2, 'target/debug/worldd');
+const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
+const CLI = join(here, '../cli/souls.mjs');
+const SECONDS = Number(process.env.R9B_SECONDS ?? 15);
+// `worldd gateway-link`'s world mints from scope 2b: the place, the room, then each body and its lamp.
+const WORLD_SCOPE = '2b'.repeat(16);
+const body = (k) => `${WORLD_SCOPE}-${2 + 2 * k}`;
+const lamp = (k) => `${WORLD_SCOPE}-${3 + 2 * k}`;
+const B = 's_r9bb';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+
+const dir = realpathSync(mkdtempSync(join(tmpdir(), 'souls-r9b-'))); // memory refuses a path through a link
+const home = join(dir, '.souls');
+const procs = [];
+const token = (k) => `soul-${body(k)}.${randomBytes(32).toString('hex')}`;
+const tokens = [0, 1, 2].map(token); // A is body 0, B body 1, C body 2
+const env = { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG };
+let relay, roots, gateway, rt;
+
+function run(bin, args, ready) {
+  const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  procs.push(p);
+  return new Promise((ok, fail) => {
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; const m = ready.exec(out); if (m) ok(m); });
+    p.stderr.on('data', (d) => { out += d; });
+    p.on('exit', (c) => fail(new Error(`${bin} ended (${c}): ${out}`)));
+  });
+}
+
+async function waitFor(f, ms = 10_000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const v = await f();
+    if (v) return v;
+    if (Date.now() > until) throw new Error(`timed out\n${readFileSync(rt.log, 'utf8').split('\n').slice(-20).join('\n')}`);
+    await sleep(10);
+  }
+}
+
+/** A TCP relay to the gateway: `cut()` closes every connection; `refuse` closes each new one at once. */
+function makeRelay(port) {
+  const pairs = new Set();
+  const r = { refuse: false, cut: () => { for (const [a, b] of pairs) { a.destroy(); b.destroy(); } pairs.clear(); } };
+  r.server = createServer((down) => {
+    if (r.refuse) { down.destroy(); return; }
+    const up = createConnection(port, '127.0.0.1');
+    pairs.add([down, up]);
+    down.pipe(up);
+    up.pipe(down);
+    for (const s of [down, up]) { s.on('error', () => {}); s.on('close', () => { down.destroy(); up.destroy(); }); }
+  });
+  return new Promise((ok) => r.server.listen(0, '127.0.0.1', () => { r.port = r.server.address().port; ok(r); }));
+}
+
+/** Another Soul on the gateway's socket, signed in as body `k`: `act(verb, words)` resolves with the world's answer. */
+async function soulOn(k) {
+  const ws = new WebSocket(gateway);
+  ws.binaryType = 'arraybuffer';
+  const waiting = new Map();
+  let signed, sequence = 0;
+  const signedIn = new Promise((ok) => { signed = ok; });
+  ws.onopen = () => ws.send(wire.wireHello());
+  let step = 'hello';
+  ws.onmessage = (m) => {
+    const bytes = new Uint8Array(m.data);
+    if (step === 'hello') { wire.wireWorldBuild(bytes); ws.send(wire.wireSignIn(tokens[k], new Uint8Array(), undefined)); step = 'outcome'; return; }
+    const [kind, a, , c, d] = wire.wireFrame(bytes).split(' ');
+    if (kind === 'outcome') { step = 'stream'; signed(a); return; }
+    if (kind === 'answer') { waiting.get(Number(a))?.({ answer: Number(c), reason: d }); waiting.delete(Number(a)); }
+  };
+  await signedIn;
+  const scope = new Uint8Array(Buffer.from(WORLD_SCOPE, 'hex'));
+  return {
+    act(verb, words) {
+      sequence++;
+      ws.send(wire.wireIntent(scope, BigInt(2 + 2 * k), verb, BigInt(sequence), new Uint8Array(), BigInt(Number.MAX_SAFE_INTEGER), '', words, undefined));
+      return new Promise((ok) => waiting.set(sequence, ok));
+    },
+    close: () => ws.close(),
+  };
+}
+
+const placeHash = () => readFileSync(roots, 'utf8').split('\n').filter(Boolean).at(-1)?.split(' ')[1];
+const firings = [], events = []; // every reflex firing and event B's answers gave, in order
+/** A command to B's daemon; the firings each answer shows in `changed` and the events a read gives are kept. */
+async function ask(req) {
+  const a = await request(rt.socket, req);
+  firings.push(...(a.changed?.reflexes ?? []));
+  events.push(...(req.op === 'read' ? a.events : []));
+  return a;
+}
+const status = () => ask({ op: 'status' });
+/** B's copy holds the world's place: its hash is the one the world wrote after its last change. */
+const current = async () => { const s = await status(); return s.connected && !s.syncing && Object.values(s.roots)[0] === placeHash() && s; };
+let A, C;
+
+before(async () => {
+  const world = join(dir, 'w.sock'), list = join(dir, 'tokens.txt');
+  roots = join(dir, 'roots.txt');
+  writeFileSync(list, tokens.map((t) => `${t.split('.')[0]} ${createHash('sha256').update(t).digest('hex')}\n`).join(''));
+  procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--roots', roots, '--rooms', '1', '--bodies', '3', '--items', '0', '--no-measures'], { stdio: 'ignore' }));
+  await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
+  const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', list, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
+  gateway = `ws://${addr}/v2/ws`;
+  relay = await makeRelay(Number(addr.split(':').pop()));
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway: `ws://127.0.0.1:${relay.port}/v2/ws` } } }));
+  writeFileSync(join(home, 'credentials.json'), JSON.stringify({ souls: { [B]: { local: { token: tokens[1] } } } }), { mode: 0o600 });
+  chmodSync(join(home, 'credentials.json'), 0o600);
+  rt = runtimeOf(home, B);
+  const r = spawnSync(process.execPath, [CLI, 'status', '--soul', B], { env, encoding: 'utf8' }); // starts B's daemon
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  await waitFor(async () => { const s = await status(); return s.connected && !s.syncing; });
+  [A, C] = await Promise.all([soulOn(0), soulOn(2)]);
+});
+
+after(async () => {
+  await request(rt.socket, { op: 'stop' }).catch(() => {});
+  A?.close(); C?.close();
+  relay?.server.close();
+  for (const p of procs) p.kill();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('R9b A1: B applies the entries of the Souls near it; its copy is the world after their scripted acts', async () => {
+  const before = await status();
+  let acts = 0, most = 0;
+  const until = performance.now() + SECONDS * 1000;
+  while (performance.now() < until) {
+    // A and C each give their body a new name in turn: an entry of a body near B, which changes the world.
+    const who = acts % 2 === 0 ? A : C, was = placeHash();
+    const a = await who.act('local:describe', `name ${acts}`);
+    assert.equal(a.answer, 1, `a describe is a receipt: ${JSON.stringify(a)}`);
+    acts++;
+    // B's copy is current with no command asking for it: `status` reads it as it is.
+    const t = performance.now();
+    await waitFor(() => placeHash() !== was, 5000);
+    await waitFor(current, 5000);
+    most = Math.max(most, performance.now() - t);
+  }
+  const s = await waitFor(current);
+  assert.ok(s.entries >= acts, `entries ${s.entries} of ${acts} acts`);
+  assert.ok(s.follows > before.follows, `follows ${s.follows}`);
+  if (process.env.R9B_REPORT) console.log(JSON.stringify({ seconds: SECONDS, acts, entries: s.entries, follows: s.follows, mostMs: Math.round(most), root: placeHash() }));
+});
+
+test('R9b A2: a reflex fires on another Soul\'s event in the item that brings it, and the world takes its intent; never on its own', async () => {
+  const rule = { when: { event: 'souls:said' }, send: { verb: 'r2:switch_on', target: lamp(1) }, expires: 600, cooldown: 0 };
+  assert.equal((await ask({ op: 'reflex', do: 'add', rule })).ok, true);
+  await ask({ op: 'read' });
+  const { answered } = await status();
+  firings.length = events.length = 0;
+  // A says a line: B's reflex fires on it, with no model turn, and sends its intent.
+  assert.equal((await A.act('local:say', 'good morning')).answer, 1);
+  const got = await waitFor(async () => { const s = await status(); return s.answered > answered && s; });
+  await ask({ op: 'read' });
+  const heard = events.filter((e) => e.kind === 'heard');
+  assert.deepEqual(heard.map((e) => [e.from, e.words]), [[body(0), 'good morning']]);
+  // It fired once, on the event that item carried.
+  assert.deepEqual(firings.map((f) => [f.event, f.sequence, f.intent.verb]), [['souls:said', heard[0].sequence, 'r2:switch_on']]);
+  // The same event reached R14's memory feeder: B remembers what A said, marked as the world's words.
+  assert.ok(JSON.stringify(readLog(soulDirOf(home, B))).includes('good morning'), 'in memory');
+  // The world takes its intent: answered as a receipt, nothing left unanswered.
+  assert.deepEqual(got.unanswered, []);
+  const answers = events.filter((e) => e.kind === 'answer');
+  assert.ok(answers.length === 1 && answers[0].answer === 1 && !answers[0].reason, JSON.stringify(answers));
+  // B says a line itself: the rule never fires on its own event.
+  assert.equal((await ask({ op: 'say', words: 'and to you' })).ok, true);
+  await sleep(1000);
+  const list = await ask({ op: 'reflex' });
+  assert.equal(firings.length, 1, JSON.stringify(firings));
+  assert.equal(list.reflexes[0].fired, 1);
+});
+
+test('R9b A3: losing and regaining the stream resumes by hash and fires no reflex twice', async () => {
+  const s0 = await status();
+  firings.length = 0;
+  // While B is cut off, A renames its body and C says a line: B misses both items.
+  relay.refuse = true;
+  relay.cut();
+  await waitFor(async () => !(await status()).connected);
+  const was = placeHash();
+  assert.equal((await A.act('local:describe', 'renamed while away')).answer, 1);
+  assert.equal((await C.act('local:say', 'said while away')).answer, 1);
+  await waitFor(() => placeHash() !== was);
+  relay.refuse = false;
+  const s = await waitFor(async () => { const x = await status(); return x.resumed > s0.resumed && x.connected && x; });
+  // Resumed by its cursor, then brought current by hash: the copy is the world's place, with no command asking.
+  assert.equal(s.cannotResume, s0.cannotResume);
+  await waitFor(current);
+  assert.ok((await status()).follows > s0.follows);
+  // The line said while away is not replayed; the next one fires the rule once, and nothing fires twice.
+  assert.equal((await A.act('local:say', 'welcome back')).answer, 1);
+  await waitFor(async () => { await status(); return firings.length > 0; });
+  await sleep(1000);
+  const list = await ask({ op: 'reflex' });
+  assert.deepEqual(firings.map((f) => f.event), ['souls:said'], JSON.stringify(firings));
+  assert.equal(list.reflexes[0].fired, 2);
+});

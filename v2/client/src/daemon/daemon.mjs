@@ -27,6 +27,12 @@
 //   is an event `{"kind":"heard","from":"<body id>","name":..,"words":..,"whisper":bool}`: it wakes a `wait`, is in
 //   the next `look`'s brief (`heard`, quoted as data), and reaches the reflexes as `souls:said` (`toMe` for a
 //   whisper), whose intents are sent once, as `act`'s are. Its own words are not heard back.
+//   and R9b's (#3201): the same subscription, at `sampled`, brings the entries of the bodies near it (R4 rule 2). An
+//   entry that changes the world brings the copy current by hash (R5's compare and descend, `follow` in `status`'s
+//   `follows`), so the copy follows the world between commands; each named event goes to the reflexes (`toMe` when a
+//   field names this Soul's body) and to R14's memory feeder (`../memory/feeder.mjs`), as each heard utterance does.
+//   An event reaches the reflexes once by its entry's sequence and name, however it arrived and across drops; after a
+//   drop the copy is brought current by hash, since the items missed while away are not replayed.
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
@@ -71,6 +77,7 @@ import { kindsIn, stateOf } from '../check/state.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
+import { feederFor } from '../memory/feeder.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -139,8 +146,8 @@ const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
 const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
-const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
-const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
+const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, entries: 0, follows: 0, build: null };
+const reflexes = new Table(soul); // R9: onEvent(event, now) per named event, from the stream (R9b)
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
 // Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
@@ -182,6 +189,19 @@ function current() {
   attempt = 0;
   if (ws && !ws.hearing) { ws.hearing = true; ws.send(wire.wireSubscribe(scope, seat.grant.counter, BigInt(HEARING_BUDGET))); }
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
+  follow();
+}
+
+/**
+ * R9b: the copy brought current by hash once an entry changed the world near it, or after a drop (the items missed
+ * while away are not replayed). One at a time: entries that arrive during a sync ask for one more after it.
+ */
+let followWanted = false;
+function follow() {
+  if (!followWanted || syncing || !ws || !signedIn) return;
+  followWanted = false;
+  counts.follows++;
+  startSync(ws, 'follow');
 }
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
@@ -216,8 +236,9 @@ function syncAnswer(sock, n, refused, bytes) {
   const { waiters } = syncing;
   syncing = null;
   for (const w of waiters) w(true);
-  // A refresh (R7) brings the copy current for an answer; the stream's cursor stays the last frame it was given.
-  if (done.kind === 'refresh') return;
+  // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
+  // the last frame it was given.
+  if (done.kind === 'refresh' || done.kind === 'follow') { follow(); return; }
   state.cursor = copyVersion; // the stream carries on from the version the hashes are at
   state.seen = null; // no frame of it applied: the gateway's default
   save();
@@ -258,7 +279,7 @@ function connect() {
         log(`signed in: ${a}`);
         step = 'stream';
         clearTimeout(deadline);
-        if (a === 'stream.resumed' && !copy.empty()) current();
+        if (a === 'stream.resumed' && !copy.empty()) { followWanted = true; current(); }
         else startSync(sock, a === 'stream.cannot-resume' ? 'resync' : 'snapshot');
         return;
       }
@@ -312,6 +333,8 @@ function connect() {
  * (its say has its receipt). Each wakes a `wait`, joins the next brief, and goes to the reflexes as `souls:said`.
  */
 function onItem(bytes) {
+  const entry = wire.wireEntry(bytes);
+  if (entry) { onEntry(JSON.parse(entry)); return; }
   const line = wire.wireHeard(bytes);
   if (!line) return;
   const [, sequence, at, from, audience, words] = line.split(' ');
@@ -320,9 +343,55 @@ function onItem(bytes) {
   heardSince.push(e);
   if (heardSince.length > HEARD_KEPT) heardSince.shift();
   note(e);
-  for (const { intent } of reflexes.onEvent({ name: 'souls:said', fields: { 1: e.words }, actor: from, toMe: e.whisper, sequence: e.sequence }, Date.now())) {
+  fire({ name: SAID, fields: { 1: e.words }, actor: from, toMe: e.whisper, sequence: e.sequence });
+  if (e.words) {
+    // Memory keeps a line with its speaker's name: as the last answer's copy named it, else the speaker's id.
+    heardWords.set('words', e.words).set('name', shown.get(from)?.name || from);
+    remember([{ sequence: e.sequence, at: e.at, actor: from, events: [{ name: SAID, fields: { 1: 'words', 2: 'name' } }] }]);
+    heardWords.clear();
+  }
+}
+
+// --- What happens near this Soul (R9b, #3201) ----------------------------------------------------------------------
+const SAID = 'souls:said';
+const FIRED_KEYS_KEPT = 4096;
+const firedKeys = new Set(); // `<sequence>/<name>` of the events handed to the reflexes, the oldest let go first
+
+/** One named event to the reflexes, once by its entry and name; the intents they give are sent once, as `act`'s are. */
+function fire(event) {
+  const key = `${event.sequence}/${event.name}`;
+  if (firedKeys.has(key)) return;
+  firedKeys.add(key);
+  if (firedKeys.size > FIRED_KEYS_KEPT) firedKeys.delete(firedKeys.values().next().value);
+  for (const { intent } of reflexes.onEvent(event, Date.now())) {
     sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor });
   }
+}
+
+/** R14's feeder, opened on first use; a memory that cannot be written is logged and never stops the daemon. */
+let feeder = null;
+const heardWords = new Map(); // a heard utterance's words, by the reference the feeder is given
+function remember(entries) {
+  try {
+    feeder ??= feederFor(home, soul, { world: seat.world, textOf: (ref) => heardWords.get(ref) ?? null });
+    feeder.feed(entries);
+  } catch (e) {
+    log(`memory not written: ${String(e.message ?? e).slice(0, 200)}`);
+  }
+}
+
+/**
+ * An entry of a body near this Soul: one that changes the world brings the copy current by hash; its named events go
+ * to the reflexes and to memory. This Soul's own body's id is its Soul's (`soul`) there, so neither takes its own acts
+ * for another's. Utterances arrive addressed, with their words (`onItem`), and are not taken twice.
+ */
+function onEntry(e) {
+  counts.entries++;
+  if (e.changes > 0) { followWanted = true; follow(); }
+  const actor = e.actor === ME ? soul : e.actor;
+  const events = e.events.filter((ev) => ev.name !== SAID);
+  for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
+  if (events.length) remember([{ sequence: e.sequence, at: e.at, actor, events }]);
 }
 
 /** Heard utterances for an answer: the speaker's name from the copy beside its id. */
