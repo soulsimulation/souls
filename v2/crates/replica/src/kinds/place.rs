@@ -8,9 +8,9 @@
 //! - **A front** is the thing's own +z unless its geometry says `2: "none"` (a round table): facing toward something
 //!   needs one.
 //! - **The words** are one closed list with Soul Actions' (`packages/form-rules/placements.json`, SA-F11 #2883): the
-//!   placement words ([`Word`]) and the facings ([`Facing`]). The list is the file's; a test here holds the two to the
-//!   same names, so a word added there fails until the engine reads it. Which spot each word becomes is the engine's
-//!   (`sim::setdown`), recorded.
+//!   placement words ([`Word`]) and the facings ([`Facing`]), by the file's names. The list is the file's; v2's crates
+//!   never read today's packages (K14), so the names are written here once, and a word added there is added here.
+//!   Which spot each word becomes is the engine's (`sim::setdown`), recorded.
 
 use crate::encode::Value;
 use crate::ids::Id;
@@ -177,35 +177,20 @@ impl Facing {
 mod tests {
     use super::*;
     use crate::encode::Name;
-    use crate::rules::json::parse;
     use std::collections::BTreeMap;
 
-    /// Soul Actions' one list (SA-F11), read, never copied.
-    const PLACEMENTS: &str = include_str!("../../../../../packages/form-rules/placements.json");
-
     #[test]
-    fn the_words_and_facings_are_the_placements_file_s_one_list() {
-        let f = parse(PLACEMENTS).expect("the placements file");
-        let keys = |k: &str| -> Vec<String> {
-            let mut v: Vec<String> = f
-                .get(k)
-                .and_then(|o| o.obj())
-                .expect("a map")
-                .iter()
-                .map(|(k, _)| k.clone())
-                .collect();
-            v.sort();
-            v
-        };
-        let mut words: Vec<String> = Word::ALL.iter().map(|w| w.name().to_owned()).collect();
-        words.sort();
-        assert_eq!(keys("words"), words);
-        let mut facings: Vec<String> = Facing::NAMES.iter().map(|s| (*s).to_owned()).collect();
-        facings.sort();
-        assert_eq!(keys("facings"), facings);
+    fn each_word_and_facing_has_one_name() {
         for w in Word::ALL {
             assert_eq!(Word::from_name(w.name()), Some(w));
         }
+        let mut names: Vec<&str> = Word::ALL.iter().map(|w| w.name()).collect();
+        names.extend(Facing::NAMES);
+        let n = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!((n, names.len()), (12, 12));
+        assert_eq!(Facing::ToWall.name(), Facing::NAMES[2]);
     }
 
     #[test]
