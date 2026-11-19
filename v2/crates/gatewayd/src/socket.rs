@@ -22,7 +22,7 @@ use crate::receipts::{Outcome, Who};
 use crate::resume::Cursor;
 use crate::times;
 use crate::token::{self, Grant, Token};
-use crate::world_link::{RESTARTING, Sent, sync_refused};
+use crate::world_link::{FRAME_MOST, RESTARTING, Sent, sync_refused};
 use replica::sync::wire;
 use std::collections::BTreeMap;
 
@@ -35,6 +35,12 @@ const READ_BUFFER: usize = 4096;
 /// The largest message a client may send: an intent's frame limit, from the limits file (I2, #2689). A sign-in is far
 /// smaller. tungstenite refuses a longer frame from its header's length, before reading or reserving its payload.
 const MESSAGE_MOST: usize = LIMITS.frame_bytes as usize;
+/// The largest message the gateway may send: a frame from the world (a sync answer: one room's record lists each
+/// child's hash, 36 bytes each), with the client's own request number in place of the gateway's and the WebSocket
+/// header. tungstenite refuses to send a message over its write buffer's limit and the socket ends (1006 at the
+/// client); at 64 KiB a first sync stopped at a room of about 1,800 children (#3424). It bounds one message in
+/// flight, not memory held: each send is flushed before the next (`write_buffer_size(0)`).
+const SEND_MOST: usize = FRAME_MOST + 64;
 /// How long a socket has to send its first frame and to sign in.
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
 
@@ -71,7 +77,7 @@ async fn upgrade(
         .map(str::to_owned);
     ws.read_buffer_size(READ_BUFFER)
         .write_buffer_size(0)
-        .max_write_buffer_size(64 * 1024)
+        .max_write_buffer_size(SEND_MOST)
         .max_message_size(MESSAGE_MOST)
         .max_frame_size(MESSAGE_MOST)
         .on_upgrade(move |socket| async move {
