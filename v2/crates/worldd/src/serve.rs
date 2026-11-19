@@ -69,6 +69,36 @@ const EPOCH: u64 = 1;
 const EVERY: u64 = 8 << 20;
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
 const BOUND: usize = 1 << 16;
+/// Eden's zone, America/New_York (today's default, `apps/server/src/god/real-clock.ts`): standard time is UTC−5, and
+/// from 2 AM on March's second Sunday to 2 AM on November's first it is UTC−4. Offsets are written to 2100.
+const EST_US: i64 = -5 * HOUR_US;
+const HOUR_US: i64 = 3_600_000_000;
+const SKY_UNTIL_YEAR: i64 = 2100;
+
+/// Today's sky on Eden's calendar: world time is the machine's clock (µs from the Unix epoch, [`answers::now`]), so the
+/// civil origin is 0 and a day is 86,400 s; the weather is seeded from the world's lineage.
+fn eden_sky(lineage: Scope) -> sim::daylight::Config {
+    use replica::sky::{Calendar, DAY_US, days_from_civil};
+    // The day number of the `n`th Sunday on or after day `d` (1970-01-01, day 0, was a Thursday).
+    let sunday = |d: i64, n: i64| d + (7 - (d + 4).rem_euclid(7)) % 7 + 7 * (n - 1);
+    let mut offsets = vec![(0, EST_US)];
+    for y in 1970..=SKY_UNTIL_YEAR {
+        let spring = sunday(days_from_civil(y, 3, 1), 2) * DAY_US + 2 * HOUR_US - EST_US;
+        let autumn =
+            sunday(days_from_civil(y, 11, 1), 1) * DAY_US + 2 * HOUR_US - (EST_US + HOUR_US);
+        offsets.push((spring, EST_US + HOUR_US));
+        offsets.push((autumn, EST_US));
+    }
+    let cal = Calendar {
+        day_s: 86_400,
+        origin: 0,
+        offsets,
+    };
+    let mut seed = [0; 8];
+    seed.copy_from_slice(&lineage.0[..8]);
+    sim::daylight::Config::today(cal, u64::from_le_bytes(seed))
+}
+
 /// Souls stand this far apart along x on a first start, mm.
 const APART_MM: i64 = 2_000;
 
@@ -392,6 +422,8 @@ fn serve(args: &[String]) -> R<()> {
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
     cfg.synced = Some(tx);
+    // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
+    cfg.sky = Some(eden_sky(built.root.scope()));
     let (town, ground) = (built.town, built.ground);
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
         bodies(town, ground, &souls, placed)
