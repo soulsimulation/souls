@@ -3,8 +3,9 @@
 // as `replica::sky::Calendar::local` reads it: civil µs = origin + world µs · 86,400 / day length (rounded down), plus
 // the zone's offset in force. Nothing here reads the page's clock.
 
-/** E6's field numbers: the calendar (60–62), the light (70, 71) and the weather (75–79). */
-export const F = { dayS: 60, origin: 61, offsets: 62, light: 70, lightNext: 71, weather: 75, cloud: 76, rain: 77, wind: 78, weatherNext: 79 } as const;
+/** E6's field numbers: the calendar (60–62), how the sky is drawn (66–68, V19c #3521: the month and day it is drawn
+ *  on, the palette, the morning mist), the light (70, 71) and the weather (75–79). */
+export const F = { dayS: 60, origin: 61, offsets: 62, skyDate: 66, palette: 67, mist: 68, light: 70, lightNext: 71, weather: 75, cloud: 76, rain: 77, wind: 78, weatherNext: 79 } as const;
 const KEYS = Object.values(F);
 const DAY_US = 86_400_000_000;
 
@@ -34,10 +35,28 @@ export type SkyRecord = {
   rain: number;
   wind: number;
   weatherNext: number | null;
+  /** V19c (#3521): the month and day the sky is drawn on (today's `state.time.calendar`), else the calendar's own
+   *  date; the palette's name (`souls:<palette>`); the morning mist `[peak, half-width]` µs after local midnight and
+   *  its strength 0 to 100. Each null when the world has none. */
+  skyDate: [number, number] | null;
+  palette: string | null;
+  mist: [number, number, number] | null;
 };
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const text = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+
+const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const pair = (v: unknown): [number, number] | null => {
+  if (!Array.isArray(v) || v.length !== 2) return null;
+  const [m, d] = v.map(num);
+  return m !== null && d !== null && m >= 1 && m <= 12 && d >= 1 && d <= MONTH_DAYS[m - 1] ? [m, d] : null;
+};
+const mist = (v: unknown): [number, number, number] | null => {
+  if (!Array.isArray(v) || v.length !== 3) return null;
+  const [p, h, s] = v.map(num);
+  return p !== null && h !== null && s !== null && p >= 0 && p < DAY_US && h > 0 && s >= 0 && s <= 100 ? [p, h, s] : null;
+};
 
 /** The record's sky, or null before the world node holds its calendar. A world with a calendar and no weather yet
  *  reads clear (levels 0). */
@@ -50,6 +69,7 @@ export function readSky(f: SkyFields): SkyRecord | null {
     light: text(f[F.light]), lightNext: num(f[F.lightNext]),
     weather: text(f[F.weather]), cloud: num(f[F.cloud]) ?? 0, rain: num(f[F.rain]) ?? 0, wind: num(f[F.wind]) ?? 0,
     weatherNext: num(f[F.weatherNext]),
+    skyDate: pair(f[F.skyDate]), palette: text(f[F.palette]), mist: mist(f[F.mist]),
   };
 }
 
@@ -66,8 +86,26 @@ export function localAt(r: SkyRecord, t: number): number {
   return civil + offsetAt(r, t);
 }
 
-/** The civil date and time of day of a local µs (H. Hinnant's `civil_from_days`, as `replica::sky`). */
-export function civil(local: number): { y: number; m: number; d: number; hour: number } {
+/** Local wall time at world time `t` as the sky is drawn: on the world's sky date when it has one (the clock's year
+ *  and time of day), as today's page draws its sky, moon and stars on `calendarClock`'s clock. */
+export function skyLocalAt(r: SkyRecord, t: number): number {
+  const local = localAt(r, t);
+  if (!r.skyDate) return local;
+  const days = Math.floor(local / DAY_US), { y } = civil(local);
+  return daysFromCivil(y, r.skyDate[0], r.skyDate[1]) * DAY_US + (local - days * DAY_US);
+}
+
+/** The day number (since 1970-01-01) of a civil date (H. Hinnant's `days_from_civil`, as `replica::sky`). */
+export function daysFromCivil(y: number, m: number, d: number): number {
+  const yy = m <= 2 ? y - 1 : y, era = Math.floor(yy / 400), yoe = yy - era * 400;
+  const doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+  return era * 146_097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy - 719_468;
+}
+
+/** The civil date and time of day of a local µs (H. Hinnant's `civil_from_days`, as `replica::sky`). Given the
+ *  world's sky date (`skyDate`), the month and day are that date's and the year and hour the clock's, as today's
+ *  `calendarClock` dates a world's sky. */
+export function civil(local: number, skyDate: [number, number] | null = null): { y: number; m: number; d: number; hour: number } {
   const days = Math.floor(local / DAY_US);
   const z = days + 719_468;
   const era = Math.floor(z / 146_097);
@@ -77,5 +115,6 @@ export function civil(local: number): { y: number; m: number; d: number; hour: n
   const mp = Math.floor((5 * doy + 2) / 153);
   const d = doy - Math.floor((153 * mp + 2) / 5) + 1;
   const m = mp < 10 ? mp + 3 : mp - 9;
-  return { y: yoe + era * 400 + (m <= 2 ? 1 : 0), m, d, hour: (local - days * DAY_US) / 3_600_000_000 };
+  const y = yoe + era * 400 + (m <= 2 ? 1 : 0), hour = (local - days * DAY_US) / 3_600_000_000;
+  return skyDate ? { y, m: skyDate[0], d: skyDate[1], hour } : { y, m, d, hour };
 }

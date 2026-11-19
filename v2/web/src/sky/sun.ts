@@ -59,7 +59,7 @@ export function solar(y: number, m: number, d: number, hour: number, tz: number,
 
 /** The sun at world time `t` (µs) on the record's calendar: the equator sun on the local clock. */
 export function sunAt(r: SkyRecord, t: number): Sun {
-  const { y, m, d, hour } = civil(localAt(r, t));
+  const { y, m, d, hour } = civil(localAt(r, t), r.skyDate);
   const tz = offsetAt(r, t) / 3_600_000_000;
   return solar(y, m, d, hour, tz, 0, 15 * tz);
 }

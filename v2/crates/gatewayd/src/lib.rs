@@ -10,6 +10,8 @@
 //! - [`resume`]: a client resumes its stream from a cursor, or is told by name that it must start again.
 //! - [`gate`]: the gate a world's intents pass through while it moves to another machine (O9, #2828).
 //! - [`receipts`]: one line per answered intent in the world's receipts file, for the operator's usage roll-up.
+//! - [`creator`]: a page signed in with W1's session exchanges it for a short token for the world's one creator (W5,
+//!   #2801), so a browser holds the creator's socket.
 //! - [`views`]: a signed-in socket subscribes to R4's view items for its scope (#3292), on a second local socket to
 //!   the world; its frames are keys 30 to 32.
 //! - Stopping (O16, #2809): on SIGTERM the gateway stops accepting, closes each signed-in socket with 1012 (Service
@@ -44,6 +46,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use replica::encode::Value;
 use tokio::sync::mpsc;
 
+pub mod creator;
 pub mod gate;
 pub mod mailbox;
 pub mod receipts;
@@ -87,6 +90,8 @@ pub const OUTBOUND: usize = 64;
 /// The gateway's shared state.
 pub struct Gateway {
     pub tokens: RwLock<Tokens>,
+    /// The tokens file, read again at a sign-in when it changed (C3, #3367); unset, the tokens are as given.
+    pub tokens_file: std::sync::OnceLock<token::Source>,
     /// The world's pinned build hash, sent in the first frame (T10 rule 12).
     pub build: Vec<u8>,
     pub link: world_link::Link,
@@ -99,6 +104,8 @@ pub struct Gateway {
     pub view_key: std::sync::OnceLock<token::ViewKey>,
     /// The directory's mailbox (`--mailbox`), set once at start; off if unset.
     pub mailbox: std::sync::OnceLock<mailbox::Mailbox>,
+    /// The world's creator and the directory that checks sessions (`--creator`), set once at start; off if unset.
+    pub exchange: std::sync::OnceLock<creator::Exchange>,
     /// Set once when the gateway stops: every signed-in socket closes with [`RESTART`].
     pub closing: tokio::sync::watch::Sender<bool>,
     hub: Mutex<Hub>,
@@ -151,6 +158,7 @@ impl Gateway {
     ) -> Arc<Gateway> {
         Arc::new(Gateway {
             tokens: RwLock::new(tokens),
+            tokens_file: std::sync::OnceLock::new(),
             build,
             link: world_link::Link::default(),
             views: views::Views::default(),
@@ -158,6 +166,7 @@ impl Gateway {
             receipts,
             view_key: std::sync::OnceLock::new(),
             mailbox: std::sync::OnceLock::new(),
+            exchange: std::sync::OnceLock::new(),
             closing: tokio::sync::watch::channel(false).0,
             hub: Mutex::new(Hub::default()),
         })
