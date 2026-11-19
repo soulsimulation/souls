@@ -1,0 +1,168 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:harvest_basket (from #1729). The basket holds up to six harvested tomatoes (fruit, a count filled by harvesting, which is not this kind's: SA-V4b). Anyone with a free hand prepares one: walks to the stand, works three seconds at the board beside the basket, one fruit is used and one eden:tomato is made on the board (the out slot). Refused, as the original refused: no fruit ('Harvest ripe tomatoes into this basket first.'), the board taken ('Clear the output room 30 cm to the right of the basket first.') and no free hand ('Put down what you are holding before preparing a tomato.'). The original also needed the basket on a fixed admitted work surface; where a thing rests is no need the rules read (left to Engine v2's set-down, E4).",
+  "cases": [
+    {
+      "name": "prepare_every_need_met",
+      "act": {
+        "this": "hb1",
+        "form": "prepare"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "hb1": {
+            "kind": "eden:harvest_basket",
+            "fields": {
+              "fruit": 6
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "prepare_no_fruit",
+      "act": {
+        "this": "hb1",
+        "form": "prepare"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "hb1": {
+            "kind": "eden:harvest_basket"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "fruit",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "prepare_board_taken",
+      "act": {
+        "this": "hb1",
+        "form": "prepare"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "hb1": {
+            "kind": "eden:harvest_basket",
+            "fields": {
+              "fruit": 6
+            },
+            "slots": {
+              "out": [
+                "t1"
+              ]
+            }
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": {
+          "node": "hb1",
+          "slot": "out"
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "prepare_hands_full",
+      "act": {
+        "this": "hb1",
+        "form": "prepare"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "hb1": {
+            "kind": "eden:harvest_basket",
+            "fields": {
+              "fruit": 6
+            }
+          },
+          "x1": {
+            "kind": "eden:kindling_bundle"
+          },
+          "x2": {
+            "kind": "eden:kindling_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

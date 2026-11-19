@@ -1,0 +1,67 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lake",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      400000,
+      60000,
+      400000
+    ]
+  },
+  "looks": {
+    "model": "look:lake",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            50,
+            0
+          ],
+          "r": 206000,
+          "h": 100,
+          "segments": 32,
+          "tint": "bank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            120,
+            0
+          ],
+          "r": 200000,
+          "h": 100,
+          "segments": 32,
+          "tint": "water"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "water": "#3f7896",
+        "bank": "#c2b48a"
+      },
+      "tags": [
+        "water",
+        "lake"
+      ]
+    }
+  },
+  "text": {
+    "card": "A wide lake of deep water with a shore all round.",
+    "water": "water",
+    "sea": "sea",
+    "mere": "mere"
+  },
+  "card": {
+    "text": "card",
+    "category": "water",
+    "synonyms": [
+      "sea",
+      "water",
+      "mere"
+    ]
+  }
+}

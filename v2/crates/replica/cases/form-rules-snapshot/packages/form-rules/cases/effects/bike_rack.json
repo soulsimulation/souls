@@ -1,0 +1,191 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:bike_rack (core/bike-rack@1, 4 placed): a bicycle is wheeled into a free stand and taken out again; a thing that is not wheeled is refused by how it moves.",
+ "cases": [
+  {
+   "name": "bike_rack_park_two_then_take_one_out",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "k1",
+       "k2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:bike_rack"
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "k1": {
+      "kind": "eden:bicycle"
+     },
+     "k2": {
+      "kind": "eden:bicycle"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "park",
+      "args": {
+       "bike": "k1",
+       "stand": "stand_1"
+      }
+     },
+     "receipt": "rbike_rack_pa0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "k1",
+        "to": {
+         "node": "t1",
+         "slot": "stand_1"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:parked",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "park",
+      "args": {
+       "bike": "k2",
+       "stand": "stand_1"
+      }
+     },
+     "receipt": "rbike_rack_pa1",
+     "expect": {
+      "verdict": "no",
+      "reason": "slot_taken",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "park",
+      "args": {
+       "bike": "k2",
+       "stand": "stand_2"
+      }
+     },
+     "receipt": "rbike_rack_pa2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "k2",
+        "to": {
+         "node": "t1",
+         "slot": "stand_2"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:parked",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "take_out",
+      "args": {
+       "bike": "k1"
+      }
+     },
+     "receipt": "rbike_rack_pa3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "k1",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:took_out",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:bike_rack",
+     "slots": {
+      "stand_1": [],
+      "stand_2": [
+       "k2"
+      ]
+     }
+    },
+    "b1": {
+     "kind": "eden:humanoid",
+     "hands": {
+      "left": "k1",
+      "right": null
+     },
+     "effector_mm": [
+      0,
+      1000,
+      0
+     ]
+    }
+   }
+  }
+ ]
+}

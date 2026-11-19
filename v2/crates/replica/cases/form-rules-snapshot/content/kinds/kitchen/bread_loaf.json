@@ -1,0 +1,142 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bread_loaf",
+  "owner": "thing",
+  "state": {
+    "slices": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 6,
+      "min": 1,
+      "max": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        55,
+        0
+      ]
+    },
+    "edge": {
+      "role": "contact",
+      "at_mm": [
+        75,
+        60,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      157,
+      120,
+      101
+    ]
+  },
+  "forms": {
+    "tear_off": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "slices",
+          "at_least": 2
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "edge"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "slices",
+          "by": -1,
+          "event": "tore_off_a_piece"
+        }
+      ]
+    },
+    "finish": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "slices",
+          "at_most": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "edge"
+        }
+      ],
+      "effects": [
+        {
+          "change": "remove",
+          "what": "this",
+          "event": "finished"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:bread_loaf",
+    "table": [
+      {
+        "part": "fill",
+        "field": "slices",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          6
+        ],
+        "to": [
+          166,
+          1000
+        ]
+      }
+    ],
+    "shape": {"round":20,"shapes":[{"kind":"box","at":[0,55,0],"size":[150,100,95],"tint":"crust","role":"fill","pivot":[-75,55,0]}],"palette":{"crust":"#b9792f"},"tags":["food","bread","loaf","object"]}
+  },
+  "text": {
+    "card": "A loaf of bread: pick it up and tear off a piece; the last piece finishes it.",
+    "bread": "bread",
+    "loaf": "loaf",
+    "food": "food"
+  },
+  "card": {
+    "text": "card",
+    "category": "food",
+    "synonyms": [
+      "bread",
+      "loaf"
+    ]
+  }
+}

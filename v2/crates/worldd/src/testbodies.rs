@@ -99,6 +99,27 @@ pub fn town() -> Result<(Town, Id), Refusal> {
     Ok((town, ground))
 }
 
+/// What a client may walk to and sit on, by name, with the Soul's own body (C10, #3414): `worldd gateway-link
+/// --testworld` prints them, since the replica's tree does not hold the town's nodes.
+pub fn named() -> Result<Vec<(String, Id)>, Refusal> {
+    let w = testworld::generate(1, 0).map_err(|e| refusal("testworld", e))?;
+    let im = import_eden::load(&w.text).map_err(|e| refusal("testworld", e))?;
+    let square = im
+        .nodes
+        .get("square")
+        .ok_or_else(|| refusal("testworld", "no square"))?;
+    let mut out = vec![
+        ("soul".to_owned(), body()),
+        ("the square".to_owned(), *square),
+    ];
+    out.extend(
+        chairs()
+            .into_iter()
+            .map(|(name, thing, _)| (name.to_owned(), thing)),
+    );
+    Ok(out)
+}
+
 /// The world's bodies: the Soul at [`start`] and the [`chairs`].
 pub fn bodies() -> Result<Bodies, Refusal> {
     let (town, ground) = town()?;

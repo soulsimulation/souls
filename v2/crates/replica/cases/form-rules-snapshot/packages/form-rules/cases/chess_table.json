@@ -1,0 +1,551 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:chess_table (SA-X16, #2911), converted from the chess set of today's server (C8, #491). Whose turn is the turn field and the side's link: only the Soul linked as white may do move_white. Legality of a move is the hatch's verdict, which no rule here runs (Engine v2 F8): these cases decide the declared needs only.",
+  "cases": [
+    {
+      "name": "play_white_when_white_is_free",
+      "act": {"this": "c1", "form": "play_white"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {}, "slots": {}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/link/1", 0], ["c1/slot/white_seat", 0]]}
+    },
+    {
+      "name": "play_white_when_someone_plays_white",
+      "act": {"this": "c1", "form": "play_white"},
+      "state": {
+        "actor": "b3",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {"white": ["b2"]}, "slots": {}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "already_linked",
+        "need": 0,
+        "detail": {"link": "white", "count": 1},
+        "fix": null,
+        "read": [["c1/link/1", 1]]
+      }
+    },
+    {
+      "name": "play_white_when_the_seat_is_taken",
+      "act": {"this": "c1", "form": "play_white"},
+      "state": {
+        "actor": "b3",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {}, "slots": {"white_seat": ["b2"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": {"node": "c1", "slot": "white_seat"},
+        "fix": null,
+        "read": [["c1/link/1", 0], ["c1/slot/white_seat", 1]]
+      }
+    },
+    {
+      "name": "play_black_when_black_is_free",
+      "act": {"this": "c1", "form": "play_black"},
+      "state": {
+        "actor": "b2",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {"white": ["b1"]}, "slots": {"white_seat": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/link/2", 0], ["c1/slot/black_seat", 0]]}
+    },
+    {
+      "name": "play_black_when_someone_plays_black",
+      "act": {"this": "c1", "form": "play_black"},
+      "state": {
+        "actor": "b3",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {"black": ["b2"]}, "slots": {}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "already_linked",
+        "need": 0,
+        "detail": {"link": "black", "count": 1},
+        "fix": null,
+        "read": [["c1/link/2", 1]]
+      }
+    },
+    {
+      "name": "play_black_when_the_seat_is_taken",
+      "act": {"this": "c1", "form": "play_black"},
+      "state": {
+        "actor": "b3",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {}, "slots": {"black_seat": ["b2"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": {"node": "c1", "slot": "black_seat"},
+        "fix": null,
+        "read": [["c1/link/2", 0], ["c1/slot/black_seat", 1]]
+      }
+    },
+    {
+      "name": "begin_with_both_sides_taken",
+      "act": {"this": "c1", "form": "begin"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {"white": ["b1"], "black": ["b2"]}, "slots": {}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/field/2", "waiting"], ["c1/link/1", 1], ["c1/link/2", 1]]}
+    },
+    {
+      "name": "begin_again_after_a_resigned_game",
+      "act": {"this": "c1", "form": "begin"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "resigned", "winner": "black"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/field/2", "resigned"], ["c1/link/1", 1], ["c1/link/2", 1]]}
+    },
+    {
+      "name": "begin_while_a_game_is_in_progress",
+      "act": {"this": "c1", "form": "begin"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "playing"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field": "phase", "found": "playing", "wanted": {"not": "playing"}},
+        "fix": null,
+        "read": [["c1/field/2", "playing"]]
+      }
+    },
+    {
+      "name": "begin_with_nobody_playing_white",
+      "act": {"this": "c1", "form": "begin"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {"black": ["b2"]}, "slots": {}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "not_linked",
+        "need": 1,
+        "detail": {"link": "white", "count": 0},
+        "fix": {"form": "play_white"},
+        "read": [["c1/field/2", "waiting"], ["c1/link/1", 0]]
+      }
+    },
+    {
+      "name": "begin_waiting_for_an_opponent",
+      "act": {"this": "c1", "form": "begin"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {"white": ["b1"]}, "slots": {}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "not_linked",
+        "need": 2,
+        "detail": {"link": "black", "count": 0},
+        "fix": {"form": "play_black"},
+        "read": [["c1/field/2", "waiting"], ["c1/link/1", 1], ["c1/link/2", 0]]
+      }
+    },
+    {
+      "name": "move_white_on_whites_turn",
+      "act": {"this": "c1", "form": "move_white", "args": {"from": 12, "to": 28, "promotion": 5}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "playing"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/field/2", "playing"], ["c1/field/1", "white"]]}
+    },
+    {
+      "name": "move_white_before_the_game_begins",
+      "act": {"this": "c1", "form": "move_white", "args": {"from": 12, "to": 28, "promotion": 5}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {"white": ["b1"], "black": ["b2"]}, "slots": {}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field": "phase", "found": "waiting", "wanted": {"is": "playing"}},
+        "fix": {"form": "begin"},
+        "read": [["c1/field/2", "waiting"]]
+      }
+    },
+    {
+      "name": "move_white_on_blacks_turn",
+      "act": {"this": "c1", "form": "move_white", "args": {"from": 12, "to": 28, "promotion": 5}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "playing", "turn": "black"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {"field": "turn", "found": "black", "wanted": {"is": "white"}},
+        "fix": {"form": "begin"},
+        "read": [["c1/field/2", "playing"], ["c1/field/1", "black"]]
+      }
+    },
+    {
+      "name": "move_black_on_blacks_turn",
+      "act": {"this": "c1", "form": "move_black", "args": {"from": 52, "to": 36, "promotion": 5}},
+      "state": {
+        "actor": "b2",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "playing", "turn": "black"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/field/2", "playing"], ["c1/field/1", "black"]]}
+    },
+    {
+      "name": "move_black_after_the_game_is_over",
+      "act": {"this": "c1", "form": "move_black", "args": {"from": 52, "to": 36, "promotion": 5}},
+      "state": {
+        "actor": "b2",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "checkmate", "turn": "black", "winner": "white"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field": "phase", "found": "checkmate", "wanted": {"is": "playing"}},
+        "fix": {"form": "begin"},
+        "read": [["c1/field/2", "checkmate"]]
+      }
+    },
+    {
+      "name": "move_black_on_whites_turn",
+      "act": {"this": "c1", "form": "move_black", "args": {"from": 52, "to": 36, "promotion": 5}},
+      "state": {
+        "actor": "b2",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "playing"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {"field": "turn", "found": "white", "wanted": {"is": "black"}},
+        "fix": null,
+        "read": [["c1/field/2", "playing"], ["c1/field/1", "white"]]
+      }
+    },
+    {
+      "name": "resign_white_during_a_game",
+      "act": {"this": "c1", "form": "resign_white"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "playing"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/field/2", "playing"]]}
+    },
+    {
+      "name": "resign_white_with_no_game_in_progress",
+      "act": {"this": "c1", "form": "resign_white"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {"white": ["b1"], "black": ["b2"]}, "slots": {}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field": "phase", "found": "waiting", "wanted": {"is": "playing"}},
+        "fix": {"form": "begin"},
+        "read": [["c1/field/2", "waiting"]]
+      }
+    },
+    {
+      "name": "resign_black_during_a_game",
+      "act": {"this": "c1", "form": "resign_black"},
+      "state": {
+        "actor": "b2",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "playing", "turn": "black"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/field/2", "playing"]]}
+    },
+    {
+      "name": "resign_black_with_no_game_in_progress",
+      "act": {"this": "c1", "form": "resign_black"},
+      "state": {
+        "actor": "b2",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "stalemate"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field": "phase", "found": "stalemate", "wanted": {"is": "playing"}},
+        "fix": {"form": "begin"},
+        "read": [["c1/field/2", "stalemate"]]
+      }
+    },
+    {
+      "name": "leave_white_after_the_game",
+      "act": {"this": "c1", "form": "leave_white"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "resigned", "winner": "black"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {"white_seat": ["b1"]}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/field/2", "resigned"]]}
+    },
+    {
+      "name": "leave_white_during_a_game_is_refused",
+      "act": {"this": "c1", "form": "leave_white"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "playing"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {"white_seat": ["b1"]}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field": "phase", "found": "playing", "wanted": {"not": "playing"}},
+        "fix": null,
+        "read": [["c1/field/2", "playing"]]
+      }
+    },
+    {
+      "name": "leave_black_before_the_game",
+      "act": {"this": "c1", "form": "leave_black"},
+      "state": {
+        "actor": "b2",
+        "nodes": {
+          "c1": {"kind": "eden:chess_table", "links": {"black": ["b2"]}, "slots": {"black_seat": ["b2"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["c1/field/2", "waiting"]]}
+    },
+    {
+      "name": "leave_black_during_a_game_is_refused",
+      "act": {"this": "c1", "form": "leave_black"},
+      "state": {
+        "actor": "b2",
+        "nodes": {
+          "c1": {
+            "kind": "eden:chess_table",
+            "fields": {"phase": "playing"},
+            "links": {"white": ["b1"], "black": ["b2"]},
+            "slots": {"black_seat": ["b2"]}
+          },
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}},
+          "b3": {"hands": {"left": null, "right": null}, "links": {"soul": ["s3"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field": "phase", "found": "playing", "wanted": {"not": "playing"}},
+        "fix": null,
+        "read": [["c1/field/2", "playing"]]
+      }
+    }
+  ]
+}
