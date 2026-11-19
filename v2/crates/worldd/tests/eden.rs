@@ -1757,6 +1757,31 @@ fn c25_a2_a3_a_slot_walked_to_rise_settle_and_use_held_on_eden() {
     assert_eq!(out[2], Err("not-held".to_owned()), "juggle: not held");
 }
 
+/// C28 (#3541) A2: from C21's original house court, the same-ground form walk keeps its door crossings and reaches
+/// the street sandpit. Its own entry's walk and pause end done, through the world's gateway framing.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c28_a2_from_the_house_court_build_a_sandcastle_done() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let sandpit = im.nodes["e_1f394e0b"];
+    let (served, mut soul, dir) = serve(&facts, "52.4,27.4", "c28a2", im.nodes["world"].scope());
+    let built = soul.act("eden:build_sandcastle", Some(sandpit), BTreeMap::new());
+    println!("from house 4's court (52.4, 27.4), build_sandcastle: {built:?}");
+    let entries = receipt_entries(&dir, built.as_deref().unwrap_or(&[]));
+    for (at, names, _) in &entries {
+        println!("  {at} µs: {names:?}");
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    built.expect("walked from the court and built, done");
+    assert!(
+        entries
+            .iter()
+            .any(|(_, names, _)| names.iter().any(|n| n == answers::FORM_ENDED))
+    );
+}
+
 /// C21 (#3484) A1, A3: C20's stall. A Soul born 40 m north of the street sandpit (today's e_1f394e0b, at (52.4, 67.4)
 /// m, turned 17.2 degrees) builds a sandcastle by the sandpit's own entry (`build_sandcastle`: a walk to its `edge`,
 /// then a 20 s pause). The act either ends `done` or `walk.blocked`, within 5 s of the walk's last progress.
