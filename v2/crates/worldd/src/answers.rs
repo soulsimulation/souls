@@ -711,7 +711,7 @@ struct Clock {
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
     /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
-    edits: Option<Sender<(Id, Edit)>>,
+    edits: Option<Sender<(Id, Edit, Minter)>>,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
     /// Where the edit checker reads the bodies the controller holds, handed off each tick (G1d).
@@ -757,7 +757,13 @@ struct Clock {
 }
 
 /// An edit planned off the clock, and the Souls' bodies its commit is judged against (G2's rule, G1c).
-type Checked = (Planned, Vec<Who>, crate::edit_places::Projection);
+type Checked = (
+    Planned,
+    Vec<Who>,
+    crate::edit_places::Projection,
+    Minter,
+    Option<buildsafe::PreparedMaps>,
+);
 
 /// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
 /// by the tick that holds it, and each fire's entries written on the world node.
@@ -812,6 +818,23 @@ impl Heavens {
             first,
         })
     }
+}
+
+/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds.
+fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, Refused> {
+    let reserved = Minter::at(lineage, *next);
+    let mut end = reserved.clone();
+    for op in &edit.ops {
+        if matches!(op, edit::Op::Place { .. } | edit::Op::Doorway { .. }) {
+            end.mint().map_err(|e| Refused {
+                op: None,
+                name: "edit.ids-exhausted",
+                detail: e.to_string(),
+            })?;
+            *next = end.next();
+        }
+    }
+    Ok(reserved)
 }
 
 /// What an intent becomes: a form's act for the checkers, a move for the bodies, or an edit for the edit checker.
@@ -1368,13 +1391,16 @@ impl Clock {
                 self.forming.push((id, act, i, thing_args(&intent)));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
-            Taken::Edit(e) => {
-                if let Some(tx) = &self.edits
-                    && tx.send((id, e)).is_ok()
-                {
-                    self.outstanding += 1;
+            Taken::Edit(e) => match reserve_edit(&e, self.lineage, &mut self.next_intent) {
+                Ok(reserved) => {
+                    if let Some(tx) = &self.edits
+                        && tx.send((id, e, reserved)).is_ok()
+                    {
+                        self.outstanding += 1;
+                    }
                 }
-            }
+                Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
+            },
         }
     }
 
@@ -1392,13 +1418,30 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let committed = checked.and_then(|(c, souls, places)| {
+            let committed = checked.and_then(|(c, souls, places, mut reserved, maps)| {
                 if let Some(b) = &self.bodies {
                     places.check(&b.slots)?;
+                    if let Some(maps) = &maps {
+                        b.check_map(maps)?;
+                    }
                 }
-                let mut minter = Minter::at(self.lineage, self.next_intent);
-                let done = sim::edit::commit(&mut self.replica, &mut minter, &c, &souls, now);
-                self.next_intent = minter.next();
+                let current = self
+                    .bodies
+                    .as_ref()
+                    .map(|b| buildsafe::judged(souls.clone(), &buildsafe::moving(b)));
+                let mut commit = || {
+                    sim::edit::commit(
+                        &mut self.replica,
+                        &mut reserved,
+                        &c,
+                        current.as_deref().unwrap_or(&souls),
+                        now,
+                    )
+                };
+                let done = match (&mut self.bodies, maps) {
+                    (Some(b), Some(maps)) => b.commit_map(maps, commit),
+                    _ => commit(),
+                };
                 done.map(|c| (c, places))
             });
             match committed {
@@ -2443,6 +2486,7 @@ impl Clock {
         // frozen copy (6).
         if let (Some(w), Some(b)) = (&self.walkers, &self.bodies) {
             w.offer(buildsafe::moving(b));
+            w.offer_map(b, self.replica.version());
         }
         at[5] = mark();
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
@@ -2807,7 +2851,7 @@ pub fn start<S: Storage + 'static>(
         for e in &part.effects {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
-                    if let Change::Create { node, .. } = c.change
+                    if let Change::Create { node, .. } | Change::Link { link: node, .. } = c.change
                         && node.scope() == cfg.lineage
                     {
                         next_intent = next_intent.max(node.counter() + 1);
@@ -3130,6 +3174,9 @@ pub fn start<S: Storage + 'static>(
                                 replica::world_model::show(body)
                             );
                         }
+                        if let Some(w) = &c.walkers {
+                            w.offer_map(&b, c.replica.version());
+                        }
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
                         if let (Some(e), Some(b)) = (c.engine.as_mut(), c.bodies.as_mut())
@@ -3285,8 +3332,8 @@ fn edit_checker(
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
     entries: replica::rules::json::Value,
-) -> R<Sender<(Id, Edit)>> {
-    let (tx, rx) = channel::<(Id, Edit)>();
+) -> R<Sender<(Id, Edit, Minter)>> {
+    let (tx, rx) = channel::<(Id, Edit, Minter)>();
     thread::Builder::new()
         .name("edit-check".into())
         .spawn(move || {
@@ -3299,16 +3346,26 @@ fn edit_checker(
                 // Each edit committed since, on the town; a copy that holds them all, for a town built whole.
                 let committed = walkers.take();
                 let edited = walkers.edited();
-                let Ok((id, e)) = next else {
+                let Ok((id, e, reserved)) = next else {
                     // No edit waits: the town is built, or kept, ahead of the next.
                     let copy = publisher.wait_for(edited, Duration::from_secs(1));
                     town.on(&copy, buildsafe::open_ground(&copy), &committed);
                     continue;
                 };
-                let copy = publisher.wait_for(e.planned.max(edited), Duration::from_secs(1));
+                let source = walkers.map();
+                let needed = source
+                    .as_ref()
+                    .map_or(edited, |m| edited.max(m.version))
+                    .max(e.planned);
+                let copy = publisher.wait_for(needed, Duration::from_secs(1));
                 let ground = buildsafe::open_ground(&copy);
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
                 let checked = match who {
+                    _ if copy.version() < needed => Err(Refused {
+                        op: None,
+                        name: "edit.stale",
+                        detail: "the published copy has not reached the map basis".into(),
+                    }),
                     Some(c) => {
                         world.creator = c;
                         edit::check(e, &copy, &world)
@@ -3327,7 +3384,20 @@ fn edit_checker(
                     .and_then(|p| {
                         let places = crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                         let tree = buildsafe::souls(&copy, &world.kinds);
-                        Ok((p, buildsafe::judged(tree, &walkers.latest()), places))
+                        let souls = buildsafe::judged(tree, &walkers.latest());
+                        let maps = source
+                            .as_ref()
+                            .map(|source| {
+                                buildsafe::PreparedMaps::prepare(
+                                    &copy,
+                                    &p,
+                                    reserved.clone(),
+                                    &souls,
+                                    source,
+                                )
+                            })
+                            .transpose()?;
+                        Ok((p, souls, places, reserved, maps))
                     });
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
@@ -3925,6 +3995,281 @@ mod tests {
             replica::ids::sha256(&b),
             "the same edits at the same ticks write the same log"
         );
+    }
+
+    /// K18d reservations are taken by recorded intake, independent of checker completion. Interleaved normal
+    /// intents and refused edits never reuse those counters; replay and restart preserve published names.
+    #[test]
+    fn k18d_reservations_interleave_record_replay_and_recover_without_aliasing() {
+        use replica::edit::wire::{VERB, parameters};
+        use replica::edit::{Op, Ref, Spot};
+        use replica::pose::{Quat, Support, Vec3};
+        let fixture = toggles::World::build(1, 1, 0);
+        let room = fixture
+            .replica
+            .tree()
+            .children(fixture.replica.tree().root())
+            .unwrap()[0];
+        let room = fixture.replica.tree().node(room).unwrap().id();
+        let kinds = toggles::kinds();
+        let item = Name::new(kinds.keys().find(|k| k.starts_with("souls:item@")).unwrap()).unwrap();
+        let creator = Id::new(Scope([0xc1; 16]), 1).unwrap();
+        let place = |actor, sequence| Intent {
+            actor,
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters: parameters(&[Op::Place {
+                name: 1,
+                kind: item.clone(),
+                parent: Ref::Node(room),
+                at: Spot {
+                    slot: None,
+                    position: Vec3::new(sequence as i64 * 1_000_000, 0, 0),
+                    orientation: Quat::IDENTITY,
+                    support: Support::None,
+                },
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            }]),
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+        };
+        let cfg = || {
+            let mut cfg = Config::new(LINEAGE, 1);
+            cfg.lockstep = true;
+            cfg.measures = false;
+            cfg.edits = Some(edit::World {
+                creator,
+                kinds: kinds.clone(),
+            });
+            cfg
+        };
+        let scripted: Vec<(i64, Vec<u8>)> = vec![
+            (
+                1,
+                encode(&place(Actor::Creator(creator), 1).to_value()).unwrap(),
+            ),
+            (
+                1,
+                encode(&toggle(fixture.pairs[0].0, fixture.pairs[0].1, 1, i64::MAX).to_value())
+                    .unwrap(),
+            ),
+            (
+                1,
+                encode(
+                    &place(Actor::Creator(Id::new(Scope([0xc2; 16]), 1).unwrap()), 1).to_value(),
+                )
+                .unwrap(),
+            ),
+            (
+                3,
+                encode(&place(Actor::Creator(creator), 2).to_value()).unwrap(),
+            ),
+        ];
+        let execute = |script: &[(i64, Vec<u8>)]| {
+            let store = Held::new(Vec::new());
+            let world = start(
+                toggles::World::build(1, 1, 0).replica,
+                toggles::rules(),
+                store.clone(),
+                cfg(),
+            )
+            .unwrap();
+            let answers: Vec<_> = script
+                .iter()
+                .map(|(tick, bytes)| {
+                    let (reply, rx) = channel();
+                    world
+                        .events
+                        .send(Event::ArrivalAt {
+                            tick: *tick,
+                            bytes: bytes.clone(),
+                            reply,
+                        })
+                        .unwrap();
+                    rx
+                })
+                .collect();
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick: 5, done }).unwrap();
+            ran.recv_timeout(Duration::from_secs(30)).unwrap();
+            let frames: Vec<_> = answers.iter().map(answer).collect();
+            world.stop();
+            (store.bytes(), frames)
+        };
+        let (logged, frames) = execute(&scripted);
+        assert_eq!(
+            frames.iter().map(|f| read(f).0).collect::<Vec<_>>(),
+            [1, 1, 2, 1]
+        );
+        let answer_fields = |frame: &[u8]| {
+            let Value::Map(mut frame) = decode(frame).unwrap().value else {
+                panic!("frame")
+            };
+            let Value::Map(answer) = frame.remove(&2).unwrap() else {
+                panic!("answer")
+            };
+            answer
+        };
+        let placed = |frame: &[u8]| {
+            let fields = answer_fields(frame);
+            let Value::Map(names) = &fields[&6] else {
+                panic!("names")
+            };
+            replica::effects::read_id(&names[&1]).unwrap()
+        };
+        let first = placed(&frames[0]);
+        let second = placed(&frames[3]);
+        let normal = replica::effects::read_id(&answer_fields(&frames[1])[&4]).unwrap();
+        assert_ne!(
+            first, normal,
+            "a normal intent cannot consume the in-flight edit's name"
+        );
+        assert!(
+            second.counter() > normal.counter() + 2,
+            "the refused edit's intent and reserved name leave distinct counters"
+        );
+        let records = recover(&logged).unwrap().records;
+        let mut input_bytes = BTreeMap::new();
+        for record in records.iter().filter(|r| !recorder::is_input(r)) {
+            let part = Part::read(record).unwrap();
+            let Some(Value::Array(rows)) = part.rest.get(&ANSWERED) else {
+                continue;
+            };
+            for row in rows {
+                let Value::Map(fields) = row else { continue };
+                if let (Some(id), Some(input)) = (fields.get(&3), fields.get(&5)) {
+                    input_bytes.insert(
+                        replica::effects::read_id(id).unwrap(),
+                        encode(input).unwrap(),
+                    );
+                }
+            }
+        }
+        let replay: Vec<_> = recorder::inputs(&records)
+            .unwrap()
+            .into_iter()
+            .flat_map(|(tick, inputs)| {
+                inputs
+                    .into_iter()
+                    .filter_map(|input| match input {
+                        Input::Intent { id, .. } => Some((tick as i64, input_bytes[&id].clone())),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(replay, scripted);
+        let (again, replayed) = execute(&replay);
+        assert_eq!(
+            recorder::effect_hash(&records),
+            recorder::effect_hash(&recover(&again).unwrap().records)
+        );
+        assert_eq!(placed(&replayed[0]), first);
+        assert_eq!(placed(&replayed[3]), second);
+
+        let store = Held::new(logged);
+        let world = start(
+            toggles::World::build(1, 1, 0).replica,
+            toggles::rules(),
+            store,
+            cfg(),
+        )
+        .unwrap();
+        let received = send(&world, &place(Actor::Creator(creator), 3));
+        let (done, ran) = channel();
+        world.events.send(Event::RunTo { tick: 8, done }).unwrap();
+        ran.recv_timeout(Duration::from_secs(30)).unwrap();
+        let after = placed(&answer(&received));
+        assert!(
+            after.counter() > second.counter(),
+            "recovery does not reuse a published name"
+        );
+        world.stop();
+        // A doorway's published name is a link, and its retirement must not make that name reusable.
+        let fixture = toggles::World::build(1, 1, 0);
+        let root = fixture
+            .replica
+            .tree()
+            .node(fixture.replica.tree().root())
+            .unwrap()
+            .id();
+        let link = Id::new(LINEAGE, 9_000).unwrap();
+        let store = Held::new(Vec::new());
+        let (mut log, _) = sim::log::Log::open(store.clone(), 1).unwrap();
+        let mut admitted = fixture.replica.tree().frozen();
+        let admitted_rules = replica::tree::Rules {
+            kinds: toggles::kinds(),
+            ..Default::default()
+        };
+        for (k, change) in [
+            Change::Link {
+                link,
+                ty: Name::new("souls:tied-to").unwrap(),
+                ends: [root, room],
+                owner: replica::world_model::End::First,
+                audience: Audience::Everyone,
+            },
+            Change::Unlink { link },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let effect = Effect {
+                envelope: Envelope {
+                    sequence: fixture.replica.version() + k as u64,
+                    at: 0,
+                    cause: Cause::World,
+                    actor: Actor::World,
+                    audience: Audience::Everyone,
+                    node: root,
+                },
+                body: Body::Changes(vec![ChangeRec {
+                    change,
+                    rest: BTreeMap::new(),
+                }]),
+                events: None,
+                rest: BTreeMap::new(),
+            };
+            let bytes = encode(&Value::Map(BTreeMap::from([
+                (1, Value::Bytes(fixture.replica.header().hash().to_bytes())),
+                (2, Value::Array(vec![effect.to_value()])),
+            ])))
+            .unwrap();
+            // Same canonical T6 link type as the tree fixtures; real entry/kind/endpoint/ownership rules apply.
+            admitted
+                .commit(
+                    fixture.replica.header(),
+                    &Part::read(&bytes).unwrap(),
+                    &admitted_rules,
+                )
+                .unwrap();
+            let record = log.append(bytes).unwrap();
+            log.wait_durable(record).unwrap();
+        }
+        drop(log);
+        let world = start(fixture.replica, toggles::rules(), store, cfg()).unwrap();
+        let received = send(&world, &place(Actor::Creator(creator), 1));
+        let (done, ran) = channel();
+        world.events.send(Event::RunTo { tick: 2, done }).unwrap();
+        ran.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(
+            placed(&answer(&received)).counter() > link.counter(),
+            "a retired published link name is never minted again after recovery"
+        );
+        world.stop();
+        println!("K18d: reserved place/normal/refusal/replay/restart IDs remain distinct");
     }
 
     /// `"<name>":{"items":n,"oldest_us":m}` in a health file: (n, m).

@@ -654,30 +654,51 @@ impl Town {
         Some(out)
     }
 
+    /// Lookup-only preflight before the caller commits the same prepared map and part.
+    pub fn check_install(&self, r: &Rebuilt) -> Result<(), Refusal> {
+        if let Fresh::Squares(sq, ..) = &r.fresh {
+            let keys: Vec<(i32, i32)> = sq.iter().map(|(k, ..)| *k).collect();
+            let link_of = |id: Id| find_link(&self.link_at, &self.buildings, id).cloned();
+            self.map
+                .check_squares(self.ground, &keys, &link_of)
+                .map_err(|e| refusal("ground-changed", e))?;
+        }
+        Ok(())
+    }
+
     /// On the tick `part` commits: commits it through the zone's one write, its effects numbered from the zone's next
     /// sequence (doors may have opened since it was checked), and installs the ground `r` built for it, in the same
     /// call: the whole ground swapped in, or each building read again replaced on the map. The walks planned on the
     /// changed ground are listed in [`Town::stale`], and the lines of corners on it are dropped. A refused part
     /// installs nothing.
     pub fn install(&mut self, r: Rebuilt, part: &Part) -> Result<(), Refusal> {
+        self.install_then(r, part, || Ok(()))
+    }
+
+    /// All map and tree input checks precede the paired live write. Its refusal rolls the town tree back;
+    /// its success leaves only installation of already checked geometry, with no fallible input check.
+    pub fn install_then<T>(
+        &mut self,
+        r: Rebuilt,
+        part: &Part,
+        commit: impl FnOnce() -> Result<T, Refusal>,
+    ) -> Result<T, Refusal> {
         // What the threads' route searches found joins the map before it changes (N17b): no scratch outlives its map.
         for s in &mut self.scratches {
             self.map.keep(s);
         }
-        let link_of = |id: Id| find_link(&self.link_at, &self.buildings, id).cloned();
-        if let Fresh::Squares(sq, ..) = &r.fresh {
-            let keys: Vec<(i32, i32)> = sq.iter().map(|(k, ..)| *k).collect();
-            self.map
-                .check_squares(self.ground, &keys, &link_of)
-                .map_err(|e| refusal("ground-changed", e))?;
-        }
+        self.check_install(&r)?;
         let mut p = part.clone();
         for (k, e) in p.effects.iter_mut().enumerate() {
             e.envelope.sequence = self.doors.next + k as u64;
         }
         let bytes = encode(&p.to_value()).map_err(|e| refusal("encoding", e.to_string()))?;
-        self.tree
-            .commit(&self.doors.header, &Part::read(&bytes)?, &self.doors.rules)?;
+        let committed = self.tree.commit_then(
+            &self.doors.header,
+            &Part::read(&bytes)?,
+            &self.doors.rules,
+            commit,
+        )?;
         self.doors.next += part.effects.len() as u64;
         let Rebuilt {
             mut touched,
@@ -711,7 +732,7 @@ impl Town {
                     .collect();
                 self.map
                     .replace_squares(ground, versions.of(ground), cut, &link_of)
-                    .map_err(|e| refusal("ground-changed", e))?;
+                    .expect("the same map and links passed check_install before the paired write");
                 let (mut drop, mut add, mut on) = (Vec::new(), Vec::new(), Vec::new());
                 for (sq, pieces, flags) in &squares {
                     drop.extend(self.square_pieces.get(sq).into_iter().flatten().copied());
@@ -796,7 +817,7 @@ impl Town {
         self.lines.retain(|(_, l)| {
             !(changed(&l.node) || (l.node == ground && touched.contains(&ground) && crosses(l)))
         });
-        Ok(())
+        Ok(committed)
     }
 
     /// Each building read again replaced on the route map, its floors' surfaces with it.

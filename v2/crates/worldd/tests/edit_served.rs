@@ -1348,3 +1348,6 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
         blocked.reason, rose.entries, removed.entries, gone.reason
     );
 }
+
+#[path = "edit_served/k18d.rs"]
+mod k18d;

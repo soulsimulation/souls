@@ -37,10 +37,11 @@ use replica::pose::{Frame, Pose, Support, Vec3};
 use replica::tree::Rules;
 use replica::world_model::{Kind, plain};
 use sim::edit::safety::Who;
+use sim::ground::Versions;
 use sim::ground::scene::GROUND;
 use sim::links::Doors;
 use sim::routes::HANDS;
-use sim::walk::town::Town;
+use sim::walk::town::{Basis, Rebuilt, Town};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -103,9 +104,82 @@ pub fn souls(copy: &Replica, kinds: &BTreeMap<String, Kind>) -> Vec<Who> {
 /// The bodies the clock thread last handed off (G1d): written once a tick by a pointer swap, read by the edit checker;
 /// and the edits it committed since the checker last took them (G1e).
 #[derive(Default)]
-pub struct Moving(Mutex<Arc<Vec<Who>>>, Mutex<Vec<Arc<Part>>>, AtomicU64);
+pub struct Moving(
+    Mutex<Arc<Vec<Who>>>,
+    Mutex<Vec<Arc<Part>>>,
+    AtomicU64,
+    Mutex<Option<Arc<MapBasis>>>,
+);
+
+/// The authoritative map's immutable preparation input. Basis clones only its existing shared handles.
+pub struct MapBasis {
+    pub version: u64,
+    pub ground: Id,
+    pub stamp: Arc<Versions>,
+    pub basis: Basis,
+}
+
+/// Two installations prepared off-clock from the same canonical part and authoritative basis.
+pub struct PreparedMaps {
+    pub part: Arc<Part>,
+    pub before: Arc<Versions>,
+    pub after: Arc<Versions>,
+    pub live: Rebuilt,
+    pub worker: Rebuilt,
+}
+
+impl PreparedMaps {
+    pub fn prepare(
+        copy: &Replica,
+        planned: &sim::edit::Planned,
+        mut reserved: replica::ids::Minter,
+        souls: &[Who],
+        source: &MapBasis,
+    ) -> Result<Self, replica::edit::Refused> {
+        let mut preview = copy.frozen();
+        let part = sim::edit::commit(&mut preview, &mut reserved, planned, souls, 0)?.part;
+        let rebuild = || {
+            Town::rebuild(
+                copy.tree().frozen(),
+                copy.header(),
+                source.ground,
+                &source.stamp,
+                &source.basis,
+                &part,
+            )
+            .map_err(|detail| replica::edit::Refused {
+                op: None,
+                name: "edit.map-unchecked",
+                detail,
+            })
+        };
+        let live = rebuild()?;
+        let worker = rebuild()?;
+        Ok(Self {
+            part,
+            before: Arc::clone(&source.stamp),
+            after: Arc::new(live.versions.clone()),
+            live,
+            worker,
+        })
+    }
+}
 
 impl Moving {
+    /// Clock thread: a shared map basis, never a geometry build or whole-tree copy.
+    pub fn offer_map(&self, bodies: &Bodies, version: u64) {
+        *self.3.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(MapBasis {
+            version,
+            ground: bodies.town.ground,
+            stamp: Arc::clone(&bodies.form_map),
+            basis: bodies.town.basis(),
+        }));
+    }
+
+    pub fn map(&self) -> Option<Arc<MapBasis>> {
+        self.3.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     /// Clock thread: the tick's bodies replace the last.
     pub fn offer(&self, bodies: Vec<Who>) {
         *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(bodies);

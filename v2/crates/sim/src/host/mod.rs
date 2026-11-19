@@ -700,7 +700,11 @@ pub struct Planned {
 impl Planned {
     /// Discards answers from an obsolete map before they can enter a current cache. Searches remain counted.
     pub fn keep_map(&mut self, current: &std::sync::Arc<crate::ground::Versions>) {
-        if self.map.as_ref().is_none_or(|map| !std::sync::Arc::ptr_eq(map, current)) {
+        if self
+            .map
+            .as_ref()
+            .is_none_or(|map| !std::sync::Arc::ptr_eq(map, current))
+        {
             self.places.clear();
             self.lines.clear();
             self.reach.clear();
@@ -711,6 +715,11 @@ impl Planned {
 
     /// Takes `later`'s answers over these. A different map cannot retain answers from its predecessor.
     pub fn merge(&mut self, later: Planned) {
+        // Unstamped legacy answers cannot acquire a stamped cache's current identity.
+        if self.map.is_some() && later.map.is_none() {
+            self.searched += later.searched;
+            return;
+        }
         if let Some(map) = &later.map {
             self.keep_map(map);
             self.map = Some(std::sync::Arc::clone(map));
