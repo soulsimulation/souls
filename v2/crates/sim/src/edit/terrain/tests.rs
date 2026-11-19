@@ -349,7 +349,8 @@ fn landform_parameters_and_owned_doorway_metadata_have_distinct_fields() {
         )
         .expect("landform field 28 Set");
     let tree = edits.live.tree();
-    let fields = tree.node(tree.handle(node).unwrap()).unwrap().fields();
+    let placed = tree.node(tree.handle(node).unwrap()).unwrap();
+    let fields = placed.fields();
     assert_eq!(fields.get(&28), Some(&updated));
     assert!(!fields.contains_key(&DOOR_GEOMETRY));
 
