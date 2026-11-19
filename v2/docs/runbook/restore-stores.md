@@ -11,7 +11,7 @@ Each has one owning program; the list says how each is copied.
 
 | store | owner | path under the data folder | copy | ships |
 |---|---|---|---|---|
-| accounts (W1); the owner's mailbox is a table in it (R13, #2753, not yet on main) | directoryd | `directory/accounts.sqlite` | SQLite's online backup, through the owner (it holds the file exclusively: `Store::backup`) | each 270 s, when changed |
+| accounts (W1); the owner's mailbox is a table in it (R13, #2753) | directoryd | `directory/accounts.sqlite` | SQLite's online backup, through the owner (it holds the file exclusively: `Store::backup`) | each 270 s, when changed |
 | pairing, with each paired Soul's token hash (W2) | directoryd | `directory/pairing.sqlite` | SQLite's online backup | each 270 s, when changed |
 | the gateway's tokens file (W2) | directoryd | `directory/gateway-tokens` | as it is (written whole, renamed) | each 270 s, when changed |
 | words and uploads: the text store (K16, V1b) | worldd | `worlds/<world>/log.text/` | `text`, then `uploads/`, then `removed`, in that order | each 270 s, when changed |
@@ -69,4 +69,11 @@ instead, never production's bucket or keys.
 
 ## The first measurement (19 Nov 2026, a laptop, the folder store)
 
-RESULTS
+| seed | kill at (s) | restore (ms) | bytes restored | accounts sign in | agents reconnect | sentences read | erased stay erased | uploads by hash | writes acked | writes lost | lost window (s) | bar |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 341 | 190 | 383,452 | 243/308 | 49/62 | 874/1,129 | 102/102 | 24/30 | 1,733 | 339 | 70.61 | met |
+| 2 | 319 | 414 | 372,691 | 239/284 | 48/57 | 866/1,041 | 94/94 | 23/28 | 1,598 | 234 | 48.93 | met |
+
+Every write lost was acknowledged after the last copy of its store (70.65 s and 48.96 s before the loss); every
+write before it came back. No file on machine-b fell outside the list. The removal list shipped 103 and 95 times, its
+last copy 1.05 s and 2.43 s before the loss, and no erased sentence read again.
