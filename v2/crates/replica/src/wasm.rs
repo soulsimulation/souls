@@ -305,7 +305,8 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
 /// version's bytes; empty for the zero version) and expiring at `expiry` world microseconds; read back as the world
 /// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b). C10 (#3414): `target`
 /// may be one id per verb, split by spaces; `args`, the first verb's thing arguments as `name=<id>` split by spaces, is
-/// parameter 1 as C2's `[[name, id], ...]`.
+/// parameter 1 as C2's `[[name, id], ...]`. E26 (#3329): `params`, a JSON object of numbered parameters for an engine
+/// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those.
 #[wasm_bindgen(js_name = wireIntent)]
 // JS calls it with positional arguments; the words came last (C4, #3368), then the arguments (C10, #3414).
 #[allow(clippy::too_many_arguments)]
@@ -319,6 +320,7 @@ pub fn wire_intent(
     target: &str,
     words: Option<String>,
     args: Option<String>,
+    params: Option<String>,
 ) -> Result<Vec<u8>, JsError> {
     let node = |t: &str| -> Result<Option<Target>, JsError> {
         Ok(match t {
@@ -396,6 +398,7 @@ pub fn wire_intent(
             })
             .into_iter()
             .chain((!args.is_empty()).then_some((1, Value::Array(args))))
+            .chain(numbered(params.as_deref(), &node)?)
             .collect(),
         sequence,
         basis,
@@ -805,6 +808,39 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
     format!(r#"{{"ok":true,"kinds":{}}}"#, kinds.is_some())
 }
 
+/// E26: `wireIntent`'s numbered parameters, read from a JSON object; a text is an id when it reads as one.
+fn numbered(
+    params: Option<&str>,
+    node: &dyn Fn(&str) -> Result<Option<Target>, JsError>,
+) -> Result<Vec<(u64, Value)>, JsError> {
+    use crate::rules::json::{Value as Json, parse};
+    let bad = || JsError::new("params-not-numbered");
+    fn one(
+        v: &Json,
+        node: &dyn Fn(&str) -> Result<Option<Target>, JsError>,
+    ) -> Result<Value, JsError> {
+        Ok(match v {
+            Json::Int(n) => {
+                Value::Uint(u64::try_from(*n).map_err(|_| JsError::new("param-negative"))?)
+            }
+            Json::Str(t) => match node(t) {
+                Ok(Some(Target::Node(id))) => id.to_value(),
+                _ => Value::Text(Name::new(t).ok_or_else(|| JsError::new("param-not-a-name"))?),
+            },
+            Json::Arr(a) => Value::Array(a.iter().map(|x| one(x, node)).collect::<Result<_, _>>()?),
+            _ => return Err(JsError::new("param-unsupported")),
+        })
+    }
+    let Some(text) = params.filter(|t| !t.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let Json::Obj(m) = parse(text).map_err(|_| bad())? else {
+        return Err(bad());
+    };
+    m.iter()
+        .map(|(k, v)| Ok((k.parse().map_err(|_| bad())?, one(v, node)?)))
+        .collect()
+}
 fn sync_map(frame: &[u8]) -> Result<BTreeMap<u64, Value>, JsError> {
     match decode(frame).map_err(js)?.value {
         Value::Map(m) => match m.get(&wire::REFUSED) {
