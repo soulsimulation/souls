@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p . && vite build",
-    "test": "node --test src/clock/*.test.ts src/source/*.test.ts src/things/*.test.ts src/crowd/*.test.ts src/draw/*.test.ts src/pose/*.test.ts src/history/*.test.ts"
+    "test": "node --test src/clock/*.test.ts src/source/*.test.ts src/things/*.test.ts src/crowd/*.test.ts src/draw/*.test.ts src/pose/*.test.ts src/history/*.test.ts src/sound/*.test.ts"
   },
   "dependencies": {
     "cborg": "6.2.1",

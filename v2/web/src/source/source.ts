@@ -2,6 +2,8 @@
 // (a snapshot) and what changed (parts). V1's stream of numbered files is the first; V9 (history) and V13 add theirs
 // by implementing `Source`. Times are world microseconds; positions micrometres in the node's parent frame (T4).
 
+import type { Happened } from '../sound/record.ts';
+
 /** One node as the page needs it, read from R1's replica after a part. */
 export type NodeRec = {
   id: string;
@@ -40,7 +42,7 @@ export type Pointer = { newest: number | null; newestTo: number | null; period: 
 export type SampleRec = [string, string, number | null, number, number, number, number];
 
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order. */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null };
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; happened?: Happened[] };
 
 export type SourceEvents = {
   pointer(p: Pointer): void;

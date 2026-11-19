@@ -3,6 +3,7 @@
 import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
 import type { NodeRec, PartRec, Pointer } from './source.ts';
+import { happenedInPart } from '../sound/record.ts';
 
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
 const post = (m: Msg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
@@ -84,7 +85,9 @@ async function run(stream: URL) {
           }
         }
         const samples = JSON.parse(player.samples());
-        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, samples, hash: played.hash } }, transfer);
+        let happened: PartRec['happened'] = [];
+        try { happened = happenedInPart(bytes); } catch { /* sounds only: the part played */ }
+        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, samples, hash: played.hash, happened } }, transfer);
       }
     } catch (e) {
       post({ t: 'error', message: String((e as Error)?.message ?? e) });
