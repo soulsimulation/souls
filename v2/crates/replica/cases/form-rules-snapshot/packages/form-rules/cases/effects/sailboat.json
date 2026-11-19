@@ -1,0 +1,167 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:sailboat (core/sailboat@1, 21 placed): a ride with a set trip across the water and back. A seat is taken only while it is moored; whoever sails sets off; the trip's end is its track's (Engine v2 N12), which sets under_way back at its last stop, so no form of the kind ends it.",
+ "cases": [
+  {
+   "name": "sailboat_board_then_set_off_then_nobody_gets_on",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "b2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:sailboat",
+      "fields": {
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "starboard"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rsailboat_boa0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "t1",
+         "slot": "starboard"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sail",
+      "args": {
+       "seat": "port"
+      }
+     },
+     "receipt": "rsailboat_boa1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "port"
+        }
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "under_way",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:set_off",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "starboard"
+      }
+     },
+     "receipt": "rsailboat_boa2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:sailboat",
+     "fields": {
+      "under_way": 1
+     },
+     "slots": {
+      "starboard": [
+       "b2"
+      ],
+      "port": [
+       "b1"
+      ]
+     }
+    }
+   }
+  }
+ ]
+}
