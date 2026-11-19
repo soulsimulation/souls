@@ -77,10 +77,12 @@
 //! 8. the auditor checks a slice of the tree (K11).
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
-//! handed to the log is on the disk, so it never holds a change the log lacks. **Lockstep** ([`Config::lockstep`]) runs the
-//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check, and for the checkers' copy
-//! to stand at the live version, before a tick, so a run fed
-//! the same inputs at the same ticks writes the same log: how K12's replay is checked on the real loop.
+//! handed to the log is on the disk, so it never holds a change the log lacks. A tree holding changes no checkpoint
+//! has (a first start from the log, or the log after the newest checkpoint) is checkpointed in [`start`], before the
+//! clock and its watchdog start, so each later checkpoint and each tick's state hash hash only what changed (K20).
+//! **Lockstep** ([`Config::lockstep`]) runs the same loop on a clock the caller moves ([`Event::RunTo`]) and waits for
+//! every check, and for the checkers' copy to stand at the live version, before a tick, so a run fed the same inputs
+//! at the same ticks writes the same log: how K12's replay is checked on the real loop.
 //!
 //! **Measures** (O4, #2694, `crate::measures`): each act carries its stamps from the socket to its answer, each
 //! tick times the loop's own phases above ([`measures::PHASES`]), and every queue its oldest item; the answers thread
@@ -88,9 +90,15 @@
 //! never holds it. `health.json` is written by its own thread. [`Config::measures`] off takes no stamps and adds no
 //! block. Intents enter through a [`Door`], which stamps them as they are read.
 //!
-//! Not here (K18's known limits): a route search and a move's checks still run on the clock thread (`sim::host`'s
-//! runner plans a walk's route when its spot is granted; B3 checks a seat at commit); a walk or a sit in progress at
-//! a kill is not resumed (its intent is taken again when sent again); one zone a process.
+//! **Off the clock** (K18b, #3175). The clock runs no rule check, no route search and no reach check: the checkers
+//! run the rules (I3), and the bodies' planner thread (`sim::planner`) writes the spot tables, plans a walk's legs,
+//! finds each walker's line and measures each reach, from the bodies as a tick left them, for the next tick. A
+//! lockstep tick waits for the planner's answers to the last one as it waits for every check, so a run fed the same
+//! inputs repeats; a free-running one waits at most a tenth of a tick for each batch and reads a late one at a later
+//! tick, so the clock never stops for the planner.
+//!
+//! Not here (K18's known limits): a walk or a sit in progress at a kill is not resumed (its intent is taken again
+//! when sent again); one zone a process.
 // worldd's real clock (`Real`): the one place the process reads time.
 #![allow(clippy::disallowed_methods)]
 
@@ -256,6 +264,8 @@ pub struct Ran {
     pub panicked: u64,
     /// The bodies in a seat: (body, the seat's thing), in body order.
     pub seated: Vec<(Id, Id)>,
+    /// Route searches the bodies' planner ran, off the clock (K18b).
+    pub searched: u64,
 }
 
 /// How a start found the world (K18c, #3176): from the newest checkpoint and the log after it, or the whole log.
@@ -284,6 +294,18 @@ struct Carry {
 }
 
 impl Carry {
+    fn of(sequences: &Sequences, next_intent: u64, placed: Placed, tick: i64) -> Carry {
+        Carry {
+            sequences: sequences
+                .kept()
+                .map(|(a, last, kept)| (a.to_vec(), last, kept.cloned().collect()))
+                .collect(),
+            next_intent,
+            placed,
+            tick,
+        }
+    }
+
     fn to_bytes(&self) -> Vec<u8> {
         let sequences = self
             .sequences
@@ -413,6 +435,10 @@ pub struct Config {
     /// Each log record once it is on the disk, input records included, in order (C1, #3365): `worldd serve`'s own
     /// view tier and shipper read them here, off the clock thread.
     pub synced: Option<Sender<Synced>>,
+    /// How long a free-running tick waits for each of the bodies' planner batches (K18b); `None` is a tenth of a tick.
+    pub planner_wait: Option<Duration>,
+    /// A replay's planner batches (K18b): the recorder's `Planned` inputs, body time µs and batches taken there.
+    pub planned: BTreeMap<u64, u64>,
     /// The world's rules and its activity kinds, for the engine's own acts (C2: activities, offers, carrying);
     /// without them those acts are refused `engine-acts-off`.
     pub engine: Option<(replica::tree::Rules, Vec<replica::activity::ActivityKind>)>,
@@ -487,6 +513,8 @@ impl Config {
             edits: None,
             creator: None,
             synced: None,
+            planner_wait: None,
+            planned: BTreeMap::new(),
             sky: None,
             served: None,
             text: None,
@@ -580,17 +608,21 @@ impl Pace for Stepped {
     fn sleep_until(&mut self, _: Micros) {}
 }
 
-/// The zone's state hash (K18): `souls/fixture/1` over `[tree state hash, [[body, pose], ...]]`, the bodies the
-/// controller holds included, since the tree does not hold them yet.
-pub fn state_hash(replica: &Replica, bodies: &[(Id, Pose)]) -> [u8; 32] {
-    let tree = replica
-        .tree()
-        .to_state()
-        .hash()
-        .map(|h| h.to_bytes())
-        .unwrap_or_default();
+/// The zone's state hash (K18; K20, #3395): `souls/fixture/1` over `[[[audience, state hash], ...], [[body, pose],
+/// ...]]`: each audience's state hash as K5's seal gives it (`replica::tree::Tree::state_hashes`, the public one
+/// first), worked out each tick from the nodes the tick changed, then the bodies the controller holds, since the tree
+/// does not hold them yet.
+pub fn state_hash(tree: &[(Audience, Hash)], bodies: &[(Id, Pose)]) -> [u8; 32] {
+    let audience = |a: &Audience| match a {
+        Audience::Everyone => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+        Audience::Of(id) => Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id.to_value())])),
+    };
     let v = Value::Array(vec![
-        Value::Bytes(tree),
+        Value::Array(
+            tree.iter()
+                .map(|(a, h)| Value::Array(vec![audience(a), Value::Bytes(h.to_bytes())]))
+                .collect(),
+        ),
         Value::Array(
             bodies
                 .iter()
@@ -1977,6 +2009,13 @@ impl Clock {
             return;
         };
         let ended = b.step(now);
+        // Where the planner's answers came back late (K18b), for the recorder: a replay takes them at the same tick.
+        for (at, taken) in b.late() {
+            self.inputs.push(Input::Planned {
+                at: u64::try_from(at).unwrap_or(0),
+                taken,
+            });
+        }
         let heard = std::mem::take(&mut b.heard);
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
@@ -2218,10 +2257,15 @@ impl Clock {
         }
     }
 
-    /// The zone's state hash now ([`state_hash`]).
-    fn state(&self) -> [u8; 32] {
+    /// The zone's state hash now ([`state_hash`]): the tree's nodes changed since the last are hashed again.
+    fn state(&mut self) -> [u8; 32] {
         let poses = self.bodies.as_ref().map(Bodies::poses).unwrap_or_default();
-        state_hash(&self.replica, &poses)
+        let tree = self
+            .replica
+            .tree_for_seal()
+            .state_hashes()
+            .unwrap_or_default();
+        state_hash(&tree, &poses)
     }
 
     /// A check came back (O4: its stamp and queues); kept for the next tick.
@@ -2464,16 +2508,12 @@ impl Clock {
         if !c.due() || at.record < self.records {
             return;
         }
-        let carry = Carry {
-            sequences: self
-                .sequences
-                .kept()
-                .map(|(a, last, kept)| (a.to_vec(), last, kept.cloned().collect()))
-                .collect(),
-            next_intent: self.next_intent,
-            placed: self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
-            tick: self.tick,
-        };
+        let carry = Carry::of(
+            &self.sequences,
+            self.next_intent,
+            self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
+            self.tick,
+        );
         let version = Version {
             lineage: self.lineage,
             zone: self.zone,
@@ -2503,7 +2543,7 @@ impl Clock {
         }
     }
 
-    fn ran(&self) -> Ran {
+    fn ran(&mut self) -> Ran {
         let panicked = self
             .bodies
             .as_ref()
@@ -2526,6 +2566,7 @@ impl Clock {
             faults: self.faults,
             panicked,
             seated,
+            searched: self.bodies.as_ref().map_or(0, Bodies::searched),
         }
     }
 }
@@ -2751,8 +2792,50 @@ pub fn start<S: Storage + 'static>(
         name: "id-counter",
         detail: "the zone".into(),
     })?;
+    let records = found.first + found.records.len() as u64;
+    // Restored trees retain sealed hashes: their unchanged records will not be emitted by the next seal.
+    // Keep the validated blobs for sync before the checkpoint writer takes ownership of them.
+    let mut kept = Records::default();
+    kept.extend(blobs.records());
+    let mut checkpoints = match &cfg.checkpoints {
+        Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
+        None => None,
+    };
+    // K20 (#3395): a tree holding changes no checkpoint has (a first start from the log, or the log after the newest
+    // checkpoint) is sealed and checkpointed here, before the clock and its watchdog start: hashing the whole tree is
+    // never a tick's work, and from here each tick's state hash and each checkpoint hash only what changed.
+    if let Some(c) = checkpoints.as_mut()
+        && !world.tree().sealed()
+    {
+        let at = log.durable_mark().at();
+        if at.record >= records {
+            let carry = Carry::of(&sequences, next_intent, placed.clone(), last.unwrap_or(-1));
+            let version = Version {
+                lineage: cfg.lineage,
+                zone,
+                epoch: cfg.epoch,
+                sequence: world.version(),
+            };
+            let minter = Minter::at(cfg.lineage, next_intent);
+            let sealed = world.seal()?;
+            kept.keep(&sealed);
+            c.take_sealed(
+                sealed,
+                version,
+                records,
+                Some((at, &minter)),
+                &carry.to_bytes(),
+            )?;
+        }
+    }
     let mut cfg = cfg;
     let make = cfg.bodies.take();
+    let tick = cfg.tick;
+    let planner_wait = cfg.planner_wait;
+    let planned_at: BTreeMap<Micros, u64> = std::mem::take(&mut cfg.planned)
+        .into_iter()
+        .map(|(at, n)| (i64::try_from(at).unwrap_or(i64::MAX), n))
+        .collect();
     let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
     if 1_000_000 % tick_us != 0 {
         return Err(Refusal {
@@ -2791,10 +2874,6 @@ pub fn start<S: Storage + 'static>(
             log.durable_mark(),
         )?)),
         false => None,
-    };
-    let checkpoints = match &cfg.checkpoints {
-        Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
-        None => None,
     };
     let loose = Ends::start(
         world.tree(),
@@ -2876,10 +2955,9 @@ pub fn start<S: Storage + 'static>(
     let world_durable = log.durable_mark();
     let synced = cfg.synced.take();
     let served = cfg.served.take();
-    // The first seal hashes every node: taken here, before the clock runs, so no tick waits on it. Later seals hash
-    // what changed. The sync thread (C16) starts from a whole copy of the sealed world and the records the seal gave.
+    // Seal any remaining changes before the clock runs. The sync thread (C16) starts from the sealed world and
+    // one complete cache: restored records, the pre-clock checkpoint's records, and this seal's incremental records.
     let first = world.seal()?;
-    let mut kept = Records::default();
     kept.keep(&first);
     let syncs = syncs::start(world.frozen(), kept, (cfg.lineage, zone, cfg.epoch)).map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
@@ -2906,7 +2984,6 @@ pub fn start<S: Storage + 'static>(
             )
         })
         .map_err(io)?;
-    let records = found.first + found.records.len() as u64;
     let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
@@ -2988,6 +3065,12 @@ pub fn start<S: Storage + 'static>(
                     Ok(mut b) => {
                         let at = ticker.due().unwrap_or(0);
                         b.begin(at);
+                        // A free-running clock waits at most a tenth of a tick for each planner batch (K18b); a
+                        // replay takes the batches where the recorder says the live run took them.
+                        if !lockstep {
+                            b.wait = Some(planner_wait.unwrap_or(tick / 10));
+                        }
+                        b.schedule = planned_at;
                         // Those the log last had in a seat sit in it again, the seat held (K18c).
                         for (body, why) in b.seat_placed(&placed, at) {
                             eprintln!(
@@ -3007,10 +3090,11 @@ pub fn start<S: Storage + 'static>(
                 }
             }
             // The state this start resumes from, bodies included: after a kill it equals the last logged tick's (C1).
+            let state = c.state();
             eprintln!(
                 "worldd: started at tick {} state {}",
                 c.tick,
-                replica::encode::to_hex(&c.state())
+                replica::encode::to_hex(&state)
             );
             // Takes one event; false once the world is to stop.
             let take = |c: &mut Clock, e: Event| -> Option<Sender<Ran>> {
