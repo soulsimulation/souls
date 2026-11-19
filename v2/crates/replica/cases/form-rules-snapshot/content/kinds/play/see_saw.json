@@ -1,0 +1,98 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:see_saw",
+  "owner": "thing",
+  "state": {
+    "low_end": {
+      "n": 1,
+      "type": "enum",
+      "values": ["end_1", "end_2"],
+      "default": "end_1",
+      "audience": { "rule": "everyone" }
+    }
+  },
+  "links": { "rider": { "n": 1, "from": "body", "most": 2, "audience": { "rule": "everyone" } } },
+  "points": {
+    "by_end_1": { "role": "stand", "at_mm": [0, 0, -1900] },
+    "by_end_2": { "role": "stand", "at_mm": [0, 0, 1900] }
+  },
+  "slots": {
+    "end_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 530, -1600], "stand": "by_end_1" },
+    "end_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 530, 1600], "stand": "by_end_2" }
+  },
+  "geometry": { "bounds_mm": [500, 895, 3560] },
+  "forms": {
+    "ride": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "place": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "place" } }, { "step": "sit", "slot": { "arg": "place" } }],
+      "effects": [
+        { "change": "link", "link": "rider", "from": "actor", "event": "got_on" },
+        { "change": "reparent", "what": "actor", "into": { "arg": "place" }, "event": "sat_down" }
+      ]
+    },
+    "get_off": {
+      "who": { "link": "rider" },
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "rider", "from": "actor", "event": "got_off" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_up" }
+      ]
+    },
+    "push_off_end_1": {
+      "who": { "link": "rider" },
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "low_end", "is": "end_1" }],
+      "steps": [{ "step": "wait", "us": 2000000 }],
+      "effects": [{ "change": "set", "field": "low_end", "to": "end_2", "event": "end_2_went_down" }]
+    },
+    "push_off_end_2": {
+      "who": { "link": "rider" },
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "low_end", "is": "end_2" }],
+      "steps": [{ "step": "wait", "us": 2000000 }],
+      "effects": [{ "change": "set", "field": "low_end", "to": "end_1", "event": "end_1_went_down" }]
+    }
+  },
+  "roles": { "rider": { "need": "required", "places": { "in": "this", "slots": ["end_1", "end_2"] } } },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:see_saw",
+    "shape": {"shapes":[{"kind":"cyl","at":[0,300,0],"r":180,"h":500,"segments":8,"tint":"frame","roll":90000},{"kind":"box","at":[0,150,0],"size":[460,260,360],"round":0,"tint":"frame"},{"kind":"box","at":[0,500,0],"size":[240,20,3560],"round":0,"tint":"plank","role":"boom","pivot":[0,490,0]},{"kind":"torus","at":[0,720,-1400],"r":150,"r2":25,"segments":6,"tint":"handle","yaw":90000,"arc":180000,"role":"boom","pivot":[0,490,0]},{"kind":"torus","at":[0,720,1400],"r":150,"r2":25,"segments":6,"tint":"handle","yaw":90000,"arc":180000,"role":"boom","pivot":[0,490,0]}],"palette":{"frame":"#7d8783","plank":"#d9534f","handle":"#2b2b2b"},"tags":["play","see-saw","playground","seat"],"round":20},
+    "table": [
+      {
+        "part": "boom",
+        "field": "low_end",
+        "do": "rotate",
+        "axis": "x",
+        "at": { "end_1": 9000, "end_2": -9000 },
+        "over_us": 1000000
+      }
+    ]
+  },
+  "text": {
+    "card": "A see-saw for two: sit at each end and push off in turn.",
+    "playground": "playground",
+    "seesaw": "seesaw",
+    "teeter_totter": "teeter totter",
+    "play": "play",
+    "howto_ride": "Two get on, one at each end; whoever is down pushes off."
+  },
+  "card": { "text": "card", "category": "playground", "synonyms": ["seesaw", "teeter_totter", "play"] },
+  "howtos": {
+    "ride": {
+      "text": "howto_ride",
+      "steps": [{ "form": "ride" }, { "form": "push_off_end_1" }, { "form": "push_off_end_2" }, { "form": "get_off" }]
+    }
+  }
+}

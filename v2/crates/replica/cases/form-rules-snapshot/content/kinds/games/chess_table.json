@@ -1,0 +1,274 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:chess_table",
+  "owner": "thing",
+  "state": {
+    "turn": {"n": 1, "type": "enum", "values": ["white", "black"], "default": "white", "audience": {"rule": "everyone"}},
+    "phase": {
+      "n": 2,
+      "type": "enum",
+      "values": ["waiting", "playing", "checkmate", "stalemate", "resigned", "draw"],
+      "default": "waiting",
+      "audience": {"rule": "everyone"}
+    },
+    "winner": {
+      "n": 3,
+      "type": "enum",
+      "values": ["none", "white", "black"],
+      "default": "none",
+      "audience": {"rule": "everyone"}
+    },
+    "pieces": {
+      "n": 4,
+      "type": "list",
+      "most": 32,
+      "of": {"square": {"type": "int", "unit": "count"}, "piece": {"type": "int", "unit": "count"}},
+      "key": "square",
+      "default": [],
+      "audience": {"rule": "everyone"}
+    },
+    "castling": {"n": 5, "type": "int", "unit": "count", "default": 15, "min": 0, "max": 15, "audience": {"rule": "everyone"}},
+    "en_passant": {"n": 6, "type": "int", "unit": "count", "default": 64, "min": 0, "max": 64, "audience": {"rule": "everyone"}}
+  },
+  "links": {
+    "white": {"n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"}},
+    "black": {"n": 2, "from": "soul", "most": 1, "audience": {"rule": "everyone"}}
+  },
+  "points": {
+    "white_stand": {"role": "stand", "at_mm": [-500, 0, -580]},
+    "black_stand": {"role": "stand", "at_mm": [500, 0, 580]},
+    "board": {"role": "contact", "at_mm": [0, 724, 0]}
+  },
+  "slots": {
+    "white_seat": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 460, -580], "stand": "white_stand"},
+    "black_seat": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 460, 580], "stand": "black_stand"}
+  },
+  "geometry": {"bounds_mm": [700, 940, 1600]},
+  "forms": {
+    "play_white": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need": "unlinked", "link": "white"}, {"need": "slot_free", "slot": "white_seat"}],
+      "steps": [{"step": "walk_to", "point": "white_seat"}, {"step": "sit", "slot": "white_seat"}],
+      "effects": [
+        {"change": "link", "link": "white", "from": "actor", "event": "took_white"},
+        {"change": "reparent", "what": "actor", "into": "white_seat", "event": "sat_down"}
+      ]
+    },
+    "play_black": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need": "unlinked", "link": "black"}, {"need": "slot_free", "slot": "black_seat"}],
+      "steps": [{"step": "walk_to", "point": "black_seat"}, {"step": "sit", "slot": "black_seat"}],
+      "effects": [
+        {"change": "link", "link": "black", "from": "actor", "event": "took_black"},
+        {"change": "reparent", "what": "actor", "into": "black_seat", "event": "sat_down"}
+      ]
+    },
+    "begin": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "phase", "not": "playing"},
+        {"need": "linked", "link": "white"},
+        {"need": "linked", "link": "black"}
+      ],
+      "steps": [],
+      "effects": [
+        {"change": "set", "field": "phase", "to": "playing", "event": "game_began"},
+        {"change": "set", "field": "turn", "to": "white", "event": "white_to_move"},
+        {"change": "set", "field": "winner", "to": "none", "event": "no_winner_yet"},
+        {"change": "set", "field": "castling", "to": 15, "event": "castling_restored"},
+        {"change": "set", "field": "en_passant", "to": 64, "event": "no_en_passant"}
+      ]
+    },
+    "move_white": {
+      "who": {"link": "white"},
+      "starts": "act",
+      "takes": {"from": {"type": "count"}, "to": {"type": "count"}, "promotion": {"type": "count"}},
+      "needs": [{"need": "state", "field": "phase", "is": "playing"}, {"need": "state", "field": "turn", "is": "white"}],
+      "steps": [{"step": "move", "move": "slide", "at": "board"}],
+      "hatch": {
+        "module": "prov-12200000000000000000000000000000000000000000000000000000000000000000",
+        "reads": [
+          {"field": "pieces"},
+          {"field": "turn"},
+          {"field": "en_passant"},
+          {"field": "castling"},
+          {"arg": "from"},
+          {"arg": "to"},
+          {"arg": "promotion"}
+        ],
+        "steps_most": 20000,
+        "answers": "verdict",
+        "why": "why_chess"
+      },
+      "effects": [{"change": "set", "field": "turn", "to": "black", "event": "moved"}]
+    },
+    "move_black": {
+      "who": {"link": "black"},
+      "starts": "act",
+      "takes": {"from": {"type": "count"}, "to": {"type": "count"}, "promotion": {"type": "count"}},
+      "needs": [{"need": "state", "field": "phase", "is": "playing"}, {"need": "state", "field": "turn", "is": "black"}],
+      "steps": [{"step": "move", "move": "slide", "at": "board"}],
+      "hatch": {
+        "module": "prov-12200000000000000000000000000000000000000000000000000000000000000000",
+        "reads": [
+          {"field": "pieces"},
+          {"field": "turn"},
+          {"field": "en_passant"},
+          {"field": "castling"},
+          {"arg": "from"},
+          {"arg": "to"},
+          {"arg": "promotion"}
+        ],
+        "steps_most": 20000,
+        "answers": "verdict",
+        "why": "why_chess"
+      },
+      "effects": [{"change": "set", "field": "turn", "to": "white", "event": "moved"}]
+    },
+    "resign_white": {
+      "who": {"link": "white"},
+      "starts": "act",
+      "needs": [{"need": "state", "field": "phase", "is": "playing"}],
+      "steps": [],
+      "effects": [
+        {"change": "set", "field": "phase", "to": "resigned", "event": "resigned"},
+        {"change": "set", "field": "winner", "to": "black", "event": "black_won"}
+      ]
+    },
+    "resign_black": {
+      "who": {"link": "black"},
+      "starts": "act",
+      "needs": [{"need": "state", "field": "phase", "is": "playing"}],
+      "steps": [],
+      "effects": [
+        {"change": "set", "field": "phase", "to": "resigned", "event": "resigned"},
+        {"change": "set", "field": "winner", "to": "white", "event": "white_won"}
+      ]
+    },
+    "leave_white": {
+      "who": {"link": "white"},
+      "starts": "act",
+      "needs": [{"need": "state", "field": "phase", "not": "playing"}],
+      "steps": [{"step": "rise"}],
+      "effects": [
+        {"change": "unlink", "link": "white", "from": "actor", "event": "left_white"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "stood_up"}
+      ]
+    },
+    "leave_black": {
+      "who": {"link": "black"},
+      "starts": "act",
+      "needs": [{"need": "state", "field": "phase", "not": "playing"}],
+      "steps": [{"step": "rise"}],
+      "effects": [
+        {"change": "unlink", "link": "black", "from": "actor", "event": "left_black"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "stood_up"}
+      ]
+    }
+  },
+  "roles": {
+    "white": {"need": "required", "places": {"in": "this", "slots": ["white_seat"], "posture": "sit"}},
+    "black": {"need": "required", "places": {"in": "this", "slots": ["black_seat"], "posture": "sit"}}
+  },
+  "motion": {"how": "pushed_by_one"},
+  "loose": {"ever": true},
+  "looks": {
+    "model": "look:chess_table",
+    "table": [
+      {"part": "flip", "field": "winner", "do": "rotate", "axis": "z", "at": {"none": 0, "white": 0, "black": 90000}},
+      {"part": "lid", "field": "winner", "do": "rotate", "axis": "z", "at": {"none": 0, "white": -90000, "black": 0}}
+    ],
+    "shape": {
+      "round": 4,
+      "shapes": [
+        {"kind": "box", "at": [0, 700, 0], "size": [700, 40, 700], "tint": "wood"},
+        {"kind": "box", "at": [-290, 340, -290], "size": [60, 680, 60], "tint": "leg"},
+        {"kind": "box", "at": [-290, 340, 290], "size": [60, 680, 60], "tint": "leg"},
+        {"kind": "box", "at": [290, 340, -290], "size": [60, 680, 60], "tint": "leg"},
+        {"kind": "box", "at": [290, 340, 290], "size": [60, 680, 60], "tint": "leg"},
+        {"kind": "box", "at": [-245, 722, -175], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-245, 722, -35], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-245, 722, 105], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-245, 722, 245], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-175, 722, -245], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-175, 722, -105], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-175, 722, 35], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-175, 722, 175], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-105, 722, -175], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-105, 722, -35], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-105, 722, 105], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-105, 722, 245], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-35, 722, -245], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-35, 722, -105], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-35, 722, 35], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [-35, 722, 175], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [35, 722, -175], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [35, 722, -35], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [35, 722, 105], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [35, 722, 245], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [105, 722, -245], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [105, 722, -105], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [105, 722, 35], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [105, 722, 175], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [175, 722, -175], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [175, 722, -35], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [175, 722, 105], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [175, 722, 245], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [245, 722, -245], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [245, 722, -105], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [245, 722, 35], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [245, 722, 175], "size": [70, 4, 70], "tint": "cream"},
+        {"kind": "box", "at": [0, 440, -580], "size": [440, 40, 440], "tint": "chair"},
+        {"kind": "box", "at": [-180, 210, -760], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [-180, 210, -400], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [180, 210, -760], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [180, 210, -400], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [0, 700, -780], "size": [440, 480, 40], "tint": "chair"},
+        {"kind": "box", "at": [0, 440, 580], "size": [440, 40, 440], "tint": "chair"},
+        {"kind": "box", "at": [-180, 210, 400], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [-180, 210, 760], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [180, 210, 400], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [180, 210, 760], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [0, 700, 780], "size": [440, 480, 40], "tint": "chair"},
+        {
+          "kind": "box",
+          "at": [-300, 834, 0],
+          "size": [70, 220, 70],
+          "tint": "ivory",
+          "role": "flip",
+          "pivot": [-300, 724, 0]
+        },
+        {
+          "kind": "box",
+          "at": [300, 834, 0],
+          "size": [70, 220, 70],
+          "tint": "ebony",
+          "role": "lid",
+          "pivot": [300, 724, 0]
+        }
+      ],
+      "palette": {
+        "wood": "#5b3a22",
+        "leg": "#4a2f1c",
+        "cream": "#e9dfc4",
+        "chair": "#7d8f6a",
+        "ivory": "#f4efe2",
+        "ebony": "#1f1b18"
+      },
+      "tags": ["chess", "game", "table", "furniture"]
+    }
+  },
+  "text": {
+    "card": "A chess table for two: sit as white or black, move in turn, or resign.",
+    "game": "game",
+    "chess": "chess",
+    "board_game": "board game",
+    "why_chess": "Whether a chess move is legal depends on every piece, the castling rights and en passant; no declared need can say it.",
+    "howto_play": "Take a side, begin once both sides are taken, then move in turn until the game ends or a player resigns."
+  },
+  "card": {"text": "card", "category": "game", "synonyms": ["chess", "board_game"]},
+  "howtos": {"play": {"text": "howto_play", "steps": [{"form": "play_white"}, {"form": "begin"}, {"form": "move_white"}]}}
+}

@@ -1,0 +1,42 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:molded_candle",
+  "owner": "thing",
+  "state": {
+    "shape": { "n": 1, "type": "enum", "values": ["pillar", "taper"], "default": "pillar", "audience": { "rule": "everyone" } },
+    "colour": { "n": 2, "type": "enum", "values": ["red", "blue", "ivory"], "default": "ivory", "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 50, 0] }
+  },
+  "geometry": { "bounds_mm": [80, 240, 80] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:molded_candle",
+    "table": [
+      { "part": "body", "field": "shape", "do": "scale", "axis": "y", "at": { "pillar": 1000, "taper": 2200 } },
+      { "part": "body", "field": "shape", "do": "scale", "axis": "x", "at": { "pillar": 1000, "taper": 400 } },
+      { "part": "body", "field": "shape", "do": "scale", "axis": "z", "at": { "pillar": 1000, "taper": 400 } },
+      { "part": "light", "field": "shape", "do": "slide", "axis": "y", "at": { "pillar": 0, "taper": 120 } },
+      { "part": "body", "field": "colour", "do": "tint", "at": { "red": "#b8322c", "blue": "#2f5fa8", "ivory": "#f1ead8" } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,50,0],"r":36,"h":100,"segments":12,"tint":"wax","role":"body","pivot":[0,0,0]},{"kind":"cyl","at":[0,108,0],"r":3,"h":16,"segments":6,"tint":"wick","role":"light"}],"palette":{"wax":"#ffffff","wick":"#2c2622"},"tags":["candle","lighting","item","object"]}
+  },
+  "text": {
+    "card": "A candle molded at a bench: a pillar or a taper, in red, blue or ivory.",
+    "candle": "candle",
+    "pillar": "pillar",
+    "taper": "taper"
+  },
+  "card": { "text": "card", "category": "candle", "synonyms": ["pillar", "taper"] }
+}

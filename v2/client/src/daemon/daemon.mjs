@@ -18,6 +18,10 @@
 //     {"op":"find","words":"..."}         one search over the copy (`../find/find.mjs`)
 //     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks, each on `target`
 //     {"op":"wait","seconds":30}          returns when something addressed to this Soul happened, or at the timeout
+//   and C4's (#3368), each sent once as `act` is, its answer arriving as an event (`answer` 1 is a receipt):
+//     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361)
+//     {"op":"whisper","to":"<id>","words":".."}  words to one listener's body alone
+//     {"op":"lie","this":"<id>"}          lie down on a bed (worldd's bodies, as a sit)
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
@@ -29,7 +33,9 @@
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
 //       intent's basis is the version the model was last shown, not the send-time version.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
-//   gateway replays what it kept after it). A socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM build (`wire*`).
+//   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
+//   socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM
+//   build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
 //   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
@@ -122,6 +128,8 @@ const events = []; // what happened since the last read
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
 const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
 const copy = new wire.Copy(); // its scope, by hash (R5b)
+// A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
+// Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
 const syncs = []; // the last syncs: kind, time and R5's counts
 let syncing = null, asked = 0; // the sync under way: its request's number, step, kind and start
@@ -165,8 +173,14 @@ function current() {
 function startSync(sock, kind) {
   syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: [] };
   if (cutAt !== null) cutWhy = 'syncing';
-  syncing.timer = setTimeout(() => { log('sync: no answer; reconnecting'); sock.close(); }, SYNC_WITHIN);
+  awaitAnswer(sock);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
+}
+
+/** The sync's next answer is due within SYNC_WITHIN. */
+function awaitAnswer(sock) {
+  clearTimeout(syncing.timer);
+  syncing.timer = setTimeout(() => { log('sync: no answer; reconnecting'); sock.close(); }, SYNC_WITHIN);
 }
 
 function syncAnswer(sock, n, refused, bytes) {
@@ -176,7 +190,7 @@ function syncAnswer(sock, n, refused, bytes) {
   else copy.onRecords(bytes);
   syncing.n = ++asked;
   const next = copy.next(BigInt(syncing.n));
-  if (next.length > 0) { syncing.step = 'records'; sock.send(next); return; }
+  if (next.length > 0) { syncing.step = 'records'; awaitAnswer(sock); sock.send(next); return; }
   const done = { kind: syncing.kind, ms: Math.round(performance.now() - syncing.t0), ...JSON.parse(copy.finish()) };
   clearTimeout(syncing.timer);
   const t = performance.now();
@@ -190,11 +204,12 @@ function syncAnswer(sock, n, refused, bytes) {
   // A refresh (R7) brings the copy current for an answer; the stream's cursor stays the last frame it was given.
   if (done.kind === 'refresh') return;
   state.cursor = copyVersion; // the stream carries on from the version the hashes are at
+  state.seen = null; // no frame of it applied: the gateway's default
   save();
   syncs.push(done);
   if (syncs.length > SYNCS_KEPT) syncs.shift();
   log(`synced (${done.kind}): ${done.fetched} of ${done.held} records in ${done.rounds} rounds, ${done.got} B, ${done.ms} ms`);
-  note({ kind: 'synced', ...done });
+  note({ ...done, kind: 'synced', sync: done.kind }); // its own kind, which wakes no `wait`; `sync` is snapshot or resync
   current();
 }
 
@@ -216,7 +231,7 @@ function connect() {
     try {
       if (step === 'hello') {
         counts.build = wire.wireWorldBuild(bytes);
-        sock.send(wire.wireSignIn(seat.token, state.cursor ? unhex(state.cursor) : new Uint8Array()));
+        sock.send(wire.wireSignIn(seat.token, state.cursor ? unhex(state.cursor) : new Uint8Array(), state.seen ?? undefined));
         step = 'outcome';
         return;
       }
@@ -233,7 +248,9 @@ function connect() {
         return;
       }
       if (kind === 'sync') { syncAnswer(sock, Number(a), b, bytes); return; }
-      if (b !== '-') state.cursor = b;
+      // The frames applied at the cursor's version (#3346): a refusal does not move the version, so on a resume the
+      // gateway replays those at the cursor after the ones counted here, and none twice.
+      if (b !== '-') { state.seen = b === state.cursor ? (state.seen ?? 1) + 1 : 1; state.cursor = b; }
       if (a !== '-') {
         const s = Number(a);
         const k = state.unanswered.indexOf(s);
@@ -242,7 +259,8 @@ function connect() {
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
       }
       save();
-      note({ kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b });
+      // C4: the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason, by name.
+      note({ kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}) });
     } catch (e) {
       log(`frame refused: ${String(e.message ?? e).slice(0, 200)}`);
       if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.close(); }
@@ -314,7 +332,35 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'read', 'stats', 'reflex', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'read', 'stats', 'reflex', 'stop']);
+
+// C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
+// the world's key when it is a plain name.
+const NS = /^[A-Za-z0-9_.\-/@]+$/.test(seat.world) && seat.world !== 'souls' ? seat.world : 'world';
+const WORDS_MOST = 1000; // characters a say or a whisper carries
+const ID = /^[0-9a-f]{32}-\d+$/;
+
+/** The intent a say, a whisper or a lie makes: its verb, target and words, or a refusal by name. */
+function formOf(req) {
+  if (req.op === 'lie') {
+    return ID.test(String(req.this ?? '')) ? { verb: `${NS}:lie`, target: req.this } : { code: 'lie-names-a-thing', detail: 'lie <id of a bed or a thing to lie on>' };
+  }
+  const words = String(req.words ?? '');
+  if (!words.trim() || [...words].length > WORDS_MOST) return { code: 'words-empty-or-long', detail: `1 to ${WORDS_MOST} characters` };
+  if (req.op === 'say') return { verb: `${NS}:say`, words };
+  return ID.test(String(req.to ?? '')) ? { verb: `${NS}:whisper`, target: req.to, words } : { code: 'whisper-names-a-body', detail: 'whisper <body id> "<words>"' };
+}
+
+/** Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in). */
+function sendIntent(ranked, { target, words, basis, expiry }) {
+  state.sequence++;
+  const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
+    basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words);
+  save();
+  const sequence = state.sequence, sent = signedIn;
+  if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
+  return { sequence, sent };
+}
 
 async function answer(req) {
   switch (req.op) {
@@ -364,15 +410,16 @@ async function answer(req) {
         trace.write({ k: 'send', seq: `local-${++stopped}`, ranked: candidates.length, cause: 'stopped-locally' });
         return closing({ ok: false, code: 'stopped-locally', sent: false, dropped, basis: sequenceOf(basis) }, null, { age });
       }
-      const ranked = keep.map((c) => c.verb);
-      state.sequence++;
-      const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
-        basis ? unhex(basis) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER), String(req.target ?? ''));
-      save();
-      const sequence = state.sequence, sent = signedIn;
-      if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
+      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target: req.target, basis, expiry: req.expiry });
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
+    }
+    case 'say': case 'whisper': case 'lie': {
+      const f = formOf(req);
+      if (f.code) return { ok: false, code: f.code, detail: f.detail };
+      const basis = shownVersion ?? state.cursor;
+      const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
+      return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
     }
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });

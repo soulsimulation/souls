@@ -1,0 +1,125 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:shed",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      3000,
+      4500,
+      2600
+    ]
+  },
+  "areas": {
+    "shed": {
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "radius_mm": 1080
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:shed",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1250,
+            0
+          ],
+          "size": [
+            3000,
+            2500,
+            2600
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            2665,
+            0
+          ],
+          "size": [
+            3200,
+            329,
+            2800
+          ],
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1100,
+            1320
+          ],
+          "size": [
+            1200,
+            2000,
+            60
+          ],
+          "tint": "doorway"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#7d9a6a",
+        "trim": "#f2ece0",
+        "roof": "#4a4a48",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "shed"
+      ]
+    }
+  },
+  "text": {
+    "card": "A garden shed: one room, one door and a small window.",
+    "building": "building",
+    "hut": "hut",
+    "outhouse": "outhouse"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "hut",
+      "outhouse"
+    ]
+  }
+}
