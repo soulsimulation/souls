@@ -206,6 +206,7 @@ let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-conne
 const trace = openTrace(rt.dir);
 const rankedOf = new Map(); // sequence → how many verbs it ranked, until answered
 const movesOf = new Map(); // sequence → its move's form (C14), until answered: a receipt says whether the body sits
+const joinsOf = new Set(); // own join sequences: only a successful receipt requests a post-birth copy
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
 let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now();
@@ -405,6 +406,15 @@ function connect() {
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
         trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
+        if (joinsOf.has(s) && Number(c) !== 3) {
+          joinsOf.delete(s);
+          if (Number(c) === 1) {
+            // An older sync may still hold the pre-birth tree. Keep one follow pending until it finishes, then
+            // read the authoritative body link and renew hearing through the usual sync completion path.
+            followWanted = true;
+            follow();
+          }
+        }
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
@@ -628,6 +638,7 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry }) {
     params ? JSON.stringify(params) : undefined);
   save();
   const sequence = state.sequence, sent = signedIn;
+  if (ranked[0] === 'life:join') joinsOf.add(sequence);
   if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
   return { sequence, sent };
