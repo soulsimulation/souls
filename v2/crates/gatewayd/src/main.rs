@@ -3,9 +3,11 @@
 //! `gatewayd --listen <addr:port> --world <local socket path> --tokens <file> --build <hex>` prints
 //! `listening <addr:port>` once it accepts sockets. The tokens file holds `<grant> <sha-256 hex> [<account>]` lines,
 //! never a token. With `--receipts <dir>` (the world's `<worlds root>/worlds/<world>/receipts`), each answered intent
-//! is a line in `<dir>/<UTC day>.jsonl` (see `receipts.rs`).
+//! is a line in `<dir>/<UTC day>.jsonl` (see `receipts.rs`). With `--wake <alarm daemon's socket> --world-name
+//! <world>` (O2, #2731), an intent for the world while it sleeps is held and the alarm daemon asked to wake it.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gatewayd::receipts::Receipts;
 use gatewayd::token::Tokens;
@@ -28,7 +30,7 @@ async fn main() {
         arg("--build"),
     ) else {
         eprintln!(
-            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>]"
+            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--wake <socket> --world-name <world>]"
         );
         std::process::exit(2);
     };
@@ -41,6 +43,22 @@ async fn main() {
     };
     let receipts = arg("--receipts").map_or_else(Receipts::off, |d| Receipts::to_dir(d.into()));
     let gw = Gateway::with_receipts(tokens, build, stderr_log(), receipts);
+    if let (Some(socket), Some(name)) = (arg("--wake"), arg("--world-name")) {
+        gw.link.set_wake(Arc::new(move || {
+            let (socket, name) = (socket.clone(), name.clone());
+            // Off the socket's task: one line to the local daemon, its answer read and dropped.
+            std::thread::spawn(move || {
+                use std::io::{Read, Write};
+                match std::os::unix::net::UnixStream::connect(&socket) {
+                    Ok(mut s) => {
+                        let _ = s.write_all(format!("wake {name}\n").as_bytes());
+                        let _ = s.read(&mut [0u8; 64]);
+                    }
+                    Err(e) => eprintln!("gatewayd: wake {name}: {e}"),
+                }
+            });
+        }));
+    }
     tokio::spawn(world_link::run(gw.clone(), PathBuf::from(world)));
     let listener = match tokio::net::TcpListener::bind(&listen).await {
         Ok(l) => l,

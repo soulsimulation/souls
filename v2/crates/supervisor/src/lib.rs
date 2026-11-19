@@ -11,9 +11,16 @@
 //!
 //! There is no start limit, no breaker and no resting state: systemd retries every failure, with a delay that grows
 //! from [`RESTART_SEC_MS`] to [`RESTART_MAX_MS`].
+//!
+//! - **Sleep and wake** (O2, #2731; [`sleep`], [`alarm`], [`wake`]): a still world with nothing due for a minute
+//!   checkpoints, leaves its next due time in the directory and exits; the machine's alarm daemon wakes it before
+//!   that time, or at once for an intent the gateway holds. Runbook: `v2/docs/runbook/sleep-and-wake.md`.
 
+pub mod alarm;
 pub mod folder;
 pub mod health;
+pub mod sleep;
+pub mod wake;
 
 use std::path::{Path, PathBuf};
 
