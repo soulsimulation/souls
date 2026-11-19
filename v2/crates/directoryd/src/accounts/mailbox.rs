@@ -1,5 +1,5 @@
 //! The mailbox (Engine v2 R13, #2753): an owner's messages to their Soul, kept in the account store's file beside
-//! the accounts, never in a world's log. The page's box is W10's; until it lands a test call puts a message in.
+//! the accounts, never in a world's log. The page's box (W10) puts one through the gateway.
 //!
 //! A message is `open` until the Soul's daemon closes it with the outcome of the act that served it (`done` or
 //! `failed`, and the outcome's name), through the gateway. One still open [`OPEN_MOST_S`] after it was put is closed

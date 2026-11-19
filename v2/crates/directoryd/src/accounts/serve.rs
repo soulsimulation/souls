@@ -16,8 +16,9 @@
 //!   frame the gateway gives the Soul's socket as it is (`{"mail": {"id", "text", "at"}}`). The second's body is the
 //!   socket's own `{"close": {"id", "state", "outcome"}}`, with the socket's grant in a `souls-soul` header. So the
 //!   gateway reads no JSON.
-//! - `POST /v1/mailbox/put` `{"soul", "text"}` and `POST /v1/mailbox/read` `{"id"}`: the test call that stands in
-//!   for the page's box (W10) until it lands, with the sign-in for test worlds on only.
+//! - `POST /v1/mailbox/put` `{"soul", "text"}`: the gateway's, with the mailbox key, for the page's box (W10), which
+//!   checks the page's view token holds that Soul; also open with the sign-in for test worlds on, as is
+//!   `POST /v1/mailbox/read` `{"id"}`.
 //! - Prayers (G11, #3335; [`super::prayers`]), the gateway's too, each the socket's own frame with its grant in the
 //!   `souls-soul` header, and answered `{"reply": {"n", "ok", ..}}` (`n` the request's own, `refused` a name), which
 //!   the gateway gives back to that socket: `POST /v1/mailbox/pray` `{"pray": {"n", "text"}}` (a Soul's),
@@ -294,7 +295,7 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
             "POST",
             "/v1/mailbox/close" | "/v1/mailbox/pray" | "/v1/mailbox/prayers" | "/v1/mailbox/answer",
         ) => refuse(401, "mailbox-key"),
-        ("POST", "/v1/mailbox/put") if app.test_sign_in => {
+        ("POST", "/v1/mailbox/put") if app.test_sign_in || gateway() => {
             let b = body();
             Some(
                 match app
