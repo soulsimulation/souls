@@ -94,8 +94,12 @@ function publishFixture(file, target) {
   const settings = new Map(effect);
   settings.set(1, part.get(2).length);
   settings.set(7, [...fields].map(([field, value]) => new Map([[1, 4], [2, root], [3, field], [4, value]])));
-  settings.get(7).push(new Map([[1, 4], [2, shop], [3, 81], [4, hours]]));
-  part.get(2).push(settings); // ordinary settings after every node was created; no time effect is added or changed
+  part.get(2).push(settings);
+  const shopSettings = new Map(settings);
+  shopSettings.set(1, part.get(2).length);
+  shopSettings.set(6, shop);
+  shopSettings.set(7, [new Map([[1, 4], [2, shop], [3, 81], [4, hours]])]);
+  part.get(2).push(shopSettings); // each settings entry owns its node; no time effect is added or changed
   const payload = Buffer.from(encode(part)), head = Buffer.alloc(12);
   head.writeUInt32LE(payload.length, 0);
   head.writeUInt32LE(original.readUInt32LE(28), 4);
