@@ -145,6 +145,19 @@ pub fn run(args: &[String]) -> i32 {
             );
         }
     }
+    // V19 (#2763): `--sky <civil µs at world time 0> <seed>`, today's light and weather on a real-time UTC calendar.
+    if let Some(i) = args.iter().position(|a| a == "--sky") {
+        let n = |k: usize| args.get(i + k).and_then(|v| v.parse::<i64>().ok());
+        let (day_s, offsets) = (86_400, vec![(0, 0)]);
+        if let (Some(origin), Some(seed)) = (n(1), n(2)) {
+            let cal = replica::sky::Calendar {
+                day_s,
+                origin,
+                offsets,
+            };
+            cfg.sky = Some(sim::daylight::Config::today(cal, seed.unsigned_abs()));
+        }
+    }
     cfg.measures = !args.iter().any(|a| a == "--no-measures");
     cfg.health =
         Some(arg("--health").map_or_else(|| log.with_extension("health.json"), PathBuf::from));

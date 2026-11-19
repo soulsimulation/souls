@@ -16,6 +16,7 @@ import { HistoryPage, readMoment } from '../history/page.ts';
 import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
 import { arrive } from '../worlds/arrive.ts';
+import { WorldSky } from '../sky/sky.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -33,11 +34,12 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, quality.maxPixelRatio));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xbcd3e6);
 scene.fog = new THREE.Fog(0xbcd3e6, 300, 1200);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x556644, 1.6));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 1.6);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.4);
 // Shadows from the sun over the near part of the view (buildings, trees, things and the nearest bodies: V6's level 0),
 // in a square of SHADOW m each side of where the camera looks, which follows it.
-const SUN = new THREE.Vector3(300, 500, 200).normalize().multiplyScalar(400), SHADOW = 70;
+const SHADOW = 70;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 sun.castShadow = true;
@@ -47,6 +49,7 @@ sun.shadow.normalBias = 0.04;
 Object.assign(sun.shadow.camera, { left: -SHADOW, right: SHADOW, top: SHADOW, bottom: -SHADOW, near: 1, far: 1000 });
 sun.shadow.camera.updateProjectionMatrix();
 scene.add(sun, sun.target);
+const sky = new WorldSky(scene, hemi, sun); // V19: sky, daylight and rain from the world node's record
 const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
@@ -54,7 +57,7 @@ const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
 const director = new CameraDirector(cam, canvas, world, souls, new URLSearchParams(location.search), moment !== null); // V20: broadcast, follow, find
-Object.assign(globalThis, { v2: { renderer, scene, cam, director, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
+Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
 loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 
@@ -81,6 +84,7 @@ const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
     world.apply(p.nodes, p.removed, p.samples);
+    sky.apply(p.nodes, p);
     things.apply(p.nodes, p.removed);
     sound.part(p.nodes, p.removed, p.samples, p.happened ?? []);
     souls.apply(p);
@@ -92,7 +96,7 @@ const live = (address: string) => new StreamSource(address).start({
   error: (m) => (error = m),
 });
 let history = moment && new HistoryPage(moment, cam, {
-  apply: (n, r, s, h) => (world.apply(n, r, s), things.apply(n, r), sound.part(n, r, s, h ?? [])), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
+  apply: (n, r, s, h) => (world.apply(n, r, s), sky.apply(n), things.apply(n, r), sound.part(n, r, s, h ?? [])), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
   frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
 });
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
@@ -114,10 +118,10 @@ renderer.setAnimationLoop((now) => {
   // The shadow's square moves in whole texels, so standing shadows don't shimmer as the camera moves.
   const texel = (2 * SHADOW) / sun.shadow.mapSize.x, at = cam.controls.target;
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
-  sun.position.copy(sun.target.position).add(SUN);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
   const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   director.update(Math.min(100, dt), t);
+  sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {
