@@ -37,10 +37,10 @@
 //! entry at once and is answered with a receipt after its tick's sync.
 //!
 //! **Sync by hash** (R5b, #3164): a frame with key 20 is R5's sync request (`replica::sync::wire`), not an intent.
-//! The clock thread answers it from the tree as last sealed, sealing first when the world has changed since, and
-//! every record a seal gave is kept, so a client compares and descends over the place, which every actor is granted.
-//! Its answer goes to the answers thread at once, behind every tick record already sent: it never shows a change
-//! before the change is on the disk, and never waits for a tick.
+//! The [`Door`] hands it to the sync thread (`crate::syncs`, C16 #3450), never to the clock thread: it answers from
+//! its own sealed copy of the zone, which takes each tick's parts from the answers thread once they are on the disk,
+//! so a client compares and descends over the place, which every actor is granted. An answer never shows a change
+//! before the change is on the disk, never waits for a tick, and never delays one.
 //!
 //! **The world's tick** (K18, #3160). One loop per zone, run by K7's ticker at the clock's rate (one tick each
 //! [`Config::tick`]; world time is real time in µs from the Unix epoch, rate one). Each tick, in the trunk's order
@@ -88,6 +88,7 @@ use crate::bodies::{self, Ask, Asked, Bodies, Placed};
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::loose::Ends;
 use crate::measures::{self, Measures, Stamps};
+use crate::syncs::{self, ToSync};
 use crate::views::Tier;
 use crate::words;
 use replica::apply::Replica;
@@ -104,7 +105,7 @@ use replica::select::Answer as Answered;
 use replica::select::Spot;
 use replica::select::wire::SPOT;
 use replica::sky::{self, Sky};
-use replica::sync::{self, Records, Served, wire};
+use replica::sync::Records;
 use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
@@ -196,11 +197,16 @@ pub enum Event {
 pub struct Door {
     pub events: Sender<Event>,
     pub measures: Option<Arc<Measures>>,
+    syncs: Sender<ToSync>,
 }
 
 impl Door {
-    /// Hands an intent's bytes to the clock thread; false once the world has stopped.
+    /// Hands an intent's bytes to the clock thread, and a sync request's to the sync thread (C16); false once the
+    /// world has stopped.
     pub fn arrive(&self, bytes: Vec<u8>, reply: Reply) -> bool {
+        if let Some(ask) = syncs::ask_of(&bytes) {
+            return self.syncs.send(ToSync::Ask(ask, reply)).is_ok();
+        }
         let (stamps, key) = self
             .measures
             .as_ref()
@@ -438,6 +444,8 @@ impl Config {
 /// The running world: send it [`Event`]s; [`World::stop`] ends it once the answers already due are sent.
 pub struct World {
     pub events: Sender<Event>,
+    /// Where sync requests go (C16): the sync thread, not the clock.
+    syncs: Sender<ToSync>,
     /// The tick and real time the last tick ended (K7): a watchdog reads it.
     pub beat: Arc<Heartbeat>,
     /// The view tier, when [`Config::views`]: subscribe to it.
@@ -456,6 +464,7 @@ impl World {
         Door {
             events: self.events.clone(),
             measures: self.measures.clone(),
+            syncs: self.syncs.clone(),
         }
     }
 
@@ -566,8 +575,8 @@ struct Tick {
     replies: Vec<Out>,
     started: Option<u64>,
     handed: Option<u64>,
-    /// Sync answers (R5b): sent as they are, with no block.
-    bare: Vec<(Vec<Reply>, Vec<u8>)>,
+    /// The tick's parts, handed to the sync thread once its records are on the disk (C16).
+    parts: Vec<Arc<Part>>,
 }
 
 struct Clock {
@@ -587,11 +596,10 @@ struct Clock {
     deadline: Micros,
     arrivals: Option<File>,
     roots: Option<File>,
-    /// Every record the tree's seals gave, and whether the world changed since the last seal (R5b).
-    kept: Records,
+    /// Whether the world changed since the last seal (the roots file's and the checkpoints').
     unsealed: bool,
-    /// The nodes R5b's seals hashed since the last checkpoint: the next checkpoint writes them too, as its own seal
-    /// finds only what changed after them.
+    /// The nodes the roots file's seals hashed since the last checkpoint: the next checkpoint writes them too, as its
+    /// own seal finds only what changed after them.
     fresh: Vec<(Hash, Vec<u8>)>,
     checked: Vec<(Act, Checks)>,
     replies: Vec<Out>,
@@ -806,7 +814,12 @@ fn bind_spot(s: Box<SpotAct>, body: Id, actor: Actor) -> Result<Asked, String> {
         },
         (Bound::Stand(_), true, _) => return Err("spot.not-a-slot".into()),
     };
-    Ok(Asked { body, actor, ask })
+    Ok(Asked {
+        body,
+        actor,
+        ask,
+        fallbacks: Vec::new(),
+    })
 }
 
 impl Clock {
@@ -901,38 +914,17 @@ impl Clock {
         );
     }
 
-    /// Seals the tree if the world changed since the last seal, and keeps the records the seal gave.
+    /// Seals the tree if the world changed since the last seal (the roots file, R5b's relay test).
     fn seal(&mut self) {
         if !self.unsealed {
             return;
         }
         if let Ok(sealed) = self.replica.seal() {
-            self.kept.keep(&sealed);
             if self.checkpoints.is_some() {
                 self.fresh.extend(sealed.nodes);
             }
             self.unsealed = false;
         }
-    }
-
-    /// A sync request's answer (R5b), or none if `bytes` is not one: the place is granted to every actor.
-    fn sync(&mut self, bytes: &[u8]) -> Option<Vec<u8>> {
-        let Value::Map(mut m) = decode(bytes).ok()?.value else {
-            return None;
-        };
-        let n = m.remove(&wire::ASK)?;
-        if m.contains_key(&wire::IDS) {
-            self.seal();
-        }
-        let now = self.version();
-        let place = self.replica.header().zone;
-        let mut src = Served {
-            tree: self.replica.tree(),
-            records: &self.kept,
-        };
-        let mut a = sync::answer(&mut src, &[place], &m, now);
-        a.insert(wire::ASK, n);
-        encode(&Value::Map(a)).ok()
     }
 
     fn arrival(&mut self, bytes: &[u8], reply: Reply, stamps: Stamps, now: Micros) {
@@ -1163,10 +1155,18 @@ impl Clock {
 
     /// Writes the entry of open move `id`: event `event` with `{1: body, 2: how (once it ended; its name's bytes, since
     /// an event's text is a namespaced name), 3: [x, y, z] µm,
-    /// 4: the node of its frame}`, where the body stands or sits. Its cause is the intent, so the receipt finds it.
+    /// 4: the node of its frame}`, where the body stands or sits. A move started also names the candidate of its ranked
+    /// list it took (C14): `5: its rank` (0 the intent's own) and `6: its target`. Its cause is the intent, so the
+    /// receipt finds it.
     fn note(&mut self, id: Id, event: &str, how: Option<&str>, at: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let mut fields = BTreeMap::from([(1, o.body.to_value())]);
+        if let Some((rank, target)) = self.bodies.as_mut().and_then(|b| b.took(id)) {
+            fields.insert(5, Value::Uint(rank as u64));
+            if let Some(t) = target {
+                fields.insert(6, t.to_value());
+            }
+        }
         if let Some(h) = how {
             fields.insert(2, Value::Bytes(h.as_bytes().to_vec()));
         }
@@ -1424,7 +1424,12 @@ impl Clock {
         for (id, r) in started {
             match r {
                 Ok(()) => self.note(id, MOVE_STARTED, None, now),
-                Err(r) => self.settle(id, Err(r.name.to_owned()), now),
+                Err(r) => {
+                    if let Some(b) = self.bodies.as_mut() {
+                        b.took(id);
+                    }
+                    self.settle(id, Err(r.name.to_owned()), now);
+                }
             }
         }
     }
@@ -1608,7 +1613,8 @@ impl Clock {
         }
         at[6] = mark();
         // 6. The frozen copy, for the checkers and readers.
-        if !self.parts.is_empty() {
+        let parts = std::mem::take(&mut self.parts);
+        if !parts.is_empty() {
             if self.roots.is_some() {
                 self.seal();
                 let root = self.replica.tree().node(self.replica.tree().root());
@@ -1623,21 +1629,21 @@ impl Clock {
                     let _ = f.write_all(line.as_bytes());
                 }
             }
-            self.publisher.publish(std::mem::take(&mut self.parts));
+            self.publisher.publish(parts.clone());
         }
         // 7. The answers thread appends, syncs, hands the synced tick to the view tier, then answers.
         let replies = std::mem::take(&mut self.replies);
         let bytes = inputs.as_ref().map_or(0, Vec::len) + record.as_ref().map_or(0, Vec::len);
         let written = u64::from(inputs.is_some()) + u64::from(record.is_some());
         let handed = mark();
-        if written > 0 || !replies.is_empty() {
+        if written > 0 || !replies.is_empty() || !parts.is_empty() {
             let _ = self.answers.send(Tick {
                 inputs,
                 record,
                 replies,
                 started: at[0],
                 handed,
-                bare: Vec::new(),
+                parts,
             });
         }
         self.records += written;
@@ -1688,9 +1694,8 @@ impl Clock {
         let Some(c) = self.checkpoints.as_mut() else {
             return;
         };
-        // One seal for both: what R5b's seals hashed since the last checkpoint, then what changed after.
+        // One seal for both: what the roots file's seals hashed since the last checkpoint, then what changed after.
         let taken = self.replica.seal().and_then(|mut sealed| {
-            self.kept.keep(&sealed);
             self.unsealed = false;
             let mut nodes = std::mem::take(&mut self.fresh);
             nodes.append(&mut sealed.nodes);
@@ -1737,6 +1742,9 @@ impl Clock {
 
 /// The answers thread: each tick's records appended and on the disk before its answers leave, then the part handed to
 /// the view tier. A log that fails stops it for good: nothing is answered that is not on the disk.
+// Each argument is one consumer of the durable tick (views, follower, served feed, sync thread); a struct would only
+// rename them.
+#[allow(clippy::too_many_arguments)]
 fn answer_loop<S: Storage + 'static>(
     mut log: Log<S>,
     ticks: Receiver<Tick>,
@@ -1745,6 +1753,7 @@ fn answer_loop<S: Storage + 'static>(
     synced: Option<Sender<Synced>>,
     served: Option<crate::views::served::Feed>,
     mut follow: Option<Offer>,
+    syncs: Sender<ToSync>,
 ) {
     for (k, t) in ticks.into_iter().enumerate() {
         let k = k as u64;
@@ -1801,6 +1810,10 @@ fn answer_loop<S: Storage + 'static>(
         if let (Some(v), Some(r)) = (&served, durable_part) {
             v.record(r);
         }
+        // The sync thread's copy takes the tick once it is on the disk, before its answers leave (C16).
+        if !t.parts.is_empty() {
+            let _ = syncs.send(ToSync::Parts(t.parts));
+        }
         let synced = measures.as_ref().map(|_| measures::steady_us());
         for (waiters, frame, mut stamps) in t.replies {
             let frame = match &measures {
@@ -1813,11 +1826,6 @@ fn answer_loop<S: Storage + 'static>(
                 }
                 None => frame,
             };
-            for w in waiters {
-                let _ = w.send(frame.clone());
-            }
-        }
-        for (waiters, frame) in t.bare {
             for w in waiters {
                 let _ = w.send(frame.clone());
             }
@@ -2056,10 +2064,22 @@ pub fn start<S: Storage + 'static>(
     let durable = log.durable_mark();
     let world_durable = log.durable_mark();
     let synced = cfg.synced.take();
+    let served = cfg.served.take();
+    // The first seal hashes every node: taken here, before the clock runs, so no tick waits on it. Later seals hash
+    // what changed. The sync thread (C16) starts from a whole copy of the sealed world and the records the seal gave.
+    let first = world.seal()?;
+    let mut kept = Records::default();
+    kept.keep(&first);
+    let syncs = syncs::start(world.frozen(), kept, (cfg.lineage, zone, cfg.epoch)).map_err(io)?;
+    let fresh = if cfg.checkpoints.is_some() {
+        first.nodes
+    } else {
+        Vec::new()
+    };
     let (answers, ticks) = channel();
     let answer_tier = tier.clone();
     let answer_measures = measures.clone();
-    let served = cfg.served.take();
+    let answer_syncs = syncs.clone();
     let answering = thread::Builder::new()
         .name("answers".into())
         .spawn(move || {
@@ -2071,21 +2091,12 @@ pub fn start<S: Storage + 'static>(
                 synced,
                 served,
                 follow,
+                answer_syncs,
             )
         })
         .map_err(io)?;
     let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
-    // R5b's first seal hashes every node: taken here, before the clock runs, so no tick waits on it (a big world's
-    // whole tree, sealed at its first sync request, held the clock past K7's watchdog). Later seals hash what changed.
-    let first = world.seal()?;
-    let mut kept = Records::default();
-    kept.keep(&first);
-    let fresh = if cfg.checkpoints.is_some() {
-        first.nodes
-    } else {
-        Vec::new()
-    };
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let build = move || Clock {
         replica: world,
@@ -2104,7 +2115,6 @@ pub fn start<S: Storage + 'static>(
         deadline: cfg.deadline,
         arrivals: cfg.arrivals,
         roots: cfg.roots,
-        kept,
         unsealed: false,
         fresh,
         checked: Vec::new(),
@@ -2137,6 +2147,7 @@ pub fn start<S: Storage + 'static>(
     };
     let lockstep = cfg.lockstep;
     let thread_beat = Arc::clone(&beat);
+    let clock_syncs = syncs.clone();
     let clock = thread::Builder::new()
         .name("clock".into())
         .spawn(move || {
@@ -2181,17 +2192,10 @@ pub fn start<S: Storage + 'static>(
                         if let Some(m) = &c.measures {
                             m.taken(key, &mut stamps);
                         }
-                        // A sync request (R5b) is answered at once, behind every tick already handed to the
-                        // answers thread; it is not an intent and never reaches the recorder.
-                        if let Some(f) = c.sync(&bytes) {
-                            let _ = c.answers.send(Tick {
-                                inputs: None,
-                                record: None,
-                                replies: Vec::new(),
-                                started: None,
-                                handed: None,
-                                bare: vec![(vec![reply], f)],
-                            });
+                        // A sync request (R5b) sent past the door is handed to the sync thread (C16); it is not an
+                        // intent and never reaches the recorder.
+                        if let Some(ask) = syncs::ask_of(&bytes) {
+                            let _ = clock_syncs.send(ToSync::Ask(ask, reply));
                         } else {
                             c.pending.push((bytes, reply, stamps))
                         }
@@ -2280,6 +2284,7 @@ pub fn start<S: Storage + 'static>(
         .map_err(io)?;
     Ok(World {
         events,
+        syncs,
         beat,
         tier,
         measures,
@@ -2363,6 +2368,7 @@ mod tests {
     use super::*;
     use crate::checkers::toggles;
     use replica::intents::Fallback;
+    use replica::sync::{self, wire};
     use sim::log::{Mem, recover};
     use std::sync::{Condvar, Mutex};
 
