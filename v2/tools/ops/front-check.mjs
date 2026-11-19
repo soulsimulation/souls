@@ -4,8 +4,10 @@
 //     [--public https://soul.game] [--primary https://sim.eden.art] [--old https://souls.game] [--alias old=slug,...] \
 //     [--unlisted <slug>] [--points a,b] [--stopped <path>] [--map https://name=http://address,...]
 // Points (all but `poster` by default), each PASS or a PROBLEM naming it:
-//   worlds   /w/<v2>/ is the new system's page and /w/<today>/ today's; /w/<v2>/v1/config (an old API path) is answered
+//   worlds   /w/<v2>/ is the new system's page and /w/<today>/ today's; /w/<v2>/v1/edge/ (an old API path) is answered
 //            by today's launcher, never redirected
+//   client   /w/<v2>/eden.mjs and /v1/config answer from v2, with the client's SHA-256 equal to soulClient.sha256;
+//            /llms.txt is the current instructions; client and config paths for --today still come from today's launcher
 //   aliases  each old alias, at /w/<old>/ and /worlds/w/<old>/, is a same-origin 308 to /w/<slug>/ keeping the query, and
 //            lands on the system that serves the slug
 //   domains  the primary and each older domain send GET/HEAD (301) and POST (308) to the public name, path and query kept
@@ -22,9 +24,10 @@
 // Read-only: GETs and HEADs, plus a POST to an unknown path that each older domain redirects before anything reads it.
 // Exit 0 on PASS.
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { rows, signInHref } from '../../web/src/home/list.ts';
 
-export const POINTS = ['worlds', 'aliases', 'domains', 'sign-in', 'headers', 'robots', 'list', 'address', 'site'];
+export const POINTS = ['worlds', 'client', 'aliases', 'domains', 'sign-in', 'headers', 'robots', 'list', 'address', 'site'];
 const UA = 'souls-front-check';
 const FORGED = '203.0.113.77';   // a documentation address (RFC 5737): no visitor has it
 const COUNTER = 'goatcounter.com';
@@ -48,10 +51,31 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
         if (r.status !== 200 || system(r) !== want) bad('worlds', `/w/${slug}/ answered ${r.status} from ${system(r)}, want 200 from ${want}`);
       }
       if (v2) {
-        const r = await done(await get(`${pub}/w/${v2}/v1/config`));
-        seen.push(`worlds: old API /w/${v2}/v1/config -> ${r.status} ${system(r)}`);
-        if (r.status >= 300 && r.status < 400) bad('worlds', `/w/${v2}/v1/config redirected (${r.status}), want today's own answer`);
-        if (system(r) !== 'today') bad('worlds', `/w/${v2}/v1/config answered by ${system(r)}, want today's launcher`);
+        const r = await done(await get(`${pub}/w/${v2}/v1/edge/`));
+        seen.push(`worlds: old API /w/${v2}/v1/edge/ -> ${r.status} ${system(r)}`);
+        if (r.status >= 300 && r.status < 400) bad('worlds', `/w/${v2}/v1/edge/ redirected (${r.status}), want today's own answer`);
+        if (system(r) !== 'today') bad('worlds', `/w/${v2}/v1/edge/ answered by ${system(r)}, want today's launcher`);
+      }
+    },
+    client: async () => {
+      if (!v2) return bad('client', 'no --v2 world named');
+      let sha;
+      for (const path of ['eden.mjs', 'v1/config']) {
+        const r = await get(`${pub}/w/${v2}/${path}`), body = Buffer.from(await r.arrayBuffer());
+        seen.push(`client: /w/${v2}/${path} -> ${r.status} ${system(r)}`);
+        if (r.status !== 200 || system(r) !== 'v2') bad('client', `/w/${v2}/${path} answered ${r.status} from ${system(r)}, want 200 from v2`);
+        if (path === 'eden.mjs') sha = createHash('sha256').update(body).digest('hex');
+        else if (JSON.parse(body).soulClient?.sha256 !== sha) bad('client', 'eden.mjs SHA-256 differs from soulClient.sha256');
+      }
+      const guide = await get(`${pub}/w/${v2}/llms.txt`), text = await guide.text();
+      const instructions = await get(`${pub}/w/${v2}/instructions.md`);
+      seen.push(`client: /w/${v2}/llms.txt -> ${guide.status} ${system(guide)}`);
+      if (guide.status !== 200 || system(guide) !== 'v2' || guide.headers.get('cache-control') !== 'no-cache' || text !== await instructions.text()) bad('client', 'llms.txt must serve the current v2 instructions with no-cache');
+      // The stopped-launcher run checks only the new system; the full run also checks today's slugs.
+      if (today) for (const path of ['eden.mjs', 'v1/config']) {
+        const r = await done(await get(`${pub}/w/${today}/${path}`));
+        seen.push(`client: /w/${today}/${path} -> ${r.status} ${system(r)}`);
+        if (r.status !== 200 || system(r) !== 'today') bad('client', `/w/${today}/${path} answered ${r.status} from ${system(r)}, want 200 from today`);
       }
     },
     aliases: async () => {

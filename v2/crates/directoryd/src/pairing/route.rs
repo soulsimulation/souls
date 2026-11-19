@@ -212,7 +212,13 @@ pub fn route(
                 let imported = |world: &str, former: &str| {
                     app.store.imported_soul(world, former).map_err(|_| "store")
                 };
-                match p.approve_with(&account, &code, now(), &imported) {
+                // A world's creator grant the account holds is its to pair alongside imported Souls.
+                let holds = |g: &str| {
+                    app.store
+                        .grants(&account)
+                        .is_ok_and(|gs| gs.iter().any(|(h, _)| h == g))
+                };
+                match p.approve_combined(&account, &code, now(), &imported, holds) {
                     // V13c: the approving account owns the Soul, and its page follows the Soul's own body.
                     Ok(grant) => match app
                         .store
@@ -286,7 +292,9 @@ pub fn route(
             };
             match done {
                 Ok(()) => json(200, json!({ "ok": true, "soul": soul }), note),
-                Err(e) if e == "store" || e == "tokens-file" => refuse(500, &e),
+                Err(e) if e == "store" || e == "tokens-file" || e == "souls-file" => {
+                    refuse(500, &e)
+                }
                 Err(e) if e == "unknown-soul" || e == "not-yours" => refuse(404, &e),
                 Err(e) => refuse(400, &e),
             }

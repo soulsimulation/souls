@@ -23,7 +23,7 @@
 pub mod route;
 pub mod souls;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::accounts::random;
 use replica::encode::{from_hex, to_hex};
@@ -369,9 +369,7 @@ impl Pairing {
         self.approve_with(account, code, now, &|_, _| Ok(None))
     }
 
-    /// [`Pairing::approve`], where a request that names a `former` Soul (R18) is the Soul `imported(world, former)`
-    /// finds X11 brought over, as `(grant, owning account)`. A former Soul not brought over, or brought over for
-    /// another account, is refused `unknown-soul`, the same refusal either way.
+    /// Approval with X11's imported former-Soul lookup; creator holdings are absent for this wrapper.
     pub fn approve_with(
         &self,
         account: &str,
@@ -379,9 +377,33 @@ impl Pairing {
         now: u64,
         imported: Imported<'_>,
     ) -> Result<String, (&'static str, Option<String>)> {
+        self.approve_combined(account, code, now, imported, |_| false)
+    }
+
+    /// Approval with the account's creator holdings; imported former Souls are absent for this wrapper.
+    pub fn approve_holding(
+        &self,
+        account: &str,
+        code: &str,
+        now: u64,
+        holds: impl Fn(&str) -> bool,
+    ) -> Result<String, (&'static str, Option<String>)> {
+        self.approve_combined(account, code, now, &|_, _| Ok(None), holds)
+    }
+
+    fn approve_combined(
+        &self,
+        account: &str,
+        code: &str,
+        now: u64,
+        imported: Imported<'_>,
+        holds: impl Fn(&str) -> bool,
+    ) -> Result<String, (&'static str, Option<String>)> {
         let (code, _, soul, _, force, _, _) =
             self.guess(account, code, now).map_err(|e| (e, None))?;
-
+        if let Some(g) = soul.as_deref().filter(|g| is_creator_grant(g) && holds(g)) {
+            self.register(g, account).map_err(|_| ("store", None))?;
+        }
         // Each change is made only to a request still pending: of two approvals at once, one finds it gone.
         let refuse = |name: &'static str, device: Option<String>| {
             let changed = self.db.lock().expect("the store").execute(
@@ -411,7 +433,11 @@ impl Pairing {
         };
         let grant = match soul {
             Some(g) => match self.soul_of(&g).map_err(|e| (e, None))? {
+                None if is_creator_grant(&g) => return refuse("not-the-creator", None),
                 None => return refuse("unknown-soul", None),
+                Some((owner, _)) if owner != account && is_creator_grant(&g) => {
+                    return refuse("not-the-creator", None);
+                }
                 Some(_) if self.retired(&g).map_err(|e| (e, None))? => {
                     return refuse("soul-retired", None);
                 }

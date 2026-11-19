@@ -11,8 +11,8 @@
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
-# directoryd, deploy, gateway-upgrade, the origin and the page's files); data in /var/lib/souls; settings in
-# /etc/souls, the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
+# directoryd, deploy, gateway-upgrade, import-accounts, import-world, the origin and the page's files); data in
+# /var/lib/souls; settings in /etc/souls, the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
 # souls-directory and souls-origin.
 # Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
 # writes today's units, users, data, proxy, DNS or firewall: it refuses, changing nothing, when anything it would
@@ -27,7 +27,7 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd deploy gateway-upgrade)
+PROGRAMS=(supervisor worldd gatewayd directoryd deploy gateway-upgrade import-accounts import-world)
 UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service)
 DROPIN=$UNITS/worldd@.service.d
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
@@ -251,12 +251,45 @@ check() {
   [ -f "$today/install.sh" ] || die "check runs in a repo checkout (no $today/install.sh)"
   tmp=$(mktemp -d) # global: the EXIT trap reads it
   trap 'rm -rf "$tmp"' EXIT
-  mkdir -p "$tmp/root" "$tmp/b/bin" "$tmp/b/web" "$tmp/b/units"
-  for p in "${PROGRAMS[@]}"; do : > "$tmp/b/bin/$p"; done
-  cp -R "$HERE/../origin" "$tmp/b/origin"
-  cp "$HERE"/units/* "$tmp/b/units/"
-  echo '<!doctype html>' > "$tmp/b/web/index.html"
+  mkdir -p "$tmp/root" "$tmp/bins" "$tmp/page"
+  for p in "${PROGRAMS[@]}"; do printf '%s\n' "$p" > "$tmp/bins/$p"; done
+  echo '<!doctype html>' > "$tmp/page/index.html"
+  bundle "$tmp/b" "$tmp/bins" "$tmp/page" > "$tmp/bundle"
   INSTALL_ROOT=$tmp/root bash "$0" plan --from "$tmp/b" > "$tmp/plan"
+  for p in import-accounts import-world; do
+    cmp -s "$tmp/bins/$p" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
+    [ -n "$(find "$tmp/b/bin/$p" -prune -perm 755)" ] || die "check: $p bundle mode is not 755"
+    grep -qxF "would file $LIB/$p 755 root:root" "$tmp/plan" || die "check: $p missing from plan"
+  done
+  (
+    # Exercise the same file comparison as apply, entirely under the fixture root. Root ownership is simulated;
+    # bytes and modes are real. Plan mode ensures even a regression cannot write to the machine installation.
+    R=$tmp/root
+    mkdir -p "$R$LIB" "$R$ETC"
+    printf '%s\n' "${OWNED[@]}" > "$R$STATE"
+    recorded "tree $LIB" || die "check: programs are not owned by the installation record"
+    preflight
+    perms() {
+      if [ -n "$(find "$1" -prune -perm 755)" ]; then echo '755 root root'; else echo '644 root root'; fi
+    }
+    for p in import-accounts import-world; do
+      CHANGES=0
+      ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root > "$tmp/missing"
+      [ "$CHANGES" = 1 ] || die "check: missing $p was not planned"
+      install -m 755 "$tmp/b/bin/$p" "$R$LIB/$p"
+      CHANGES=0
+      ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root
+      [ "$CHANGES" = 0 ] || die "check: identical $p is not inert"
+      printf 'changed\n' >> "$R$LIB/$p"
+      ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root > "$tmp/changed"
+      [ "$CHANGES" = 1 ] || die "check: changed $p was not planned"
+      install -m 644 "$tmp/b/bin/$p" "$R$LIB/$p"
+      CHANGES=0
+      ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root > "$tmp/mode"
+      [ "$CHANGES" = 1 ] || die "check: $p mode was not repaired"
+    done
+  )
+  echo 'check: both importers bundled at 755, recorded, planned, inert for identical bytes and repaired for changed bytes or mode'
   ours=$tmp/ours theirs=$tmp/theirs
   {
     awk '$1 == "would" && $2 ~ /^(dir|file)$/ {print "path " $3} $1 == "would" && $2 == "user" {print "user " $3}' "$tmp/plan"
@@ -297,7 +330,7 @@ bundle() {
   for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$p" "$out/bin/$p"; done
   rm -rf "$out/origin" "$out/web"
   mkdir -p "$out/origin"
-  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$out/origin/"
+  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
   cp -R "$page" "$out/web"
   cp "$HERE"/units/* "$out/units/"
   install -m 755 "$0" "$out/install.sh"

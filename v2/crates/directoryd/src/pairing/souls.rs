@@ -8,6 +8,11 @@
 //! - **A retire** is asked by the agent (with its token) or the page, and done only by the owner's signed-in POST
 //!   with `confirm`: the token's hash leaves the store and the gateway's tokens file, the Soul leaves the list, and a
 //!   pairing of it is refused `soul-retired`. An agent's ask changes nothing else.
+//! - **The world hears of both** (W11b, #3511): after a retire or a change of name or description, the Souls file
+//!   beside the gateway's tokens file (its name and `.souls`) is written whole, then renamed into place: `retired
+//!   <grant>` for each retired Soul, `words <grant> <name hex> <description hex>` (`-` for one not saved) for each
+//!   other Soul with words. The world reads it at its start and on each change (`worldd::directory`): it retires
+//!   the body, or gives it the words as its own describe.
 
 use super::{Pairing, is_name, is_soul_grant};
 use replica::encode::to_hex;
@@ -199,6 +204,51 @@ impl Pairing {
         }
     }
 
+    /// Writes the Souls file beside the gateway's tokens file (W11b), when there is one.
+    pub(super) fn write_souls(&self, db: &rusqlite::Connection) -> std::io::Result<()> {
+        let Some(tokens) = &self.tokens_file else {
+            return Ok(());
+        };
+        let mut name = tokens.file_name().unwrap_or_default().to_os_string();
+        name.push(".souls");
+        let file = tokens.with_file_name(name);
+        let mut text = String::from(
+            "# Written by directoryd (W11b): retired <grant> | words <grant> <name hex> <description hex>\n",
+        );
+        let mut q = db
+            .prepare(
+                "SELECT grant_text, retired_at IS NOT NULL, name, description FROM soul_profiles_v1
+                 WHERE retired_at IS NOT NULL OR name IS NOT NULL OR description IS NOT NULL ORDER BY 1",
+            )
+            .map_err(std::io::Error::other)?;
+        let rows = q
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, bool>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(std::io::Error::other)?;
+        let hex = |w: Option<String>| w.map_or_else(|| "-".to_owned(), |w| to_hex(w.as_bytes()));
+        for row in rows {
+            let (grant, retired, name, description) = row.map_err(std::io::Error::other)?;
+            if retired {
+                text.push_str(&format!("retired {grant}\n"));
+            } else {
+                text.push_str(&format!(
+                    "words {grant} {} {}\n",
+                    hex(name),
+                    hex(description)
+                ));
+            }
+        }
+        let tmp = file.with_extension("souls-tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(tmp, file)
+    }
+
     /// `account` sets its Soul's name and description.
     pub fn set_profile(&self, account: &str, grant: &str, p: &Profile) -> Result<(), &'static str> {
         self.owned(account, grant)?;
@@ -210,12 +260,13 @@ impl Pairing {
         }) {
             return Err("description");
         }
-        store(self.db.lock().expect("the store").execute(
+        let db = self.db.lock().expect("the store");
+        store(db.execute(
             "INSERT INTO soul_profiles_v1(grant_text, name, description) VALUES (?1, ?2, ?3)
              ON CONFLICT(grant_text) DO UPDATE SET name = COALESCE(?2, name), description = COALESCE(?3, description)",
             params![grant, p.name, p.description],
-        ))
-        .map(|_| ())
+        ))?;
+        self.write_souls(&db).map_err(|_| "souls-file")
     }
 
     /// `account` sets its Soul's picture: G6's check with a portrait's limits, then the hold point. The stripped
@@ -296,6 +347,7 @@ impl Pairing {
              ON CONFLICT(grant_text) DO UPDATE SET retired_at = ?2",
             params![grant, now as i64],
         ))?;
-        self.write_tokens(&db).map_err(|_| "tokens-file")
+        self.write_tokens(&db).map_err(|_| "tokens-file")?;
+        self.write_souls(&db).map_err(|_| "souls-file")
     }
 }

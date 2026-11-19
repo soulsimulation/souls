@@ -206,24 +206,24 @@ fn w9_settings_by_the_creator_alone_and_off_the_list_wakes_no_world() {
     let keys = store.keys();
     // Only its creator.
     let e = w
-        .settings("mine", person(2), Some(true), None)
+        .settings("mine", person(2), Some(true), None, None)
         .expect_err("not hers");
     assert_eq!(e.name, "not-the-creator");
     assert_eq!(
-        w.settings("nowhere", person(1), Some(true), None)
+        w.settings("nowhere", person(1), Some(true), None, None)
             .expect_err("missing")
             .name,
         "world-missing"
     );
     // Closed to visitors: the row says so on the list.
     let row = w
-        .settings("mine", person(1), None, Some(true))
+        .settings("mine", person(1), None, Some(true), None)
         .expect("closed");
     assert_eq!(row["closed"], true);
     assert_eq!(w.list().expect("a list")["worlds"][0]["closed"], true);
     // Off the list (A4): gone from it here and on a cold machine; nothing but the list's object is written, and no
     // world is started.
-    w.settings("mine", person(1), Some(true), None)
+    w.settings("mine", person(1), Some(true), None, None)
         .expect("off the list");
     assert_eq!(w.list().expect("a list")["worlds"], json!([]));
     let (gets2, forks2) = (AtomicUsize::new(0), Arc::new(AtomicUsize::new(0)));
@@ -235,10 +235,54 @@ fn w9_settings_by_the_creator_alone_and_off_the_list_wakes_no_world() {
     assert_eq!(forks.load(Ordering::SeqCst), 1, "the create's fork alone");
     // Read back by its creator, and back on the list.
     assert_eq!(
-        w.settings("mine", person(1), None, None).expect("read")["unlisted"],
+        w.settings("mine", person(1), None, None, None)
+            .expect("read")["unlisted"],
         true
     );
-    w.settings("mine", person(1), Some(false), None)
+    w.settings("mine", person(1), Some(false), None, None)
         .expect("listed");
     assert_eq!(w.list().expect("a list")["worlds"][0]["name"], "mine");
+}
+
+#[test]
+fn g10_a4_the_creators_list_picture_passes_g6_and_shows_on_a_cold_machine() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let w = worlds(&store, &gets, forks);
+    w.create(&ask("k1", "mine", "Ann"), person(1), 0, 10 * DAY)
+        .expect("made");
+    assert_eq!(
+        w.list().expect("a list")["worlds"][0]["picture"],
+        Json::Null
+    );
+    // G6's check: over the side is refused by its code, and a glTF is not a picture.
+    let wide = crate::pairing::tests::png(PICTURE_SIDE as u32 + 1, None);
+    assert!(list_picture(&wide).is_err());
+    assert!(list_picture(b"glTF").is_err());
+    let url = list_picture(&crate::pairing::tests::png(
+        16,
+        Some("Comment\0secret place"),
+    ))
+    .expect("a picture");
+    assert!(url.starts_with("data:image/png;base64,"));
+    // Only the creator sets it; then a cold machine's list shows it, from the list's one object.
+    let e = w
+        .settings("mine", person(2), None, None, Some(&url))
+        .expect_err("not hers");
+    assert_eq!(e.name, "not-the-creator");
+    w.settings("mine", person(1), None, None, Some(&url))
+        .expect("set");
+    let (gets2, forks2) = (AtomicUsize::new(0), Arc::new(AtomicUsize::new(0)));
+    let cold = worlds(&store, &gets2, forks2).list().expect("a list");
+    assert_eq!(cold["worlds"][0]["picture"], json!(url));
+    // A switch set later keeps it.
+    w.settings("mine", person(1), None, Some(true), None)
+        .expect("closed");
+    assert_eq!(
+        w.list().expect("a list")["worlds"][0]["picture"],
+        json!(url)
+    );
 }

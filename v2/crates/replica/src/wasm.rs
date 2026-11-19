@@ -11,14 +11,22 @@
 //!
 //! The daemon's copy of its scope is a [`WasmCopy`] (R5's `sync::Copy`): when the gateway cannot resume its stream it
 //! compares and descends through the gateway, one request at a time (R5b, #3164).
+//!
+//! A creator's daemon (G7, #2796) builds its edit intents with [`wire_edit`] (T10 rule 15) and checks a batch on its
+//! copy with [`edit_check`], which asks the world nothing: the structure checks of `edit::check`, by the same names,
+//! against the kinds the world pins (its kinds text, read with `world_model::parse_kinds`).
 
 use crate::apply::Replica;
+use crate::edit::{OPS_MOST, Op, Ref, Spot};
 use crate::effects::{Actor, Body, Effect, read_id};
 use crate::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use crate::ids::{Id, Scope, Version};
 use crate::intents::{Fallback, Hello, Intent, PROTOCOL, Target};
+use crate::pose::{Quat, Support, Vec3};
+use crate::rules::json;
 use crate::sync::{Copy, Descent, read_hashes, read_records, wire};
-use std::collections::BTreeMap;
+use crate::world_model::{Audience, Kind, parse_kinds, plain, takes};
+use std::collections::{BTreeMap, BTreeSet};
 use wasm_bindgen::prelude::{JsError, wasm_bindgen};
 
 fn js(r: impl std::fmt::Display) -> JsError {
@@ -144,7 +152,21 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     };
     // R10 (#2702): the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason or outcome.
     let (sequence, kind, name) = (field(2), field(3), field(4));
-    Ok(format!("answer {sequence} {version} {kind} {name}"))
+    // G7 (#2796): an edit's receipt maps each placed name to its id (6), as `1=<id>,2=<id>`; its refusal names the
+    // failing operation (7). Each `-` when the answer has none.
+    let names = match (kind.as_str(), a.get(&6)) {
+        ("1", Some(Value::Map(n))) if !n.is_empty() => n
+            .iter()
+            .map(|(k, v)| read_id(v).map(|id| format!("{k}={}", id_text(id))))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(js)?
+            .join(","),
+        _ => "-".to_owned(),
+    };
+    Ok(format!(
+        "answer {sequence} {version} {kind} {name} {names} {}",
+        field(7)
+    ))
 }
 
 /// The gateway's view frames (`gatewayd::views`, #3292): a subscribe in, an item or a refusal out.
@@ -227,7 +249,8 @@ fn json_value(v: &Value) -> Result<String, JsError> {
     })
 }
 
-/// An entry in a view item frame (R4's `{1: 1, 2: entry}`: an entry of a body in the interest set) as JSON, for the
+/// An entry in a view item frame (R4's `{1: 1, 2: entry}` or an addressed activity notification's
+/// `{1: 9, 2: entry bytes}`) as JSON, for the
 /// daemon to follow (R9b, #3201): `{"sequence":n,"at":n,"actor":"<id>"|null,"node":"<id>","changes":n,"events":
 /// [{"name":"..","fields":{"<n>":<value>}}]}`, `actor` null for the world or a creator; empty when the item is not
 /// an entry.
@@ -242,13 +265,34 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
     let Value::Map(mut item) = decode(&item).map_err(js)?.value else {
         return Err(JsError::new("item-not-a-record"));
     };
-    if item.get(&1) != Some(&Value::Uint(ENTRY_ITEM)) {
+    let addressed = item.get(&1) == Some(&Value::Uint(crate::speech::ADDRESSED));
+    if !addressed && item.get(&1) != Some(&Value::Uint(ENTRY_ITEM)) {
         return Ok(String::new());
     }
-    let entry = item
+    let mut entry = item
         .remove(&2)
         .ok_or_else(|| JsError::new("item-without-entry"))?;
+    if addressed {
+        let Value::Bytes(bytes) = entry else {
+            return Err(JsError::new("addressed-entry-not-bytes"));
+        };
+        entry = decode(&bytes).map_err(js)?.value;
+    }
     let e = Effect::read(entry).map_err(js)?;
+    if addressed
+        && (e
+            .events
+            .iter()
+            .flatten()
+            .any(|ev| ev.name.as_str() == crate::speech::SAID)
+            || !e
+                .events
+                .iter()
+                .flatten()
+                .any(|ev| crate::activity::addressed(ev.name.as_str(), &ev.fields).is_some()))
+    {
+        return Ok(String::new());
+    }
     let actor = match e.envelope.actor {
         Actor::Soul(id) => format!("\"{}\"", id_text(id)),
         Actor::Creator(_) | Actor::World => "null".to_owned(),
@@ -363,21 +407,44 @@ pub fn wire_intent(
             })
         })
         .collect::<Result<_, _>>()?;
+    let mut parameters: BTreeMap<_, _> = words
+        .map(|w| {
+            (
+                1,
+                Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
+            )
+        })
+        .into_iter()
+        .chain((!args.is_empty()).then_some((1, Value::Array(args))))
+        .chain(numbered(params.as_deref(), &node)?)
+        .collect();
+    // An activity kind is pinned as a name and a binary hash, like an edit's kind: no text exceeds I2's limit.
+    if matches!(verb.as_str(), "activity:offer" | "activity:propose")
+        && let Some(Value::Text(kind)) = parameters.get(&1)
+        && let Some((plain, hash)) = kind.as_str().split_once('@')
+    {
+        let bytes = from_hex(hash).map_err(|_| JsError::new("activity-kind-bad-pin"))?;
+        if plain.is_empty()
+            || plain.len() > crate::intent_decode::LIMITS.text_bytes as usize
+            || bytes.len() != 34
+            || bytes[..2] != [0x12, 0x20]
+            || hash != to_hex(&bytes)
+        {
+            return Err(JsError::new("activity-kind-bad-pin"));
+        }
+        parameters.insert(
+            1,
+            Value::Array(vec![
+                Value::Text(Name::new(plain).ok_or_else(|| JsError::new("activity-kind-bad-pin"))?),
+                Value::Bytes(bytes),
+            ]),
+        );
+    }
     let intent = Intent {
         actor: Actor::Soul(id),
         verb,
         target,
-        parameters: words
-            .map(|w| {
-                (
-                    1,
-                    Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
-                )
-            })
-            .into_iter()
-            .chain((!args.is_empty()).then_some((1, Value::Array(args))))
-            .chain(numbered(params.as_deref(), &node)?)
-            .collect(),
+        parameters,
         sequence,
         basis,
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
@@ -387,8 +454,478 @@ pub fn wire_intent(
         body: None,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
+    crate::intent_decode::decode(&bytes).map_err(js)?;
+    Ok(bytes)
+}
+
+fn id_of(t: &str) -> Option<Id> {
+    let (s, c) = t.split_once('-')?;
+    Id::new(Scope(from_hex(s).ok()?.try_into().ok()?), c.parse().ok()?)
+}
+
+/// A node an operation names, in the JSON the daemon passes: an id's text, or an integer naming a node placed earlier.
+fn ref_of(v: Option<&json::Value>) -> Result<Ref, String> {
+    match v {
+        Some(json::Value::Int(n)) => u64::try_from(*n)
+            .map(Ref::New)
+            .map_err(|_| "a name is 0 or more".into()),
+        Some(json::Value::Str(t)) => id_of(t)
+            .map(Ref::Node)
+            .ok_or_else(|| format!("{t} is not an id")),
+        _ => Err("a node is an id or a name placed earlier in the batch".into()),
+    }
+}
+
+fn int_of(v: Option<&json::Value>, what: &str) -> Result<i64, String> {
+    match v {
+        Some(json::Value::Int(n)) => i64::try_from(*n).map_err(|_| format!("{what} is too large")),
+        _ => Err(format!("{what} is an integer")),
+    }
+}
+
+fn uint_of(v: Option<&json::Value>, what: &str) -> Result<u64, String> {
+    u64::try_from(int_of(v, what)?).map_err(|_| format!("{what} is 0 or more"))
+}
+
+/// A spot: `at` `[x, y, z]` in micrometres in the parent's frame and an optional `slot`, facing as the parent does.
+fn spot_of(o: &json::Value) -> Result<Spot, String> {
+    let at = o.get("at").and_then(json::Value::arr).unwrap_or(&[]);
+    let axis = |k: usize| at.get(k).map_or(Ok(0), |v| int_of(Some(v), "at's numbers"));
+    let slot = match o.get("slot") {
+        None | Some(json::Value::Null) => None,
+        v => Some(uint_of(v, "slot")?),
+    };
+    Ok(Spot {
+        slot,
+        position: Vec3::new(axis(0)?, axis(1)?, axis(2)?),
+        orientation: Quat::IDENTITY,
+        support: if slot.is_some() {
+            Support::Slot
+        } else {
+            Support::None
+        },
+    })
+}
+
+fn field_value(v: &json::Value) -> Result<Value, String> {
+    match v {
+        json::Value::Int(n) if *n >= 0 => u64::try_from(*n)
+            .map(Value::Uint)
+            .map_err(|e| e.to_string()),
+        json::Value::Int(n) => u64::try_from(-1 - *n)
+            .map(Value::Nint)
+            .map_err(|e| e.to_string()),
+        json::Value::Bool(b) => Ok(Value::Uint(u64::from(*b))),
+        json::Value::Str(t) => Name::new(t)
+            .map(Value::Text)
+            .ok_or_else(|| format!("{t:?} is not a name (ASCII, at most 64)")),
+        _ => Err("a field's value is an integer, true or false, or a name".into()),
+    }
+}
+
+/// The batch the daemon passes as JSON: `[{"op": "place", "name": 1, "kind": "<namespace:name@hash>", "in": <node>,
+/// "at": [x, y, z], "slot": n, "fields": {"<n>": value}}, {"op": "move", "node": <node>, "at": [..]}, {"op": "set",
+/// "node": <node>, "field": n, "value": v}, {"op": "remove", "node": <node>}]`, positions in micrometres.
+fn ops_of(text: &str) -> Result<Vec<Op>, String> {
+    let v = json::parse(text)?;
+    let list = v.arr().ok_or("a batch is a list of operations")?;
+    if list.is_empty() || list.len() > OPS_MOST {
+        return Err(format!("1 to {OPS_MOST} operations"));
+    }
+    list.iter()
+        .map(|o| {
+            let node = || ref_of(o.get("node"));
+            Ok(match o.get("op").and_then(json::Value::str) {
+                Some("place") => Op::Place {
+                    name: uint_of(o.get("name"), "a place's name")?,
+                    kind: o
+                        .get("kind")
+                        .and_then(json::Value::str)
+                        .and_then(Name::new)
+                        .ok_or("a place's kind is its full name")?,
+                    parent: ref_of(o.get("in"))?,
+                    at: spot_of(o)?,
+                    audience: Audience::Everyone,
+                    fields: o
+                        .get("fields")
+                        .and_then(json::Value::obj)
+                        .unwrap_or(&[])
+                        .iter()
+                        .map(|(k, v)| {
+                            let k = k.parse().map_err(|_| "a field is a number")?;
+                            Ok((k, field_value(v)?))
+                        })
+                        .collect::<Result<_, String>>()?,
+                },
+                Some("move") => Op::Move {
+                    node: node()?,
+                    at: spot_of(o)?,
+                },
+                Some("set") => Op::Set {
+                    node: node()?,
+                    field: uint_of(o.get("field"), "a set's field")?,
+                    to: field_value(o.get("value").ok_or("a set's value")?)?,
+                },
+                Some("remove") => Op::Remove { node: node()? },
+                _ => return Err("op is place, move, set or remove".into()),
+            })
+        })
+        .collect()
+}
+
+/// A creator's edit intent (T10 rule 15, G7 #2796): `ops` (the JSON [`ops_of`] reads) from the actor
+/// `<scope>-<counter>` (a creator; a Soul when `creator` is false, which the world refuses), under `sequence`, planned
+/// against `basis` (a version's bytes; its sequence is the planned version). Read back as the world reads it.
+#[wasm_bindgen(js_name = wireEdit)]
+pub fn wire_edit(
+    scope: &[u8],
+    counter: u64,
+    creator: bool,
+    sequence: u64,
+    basis: &[u8],
+    ops: &str,
+) -> Result<Vec<u8>, JsError> {
+    let scope = Scope(
+        scope
+            .try_into()
+            .map_err(|_| JsError::new("scope-not-16-bytes"))?,
+    );
+    let id = Id::new(scope, counter).ok_or_else(|| JsError::new("id-counter-exhausted"))?;
+    let ops = ops_of(ops).map_err(|e| JsError::new(&format!("edit-batch: {e}")))?;
+    let intent = Intent {
+        actor: if creator {
+            Actor::Creator(id)
+        } else {
+            Actor::Soul(id)
+        },
+        verb: Name::new(crate::edit::wire::VERB).ok_or_else(|| JsError::new("verb"))?,
+        target: None,
+        parameters: crate::edit::wire::parameters(&ops),
+        sequence,
+        basis: decode(basis).map_err(js)?.value,
+        expiry: i64::MAX,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+    };
+    let bytes = encode(&intent.to_value()).map_err(js)?;
     Intent::read(&bytes).map_err(js)?;
     Ok(bytes)
+}
+
+fn json_str(s: &str) -> String {
+    let mut out = String::from('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if u32::from(c) < 0x20 => out.push_str(&format!("\\u{:04x}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Ordinary kinds text names its references together. An imported world's lines are independently named instead
+/// (`import_eden::name_kind`), and may hold several revisions of one plain name. Keep each under its full hash.
+fn creator_kinds(text: &str) -> Result<BTreeMap<String, Kind>, crate::world_model::Refusal> {
+    let mut kinds = parse_kinds(text).or_else(|_| -> Result<_, crate::world_model::Refusal> {
+        let mut kinds = BTreeMap::new();
+        for line in text.lines() {
+            kinds.extend(parse_kinds(line)?);
+        }
+        Ok(kinds)
+    })?;
+    // C3 extends body admission at boot without revising imported kind definitions. The world's export names
+    // those exact full place kinds; both description and local checks apply the same in-memory extension.
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("# souls-boot-body"))
+    {
+        let target = line
+            .strip_prefix("# souls-boot-body ")
+            .filter(|s| !s.is_empty() && s.split_whitespace().count() == 1 && *s == s.trim())
+            .ok_or_else(|| {
+                crate::world_model::Refusal::Source("malformed boot-body admission".into())
+            })?;
+        let kind = kinds
+            .get_mut(target)
+            .filter(|k| k.owner == "place")
+            .ok_or_else(|| {
+                crate::world_model::Refusal::Source(
+                    "boot-body target must be an existing full place kind".into(),
+                )
+            })?;
+        kind.children.insert("body".into());
+    }
+    // Runtime activity pins are hashes of role definitions, not serialized T3 kind lines. Project only the
+    // world's explicit boot registration/admission; no imported definition is rewritten or rehashed.
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("# souls-boot-activity"))
+    {
+        let bad =
+            || crate::world_model::Refusal::Source("malformed boot-activity projection".into());
+        let fields: Vec<_> = line
+            .strip_prefix("# souls-boot-activity ")
+            .ok_or_else(bad)?
+            .split_whitespace()
+            .collect();
+        let [target, activity] = fields.as_slice() else {
+            return Err(bad());
+        };
+        let (base, hash) = activity.split_once('@').ok_or_else(bad)?;
+        if base.is_empty()
+            || Name::new(base).is_none()
+            || hash.len() != 68
+            || !hash.starts_with("1220")
+            || !hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(bad());
+        }
+        if kinds.get(*target).is_none_or(|kind| kind.owner != "place") {
+            return Err(crate::world_model::Refusal::Source(
+                "boot-activity target must be an existing full place kind".into(),
+            ));
+        }
+        let runtime = Kind {
+            owner: "activity".into(),
+            children: Default::default(),
+            slots: Default::default(),
+            hands: None,
+        };
+        if kinds.get(*activity).is_some_and(|kind| kind != &runtime) {
+            return Err(crate::world_model::Refusal::Source(
+                "boot-activity collides with an existing kind".into(),
+            ));
+        }
+        kinds.insert((*activity).to_owned(), runtime);
+        kinds
+            .get_mut(*target)
+            .expect("validated place")
+            .children
+            .insert(base.to_owned());
+    }
+    Ok(kinds)
+}
+
+/// The kinds a world pins, from its kinds text, as JSON `{"<full name>": {"owner": .., "admits": [..], "slots":
+/// {"<n>": [..]}}}`: what a creator may place, and in what.
+#[wasm_bindgen(js_name = editKinds)]
+pub fn edit_kinds(kinds: &str) -> Result<String, JsError> {
+    let kinds = creator_kinds(kinds).map_err(|e| JsError::new(&format!("kinds-text: {e:?}")))?;
+    let list = |l: &BTreeSet<String>| l.iter().map(|n| json_str(n)).collect::<Vec<_>>().join(",");
+    let out: Vec<String> = kinds
+        .iter()
+        .map(|(name, k)| {
+            let slots: Vec<String> = k
+                .slots
+                .iter()
+                .map(|(n, l)| format!(r#""{n}":[{}]"#, list(l)))
+                .collect();
+            format!(
+                r#"{}:{{"owner":{},"admits":[{}],"slots":{{{}}}}}"#,
+                json_str(name),
+                json_str(&k.owner),
+                list(&k.children),
+                slots.join(",")
+            )
+        })
+        .collect();
+    Ok(format!("{{{}}}", out.join(",")))
+}
+
+/// A node on the copy: its kind's full name and its parent.
+struct Held {
+    kind: String,
+    parent: Option<Id>,
+}
+
+/// The copy's nodes, read from its roots down by the records' hashes.
+fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
+    let mut out = BTreeMap::new();
+    let mut todo: Vec<Vec<u8>> = copy.roots().values().cloned().collect();
+    while let Some(h) = todo.pop() {
+        let Some(bytes) = copy.record(&h) else {
+            continue;
+        };
+        let Value::Map(m) = decode(bytes).map_err(|e| e.to_string())?.value else {
+            return Err("a record is a map".into());
+        };
+        let id = read_id(m.get(&1).ok_or("a record's id")?).map_err(|e| e.to_string())?;
+        let kind = match m.get(&2) {
+            Some(Value::Text(k)) => k.as_str().to_owned(),
+            _ => return Err("a record's kind".into()),
+        };
+        let parent = m
+            .get(&3)
+            .map(read_id)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        if let Some(Value::Array(cs)) = m.get(&10) {
+            todo.extend(cs.iter().filter_map(|c| match c {
+                Value::Bytes(b) => Some(b.clone()),
+                _ => None,
+            }));
+        }
+        out.insert(id, Held { kind, parent });
+    }
+    Ok(out)
+}
+
+fn ref_text(r: Ref) -> String {
+    match r {
+        Ref::Node(id) => id_text(id),
+        Ref::New(n) => format!("name {n}"),
+    }
+}
+
+type Why = (&'static str, String);
+
+/// Checks a batch (the JSON [`wire_edit`] takes) on the copy alone, asking the world nothing (G7, #2796): the
+/// structure checks of `edit::check`, by its refusal names, with the world's kinds text (empty: the kinds are not
+/// known here, and only the nodes are checked). Answers JSON `{"ok": true, "kinds": bool}` or `{"ok": false, "code":
+/// "edit.<name>", "op": <place in the batch or null>, "detail": ".."}`. Not here: whether a node changed since the
+/// planned version (the world's `edit.stale`) and the safety rule (G2), which need the world's stamps and bodies.
+#[wasm_bindgen(js_name = editCheck)]
+pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
+    let no = |op: Option<usize>, code: &str, detail: &str| {
+        format!(
+            r#"{{"ok":false,"code":{},"op":{},"detail":{}}}"#,
+            json_str(code),
+            op.map_or("null".to_owned(), |i| i.to_string()),
+            json_str(detail)
+        )
+    };
+    let ops = match ops_of(ops) {
+        Ok(o) => o,
+        Err(e) => return no(None, "edit.batch", &e),
+    };
+    let kinds: Option<BTreeMap<String, Kind>> = if kinds.trim().is_empty() {
+        None
+    } else {
+        match creator_kinds(kinds) {
+            Ok(k) => Some(k),
+            Err(e) => return no(None, "edit.kinds-text", &format!("{e:?}")),
+        }
+    };
+    let nodes = match held(&copy.copy) {
+        Ok(n) => n,
+        Err(e) => return no(None, "edit.copy", &e),
+    };
+    // Each name placed so far, with its kind and parent, and every node the batch has removed.
+    let mut new: BTreeMap<u64, (String, Ref)> = BTreeMap::new();
+    let mut gone: BTreeSet<Ref> = BTreeSet::new();
+    for (i, op) in ops.iter().enumerate() {
+        let named = |r: Ref| -> Result<(String, Option<Ref>), Why> {
+            if gone.contains(&r) {
+                let d = format!("{} is removed earlier in the batch", ref_text(r));
+                return Err(("edit.node-missing", d));
+            }
+            match r {
+                Ref::New(n) => new
+                    .get(&n)
+                    .map(|(k, p)| (k.clone(), Some(*p)))
+                    .ok_or(("edit.name-unknown", format!("no place names {n}"))),
+                Ref::Node(id) => nodes
+                    .get(&id)
+                    .map(|h| (h.kind.clone(), h.parent.map(Ref::Node)))
+                    .ok_or_else(|| ("edit.node-missing", format!("{} is not here", id_text(id)))),
+            }
+        };
+        let admits = |parent: &str, child: &str, slot: Option<u64>| -> Result<(), Why> {
+            let Some(kinds) = &kinds else { return Ok(()) };
+            let (Some(pk), Some(ck)) = (kinds.get(parent), kinds.get(child)) else {
+                let d = format!("{} or {}", plain(parent), plain(child));
+                return Err(("edit.kind-unknown", d));
+            };
+            let list = match slot {
+                Some(s) => pk.slots.get(&s),
+                None => Some(&pk.children),
+            };
+            if list.is_some_and(|l| takes(l, plain(child), &ck.owner)) {
+                return Ok(());
+            }
+            let d = format!(
+                "{} does not admit {} (slot {slot:?})",
+                plain(parent),
+                plain(child)
+            );
+            Err(("edit.child-not-admitted", d))
+        };
+        let step = || -> Result<(), Why> {
+            match op {
+                Op::Place {
+                    name,
+                    kind,
+                    parent,
+                    at,
+                    ..
+                } => {
+                    if kinds
+                        .as_ref()
+                        .is_some_and(|k| !k.contains_key(kind.as_str()))
+                    {
+                        let d = format!("{} is not pinned by this world", kind.as_str());
+                        return Err(("edit.kind-unknown", d));
+                    }
+                    if new.contains_key(name) {
+                        return Err(("edit.name-twice", format!("{name} is placed twice")));
+                    }
+                    let (pk, _) = named(*parent)?;
+                    admits(&pk, kind.as_str(), at.slot)
+                }
+                Op::Move { node, at } => {
+                    let (k, parent) = named(*node)?;
+                    let parent =
+                        parent.ok_or(("edit.root", "the zone's root does not move".to_owned()))?;
+                    let (pk, _) = named(parent)?;
+                    admits(&pk, &k, at.slot)
+                }
+                Op::Set { node, .. } => named(*node).map(|_| ()),
+                Op::Remove { node } => match named(*node)? {
+                    (_, None) => Err(("edit.root", "the zone's root is not removed".to_owned())),
+                    _ => Ok(()),
+                },
+            }
+        };
+        if let Err((code, detail)) = step() {
+            return no(Some(i), code, &detail);
+        }
+        match op {
+            Op::Place {
+                name, kind, parent, ..
+            } => {
+                new.insert(*name, (kind.as_str().to_owned(), *parent));
+            }
+            Op::Remove { node } => {
+                // Its subtree goes with it: every held node and placed name below it.
+                let mut stack = vec![*node];
+                while let Some(r) = stack.pop() {
+                    gone.insert(r);
+                    stack.extend(
+                        nodes
+                            .iter()
+                            .filter(|(_, h)| h.parent.map(Ref::Node) == Some(r))
+                            .map(|(id, _)| Ref::Node(*id)),
+                    );
+                    stack.extend(
+                        new.iter()
+                            .filter(|(_, (_, p))| *p == r)
+                            .map(|(n, _)| Ref::New(*n)),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    format!(r#"{{"ok":true,"kinds":{}}}"#, kinds.is_some())
 }
 
 /// E26: `wireIntent`'s numbered parameters, read from a JSON object; a text is an id when it reads as one.
@@ -424,7 +961,6 @@ fn numbered(
         .map(|(k, v)| Ok((k.parse().map_err(|_| bad())?, one(v, node)?)))
         .collect()
 }
-
 fn sync_map(frame: &[u8]) -> Result<BTreeMap<u64, Value>, JsError> {
     match decode(frame).map_err(js)?.value {
         Value::Map(m) => match m.get(&wire::REFUSED) {

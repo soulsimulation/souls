@@ -3,25 +3,32 @@
 // header, credentials, ids); O18's release line becomes today's release item; /ops keeps its CSP and noindex and makes
 // no outgoing request when served. Run: node --test v2/tools/origin/
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createOrigin } from './origin.mjs';
 import { serveOps } from './ops.mjs';
+import { build } from '../../client/served/build.mjs';
 
 let dir, server, base;
 const line = (o) => `${JSON.stringify(o)}\n`;
 
 before(async () => {
   dir = mkdtempSync(join(tmpdir(), 'v2-site-'));
-  for (const d of ['views', 'web', 'data']) mkdirSync(join(dir, d));
+  for (const d of ['views', 'web', 'data', 'pkg']) mkdirSync(join(dir, d));
   writeFileSync(join(dir, 'web', 'changelog.html'), '<!doctype html><title>Changelog · Souls</title><section id="v0.140">0.140</section>');
   writeFileSync(join(dir, 'web', 'changelog.md'), '# Changelog\n\n## 0.140 (2026-11-19)\n');
-  ({ server } = createOrigin(join(dir, 'views'), { web: join(dir, 'web'), data: join(dir, 'data') }));
+  writeFileSync(join(dir, 'pkg', 'replica.js'), 'export const test = true;');
+  writeFileSync(join(dir, 'pkg', 'replica_bg.wasm'), Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]));
+  build({ out: join(dir, 'client'), version: '0.0.0', pkg: join(dir, 'pkg') });
+  ({ server } = createOrigin(join(dir, 'views'), { web: join(dir, 'web'), data: join(dir, 'data'), client: join(dir, 'client') }));
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -32,6 +39,54 @@ after(() => {
 });
 
 const feed = (q = '', headers = {}) => fetch(`${base}/v1/feed${q}`, { headers });
+
+test('served client: world GET/HEAD routes serve the installed bytes and matching config, and refuse writes or missing files', async () => {
+  const config = await (await fetch(`${base}/w/eden/v1/config`)).json();
+  const eden = await (await fetch(`${base}/w/eden/eden.mjs`)).arrayBuffer();
+  assert.equal(createHash('sha256').update(Buffer.from(eden)).digest('hex'), config.soulClient.sha256);
+  for (const f of config.soulClient.files) {
+    for (const method of ['GET', 'HEAD']) {
+      const r = await fetch(`${base}/w/new-town/${f.name}?upgrade=1`, { method });
+      assert.equal(r.status, 200, `${method} ${f.name}`);
+      assert.equal(r.headers.get('cache-control'), 'no-cache');
+      assert.equal(Number(r.headers.get('content-length')), f.bytes);
+      const body = Buffer.from(await r.arrayBuffer());
+      if (method === 'HEAD') assert.equal(body.length, 0);
+      else assert.deepEqual(body, readFileSync(join(dir, 'client', f.name)));
+    }
+  }
+  const head = await fetch(`${base}/w/eden/v1/config`, { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), '');
+  for (const method of ['GET', 'HEAD']) {
+    const guide = await fetch(`${base}/w/eden/llms.txt`, { method });
+    assert.equal(guide.status, 200);
+    assert.equal(guide.headers.get('cache-control'), 'no-cache');
+    assert.equal(await guide.text(), method === 'HEAD' ? '' : readFileSync(join(dir, 'client', 'instructions.md'), 'utf8'));
+  }
+  assert.equal((await fetch(`${base}/w/eden/eden.mjs`, { method: 'POST' })).status, 405);
+  assert.equal((await fetch(`${base}/w/eden/soul-client.json`)).status, 404, 'manifest is not a public client address');
+  const missing = createOrigin(join(dir, 'views'), { client: join(dir, 'missing') }).server;
+  await new Promise((ok) => missing.listen(0, '127.0.0.1', ok));
+  try {
+    for (const name of ['eden.mjs', 'creator.md', 'v1/config']) assert.equal((await fetch(`http://127.0.0.1:${missing.address().port}/w/eden/${name}`)).status, 404, name);
+  } finally { missing.close(); }
+});
+
+test('served client: the install bundle carries a self-contained origin adapter', async () => {
+  const bins = join(dir, 'bins'), bundle = join(dir, 'bundle');
+  mkdirSync(bins);
+  for (const p of ['supervisor', 'worldd', 'gatewayd', 'directoryd', 'deploy', 'gateway-upgrade', 'import-accounts', 'import-world']) writeFileSync(join(bins, p), '#!/bin/sh\n');
+  execFileSync('bash', [fileURLToPath(new URL('../ops/install.sh', import.meta.url)), 'bundle', bundle, bins, join(dir, 'web')]);
+  const { createOrigin: installed } = await import(pathToFileURL(join(bundle, 'origin', 'origin.mjs')));
+  const s = installed(join(dir, 'views'), { client: join(dir, 'client') }).server;
+  await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
+  try {
+    const r = await fetch(`http://127.0.0.1:${s.address().port}/w/eden/eden.mjs`);
+    assert.equal(r.status, 200);
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), readFileSync(join(dir, 'client', 'eden.mjs')));
+  } finally { s.close(); }
+});
 
 test('A2: the feed in today\'s shape: empty, then oldest first, replaced items hidden, cursor paging, refusals', async () => {
   const r0 = await feed();
