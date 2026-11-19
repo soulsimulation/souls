@@ -34,7 +34,9 @@ const procs = [];
 const report = {};
 let rt;
 
-async function waitFor(f, ms = 8000) {
+// Bounds are generous: CI runs this beside cargo builds, and a daemon's start can take seconds there. Each wait polls
+// for its condition and returns as soon as it holds; none is a fixed sleep standing in for one.
+async function waitFor(f, ms = 30_000) {
   const until = Date.now() + ms;
   for (;;) {
     const v = await f();
@@ -45,7 +47,8 @@ async function waitFor(f, ms = 8000) {
 }
 
 const ask = (req, ms = 5000) => request(rt.socket, req, ms);
-const start = () => call(home, SOUL, { op: 'status' }, { pkg: PKG });
+const start = () => call(home, SOUL, { op: 'status' }, { pkg: PKG, within: 30_000, ms: 30_000 });
+const connected = () => waitFor(async () => (await ask({ op: 'status' }, 30_000)).connected);
 const marks = () => JSON.parse(readFileSync(rt.state, 'utf8')).schedule?.marks ?? {};
 const arrivals = () => readFileSync(join(dir, 'world', 'arrivals.txt'), 'utf8').trim().split('\n').filter(Boolean).length;
 const souls = (...args) => promisify(execFile)(process.execPath, [join(here, '../cli/souls.mjs'), ...args],
@@ -85,7 +88,7 @@ before(async () => {
   chmodSync(join(home, 'credentials.json'), 0o600);
   rt = runtimeOf(home, SOUL);
   await start();
-  await waitFor(async () => (await ask({ op: 'status' })).connected, 10_000);
+  await connected();
   await ask({ op: 'wait', seconds: 0 }); // what happened at sign-in, taken
 });
 
@@ -166,25 +169,28 @@ test('A2: a killed daemon, restarted, fires each occurrence once', async () => {
   const before = arrivals(), seq0 = (await ask({ op: 'status' })).sequence;
   const one = addEntry(file, { when: 'in 2s', does: `act r2:switch_on:${LAMP}` }, Date.now());
   await waitFor(() => marks()[one.key]?.sequence);
+  // Killed once the world has its intent: a mark is written before the send, so a kill at the mark could take the
+  // intent with it (at most once is the contract), and the world would never count it.
+  await waitFor(() => arrivals() - before === 1);
   await kill(); // just after it was sent
-  // While it is down: an entry due 4 s from now, and one the crashed daemon had marked but not sent.
-  const two = addEntry(file, { when: 'in 4s', does: `act r2:switch_off:${LAMP}` }, Date.now());
+  // While it is down: an entry due 4 s from now (late up to a minute, so a slow restart still sends it rather than
+  // telling it missed), and one the crashed daemon had marked but not sent.
+  const two = addEntry(file, { when: 'in 4s', does: `act r2:switch_off:${LAMP}`, missed: 'late 1m' }, Date.now());
   const three = addEntry(file, { when: 'in 3s', does: `act r2:switch_on:${LAMP}` }, Date.now());
   const st = JSON.parse(readFileSync(rt.state, 'utf8'));
   st.schedule.marks[three.key] = { at: Date.now(), sequence: st.sequence + 1 };
   writeFileSync(rt.state, JSON.stringify(st));
   await start();
-  await waitFor(async () => (await ask({ op: 'status' })).connected, 10_000);
+  await connected();
   await waitFor(() => marks()[two.key]?.sequence);
+  await waitFor(() => arrivals() - before === 2);
   await kill(); // and once more, then up again: nothing fires twice
   await start();
-  await waitFor(async () => (await ask({ op: 'status' })).connected, 10_000);
-  await sleep(3000);
+  await connected();
+  await sleep(3000); // a quiet spell: anything that would fire twice has had its beats
   const seq = (await ask({ op: 'status' })).sequence;
   report.a2 = { sent: seq - seq0, arrived: arrivals() - before };
   assert.equal(seq - seq0, 2, 'two intents: the first and the one due while down; the marked one never');
-  await waitFor(() => arrivals() - before === 2);
-  await sleep(1000);
   assert.equal(arrivals() - before, 2);
 });
 

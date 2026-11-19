@@ -21,3 +21,7 @@ skills = { path = "../skills" }
 # #2688); `worldd serve` reads a world's facts file with N1's loader (C1, #3365).
 import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }
+
+[dev-dependencies]
+# O20b (#3523): a served world's shipped stores read back by O20's restore, as O12's restore runs it.
+backup = { path = "../../tools/ops/backup" }

@@ -24,11 +24,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// The child program: this build's, or `ASSETS_CHECK` (to measure an optimised build).
+/// The child program: this build's, or `ASSETS_CHECK` (to measure an optimised build). Its time bound is 60 s, not
+/// the 5 s default: here it only stops a hang, since a loaded runner's debug child can pass 5 s with no fault. A3
+/// kills a child at 1 ms to test the bound, and its speed bar holds the largest file to the default.
 fn checker() -> Checker {
-    Checker::new(
-        std::env::var("ASSETS_CHECK").unwrap_or_else(|_| env!("CARGO_BIN_EXE_assets-check").into()),
-    )
+    Checker {
+        time: Duration::from_secs(60),
+        ..Checker::new(
+            std::env::var("ASSETS_CHECK")
+                .unwrap_or_else(|_| env!("CARGO_BIN_EXE_assets-check").into()),
+        )
+    }
 }
 
 // ---------------------------------------------------------------- fixtures
@@ -480,10 +486,14 @@ fn a3_child_bounds_and_peak_on_the_largest_file() {
         peak as f64 / 1e6,
         child.memory >> 20,
         times[1].as_millis(),
-        child.time.as_millis()
+        assets::child::TIME.as_millis()
     );
     assert!(peak < child.memory, "under the memory bound");
-    assert!(times[1] < child.time, "under the time bound");
+    // The default time bound is a speed bar (real time): asserted only in the speed-bar step (ci.sh,
+    // V2_SPEED_BARS=1, release).
+    if std::env::var_os("V2_SPEED_BARS").is_some() {
+        assert!(times[1] < assets::child::TIME, "under the time bound");
+    }
     // Over the memory bound: the child ends, the file is refused, the parent goes on.
     let tight = Checker {
         memory: 8 << 20,

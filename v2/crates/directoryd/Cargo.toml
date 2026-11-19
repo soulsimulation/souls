@@ -7,6 +7,8 @@ description = "The directory (Engine v2, #2635): where a world runs, when it wak
 
 [dependencies]
 replica = { path = "../replica" }
+# A Soul's picture passes G6's check and hold point (W11).
+assets = { path = "../assets" }
 # RS256 signatures (the session check), the random account and principal ids (W1); the object store's request
 # signature (AWS SigV4: SHA-256 and HMAC) and the in-memory store's ETags (W8).
 ring = "0.17"
