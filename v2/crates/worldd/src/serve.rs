@@ -14,6 +14,7 @@
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
+//! - `log.text/`: K16's text store, every word said in the world (O20b, #3523).
 //! - `views/`: V1's stream of the zone's root (full, everyone), written by a view tier of the process's own, and
 //!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
 //!   folder (history is V3's, not written here yet), which the page reads for `?world=`.
@@ -421,6 +422,14 @@ fn serve(args: &[String]) -> R<()> {
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
+    // K16's text store on the disk, `<dir>/log.text` beside the log as `gateway-link` keeps it (O20b, #3523): a
+    // world's words outlive a restart, and O20's shipper has them to ship.
+    let text = sim::text::Store::open_dir(
+        &dir.join("log.text"),
+        replica::ids::Minter::new(worldd::words::scope(built.root.scope())),
+    )
+    .map_err(|e| format!("the text store: {}", refusal(e)))?;
+    cfg.text = Some(Arc::new(text));
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.root.scope()));
