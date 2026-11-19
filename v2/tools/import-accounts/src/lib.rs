@@ -14,6 +14,9 @@
 //!   its world's arrival point, the first thing in the new history. Its name, description and look (its body's
 //!   family, today's preset and the SHA-256 of today's body) are kept with its account. A retired Soul is not brought.
 //! - **Each world** keeps its creator, as the account and its principal id.
+//! - **Ownership (V13c):** each Soul brought is recorded as its account's (`account_grants_v1`, its `soul-…` grant and
+//!   its own body for the page to follow), and each creator account as owning its `creator-…` grant, so the owner's
+//!   web session exchanges for a view of them.
 //! - **Private:** the table of old to new Soul ids, the aliases and the Souls' details stay in the account store for
 //!   R18. The births and the directory hold no account id; the row prints counts only.
 //! - **A second run changes nothing:** ids already minted are read back, every write is "insert if absent", and the
@@ -23,6 +26,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use directoryd::accounts::view::{follow_of, grant_text};
 use directoryd::accounts::{principal_text, random, store::Store as Accounts};
 use directoryd::directory::Directory;
 use directoryd::directory::store::{Object, R as DirR, Store, When, refuse};
@@ -504,6 +508,23 @@ pub fn import(set: &Path, extra: &[PathBuf], out: &Path) -> R<Report> {
                 "INSERT OR IGNORE INTO world_creators_v1(world, lineage, account_id) VALUES (?1, ?2, ?3)",
                 params![w.world, to_hex(&lineage), acct],
             ))?;
+            // V13c: the account owns what it creates, as the creator grant of its principal (no body to follow).
+            let principal: Option<String> = sq(tx
+                .query_row(
+                    "SELECT principal_id FROM account_principals_v1 WHERE account_id = ?1",
+                    [&acct],
+                    |r| r.get(0),
+                )
+                .optional())?;
+            if let Some(p) = principal
+                .as_deref()
+                .and_then(directoryd::accounts::principal_from_text)
+            {
+                sq(tx.execute(
+                    "INSERT OR IGNORE INTO account_grants_v1(account_id, grant_text, follow) VALUES (?1, ?2, NULL)",
+                    params![acct, grant_text("creator", p)],
+                ))?;
+            }
             row.creator = true;
         }
         let mut births = Vec::new();
@@ -541,6 +562,12 @@ pub fn import(set: &Path, extra: &[PathBuf], out: &Path) -> R<Report> {
                 "INSERT OR IGNORE INTO souls_v1(soul, account_id, name, description, family, preset, look)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![principal_text(soul), acct, s.name, s.description, family, preset, hash],
+            ))?;
+            // V13c: the account owns the Soul, and its page follows the Soul's own body (the session exchange).
+            let grant = grant_text("soul", soul);
+            sq(tx.execute(
+                "INSERT OR IGNORE INTO account_grants_v1(account_id, grant_text, follow) VALUES (?1, ?2, ?3)",
+                params![acct, grant, follow_of(&grant)],
             ))?;
             // W8: one record, at this world; a second run finds it there.
             let here = Place::World { lineage, zone };

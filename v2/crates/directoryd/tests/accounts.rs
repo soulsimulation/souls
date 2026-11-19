@@ -581,7 +581,7 @@ fn v13b_a1_a_session_exchanges_for_a_view_token_of_what_the_account_owns() {
     let expires = got["expires"].as_u64().unwrap();
     assert_eq!(
         body,
-        format!("view.{expires}.{},{}", soul_grant(1), soul_grant(4)),
+        format!("view.{expires}.{}/{}", soul_grant(1), soul_grant(4)),
         "scoped to what Ada owns"
     );
     let k = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &VIEW_KEY);
@@ -666,4 +666,73 @@ fn v13b_a3_an_expired_or_signed_out_session_gets_no_view_token() {
     assert_eq!(s3, 200);
     assert_eq!((s4, c["refused"].as_str()), (401, Some("session-revoked")));
     assert!(b.get("token").is_none() && c.get("token").is_none());
+}
+
+/// V13c (#3418) A1: a completed pairing (W2) records the Soul, and the body the page follows (the Soul's own), under
+/// the approving account; the account's session then exchanges for a view token of it.
+#[test]
+fn v13c_a1_a_completed_pairing_records_the_soul_under_the_approving_account() {
+    use directoryd::accounts::serve::{App, run};
+    use directoryd::accounts::view::{ViewKey, follow_of};
+    use directoryd::pairing::Pairing;
+    let dir = scratch("v13c-a1");
+    let pairing = Pairing::open(&dir.join("pairing.sqlite"), None, "http://127.0.0.1:1").unwrap();
+    let app = Arc::new(App {
+        store: Store::open(&dir.join("accounts.sqlite")).unwrap(),
+        verifier: None,
+        test_sign_in: true,
+        view_key: Some(ViewKey::new(&VIEW_KEY)),
+        origin: None,
+        pairing: Some(pairing),
+        log: Mutex::new(Box::new(std::io::sink())),
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let served = app.clone();
+    std::thread::spawn(move || run(listener, served));
+
+    // Before: Ada owns nothing, so her session gets no view.
+    let ada = json!({"name": "Ada"}).to_string();
+    let (s0, _, b0) = request(&addr, "POST", "/v1/account/view-token", None, &ada);
+    assert_eq!((s0, b0["refused"].as_str()), (404, Some("nothing-owned")));
+    // A daemon asks for a new Soul; Ada approves once on the card.
+    let ask =
+        json!({"secret_hash": "ab".repeat(32), "device": "laptop", "label": "agent", "new": true});
+    let (s1, _, asked) = request(&addr, "POST", "/v1/pair/request", None, &ask.to_string());
+    assert_eq!(s1, 200);
+    let approve = json!({"test_person": "Ada", "code": asked["code"], "confirm": true});
+    let (s2, _, approved) = request(
+        &addr,
+        "POST",
+        "/v1/pair/approve",
+        None,
+        &approve.to_string(),
+    );
+    assert_eq!(s2, 200, "{approved}");
+    let grant = approved["soul"].as_str().unwrap().to_string();
+
+    let account = app
+        .store
+        .sign_in(start::TEST_ISSUER, "Ada", 0)
+        .unwrap()
+        .account;
+    let owned = app.store.grants(&account).unwrap();
+    println!("v13c a1: Ada owns {owned:?}");
+    assert!(follow_of(&grant).is_some());
+    assert_eq!(owned, vec![(grant.clone(), follow_of(&grant))]);
+    // Bea, who approved nothing, owns nothing.
+    let bea = app
+        .store
+        .sign_in(start::TEST_ISSUER, "Bea", 0)
+        .unwrap()
+        .account;
+    assert!(app.store.grants(&bea).unwrap().is_empty());
+    // After: Ada's session exchanges for a view of her paired Soul, following its own body.
+    let (s3, _, view) = request(&addr, "POST", "/v1/account/view-token", None, &ada);
+    assert_eq!(s3, 200);
+    assert!(view["token"].as_str().unwrap().contains(&grant));
+    assert_eq!(
+        view["owned"],
+        json!([{"grant": grant, "follow": follow_of(&grant)}])
+    );
 }

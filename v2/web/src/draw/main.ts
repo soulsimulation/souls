@@ -7,6 +7,7 @@ import { PlaybackClock } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { SocketSource, chooseFollow, exchange, type Session } from '../source/socket.ts';
+import { providerSession } from '../source/signin.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
@@ -18,11 +19,16 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
 const address = new URLSearchParams(location.search).get('stream');
 const moment = readMoment(location.hash); // V9: a link to a moment opens history
-// V13/V13b: the owner's near-live view, from the web session alone: `directory` is the directory's origin, `gateway`
-// the world's socket. The session is the provider's (a fresh token asked of its script each time), or `as=<test
-// person>` on a local world. The session exchanges for a view token held in memory; no token is ever in the address.
-const q = new URLSearchParams(location.search), provider = (globalThis as any).Clerk?.session;
-const session: Session | null = provider ? { bearer: () => provider.getToken() } : q.get('as') ? { testName: q.get('as')! } : null;
+// V13/V13b/V13c: the owner's near-live view, from the web session alone: `directory` is the directory's origin,
+// `gateway` the world's socket. The session is the provider's, its script loaded behind today's configuration
+// (`signin.ts`; a fresh token asked of it each time), or `as=<test person>` on a local world. The session exchanges for
+// a view token held in memory; no token is ever in the address.
+const q = new URLSearchParams(location.search);
+const signIn = async (): Promise<Session | null> => {
+  const env = { document, href: location.href, global: globalThis as any, navigate: (u: string) => location.assign(u) };
+  const provider = await providerSession((globalThis as any).__simConfig ?? {}, env);
+  return provider ?? (q.get('as') ? { testName: q.get('as')! } : null);
+};
 let near: SocketSource | null = null;
 
 // The GL renderer's name, from a throwaway context, picks the tier before the real one is made (antialiasing is fixed
@@ -92,13 +98,15 @@ else if (!address) status.textContent = 'no stream: open this page with ?stream=
 else {
   live(address);
   const directory = q.get('directory'), gateway = q.get('gateway');
-  if (directory && gateway && session) exchange(directory, session).then((g) => {
+  if (directory && gateway) signIn().then(async (session) => {
+    if (!session) return;
+    const g = await exchange(directory, session);
     const follow = chooseFollow(g.owned, q.get('follow'));
     if (!follow) return void (error = 'no view: the account has no Soul to follow');
     near = new SocketSource({ url: gateway, token: g.token, expires: g.expires, follow, renew: () => exchange(directory, session) });
     near.start({ pointer: () => {}, part: (p) => world.apply([], [], p.samples), error: (m) => (error = m) });
     (globalThis as any).v2.near = near;
-  }, (e) => (error = e instanceof Error ? e.message : 'no view'));
+  }).catch((e) => (error = e instanceof Error ? e.message : 'no view'));
 }
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
