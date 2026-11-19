@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Souls v2 · the creator's panel</title>
+    <style>
+      html, body { margin: 0; height: 100%; font: 14px/1.45 ui-sans-serif, system-ui, sans-serif; background: #f4f1ea; color: #222; }
+      body { display: grid; grid-template-columns: 1fr 300px; }
+      #map { width: 100%; height: 100vh; display: block; touch-action: none; cursor: grab; }
+      aside { padding: 14px; border-left: 1px solid #d8d2c4; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+      h1 { font-size: 16px; margin: 0; }
+      #status { font-size: 13px; color: #555; }
+      .tools { display: none; flex-direction: column; gap: 8px; }
+      body.creator .tools { display: flex; }
+      body.creator #signin { display: none; }
+      body.refused #status { color: #a33; }
+      button, select, input { font: inherit; padding: 4px 8px; }
+      #place.on { background: #3f6e9e; color: #fff; }
+      #warn { color: #a33; min-height: 1.4em; }
+      ol { margin: 0; padding-left: 18px; }
+      li.ok { color: #2f6b3a; }
+      li.refused { color: #a33; }
+      #prayers ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+      #prayers li { background: #fffaf0; border: 1px solid #e3d9c2; border-radius: 6px; padding: 8px; }
+      #prayers p { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      #prayers form { display: flex; flex-wrap: wrap; gap: 6px; }
+      #prayers input { flex: 1 1 100%; }
+      #prayers .h { font-weight: 600; }
+      .refused { color: #a33; }
+    </style>
+  </head>
+  <body>
+    <canvas id="map"></canvas>
+    <aside>
+      <h1>The creator's panel</h1>
+      <form id="signin">
+        <label>Signed in as <input id="who" value="maker" size="12"></label>
+        <button>Open the panel</button>
+      </form>
+      <div id="status">not signed in</div>
+      <div class="tools">
+        <label>Kind <select id="kind"></select></label>
+        <button id="place" type="button">Place: click the map</button>
+        <div>Drag a thing to move it. Each release sends one edit.</div>
+        <section id="prayers" aria-label="Prayers waiting for an answer"></section>
+        <div id="warn"></div>
+        <div>Batches, newest first</div>
+        <ol id="batches"></ol>
+      </div>
+    </aside>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

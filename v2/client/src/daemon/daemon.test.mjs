@@ -182,7 +182,11 @@ test('A2: after each of ten forced drops it is current within 2 s, and no intent
 });
 
 test('R5b A2, A3: told stream.cannot-resume, it compares and descends through the gateway, ends current and resumes', async () => {
-  const before = await status();
+  // The previous answer can precede its replica update: establish the current OFF root before missing the next ON.
+  const before = await waitFor(async () => {
+    const s = await status(), roots = Object.values(s.roots);
+    return s.connected && roots.length === 1 && roots[0] === placeHash() && s;
+  }, 30_000);
   const snapshot = before.syncs.find((x) => x.kind === 'snapshot');
   assert.ok(snapshot, 'its first sign-in took its scope whole');
   // A cut long enough that resume fails: the relay drops all the gateway sends while the world answers more intents
@@ -209,10 +213,11 @@ test('R5b A2, A3: told stream.cannot-resume, it compares and descends through th
   assert.ok(resync.fetched < resync.held, `fetched ${resync.fetched} of ${resync.held}`);
   assert.ok(resync.got < resync.heldBytes, `got ${resync.got} B, a snapshot ${resync.heldBytes} B`);
   // The stream carries on from the hashes' version: an intent is answered, and the next drop resumes.
-  const answered = s.answered;
   const a = await request(rt.socket, { op: 'act', verb: 'r2:switch_off', target: LAMP });
   outputs.push(JSON.stringify(a));
-  await waitFor(async () => (await status()).answered === answered + 1);
+  const answer = await waitFor(async () =>
+    (await request(rt.socket, { op: 'read' })).events.find((e) => e.kind === 'answer' && e.sequence === a.sequence));
+  assert.equal(answer.answer, 1, JSON.stringify(answer));
   relay.cut();
   const after = await waitFor(async () => { const x = await status(); return x.connected && x.resumed > s.resumed && x; });
   assert.equal(after.cannotResume, s.cannotResume, 'resumed, not synced again');

@@ -11,7 +11,9 @@ are `v2/tools/ops/src/drill.rs`; the ten-kill test is `v2/tools/ops/o3-kill.sh`.
 start claims again (`shipping::take_over`, as `ops world --restart`) and ships from the mark plus one, so the history
 read from record 0 holds every record once, in order (`crates/worldd/tests/serve.rs`, three SIGKILLs). It also
 archives its history (V3) under `h/<world>/<lineage>/`, which the page's history plays
-(`v2/tools/ops/o3b-history.mjs`). Without a store it ships nothing, as before.
+(`v2/tools/ops/o3b-history.mjs`), with the open day's event index written as it stands every 5 s, and names it in
+`views/world.json` (`"history": "../../s/h/<world>/<lineage>/"`), where pairing finds it for a Soul's `history`
+(R16b, #3480). Without a store it ships nothing, as before.
 
 **The store's configuration** (O3c, #3529). One setting form for history, checkpoints, directory claims and O20b's
 backups (`SOULS_BACKUP_URL`): the offsite bucket, keys from the environment and never in the URL, never printed.
