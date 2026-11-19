@@ -15,6 +15,7 @@ import { runtimeOf } from '../home/home.mjs';
 import { encode } from '../history/day.mjs';
 import { addEntry, parseLine } from './schedule.mjs';
 import { calendarOf, nextWorldTime, realDeadline, worldDue } from './world.mjs';
+import { durableReceipt } from './durable-proof.mjs';
 
 const TICK = 50_000, HOUR = 3_600_000_000;
 const v2 = resolve(dirname(new URL(import.meta.url).pathname), '../../..');
@@ -255,10 +256,9 @@ test('A1/A2: the pub at 08:00 and published shop opening fire within one world t
       assert.equal(sends.length, 1, 'exactly one actual send per persisted occurrence');
       const sentWorldUs = worldNow(w.clock, sends[0].t * 1000), lateWorldUs = sentWorldUs - at;
       assert.ok(lateWorldUs >= 0 && lateWorldUs <= TICK, `${e.id}: actual send ${lateWorldUs} world µs after its moment`);
-      const receipt = delivered.find((part) => Array.isArray(part.get(3)) && part.get(3).some((r) => r.get(2) === sequence
-        && idText(r.get(1)[1]) === tokens[0].split('.')[0].slice(5)));
-      assert.ok(receipt, 'the exact sequence has a durable answer');
-      report.triggers.push({ id: e.id, targetWorldUs: at, sentWorldUs, lateWorldUs, sequence, receiptWorldTick: receipt.get(5), receiptWorldUs: receipt.get(5) * TICK });
+      const { part: receipt, entries: receiptEntries } = durableReceipt(delivered, tokens[0].split('.')[0].slice(5), sequence);
+      report.triggers.push({ id: e.id, targetWorldUs: at, sentWorldUs, lateWorldUs, sequence, receiptEntries,
+        receiptWorldTick: receipt.get(5), receiptWorldUs: receipt.get(5) * TICK });
     }
     console.log(JSON.stringify(report));
   } catch (err) {
