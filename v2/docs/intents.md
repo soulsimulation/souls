@@ -118,7 +118,7 @@ completed intent with the same form decoder as the gateway before sending it.
     containing building of both places; `closed` and `open` contain 1–64 distinct authored solid rows each (nine
     bounded integers per row). Only exact unique `closed` rows are replaced, leaving unrelated solids intact.
     The check prepares the resulting wall field off-clock, and BUILDSAFE judges that same committed field. Leaf
-    field 28 is engine-owned `[wall,closed,open]`; removal restores its patch only while the owned open rows still
+    field 29 is engine-owned `[wall,closed,open]`; removal restores its patch only while the owned open rows still
     match (`edit.doorway-wall-changed`), with intervening wall writes refused `edit.stale` by the normal stamp check.
     Imported doors have no inferred restoration: their creator supplies an explicit wall Set in the same removal
     batch. The JSON batch uses `wall`, `closed` and `open` with the same meaning. A node is an id, or the
