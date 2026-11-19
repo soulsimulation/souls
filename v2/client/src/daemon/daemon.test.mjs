@@ -182,7 +182,11 @@ test('A2: after each of ten forced drops it is current within 2 s, and no intent
 });
 
 test('R5b A2, A3: told stream.cannot-resume, it compares and descends through the gateway, ends current and resumes', async () => {
-  const before = await status();
+  // The previous answer can precede its replica update: establish the current OFF root before missing the next ON.
+  const before = await waitFor(async () => {
+    const s = await status(), roots = Object.values(s.roots);
+    return s.connected && roots.length === 1 && roots[0] === placeHash() && s;
+  }, 30_000);
   const snapshot = before.syncs.find((x) => x.kind === 'snapshot');
   assert.ok(snapshot, 'its first sign-in took its scope whole');
   // A cut long enough that resume fails: the relay drops all the gateway sends while the world answers more intents
