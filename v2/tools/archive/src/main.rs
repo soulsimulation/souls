@@ -8,6 +8,8 @@
 //!   with O3's shipping, at R2's price (in memory; `v2/docs/archive.md`).
 //! - `cargo run -p archive --release -- corpus <dir>`: writes entry one of V18's corpus.
 //! - `cargo run -p archive --release -- seek [hours]`: V4's seek table and index sizes (`seek_bench.rs`).
+//! - `cargo run -p archive --release -- pack <work dir> <out dir> [at µs ...]`: a stream-check run's log archived into
+//!   a folder the v2 page serves as history (V9), and each moment's state hash as `seek` gives it.
 //!
 //! `record` and `restore` use the S3-compatible store named by `ARCHIVE_STORE_ENDPOINT`, `_BUCKET`, `_REGION`
 //! (default `auto`), `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY` and `_PREFIX`: a local stand-in or a scratch bucket,
@@ -310,6 +312,70 @@ fn corpus(dir: &Path) -> R<()> {
     Ok(())
 }
 
+/// `pack <work dir> <out dir> [at µs ...]` (V9, #2719): a stream-check run's K4 log (`<work dir>/log`, a copy if it
+/// still runs) archived into `<out dir>` as files, each store key a path, with the T6 header as `header`; then each
+/// moment's state hash as the archive's own `seek` gives it.
+fn pack(work: &Path, out: &Path, ats: &[i64]) -> R<()> {
+    let io = |e: std::io::Error| replica::effects::Refusal {
+        name: "io",
+        detail: e.to_string(),
+    };
+    let none = |name: &'static str| replica::effects::Refusal {
+        name,
+        detail: String::new(),
+    };
+    let mut dirs = vec![work.join("www")];
+    let mut header = None;
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).map_err(io)?.flatten() {
+            if e.path().is_dir() {
+                dirs.push(e.path());
+            } else if d.ends_with("headers") {
+                header = Some(std::fs::read(e.path()).map_err(io)?);
+            }
+        }
+    }
+    let header = replica::effects::Header::read(&header.ok_or_else(|| none("no-header"))?)?;
+    let kind = header
+        .kinds
+        .iter()
+        .find(|k| k.as_str().starts_with("souls:place@"))
+        .cloned();
+    let (_, rec) = Log::open(FileStore::open(&work.join("log"))?, 1)?;
+    let store = Shared(Arc::new(Memory::default()));
+    let mut a = Archiver::open(
+        store.clone(),
+        "",
+        &header,
+        header.zone,
+        kind.ok_or_else(|| none("no-root"))?,
+    )?;
+    for (i, r) in rec.records.into_iter().enumerate() {
+        a.push(rec.first + i as u64, r)?;
+    }
+    a.flush()?;
+    for k in store.0.keys().into_iter().chain(["header".to_owned()]) {
+        let bytes = if k == "header" {
+            header.stored().to_vec()
+        } else {
+            store.get(&k)?.map(|o| o.bytes).unwrap_or_default()
+        };
+        let path = out.join(&k);
+        std::fs::create_dir_all(path.parent().unwrap_or(out)).map_err(io)?;
+        std::fs::write(&path, bytes).map_err(io)?;
+    }
+    for &at in ats {
+        let s = archive::seek(&store, "", &header, at)?;
+        println!(
+            "at {at} state hash {} ({} bytes, {} requests)",
+            to_hex(&s.state.hash()?.to_bytes()),
+            s.bytes,
+            s.requests
+        );
+    }
+    Ok(())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let arg = |i: usize| args.get(i).cloned().unwrap_or_default();
@@ -319,6 +385,14 @@ fn main() {
         "count" => count(),
         "corpus" => corpus(Path::new(&arg(2))),
         "seek" => seek_bench::run(arg(2).parse().unwrap_or(24)),
+        "pack" => pack(
+            Path::new(&arg(2)),
+            Path::new(&arg(3)),
+            &args[4.min(args.len())..]
+                .iter()
+                .filter_map(|a| a.parse().ok())
+                .collect::<Vec<_>>(),
+        ),
         _ => refuse(
             "usage",
             "record <dir> | restore <hash> | count | corpus <dir> | seek [hours]",

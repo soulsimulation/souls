@@ -7,7 +7,7 @@
 //!
 //! - **2, owner:** `thing`, `family` (a body's family) or `place`. Kinds are not only for things.
 //! - **3, state:** fields by stable number, each `{1: name, 2: type, 3: default, 4: audience}`, and for an `enum`
-//!   `5: [values]`. Types are `bool` (0 or 1), `int`, `duration` (whole microseconds), `enum` and `text`. Numbers are
+//!   `5: [values]`. An amount (an `int`) may give `6: its unit`, `7: its min` and `8: its max`, its capacity (F4). Types are `bool` (0 or 1), `int`, `duration` (whole microseconds), `enum` and `text`. Numbers are
 //!   whole: the encoding has no floats, so a client and the world never disagree over rounding.
 //! - **4, links:** the link types it takes part in, `{1: name, 2: from (a category or a kind), 3: most, 4: most_per}`
 //!   (B17, #3338). [`Kinds::check_link`] reads them: a link's type against the kinds at its ends.
@@ -65,6 +65,10 @@ pub struct Field {
     pub ty: Type,
     pub default: Value,
     pub audience: Name,
+    /// An amount's unit (`g`, `count`, ...), its least value and its capacity, whole numbers in that unit (F4).
+    pub unit: Option<Name>,
+    pub min: Option<i64>,
+    pub max: Option<i64>,
 }
 
 /// What a point is for.
@@ -499,6 +503,14 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             )));
         }
         let audience = text(e.get(&4)).ok_or_else(|| why("4, the audience, is text".into()))?;
+        let unit = e
+            .get(&6)
+            .map(|u| text(Some(u)).ok_or_else(|| why("6, the unit, is text".into())));
+        let bound = |k: u64, what: &str| {
+            e.get(&k)
+                .map(|v| int(v).ok_or_else(|| why(format!("{k}, the {what}, is a whole number"))))
+                .transpose()
+        };
         state.insert(
             n,
             Field {
@@ -506,6 +518,9 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
                 ty,
                 default,
                 audience,
+                unit: unit.transpose()?,
+                min: bound(7, "min")?,
+                max: bound(8, "max")?,
             },
         );
     }
@@ -656,6 +671,17 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             .collect(),
     };
 
+    // How a thing moves (section 18, `{1: how}`): held in one or two hands, or not held (B4, #2739).
+    let hands = match s.get(&crate::world_model::SECTION_MOTION) {
+        None => None,
+        Some(Value::Map(m)) => match text(m.get(&1)).as_ref().map(Name::as_str) {
+            Some("one_hand") => Some(1),
+            Some("two_hands") => Some(2),
+            _ => None,
+        },
+        Some(_) => return Err(bad("kind-motion", 18, None, "{1: how}".into())),
+    };
+
     let body = match s.get(&body::SECTION_BODY) {
         None => None,
         Some(v) => {
@@ -679,6 +705,7 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             owner,
             children,
             slots,
+            hands,
         },
         slots: named_slots,
         links,

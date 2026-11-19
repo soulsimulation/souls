@@ -299,7 +299,13 @@ fn fixture_view(key: Key) -> Vec<(i64, Value)> {
 fn a_view_that_skips_private_entries_plays_to_the_end() {
     let h = header();
     let note = encode(&Id::new(Scope([0xee; 16]), 20).expect("an id").to_value()).expect("bytes");
-    for (node, level) in [(0, Level::Full), (0, Level::Sampled), (1, Level::Full)] {
+    for (node, level) in [
+        (0, Level::Full),
+        (0, Level::Sampled),
+        (1, Level::Full),
+        (7, Level::Full),
+        (7, Level::Sampled),
+    ] {
         let key = Key {
             node: Id::new(Scope([0xee; 16]), node).expect("an id"),
             level,
@@ -315,13 +321,16 @@ fn a_view_that_skips_private_entries_plays_to_the_end() {
         let hb = fs::read(root.join(stream::header_path(&h))).expect("the header");
         let mut p = Player::start(&hb).expect("a player");
         let mut declared = Vec::new();
+        let mut carried = 0;
         for i in 0..w.written().parts {
             let bytes = fs::read(w.dir().join(i.to_string())).expect("a part");
             let sp = StreamPart::read(&bytes).expect("reads");
             assert!(
-                !sp.part.windows(note.len()).any(|x| x == note.as_slice()),
+                !sp.part.windows(note.len()).any(|x| x == note.as_slice())
+                    && !bytes.windows(note.len()).any(|x| x == note.as_slice()),
                 "the public stream names aa:1's note"
             );
+            carried += sp.carried.len();
             if !sp.gaps.is_empty() {
                 let at = p.replica().version();
                 let bare = StreamPart {
@@ -356,20 +365,91 @@ fn a_view_that_skips_private_entries_plays_to_the_end() {
             let played = p.play(&bytes).expect("plays");
             assert_ne!(played.hash, Some(false), "part {i}'s hash");
         }
+        let held = replica::hash::state_hash(p.replica().tree()).expect("a hash");
         println!(
-            "view_out gaps: node ee:{node} level {}: {} records, {} parts, declared gaps {declared:?}, played to version {}",
+            "view_out gaps: node ee:{node} level {}: {} records, {} parts, declared gaps {declared:?}, {carried} subtrees carried in, played to version {}, state hash {held} (writer's {})",
             level.number(),
             records.len(),
             w.written().parts,
-            p.replica().version()
+            p.replica().version(),
+            replica::hash::state_hash(w.copy.tree()).expect("a hash"),
         );
         assert!(!declared.is_empty(), "the view skipped aa:1's entries");
         assert_eq!(
-            replica::hash::state_hash(p.replica().tree()).expect("a hash"),
+            held,
             replica::hash::state_hash(w.copy.tree()).expect("a hash")
         );
+        if node == 7 {
+            // #3248 A2: the crate's view held neither leave; the key and the cushion are carried in and land on it.
+            assert_eq!(carried, 2, "the key and the cushion are carried in");
+            let tree = p.replica().tree();
+            for landed in [6, 12] {
+                let n = tree
+                    .handle(Id::new(Scope([0xee; 16]), landed).expect("an id"))
+                    .and_then(|h| tree.node(h))
+                    .expect("landed");
+                assert_eq!(n.parent(), Some(key.node), "ee:{landed} is on the crate");
+            }
+        }
         let _ = fs::remove_dir_all(&root);
     }
+}
+
+/// #3248 A3: a revision 1 carried record (no destination) still reads, and the writer still refuses it by name, as
+/// it does a carried record no arrive follows (aa:1's view of the crate: its note came in a public cushion).
+#[test]
+fn a_carried_record_without_a_destination_or_an_arrive_is_refused() {
+    let h = header();
+    let crate_ = Id::new(Scope([0xee; 16]), 7).expect("an id");
+    let public = Key {
+        node: crate_,
+        level: Level::Full,
+        audience: Audience::Everyone,
+    };
+    let old: Vec<Value> = fixture_view(public)
+        .into_iter()
+        .map(|(_, r)| match r {
+            Value::Map(mut m) => {
+                if let Some(Value::Map(c)) = m.get_mut(&0) {
+                    c.remove(&4);
+                }
+                Value::Map(m)
+            }
+            r => r,
+        })
+        .collect();
+    let first = old
+        .iter()
+        .find_map(|r| replica::views::Carried::read(r).expect("reads"))
+        .expect("a carried record");
+    assert_eq!(first.pose, None, "revision 1 names no destination");
+    assert_eq!(
+        first.flight(&h).expect_err("no destination").name,
+        "carried-no-destination"
+    );
+    let root = scratch("carried-rev1");
+    let mut w = Writer::create(&root, &h, &public, (0, 0)).expect("a writer");
+    let e = old
+        .iter()
+        .try_for_each(|r| w.frame(&frame(vec![r.clone()])))
+        .expect_err("refused");
+    assert_eq!(e.name, "stream-carried", "{e}");
+    let private = Key {
+        audience: Audience::Of(Id::new(Scope([0xaa; 16]), 1).expect("an id")),
+        ..public
+    };
+    let mut w = Writer::create(&root, &h, &private, (0, 0)).expect("a writer");
+    let e = fixture_view(private)
+        .into_iter()
+        .try_for_each(|(_, r)| w.frame(&frame(vec![r])))
+        .and_then(|()| w.flush())
+        .expect_err("refused");
+    println!(
+        "view_out: a revision 1 carried record and one with no arrive: both {}",
+        e.name
+    );
+    assert_eq!(e.name, "stream-carried", "{e}");
+    let _ = fs::remove_dir_all(&root);
 }
 
 /// A2 at R1's replica: a view's part applied as if it skipped nothing is refused as `sequence-gap`.
