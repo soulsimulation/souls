@@ -6,19 +6,19 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_PKG, request } from '../daemon/client.mjs';
-import { runtimeOf } from '../home/home.mjs';
-import { build } from '../../served/build.mjs';
-import { answer } from '../../served/serve.mjs';
+import { DEFAULT_PKG, request } from '../src/daemon/client.mjs';
+import { runtimeOf } from '../src/home/home.mjs';
+import { build } from './build.mjs';
+import { answer } from './serve.mjs';
 
-const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -56,8 +56,8 @@ before(async () => {
   served.bad = join(dir, 'served-bad');
   build({ out: served.v1, version: '1.0.0', pkg: PKG });
   build({ out: served.v2, version: '1.1.0', pkg: PKG });
-  // The changed bundle: 1.1.0's description, with one byte of its client changed.
-  cpSync(served.v2, served.bad, { recursive: true });
+  // The changed bundle: 1.2.0's description, with one byte of its client changed.
+  build({ out: served.bad, version: '1.2.0', pkg: PKG });
   const b = readFileSync(join(served.bad, 'eden.mjs'));
   b[b.length - 2] ^= 1;
   writeFileSync(join(served.bad, 'eden.mjs'), b);
@@ -133,7 +133,7 @@ test('A1: the one line, in an empty folder, ends with a running client', async (
   const gwPort = await freePort();
   const asked = await eden('pair', `${site}?gateway=ws://127.0.0.1:${gwPort}/v2/ws`);
   assert.equal(asked.step, 'approve', JSON.stringify(asked));
-  assert.deepEqual(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).client.site, site, 'the world\'s address is the home\'s one site');
+  assert.deepEqual(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).clientSite, site, 'the world\'s address is the home\'s one site');
   assert.deepEqual(readFileSync(join(home, 'bin/eden.mjs')), readFileSync(join(served.v1, 'eden.mjs')));
 
   const approve = await fetch(`${directory}/v1/pair/approve`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: asked.code, confirm: true, test_person: 'owner' }) });
@@ -162,7 +162,7 @@ test('A3, A4: upgrade hands over with no intent sent twice; --rollback restores 
   assert.equal(up.kept, '1.0.0');
   assert.deepEqual(up.handedOver, [{ soul, started: true, ok: true }]);
   assert.deepEqual(readFileSync(join(home, 'bin/eden.mjs')), readFileSync(join(served.v2, 'eden.mjs')));
-  assert.deepEqual(readFileSync(join(home, 'bin/previous/eden.mjs')), readFileSync(join(served.v1, 'eden.mjs')));
+  assert.deepEqual(readFileSync(join(home, 'bin/eden-1.0.0.mjs')), readFileSync(join(served.v1, 'eden.mjs')));
   assert.match(commandOf(daemonPid(soul)), /bin\/client\/1\.1\.0-/, 'the new daemon runs the new client');
   assert.equal((await eden('version')).version, '1.1.0', 'the folder copy hands off to the newer one');
 
@@ -178,12 +178,13 @@ test('A3, A4: upgrade hands over with no intent sent twice; --rollback restores 
   console.log(`A4: arrivals ${JSON.stringify(lines.map((l) => l.split(' ')[1]))}`);
 
   const back = await eden('upgrade', '--rollback');
-  assert.deepEqual(back.rolledBack, { from: '1.1.0', to: '1.0.0' }, JSON.stringify(back));
+  assert.deepEqual({ ok: back.ok, from: back.from, to: back.to }, { ok: true, from: '1.1.0', to: '1.0.0' }, JSON.stringify(back));
+  assert.deepEqual(back.handedOver, [{ soul, started: true, ok: true }]);
   assert.deepEqual(readFileSync(join(home, 'bin/eden.mjs')), readFileSync(join(served.v1, 'eden.mjs')), 'the first version, byte for byte');
   assert.deepEqual(readFileSync(join(home, 'bin/skill.md')), readFileSync(join(served.v1, 'skill.md')));
-  assert.equal(existsSync(join(home, 'bin/previous')), false);
+  assert.equal(existsSync(join(home, 'bin/eden-1.0.0.mjs')), false);
   assert.match(commandOf(daemonPid(soul)), /bin\/client\/1\.0\.0-/);
-  assert.equal((await eden('upgrade', '--rollback')).code, 'upgrade.nothing-kept', 'one version kept back, rolled back once');
+  assert.equal((await eden('upgrade', '--rollback')).code, 'nothing-to-roll-back', 'one version kept back, rolled back once');
   await waitFor(async () => (await request(rt.socket, { op: 'status' })).connected);
   assert.equal(arrived().length, 3, 'a second hand-over sent nothing');
 });

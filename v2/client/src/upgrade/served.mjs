@@ -66,7 +66,7 @@ export async function servedBy(site) {
     if (e instanceof Refused) throw e;
     throw new Refused('upgrade.not-a-world', '/v1/config is not JSON');
   }
-  if (typeof c?.version !== 'string' || !c.skill || !Array.isArray(c.files)) throw new Refused('upgrade.not-a-world', '/v1/config has no soulClient');
+  if (typeof c?.version !== 'string') throw new Refused('upgrade.not-a-world', '/v1/config has no soulClient');
   return c;
 }
 
@@ -163,6 +163,7 @@ function prune(home, cfg) {
 export async function firstInstall({ home, url }) {
   if (siteOfHome(readConfig(home))) return null;
   const site = siteOf(url), c = await servedBy(site);
+  if (!Array.isArray(c.files) || !c.skill) throw new Refused('upgrade.not-served', `${site} serves no client files`);
   return install(home, site, c, await fetchChecked(site, c));
 }
 
@@ -176,7 +177,7 @@ export async function libFor(home, version) {
   const site = siteOfHome(cfg);
   if (!site) return null;
   const c = await servedBy(site);
-  if (c.version !== version) return null;
+  if (c.version !== version || !Array.isArray(c.files)) return null;
   const lib = putLib(home, await fetchChecked(site, c, LIB));
   updateConfig(home, (x) => { x.clientSite ??= site; x.clientLib = { ...x.clientLib, [version]: lib }; });
   return lib;
@@ -215,7 +216,8 @@ export async function upgradeBundle({ home, version }) {
   const cfg = readConfig(home), site = siteOfHome(cfg), have = cfg.client ?? version;
   if (!site) return { current: true, version: have, note: 'no site yet: pair a Soul first' };
   const c = await servedBy(site);
-  if (!newer(c.version, have) || c.version === cfg.skippedClient) {
+  // A world that serves no files beside its client (today's, or a stand-in) has nothing for this step.
+  if (!Array.isArray(c.files) || !c.skill || !newer(c.version, have) || c.version === cfg.skippedClient) {
     await libFor(home, have).catch(() => null);
     return { current: true, version: have, served: c.version };
   }

@@ -6,9 +6,11 @@
 //   copy is newer (docs/architecture/api.md, "Soul client upgrade", frozen).
 // - The modules are unpacked once into `.souls/bin/client/<version>-<digest>/` and the thin command runs from there,
 //   so its daemon and its pairing start from files, as they do in the repository.
-// - `pair <world url>` in a home with no client first installs it (`../src/upgrade/upgrade.mjs`): the world's address
+// - `pair <world url>` in a home with no client first installs it (`../src/upgrade/served.mjs`): the world's address
 //   becomes the home's one trusted site, and the client, the skill and the daemon's library are fetched from it, each
-//   checked by length and hash before anything is written. `upgrade` and `upgrade --rollback` are there too.
+//   checked by length and hash before anything is written. A command whose version has no library yet fetches it.
+// - `upgrade`: a newer client from that site (served.mjs), then R18's `main` (`../src/upgrade/upgrade.mjs`), which
+//   brings the home's Souls of today's client across; `upgrade --rollback`: R18's `main`, then the daemons hand over.
 // - `version` prints the version.
 
 import { spawnSync } from 'node:child_process';
@@ -61,20 +63,30 @@ if (!existsSync(join(root, '.whole'))) {
   try { renameSync(tmp, root); } catch (e) { rmSync(tmp, { recursive: true, force: true }); if (!existsSync(join(root, '.whole'))) throw e; }
 }
 
-const upgrading = () => import(pathToFileURL(join(root, 'v2/client/src/upgrade/upgrade.mjs')).href);
+const served = () => import(pathToFileURL(join(root, 'v2/client/src/upgrade/served.mjs')).href);
+const crossing = () => import(pathToFileURL(join(root, 'v2/client/src/upgrade/upgrade.mjs')).href);
 const refused = (e) => { say({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 300) }); process.exitCode = 1; };
+const env = { ...process.env, SOULS_HOME: home };
 
 if (args[0] === 'version') say({ ok: true, version: VERSION });
 else if (args[0] === 'upgrade') {
-  try { say(await (await upgrading()).upgrade({ home, version: VERSION, rollback: args.includes('--rollback') })); } catch (e) { refused(e); }
+  try {
+    const u = await served(), { main } = await crossing();
+    if (args.includes('--rollback')) say(await u.rollback({ home, main, running: self }));
+    else {
+      // The newer client from the home's site, then R18's step: the Souls of today's client come across.
+      const bundle = await u.upgradeBundle({ home, version: VERSION }), across = await main([], { env });
+      say({ ok: across.ok !== false, ...bundle, home: across });
+    }
+  } catch (e) { refused(e); }
 } else {
   let ready = true;
   if (args[0] === 'pair' && args[1]) {
-    try { await (await upgrading()).firstInstall({ home, url: args[1] }); } catch (e) { refused(e); ready = false; }
+    try { await (await served()).firstInstall({ home, url: args[1] }); } catch (e) { refused(e); ready = false; }
   }
   if (ready) {
-    let lib;
-    try { lib = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).client?.lib; } catch { /* no home yet */ }
+    // The daemon's library for this version: kept, else fetched by hash from the home's site.
+    const lib = await (await served()).libFor(home, VERSION).catch(() => null);
     if (lib && !process.env.SOULS_REPLICA_PKG) process.env.SOULS_REPLICA_PKG = join(home, 'bin', 'lib', lib);
     // The command runs when it is the script named; a module's own path has its symlinks resolved (/tmp, /var).
     process.argv[1] = real(join(root, ENTRY));
