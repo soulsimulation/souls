@@ -11,7 +11,7 @@ use axum::extract::State;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
-use axum::routing::get;
+use axum::routing::{get, post};
 use replica::effects::Actor;
 use replica::encode::{Name, Value, decode, encode, from_hex};
 use replica::intent_decode::{LIMITS, decode as decode_intent};
@@ -45,9 +45,12 @@ const SEND_MOST: usize = FRAME_MOST + 64;
 /// How long a socket has to send its first frame and to sign in.
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
 
-/// The gateway's HTTP routes: the agents' socket.
+/// The gateway's HTTP routes: the agents' socket, and the creator's session exchange (W5, `creator.rs`).
 pub fn router(gw: Arc<Gateway>) -> Router {
-    Router::new().route(PATH, get(upgrade)).with_state(gw)
+    Router::new()
+        .route(PATH, get(upgrade))
+        .route(crate::creator::PATH, post(crate::creator::exchange))
+        .with_state(gw)
 }
 
 async fn upgrade(

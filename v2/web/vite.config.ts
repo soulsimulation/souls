@@ -8,6 +8,8 @@
 //   /?stream=/s/<lineage>/<zone>/<epoch>/<node>/<level>/<audience>/
 // - `V2_DIRECTORY`, in `vite` and `vite preview`, passes /v1/ to directoryd at that origin (W3's list of worlds, at
 //   /src/worlds/).
+// - `V2_GATEWAY`, in `vite` and `vite preview`, passes /v2/ (the socket and the creator's session exchange) to gatewayd
+//   at that origin (W5's creator's panel, at /src/panel/).
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,17 +37,20 @@ function streamFiles(): Plugin {
   };
 }
 
-const directory = process.env.V2_DIRECTORY ? { '/v1/': process.env.V2_DIRECTORY } : undefined;
+const proxy = {
+  ...(process.env.V2_DIRECTORY ? { '/v1/': process.env.V2_DIRECTORY } : {}),
+  ...(process.env.V2_GATEWAY ? { '/v2/': { target: process.env.V2_GATEWAY, ws: true } } : {}),
+};
 
 export default defineConfig({
   base: './',
   resolve: { alias: { replica: resolve(pkg, 'replica.js') } },
-  server: { fs: { allow: [here, pkg] }, proxy: directory },
-  preview: { proxy: directory },
+  server: { fs: { allow: [here, pkg] }, proxy },
+  preview: { proxy },
   worker: { format: 'es' },
   build: {
     target: 'es2022', outDir: 'dist', assetsInlineLimit: 0, chunkSizeWarningLimit: 1024,
-    rollupOptions: { input: { main: resolve(here, 'index.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html') } },
+    rollupOptions: { input: { main: resolve(here, 'index.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), panel: resolve(here, 'src/panel/index.html') } },
   },
   plugins: [streamFiles()],
 });
