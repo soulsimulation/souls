@@ -41,6 +41,13 @@ struct Served {
     all: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
+impl Drop for Served {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 fn serve(dir: &Path, socket: &Path) -> Served {
     serve_with(dir, socket, &[])
 }
@@ -769,5 +776,142 @@ fn o20b_a2_a3_served_world_ships_its_words_and_they_restore() {
         vec![line.as_bytes().to_vec()],
         "the sentence reads on machine-b"
     );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Actual serve startup must connect the gateway subscription socket, including after checkpoint replay.
+#[test]
+fn c30_served_subscription_socket_replays_ownership_and_private_words() {
+    let d = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.local/c30-subscriptions");
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let d = d.canonicalize().unwrap(); // Keep the Unix socket path below the platform's byte limit.
+    let (dir, a, root, _) = seeded(&d);
+    let b = Id::new(a.scope(), 2).unwrap();
+    let socket = d.join("s");
+    let act = |s: &mut UnixStream, who, seq, verb: &str, target: Option<Id>, parameters| {
+        let intent = Intent {
+            actor: Actor::Soul(who),
+            verb: Name::new(verb).unwrap(),
+            target: target.map(Target::Node),
+            parameters,
+            sequence: seq,
+            basis: Version {
+                lineage: root.scope(),
+                zone: root,
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+        };
+        let bytes = encode(&intent.to_value()).unwrap();
+        s.write_all(&(bytes.len() as u32).to_be_bytes()).unwrap();
+        s.write_all(&bytes).unwrap();
+        assert_eq!(answer(s), (1, String::new()));
+    };
+    let read_item = |s: &mut UnixStream| {
+        let mut len = [0; 4];
+        s.read_exact(&mut len).unwrap();
+        let mut bytes = vec![0; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut bytes).unwrap();
+        let Value::Map(m) = decode(&bytes).unwrap().value else {
+            panic!("frame")
+        };
+        let Some(Value::Bytes(bytes)) = m.get(&2) else {
+            panic!("item")
+        };
+        bytes.clone()
+    };
+    let mut w = serve(&dir, &socket);
+    w.line("listening ");
+    let mut intents = connect(&socket);
+    act(&mut intents, a, 1, "life:join", None, BTreeMap::new());
+    act(&mut intents, b, 1, "life:join", None, BTreeMap::new());
+    w.kill(); // Read the durable birth only after releasing the log's writer lock.
+    let body = born_body(&dir.join("log"), b);
+    w = serve(&dir, &socket);
+    w.line("listening ");
+    intents = connect(&socket);
+    for round in 0..2 {
+        if round == 1 {
+            w.kill();
+            w = serve(&dir, &socket);
+            assert!(w.line("restart: ").contains("checkpoint Some("));
+            w.line("listening ");
+            intents = connect(&socket);
+        }
+        // A hostile follower of the same body never gets its private audience.
+        let views = |principal: Id| {
+            let mut s = connect(&socket.with_extension("views"));
+            s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let req = Value::Map(BTreeMap::from([
+                (1, Value::Uint(1)),
+                (
+                    2,
+                    Value::Map(BTreeMap::from([
+                        (
+                            1,
+                            Value::Array(vec![Value::Map(BTreeMap::from([(2, body.to_value())]))]),
+                        ),
+                        (2, Value::Uint(2)),
+                        (3, Value::Uint(8000)),
+                    ])),
+                ),
+                (3, Value::Array(vec![principal.to_value()])),
+            ]));
+            let bytes = encode(&req).unwrap();
+            s.write_all(&(bytes.len() as u32).to_be_bytes()).unwrap();
+            s.write_all(&bytes).unwrap();
+            let Value::Map(grant) = decode(&read_item(&mut s)).unwrap().value else {
+                panic!("grant")
+            };
+            assert_eq!(grant.get(&1), Some(&Value::Uint(5)));
+            s
+        };
+        let mut own = views(b);
+        let mut outsider = views(Id::new(a.scope(), 99).unwrap());
+        let words = format!("private round {round}");
+        act(
+            &mut intents,
+            a,
+            round + 2,
+            "eden:whisper",
+            Some(body),
+            BTreeMap::from([(
+                1,
+                Value::Map(BTreeMap::from([(
+                    23,
+                    Value::Bytes(words.as_bytes().to_vec()),
+                )])),
+            )]),
+        );
+        let mut heard = None;
+        for _ in 0..20 {
+            if let Some(h) = replica::speech::heard(&read_item(&mut own)).unwrap() {
+                heard = Some(h);
+                break;
+            }
+        }
+        assert_eq!(heard.unwrap().words.as_deref(), Some(words.as_bytes()));
+        outsider
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        // Drain all public/count/grant traffic, refusing any addressed private words.
+        for _ in 0..20 {
+            let mut len = [0; 4];
+            if outsider.read_exact(&mut len).is_err() {
+                break;
+            }
+            let mut bytes = vec![0; u32::from_be_bytes(len) as usize];
+            outsider.read_exact(&mut bytes).unwrap();
+            assert!(!bytes.windows(words.len()).any(|w| w == words.as_bytes()));
+        }
+    }
+    w.kill();
     let _ = std::fs::remove_dir_all(&d);
 }

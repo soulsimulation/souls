@@ -12,7 +12,6 @@ import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as netServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +23,9 @@ const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const dir = mkdtempSync(join(tmpdir(), 'souls-c30-'));
+const scratch = resolve(v2, '../.local/3556');
+mkdirSync(scratch, { recursive: true });
+const dir = mkdtempSync(join(scratch, 'journey-'));
 const procs = [];
 const outputs = [];
 
@@ -172,6 +173,13 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
     const bodyOf = async (s) => waitFor(async () => (await a.find('body')).find((r) => r.kind?.startsWith('souls:body') && r.soul === s.said.grant.replace(/^soul-/, '')));
     const [ba, bb, bc] = [await bodyOf(a), await bodyOf(b), await bodyOf(c)];
     console.log('bodies', ba.id, bb.id, bc.id, 'under', ba.parent);
+    for (const [s, body] of [[a, ba], [b, bb], [c, bc]]) {
+      const st = await waitFor(async () => {
+        const st = await request(s.rt.socket, { op: 'status' });
+        return st.hearing === body.id && st.viewGrants > 0 && st;
+      });
+      console.log(s.label, 'subscription', JSON.stringify({ hearing: st.hearing, grants: st.viewGrants, kinds: st.viewKinds }));
+    }
 
     // A2: start (the offer and the opening whisper), accept, a public turn, a private turn, and both leave.
     const started = await a.act({ op: 'converse', do: 'start', with: bb.id, words: 'got a minute?' });
@@ -225,6 +233,13 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
     console.log('activity', JSON.stringify(rows));
     for (const s of [a, b]) await s.act({ op: 'act', verb: 'activity:leave', target: asked2.conversation });
   } finally {
-    for (const s of [a, b, c]) await request(s.rt.socket, { op: 'stop' }).catch(() => {});
+    for (const s of [a, b, c]) {
+      const st = await request(s.rt.socket, { op: 'status' }).catch(() => null);
+      console.log(s.label, 'transport', JSON.stringify(st && { hearing: st.hearing, grants: st.viewGrants, kinds: st.viewKinds, drops: st.drops }));
+      const log = existsSync(s.rt.log) ? readFileSync(s.rt.log, 'utf8').split('\n').slice(-12) : [];
+      console.log(s.label, 'daemon tail', JSON.stringify(log));
+      await request(s.rt.socket, { op: 'stop' }).catch(() => {});
+    }
+    console.log('service diagnostics', JSON.stringify(outputs.filter((x) => /view tier|views:|refused|panicked/.test(x)).slice(-20)));
   }
 });

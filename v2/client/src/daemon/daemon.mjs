@@ -84,7 +84,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
-import { changedBetween, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
@@ -168,6 +168,9 @@ const events = []; // what happened since the last read
 const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
 const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, entries: 0, follows: 0, build: null };
+// Bounded transport diagnostics: item kinds only, never tokens, words or encoded frames.
+const viewKinds = [];
+let viewGrants = 0;
 const reflexes = new Table(soul); // R9: onEvent(event, now) per named event, from the stream (R9b)
 const wakes = new Wakes(soul); // R13: its budget's deliveries are kept on disk, so a restart never resets them
 if (state.wake) Object.assign(wakes, { budget: state.wake.budget, delivered: state.wake.delivered });
@@ -397,6 +400,10 @@ function connect() {
  * (its say has its receipt). Each wakes a `wait`, joins the next brief, and goes to the reflexes as `souls:said`.
  */
 function onItem(bytes) {
+  const item = decode(decode(bytes).get(31)), kind = item.get(1);
+  if (kind === 5) viewGrants++;
+  viewKinds.push(kind);
+  if (viewKinds.length > 32) viewKinds.shift();
   const entry = wire.wireEntry(bytes);
   if (entry) { onEntry(JSON.parse(entry)); return; }
   const line = wire.wireHeard(bytes);
@@ -588,6 +595,7 @@ async function answer(req) {
         ok: true, soul, pid: process.pid, world: seat.world, connected: signedIn, cursor: state.cursor,
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
+        hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since,
       };
     }

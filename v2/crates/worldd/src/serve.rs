@@ -813,7 +813,20 @@ fn serve(args: &[String]) -> R<()> {
         replica::ids::Minter::new(worldd::words::scope(built.root.scope())),
     )
     .map_err(|e| format!("the text store: {}", refusal(e)))?;
-    cfg.text = Some(Arc::new(text));
+    let text = Arc::new(text);
+    cfg.text = Some(Arc::clone(&text));
+    // Gateway subscriptions have their own off-clock tier, apart from the filesystem stream below. Restore its
+    // body, ownership and activity membership indexes before the answers thread can hand it any live part.
+    let feed =
+        worldd::views::served::start_with(worldd::views::subscription::Hub::with_words(text))
+            .map_err(refusal)?;
+    for bytes in &found.records {
+        if !recorder::is_input(bytes) {
+            feed.record(bytes.clone());
+        }
+    }
+    cfg.served = Some(feed.clone());
+    worldd::views::served::listen(feed, &socket.with_extension("views")).map_err(refusal)?;
     // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
     // restore reads them back (O20b, #3523); with no bucket set it says so once and ships nothing.
     let lineage = to_hex(&built.root.scope().0);

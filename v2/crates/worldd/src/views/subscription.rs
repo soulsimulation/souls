@@ -579,6 +579,8 @@ impl Hub {
                 }
             }
         }
+        // Initial grants and scopes use the same urgent budget without waiting for another world commit.
+        s.send(Vec::new());
         self.subs.push(Some(s));
         Ok(self.subs.len() - 1)
     }
