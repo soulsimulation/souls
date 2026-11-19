@@ -356,7 +356,14 @@ fn respond(
     cache: &str,
     origin: Option<&str>,
 ) -> std::io::Result<()> {
-    respond_as(stream, status, "application/json", &text(body), cache, origin)
+    respond_as(
+        stream,
+        status,
+        "application/json",
+        &text(body),
+        cache,
+        origin,
+    )
 }
 
 /// A JSON answer's text; none for an empty answer (the preflight's).
