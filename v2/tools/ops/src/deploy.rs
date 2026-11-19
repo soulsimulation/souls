@@ -167,7 +167,8 @@ fn main() {
         world,
         canary: Canary {
             window: Duration::from_secs(num("--window-s", 60)),
-            start_within: Duration::from_secs(10),
+            // As worldd@.service's TimeoutStartSec: a real world loads its facts and replays its log (O18b, #3498).
+            start_within: Duration::from_secs(30),
             answer_within: Duration::from_secs(2),
             every: Duration::from_millis(500),
         },
