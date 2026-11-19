@@ -1517,6 +1517,7 @@ impl Clock {
                     sequence,
                     intent: id,
                     entries,
+                    names: BTreeMap::new(),
                 });
             }
         }

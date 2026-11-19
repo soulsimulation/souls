@@ -439,13 +439,10 @@ fn serve(args: &[String]) -> R<()> {
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
     cfg.synced = Some(tx);
-<<<<<<< HEAD
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.root.scope()));
-=======
     // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
     cfg.engine = Some((built.rules.clone(), Vec::new()));
->>>>>>> 858988e2c (feat(v2): hands, joint activities, offers and carrying through the gateway (Engine v2 C2, #3366))
     let (town, ground) = (built.town, built.ground);
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
         bodies(town, ground, &souls, placed)
