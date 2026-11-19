@@ -35,6 +35,8 @@ pub struct App {
     pub view_key: Option<ViewKey>,
     /// The page's origin, the one origin whose scripts may read these answers.
     pub origin: Option<String>,
+    /// Pairing a Soul to an agent (W2), if on.
+    pub pairing: Option<crate::pairing::Pairing>,
     pub log: Mutex<Box<dyn Write + Send>>,
 }
 
@@ -107,8 +109,18 @@ fn handle(mut stream: TcpStream, app: &App) {
         );
         return;
     };
-    let (status, body, note) = route(&req, app);
-    let _ = respond(&mut stream, status, &body, app.origin.as_deref());
+    let (status, kind, body, note) = crate::pairing::route::route(
+        app,
+        &req.method,
+        &req.path,
+        req.bearer.as_deref(),
+        &req.body,
+    )
+    .unwrap_or_else(|| {
+        let (status, body, note) = route(&req, app);
+        (status, "application/json", text(&body), note)
+    });
+    let _ = respond_as(&mut stream, status, kind, &body, app.origin.as_deref());
     let line = format!("directoryd: {} {} {status} {note}\n", req.method, req.path);
     let _ = app.log.lock().expect("the log").write_all(line.as_bytes());
 }
@@ -213,11 +225,25 @@ fn respond(
     body: &Value,
     origin: Option<&str>,
 ) -> std::io::Result<()> {
-    let body = if body.is_null() {
+    respond_as(stream, status, "application/json", &text(body), origin)
+}
+
+/// A JSON answer's text; none for an empty answer (the preflight's).
+fn text(body: &Value) -> String {
+    if body.is_null() {
         String::new()
     } else {
         body.to_string()
-    };
+    }
+}
+
+fn respond_as(
+    stream: &mut TcpStream,
+    status: u16,
+    kind: &str,
+    body: &str,
+    origin: Option<&str>,
+) -> std::io::Result<()> {
     // The page's own origin may read the answers (CORS); no other origin may.
     let cors = origin.map_or(String::new(), |o| {
         format!(
@@ -235,7 +261,7 @@ fn respond(
     };
     write!(
         stream,
-        "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
+        "HTTP/1.1 {status} {reason}\r\ncontent-type: {kind}\r\ncontent-length: {}\r\n\
          cache-control: no-store\r\n{cors}connection: close\r\n\r\n{body}",
         body.len()
     )

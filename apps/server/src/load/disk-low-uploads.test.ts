@@ -9,7 +9,7 @@ import {Hono} from 'hono';
 import {fixture, invite, accept, factory} from '../../test/native-owner-fixture.ts';
 import {EdgeLedger} from '../edge/ledger/ledger.ts';
 import {mountEdgeRoutes, edgeSoulResolver} from '../edge/routes.ts';
-import {rigidGLB} from '../edge/body/testing.ts';
+import {rigidGLB, RIGID_MANIFEST} from '../edge/body/testing.ts';
 import {mountArtRoutes} from '../art/routes.ts';
 import {AssetStore, mountAssetRoutes} from '../god/assets.ts';
 import {ApiError} from '../souls.ts';
@@ -40,6 +40,21 @@ test('disk low: a Soul still acts and the world still ticks', async t => {
   assert.equal(said.status, 200, await said.clone().text());
   const tick = f.host.engine.world.tick; for (let i = 0; i < 10; i++) f.host.tickOnce();
   assert.equal(f.host.engine.world.tick, tick + 10, 'the clock runs');
+});
+
+test('disk low: a body upload is refused and nothing is stored; with room again it is stored', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'disk-low-body-')), f = fixture(join(dir, 'sim.db'), factory, {durableClockV1: true}); f.brain.quiesce();
+  t.after(() => { ok(); f.host.stop(); if (f.db.db.isOpen) f.db.close(); rmSync(dir, {recursive: true, force: true}); });
+  await invite(f, 'a');
+  const row = await accept(f.host, f.souls.create('dev:a', {name: 'Disk a', description: 'disk-low test'}));
+  const token = f.souls.pairExchange(f.souls.pairCode(row, 'http://127.0.0.1:4958').code, 'scripted').token;
+  const app = new Hono(); mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, ledger: new EdgeLedger(f.host, f.db, undefined, {ambient: false}), soul: edgeSoulResolver(f.host, f.souls, c => c.req.header('authorization')?.replace(/^Bearer /, ''))});
+  const upload = () => { const form = new FormData(); form.set('manifest', JSON.stringify(RIGID_MANIFEST)); form.set('model', new Blob([new Uint8Array(rigidGLB())], {type: 'model/gltf-binary'}), 'b.glb'); return app.request('/v1/edge/body/uploads', {method: 'POST', headers: {authorization: `Bearer ${token}`}, body: form}); };
+  low();
+  await refused(await upload());
+  assert.equal((f.db.db.prepare('SELECT COUNT(*) n FROM edge_body_assets_v1').get() as {n: number}).n, 0, 'nothing stored');
+  ok();
+  assert.equal((await upload()).status, 200, 'with room again the same upload is stored');
 });
 
 test('disk low: art media is refused; hanging art (an edit) is not', async t => {

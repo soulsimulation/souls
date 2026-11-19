@@ -642,6 +642,7 @@ fn v13b_a3_an_expired_or_signed_out_session_gets_no_view_token() {
         test_sign_in: false,
         view_key: Some(ViewKey::new(&VIEW_KEY)),
         origin: Some(PAGE.to_string()),
+        pairing: None,
         log: Mutex::new(Box::new(std::io::sink())),
     };
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

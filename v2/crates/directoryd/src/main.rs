@@ -53,6 +53,10 @@ fn main() {
         .provider
         .as_ref()
         .map(|p| Verifier::new(&p.issuer, &p.parties, Box::new(Jwks { url: p.jwks_url() })));
+    let pairing = directoryd::pairing::Pairing::start(&config).unwrap_or_else(|e| {
+        eprintln!("directoryd: refusing to start: the pairing store: {e}");
+        std::process::exit(2)
+    });
     let listener = match TcpListener::bind(config.listen) {
         Ok(l) => l,
         Err(e) => {
@@ -68,6 +72,7 @@ fn main() {
         test_sign_in: config.test_sign_in,
         view_key,
         origin: Some(config.public_url.trim_end_matches('/').to_string()),
+        pairing,
         log: Mutex::new(Box::new(std::io::stderr())),
     };
     run(listener, Arc::new(app));

@@ -33,11 +33,14 @@ pub struct Config {
     pub view_key: Option<PathBuf>,
     /// For local and test worlds: a test person and what they own, `(name, grant, body followed)`.
     pub test_own: Vec<(String, String, Option<String>)>,
+    /// Pairing's store (W2), and the gateway's tokens file it writes; pairing is off without the store.
+    pub pairing: Option<PathBuf>,
+    pub gateway_tokens: Option<PathBuf>,
 }
 
 pub const USAGE: &str = "directoryd --listen <addr:port> --public-url <origin> --store <absolute path> \
 (--issuer <https origin> --parties <origin,origin> | --test-sign-in [--test-own <name>=<grant>[@<body>]]...) \
-[--view-key <file>]";
+[--view-key <file>] [--pairing <path> [--gateway-tokens <path>]]";
 
 /// Reads the arguments (without the program's name) and refuses what must not run. A refusal starts with
 /// "refusing to start".
@@ -50,6 +53,7 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
     let mut test_sign_in = false;
     let mut view_key = None;
     let mut test_own = Vec::new();
+    let (mut pairing, mut gateway_tokens) = (None, None);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || {
@@ -79,6 +83,8 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
                     format!("refusing to start: --test-own is <name>=<grant>[@<body>]; {USAGE}")
                 })?);
             }
+            "--pairing" => pairing = Some(PathBuf::from(value()?)),
+            "--gateway-tokens" => gateway_tokens = Some(PathBuf::from(value()?)),
             _ => return Err(format!("refusing to start: unknown argument {a}; {USAGE}")),
         }
     }
@@ -143,6 +149,8 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
         test_sign_in,
         view_key,
         test_own,
+        pairing,
+        gateway_tokens,
     })
 }
 
