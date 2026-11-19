@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { externalAgent, folder, measure, TASK } from './eval.mjs';
+import { construction, externalAgent, folder, measure, TASK } from './eval.mjs';
 
 const scratch = fileURLToPath(new URL('../../../.local/g7b/adapter-tests/', import.meta.url));
 mkdirSync(scratch, { recursive: true });
@@ -45,4 +45,24 @@ test('external driver stops at its bounded wait without claiming a completed tri
   try {
     await assert.rejects(externalAgent(join(dir, 'agent'), dir, 2, { within: 5, poll: 1 }), /timed out/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test('construction reports plain and pinned rooms with their directly built contents', () => {
+  const nodes = [
+    { id: 'old', kind: 'eden:room', parent: null },
+    { id: 'plain', kind: 'eden:room', parent: 'old' },
+    { id: 'door', kind: 'core:door', parent: 'plain' },
+    { id: 'chair', kind: 'core:chair', parent: 'plain' },
+    { id: 'pinned', kind: 'eden:room@1220abcd', parent: 'old' },
+    { id: 'seat', kind: 'core:chair@1220efab', parent: 'pinned' },
+    { id: 'other', kind: 'eden:bedroom', parent: 'old' },
+  ];
+  const result = construction(nodes, new Set(['old']));
+  assert.deepEqual(result.rooms, [
+    { id: 'plain', holds: ['core:door', 'core:chair'] },
+    { id: 'pinned', holds: ['core:chair@1220efab'] },
+  ]);
+  assert.deepEqual(result.added.find((n) => n.id === 'chair').in, ['eden:room', 'eden:room']);
+  assert.equal(result.added.length, 6, 'the pre-existing room is not counted');
 });

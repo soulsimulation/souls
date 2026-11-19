@@ -148,19 +148,23 @@ export function measure(transcript) {
   };
 }
 
+/** The reported construction, from the same final description used to grade the run. */
+export function construction(nodes, before) {
+  const kind = new Map(nodes.map((n) => [n.id, n.kind]));
+  const parent = new Map(nodes.map((n) => [n.id, n.parent]));
+  const path = (id) => { const p = []; for (let at = parent.get(id); at; at = parent.get(at)) p.push(kind.get(at)); return p; };
+  const added = nodes.filter((n) => !before.has(n.id)).map((n) => ({ id: n.id, kind: n.kind, in: path(n.id).slice(0, 3) }));
+  const rooms = added.filter((n) => /:room(?:@|$)/.test(n.kind)).map((r) => ({ id: r.id, holds: added.filter((n) => parent.get(n.id) === r.id).map((n) => n.kind) }));
+  return { ids: new Set(nodes.map((n) => n.id)), added, rooms };
+}
+
 /** What the run built: each node not in the world before (`before`, ids), by kind, with the kinds of its parents. */
 function built(home, before) {
   return new Promise((ok, fail) => execFile(process.execPath, [GOD, 'describe'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, maxBuffer: 256 << 20 }, (error, out) => {
     let d;
     try { d = JSON.parse(String(out).trim().split('\n').at(-1) || '{}'); } catch { return fail(new Error('describe returned invalid JSON')); }
     if (error || d.ok === false || !Array.isArray(d.nodes)) return fail(new Error(`describe refused: ${d.code ?? 'no-world'}${d.detail ? `: ${d.detail}` : ''}`));
-    const nodes = d.nodes;
-    const kind = new Map(nodes.map((n) => [n.id, n.kind]));
-    const parent = new Map(nodes.map((n) => [n.id, n.parent]));
-    const path = (id) => { const p = []; for (let at = parent.get(id); at; at = parent.get(at)) p.push(kind.get(at)); return p; };
-    const added = nodes.filter((n) => !before.has(n.id)).map((n) => ({ id: n.id, kind: n.kind, in: path(n.id).slice(0, 3) }));
-    const rooms = added.filter((n) => /:room@/.test(n.kind)).map((r) => ({ id: r.id, holds: added.filter((n) => parent.get(n.id) === r.id).map((n) => n.kind) }));
-    ok({ text: String(out), ids: new Set(nodes.map((n) => n.id)), added, rooms });
+    ok({ text: String(out), ...construction(d.nodes, before) });
   }));
 }
 
