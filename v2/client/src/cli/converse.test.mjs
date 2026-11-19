@@ -52,7 +52,7 @@ test('accept, decline and leave name the conversation; a turn is public unless p
 });
 
 test('an invitation reaches the body asked; a decline or a lapse is named to the opener', () => {
-  const ev = (name) => ({ name, fields: { 1: conv, 2: other, 3: 'cbor' } });
+  const ev = (name) => ({ name, fields: name === 'souls:offer' ? { 1: conv, 2: KIND, 3: [me], 4: 60_000_000, 5: other } : { 1: conv, 2: other, 3: [me] } });
   assert.deepEqual(offerNote(ev('souls:offer'), me), { kind: 'conversation', what: 'invited', conversation: conv, from: other });
   assert.equal(offerNote(ev('souls:offer'), other), null, 'its own offer is no invitation');
   assert.deepEqual(offerNote(ev('souls:offer-declined'), other), { kind: 'conversation', what: 'declined', conversation: conv });

@@ -126,9 +126,16 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
       const n = receipts(receiptsDir).length;
       const a = await ask(req);
       outputs.push(JSON.stringify(a));
+      console.log(label, 'sent', JSON.stringify(a));
       assert.equal(a.ok, true, `${label} ${JSON.stringify(req)}: ${JSON.stringify(a)}`);
       const sent = a.sent?.length ?? 1;
-      await waitFor(async () => { const st = await request(rt.socket, { op: 'status' }); return st.connected && st.unanswered.length === 0 && st.answered >= before + sent && st; });
+      try {
+        await waitFor(async () => { const st = await request(rt.socket, { op: 'status' }); return st.connected && st.unanswered.length === 0 && st.answered >= before + sent && st; });
+      } catch (e) {
+        const st = await request(rt.socket, { op: 'status' });
+        console.log(label, 'unanswered', JSON.stringify({ connected: st.connected, sequence: st.sequence, unanswered: st.unanswered, answered: st.answered }), 'receipts', JSON.stringify(receipts(receiptsDir).slice(n).map((r) => ({ outcome: r.outcome, code: r.code ?? r.reason }))));
+        throw e;
+      }
       const got = receipts(receiptsDir).slice(n);
       console.log(label, JSON.stringify(req), '->', JSON.stringify(got.map((r) => ({ verb: r.verb, outcome: r.outcome, code: r.code ?? r.reason }))));
       return got;

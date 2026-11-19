@@ -97,7 +97,7 @@ import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { feederFor } from '../memory/feeder.mjs';
-import { KIND_PLAIN, converseIntents, offerNote } from '../converse/converse.mjs';
+import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
@@ -447,7 +447,11 @@ function onEntry(e) {
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
   // E26: an invitation to a conversation, or the answer to this Soul's own, wakes a `wait`.
-  for (const ev of events) { const n = offerNote(ev, ME); if (n) note({ ...n, sequence: e.sequence }); }
+  const offers = events.filter((ev) => OFFER_EVENTS[ev.name]);
+  if (offers.length) {
+    const body = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME)?.id ?? ME;
+    for (const ev of offers) { const n = offerNote(ev, body); if (n) note({ ...n, sequence: e.sequence }); }
+  }
   if (events.length) remember([{ sequence: e.sequence, at: e.at, actor, events }]);
 }
 
