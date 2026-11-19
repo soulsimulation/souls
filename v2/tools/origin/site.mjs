@@ -25,7 +25,7 @@ import { serveOps } from './ops.mjs';
 const { answer } = await import(existsSync(new URL('./serve.mjs', import.meta.url)) ? './serve.mjs' : '../../client/served/serve.mjs');
 const CLIENT_PATH = /^\/w\/[a-z0-9][a-z0-9-]*\/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1\/config)$/;
 
-export const SITE_PATHS = Object.freeze(['/changelog', '/changelog/', '/changelog.md', '/v1/feed', '/ops']);
+export const SITE_PATHS = Object.freeze(['/changelog', '/changelog/', '/changelog.md', '/v1/feed', '/ops', '/v1/auth/config']);
 export const FEED_LIMITS = Object.freeze({ pageDefault: 20, pageMax: 100 });
 const ID_RE = /^f([1-9]\d{0,9})$/;
 const num = (i) => Number(ID_RE.exec(i.id)[1]);
@@ -83,8 +83,30 @@ export function wantsMarkdown(accept = '') {
   return !html || md.q > html.q || (md.q === html.q && md.i < html.i);
 }
 
+/** Only the existing provider's public page fields, never an environment spread or account/token data. */
+export function publicAuth(env = process.env) {
+  const key = env.CLERK_PUBLISHABLE_KEY, issuer = env.CLERK_ISSUER_URL;
+  if (env.AUTH_PROVIDER !== 'clerk' || !/^pk_(live|test)_[A-Za-z0-9+/=_-]+$/.test(key ?? '')) return null;
+  let host;
+  try {
+    const u = new URL(issuer);
+    host = Buffer.from(key.split('_').slice(2).join('_'), 'base64').toString();
+    if (u.protocol !== 'https:' || u.origin !== issuer || u.username || u.password || host !== `${u.hostname}$`) return null;
+  } catch { return null; }
+  const cfg = { authProvider: 'clerk', clerkPublishableKey: key, clerkIssuer: issuer };
+  const domain = env.CLERK_SATELLITE_DOMAIN, signInUrl = env.CLERK_SIGN_IN_URL;
+  if (domain || signInUrl) {
+    try {
+      const u = new URL(signInUrl);
+      if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain ?? '') || u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || u.origin === `https://${domain}`) return null;
+      cfg.clerkSatellite = { domain, signInUrl: u.href };
+    } catch { return null; }
+  }
+  return cfg;
+}
+
 /** The site's routes: `handle(req, res)` answers and returns true for a site path, false for anything else. */
-export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/souls/web', data = process.env.SOULS_DATA || '/var/lib/souls', client = process.env.SOULS_CLIENT || '/usr/local/lib/souls/client' } = {}) {
+export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/souls/web', data = process.env.SOULS_DATA || '/var/lib/souls', client = process.env.SOULS_CLIENT || '/usr/local/lib/souls/client', auth = process.env } = {}) {
   const feed = newsFeed(data);
   const file = (req, res, name, type) => {
     let body; try { body = readFileSync(join(web, name)); } catch { json(res, 404, { ok: false, code: 'not-found' }); return; }
@@ -96,6 +118,15 @@ export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/soul
     if (!SITE_PATHS.includes(path) && !isClient) return false;
     if (path === '/ops') { serveOps(req, res, url); return true; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { json(res, 405, { ok: false, code: 'read-only' }, { allow: 'GET, HEAD' }); return true; }
+    if (path === '/v1/auth/config') {
+      const cfg = publicAuth(auth);
+      // Test provider keys are confined to the same HTTP loopback setup as test sign-in.
+      const host = String(req.headers.host ?? '').split(':')[0];
+      const local = host === 'localhost' || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(host) || String(req.headers.host ?? '').startsWith('[::1]');
+      if (!cfg || (cfg.clerkPublishableKey.startsWith('pk_test_') && !local)) json(res, 503, { code: 'auth-unconfigured', message: 'Sign-in is not configured. Ask the operator to configure the public provider.' });
+      else res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'x-content-type-options': 'nosniff' }).end(req.method === 'HEAD' ? undefined : JSON.stringify(cfg));
+      return true;
+    }
     if (isClient) {
       const a = answer(client, path);
       if (!a) json(res, 404, { ok: false, code: 'not-found' });

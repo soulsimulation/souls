@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { get } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { createOrigin } from './origin.mjs';
@@ -51,4 +52,35 @@ test('every 404 is no-store: a part not yet written, a temporary file, a query s
     assert.equal(r.status, 404, path);
     assert.equal(r.headers.get('cache-control'), 'no-store', path);
   }
+});
+
+test('W18: installed origin config allowlists public fields, refuses missing/mismatched config and public test keys', async () => {
+  const auth = {
+    AUTH_PROVIDER: 'clerk', CLERK_PUBLISHABLE_KEY: `pk_live_${Buffer.from('clerk.example.test$').toString('base64')}`,
+    CLERK_ISSUER_URL: 'https://clerk.example.test', CLERK_SATELLITE_DOMAIN: 'world.example.test', CLERK_SIGN_IN_URL: 'https://primary.example.test/sign-in',
+    BACKEND_KEY: 'never-public', SESSION_TOKEN: 'never-public', ACCOUNT: 'never-public',
+  };
+  const { server: s } = createOrigin(dir, { auth });
+  await new Promise(ok => s.listen(0, '127.0.0.1', ok));
+  const at = `http://127.0.0.1:${s.address().port}/v1/auth/config`;
+  try {
+    const r = await fetch(at);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('cache-control'), 'no-store');
+    assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+    assert.deepEqual(await r.json(), { authProvider: 'clerk', clerkPublishableKey: auth.CLERK_PUBLISHABLE_KEY, clerkIssuer: auth.CLERK_ISSUER_URL, clerkSatellite: { domain: auth.CLERK_SATELLITE_DOMAIN, signInUrl: auth.CLERK_SIGN_IN_URL } });
+    assert.equal(await (await fetch(at, { method: 'HEAD' })).text(), '');
+    assert.equal((await fetch(at, { method: 'POST' })).status, 405);
+    auth.CLERK_ISSUER_URL = 'https://other.example.test';
+    assert.equal((await fetch(at)).status, 503);
+    auth.CLERK_ISSUER_URL = 'https://clerk.example.test';
+    auth.CLERK_PUBLISHABLE_KEY = auth.CLERK_PUBLISHABLE_KEY.replace('pk_live_', 'pk_test_');
+    assert.equal((await fetch(at)).status, 200);
+    const publicStatus = await new Promise((ok, fail) => get(at, { headers: { host: 'world.example.test' } }, r => { r.resume(); ok(r.statusCode); }).on('error', fail));
+    assert.equal(publicStatus, 503);
+    auth.AUTH_PROVIDER = '';
+    const absent = await fetch(at);
+    assert.equal(absent.status, 503);
+    assert.match((await absent.json()).message, /Sign-in is not configured/);
+  } finally { s.close(); }
 });

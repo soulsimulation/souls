@@ -1,7 +1,7 @@
 // The front door's page (Engine v2 O19, #2830): one list of the worlds on both systems (list.ts), a sign-in link to the
 // primary origin's bridge that returns here, and the carried-over visitor count.
 import { countPage } from '../visitor-counts.ts';
-import { rows, signInHref, type DirectoryList, type TodayList } from './list.ts';
+import { rows, type DirectoryList, type TodayList } from './list.ts';
 
 const read = <T>(path: string): Promise<T | null> =>
   fetch(path, { headers: { accept: 'application/json' } }).then((r) => (r.ok ? (r.json() as Promise<T>) : null), () => null);
@@ -21,12 +21,9 @@ async function page(): Promise<void> {
     li.append(a, ' ', s);
     return li;
   }) : [Object.assign(document.createElement('li'), { className: 'muted', textContent: directory || today ? 'no worlds yet' : 'the list could not be read' })]));
-  const href = signInHref(today, location.href);
   const sign = document.getElementById('sign-in') as HTMLAnchorElement;
-  if (href) {
-    sign.href = href;
-    sign.hidden = false;
-  }
+  sign.href = '/src/account/';
+  sign.hidden = false;
 }
 
 void page();

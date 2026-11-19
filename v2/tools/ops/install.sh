@@ -172,6 +172,8 @@ install_all() {
   ensure_dir "$DATA" 750 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
   for p in worlds directory views; do ensure_dir "$DATA/$p" 750 "$ACCOUNT" "$ACCOUNT"; done
   ensure_once "$ETC/directory.args" 640 root "$ACCOUNT" "$args"
+  ensure_once "$ETC/origin.env" 640 root "$ACCOUNT" "# Public browser sign-in only: AUTH_PROVIDER=clerk, CLERK_PUBLISHABLE_KEY, CLERK_ISSUER_URL.
+# Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here."
   ensure_once "$ETC/secrets.env" 600 root root "$SECRETS"
   for u in "${UNIT_FILES[@]}"; do
     record "file $UNITS/$u"

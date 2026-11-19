@@ -1,3 +1,4 @@
+import { browserSession, localTestSignIn, sessionRequest } from '../source/signin.ts';
 // The creator's panel (Engine v2 W5, #2801): the world's one creator places and moves things by hand, through the same
 // gate as their agent. The panel opens only after the session exchange (gatewayd's `creator.rs`) gives a creator's
 // token for W1's session; anyone else is told `not-the-creator` and the panel stays shut. Its picture is the world's
@@ -7,8 +8,7 @@
 // The prayers waiting for the creator (G11, #3335) are listed beside the batches, on the same socket, and answered
 // here as the creator's agent answers them (`prayers.ts`). A prayer's words are shown as text, never as markup.
 //
-// Sign-in is W1's sign-in for test worlds (`Bearer test:<name>`), as the list of worlds signs in; a provider's
-// session rides the same header.
+// Sign-in uses the existing provider session, as account and world creation do. Test people are HTTP-loopback only.
 import init, { wireHello, wireSignIn } from 'replica';
 import { StreamSource } from '../source/stream.ts';
 import type { NodeRec } from '../source/source.ts';
@@ -257,7 +257,9 @@ function showPrayers() {
 /** The session exchange, then the socket. */
 async function open(name: string) {
   status.textContent = 'asking the gateway for a creator token';
-  const res = await fetch('/v2/creator-token', { method: 'POST', headers: { authorization: `Bearer test:${name}` } });
+  const identity = await browserSession(name);
+  if (!identity) { status.textContent = 'Finish signing in, then open the panel again.'; return; }
+  const res = await fetch('/v2/creator-token', await sessionRequest(identity, 'world'));
   const body = (await res.json()) as { token?: string; grant?: string; refused?: string };
   if (!res.ok || !body.token || !body.grant) {
     status.textContent = `refused: ${body.refused ?? res.status}. The panel opens only for this world's creator.`;
@@ -289,8 +291,10 @@ async function open(name: string) {
 }
 $<HTMLFormElement>('signin').addEventListener('submit', (e) => {
   e.preventDefault();
-  void open($<HTMLInputElement>('who').value.trim());
+  void open($<HTMLInputElement>('who').value.trim()).catch((e) => { status.textContent = e.message; });
 });
+
+$<HTMLInputElement>('who').parentElement!.hidden = !localTestSignIn(location.href);
 
 const address = params.get('stream');
 if (address) {

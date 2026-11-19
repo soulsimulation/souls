@@ -109,3 +109,43 @@ export async function providerSession(cfg: SignInConfig, env: PageEnv): Promise<
   else clerk.openSignIn({ afterSignInUrl: env.href, afterSignUpUrl: env.href });
   return null;
 }
+
+/** Test identities exist only on the directory's existing plain-HTTP loopback setup. */
+export function localTestSignIn(href: string): boolean {
+  const u = new URL(href);
+  return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '[::1]' || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(u.hostname));
+}
+
+/** Installed static pages obtain public provider fields from their own origin; no credentials accompany config. */
+export async function signInConfig(post: typeof fetch = fetch): Promise<SignInConfig> {
+  const r = await post('/v1/auth/config', { credentials: 'omit', cache: 'no-store', redirect: 'error' });
+  if (!r.ok) throw new Error('Sign-in is not configured. Ask the operator to configure the public provider.');
+  const cfg = await r.json() as SignInConfig;
+  if (!providerScript(cfg, 'https://config.invalid')) throw new Error('Sign-in configuration is invalid. Ask the operator to check the public provider.');
+  return cfg;
+}
+
+/** The existing provider session, or explicit local test sign-in; never a copied or persisted raw token. */
+export async function browserSession(testName?: string, env?: PageEnv, post: typeof fetch = fetch): Promise<Session | null> {
+  const page = env ?? { document, href: location.href, global: globalThis as PageEnv['global'], navigate: (u: string) => location.assign(u) };
+  let cfg: SignInConfig;
+  try { cfg = await signInConfig(post); }
+  catch (e) {
+    if (localTestSignIn(page.href) && testName?.trim()) return { testName: testName.trim() };
+    throw e;
+  }
+  // A configured provider never falls back to a test identity when signed out or unavailable.
+  return providerSession(cfg, page);
+}
+
+/** Fresh provider bearer on every call; local account test names retain the directory's existing body shape. */
+export async function sessionRequest(session: Session, kind: 'account' | 'world', body: Record<string, unknown> = {}): Promise<RequestInit> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if ('bearer' in session) {
+    const token = await session.bearer();
+    if (!token) throw new Error('Sign-in expired. Sign in again.');
+    headers.authorization = `Bearer ${token}`;
+  } else if (kind === 'world') headers.authorization = `Bearer test:${session.testName}`;
+  else body = { ...body, test_person: session.testName };
+  return { method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit', redirect: 'error' };
+}

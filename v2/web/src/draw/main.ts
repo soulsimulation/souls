@@ -8,7 +8,7 @@ import { PlaybackClock, caughtUp } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { SocketSource, chooseFollow, exchange, type Session } from '../source/socket.ts';
-import { providerSession } from '../source/signin.ts';
+import { browserSession } from '../source/signin.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
@@ -41,8 +41,7 @@ const moment = readMoment(location.hash); // V9: a link to a moment opens histor
 const q = new URLSearchParams(location.search);
 const signIn = async (): Promise<Session | null> => {
   const env = { document, href: location.href, global: globalThis as any, navigate: (u: string) => location.assign(u) };
-  const provider = await providerSession((globalThis as any).__simConfig ?? {}, env);
-  return provider ?? (q.get('as') ? { testName: q.get('as')! } : null);
+  return browserSession(q.get('as') ?? undefined, env);
 };
 let near: SocketSource | null = null;
 
