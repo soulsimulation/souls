@@ -1,0 +1,30 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Embroidery (from #1791): a stitch of each colour (one unit from each thread to its stitches), each unpicked (the unit back), and the hoop taken. A cloth with six stitches refuses a seventh while gold thread remains, and takes it once a stitch is unpicked.",
+  "cases": [
+    {
+      "name": "stitch_each_unpick_each_take",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","h1"]},"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"h1","form":"stitch_red"},"receipt":"re1","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"red","n":1,"to":2,"by":-1},{"change":"set","node":"h1","field":"red_stitches","n":4,"to":1,"by":1}],"events":[{"event":"eden:stitched","node":"h1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"stitch_blue"},"receipt":"re2","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"blue","n":2,"to":2,"by":-1},{"change":"set","node":"h1","field":"blue_stitches","n":5,"to":1,"by":1}],"events":[{"event":"eden:stitched","node":"h1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"stitch_gold"},"receipt":"re3","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"gold","n":3,"to":2,"by":-1},{"change":"set","node":"h1","field":"gold_stitches","n":6,"to":1,"by":1}],"events":[{"event":"eden:stitched","node":"h1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"unpick_red"},"receipt":"re4","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"red_stitches","n":4,"to":0,"by":-1},{"change":"set","node":"h1","field":"red","n":1,"to":3,"by":1}],"events":[{"event":"eden:unpicked","node":"h1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"unpick_blue"},"receipt":"re5","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"blue_stitches","n":5,"to":0,"by":-1},{"change":"set","node":"h1","field":"blue","n":2,"to":3,"by":1}],"events":[{"event":"eden:unpicked","node":"h1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"unpick_gold"},"receipt":"re6","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"gold_stitches","n":6,"to":0,"by":-1},{"change":"set","node":"h1","field":"gold","n":3,"to":3,"by":1}],"events":[{"event":"eden:unpicked","node":"h1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"take"},"receipt":"re7","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"h1","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"h1","changes":[0]}],"timers":[]}}
+      ],
+      "after": {"h1":{"kind":"eden:embroidery_hoop","fields":{"red":3,"red_stitches":0,"blue":3,"blue_stitches":0,"gold":3,"gold_stitches":0}},"b1":{"hands":{"left":"h1","right":null}}}
+    },
+    {
+      "name": "six_stitches_full_until_one_unpicked",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","h1"]},"h1":{"kind":"eden:embroidery_hoop","fields":{"red":0,"red_stitches":3,"blue":0,"blue_stitches":3}},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"h1","form":"stitch_gold"},"receipt":"re1","expect":{"verdict":"no","reason":"field_differs","need":2}},
+        {"act":{"this":"h1","form":"unpick_blue"},"receipt":"re2","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"blue_stitches","n":5,"to":2,"by":-1},{"change":"set","node":"h1","field":"blue","n":2,"to":1,"by":1}],"events":[{"event":"eden:unpicked","node":"h1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"stitch_gold"},"receipt":"re3","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"gold","n":3,"to":2,"by":-1},{"change":"set","node":"h1","field":"gold_stitches","n":6,"to":1,"by":1}],"events":[{"event":"eden:stitched","node":"h1","changes":[0,1]}],"timers":[]}}
+      ],
+      "after": {"h1":{"kind":"eden:embroidery_hoop","fields":{"red":0,"red_stitches":3,"blue":1,"blue_stitches":2,"gold":2,"gold_stitches":1}}}
+    }
+  ]
+}

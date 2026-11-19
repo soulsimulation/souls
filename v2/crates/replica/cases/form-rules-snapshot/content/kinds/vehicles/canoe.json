@@ -1,0 +1,68 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:canoe",
+  "owner": "thing",
+  "state": {},
+  "points": {"bank":{"role":"stand","at_mm":[-1200,0,0],"yaw_mdeg":90000}},
+  "slots": {
+    "back": {"admits":"body","posture":"sit","most":1,"at_mm":[0,270,-900],"stand":"bank"},
+    "front": {"admits":"body","posture":"sit","most":1,"at_mm":[0,270,900],"stand":"bank"}
+  },
+  "geometry": {"bounds_mm":[816,1020,4200]},
+  "forms": {
+    "ride": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"slot_free","slot":"back"}],
+      "steps": [{"step":"walk_to","point":"back"},{"step":"sit","slot":"back"}],
+      "effects": [{"change":"reparent","what":"actor","into":"back","event":"took_the_paddle"}]
+    },
+    "board": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+      "effects": [{"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"}]
+    },
+    "steer": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [],
+      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
+      "effects": []
+    }
+  },
+  "vehicle": {"drive":"back","steer":"steer","speed_mm_s":1500,"ground":"deep_water"},
+  "motion": {"how":"two_souls"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:canoe",
+    "shape": {
+      "shapes": [
+        {"kind":"lathe","at":[0,0,0],"profile":[[0,0],[320,20],[460,228],[500,380],[450,380],[410,228],[280,84],[0,76]],"segments":12,"tint":"hull","scale":[800,1000,4200]},
+        {"kind":"ring","at":[0,380,0],"r":480,"r2":30,"segments":14,"tint":"rim","scale":[800,1000,4200]},
+        {"kind":"box","at":[0,250,900],"size":[600,40,220],"round":0,"tint":"seat"},
+        {"kind":"box","at":[0,250,-900],"size":[600,40,220],"round":0,"tint":"seat"},
+        {"kind":"cyl","at":[300,450,0],"r":20,"h":1500,"segments":4,"tint":"seat","pitch":68755}
+      ],
+      "round": 20,
+      "palette": {"hull":"#c8432e","rim":"#5e3d27","seat":"#c9a77a"},
+      "tags": ["transport","vehicle","boat","canoe","water"]
+    }
+  },
+  "text": {
+    "card": "A canoe for two: the one at the back paddles and steers across deep water.",
+    "getting_around": "transport",
+    "boat": "boat",
+    "kayak": "kayak",
+    "howto_paddle": "Sit at the back, then paddle toward where you are going."
+  },
+  "card": {"text":"card","category":"getting_around","synonyms":["boat","kayak"]},
+  "howtos": {"paddle":{"text":"howto_paddle","steps":[{"form":"ride"},{"form":"steer"}]}}
+}

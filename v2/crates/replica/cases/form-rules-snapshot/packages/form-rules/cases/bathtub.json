@@ -1,0 +1,374 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:bathtub (core/bathtub@1): run a bath (200 kg of water from the taps) and let it out; a body lies in it in its soak place. Today's fill and empty, with the level as grams.",
+ "cases": [
+  {
+   "name": "bathtub_fill_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "fill"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bathtub",
+      "fields": {
+       "water": 0
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       820,
+       -500
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bathtub_fill_water_unmet",
+   "act": {
+    "this": "t1",
+    "form": "fill"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bathtub",
+      "fields": {
+       "water": 1000
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       820,
+       -500
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "bathtub_fill_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "fill"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bathtub",
+      "fields": {
+       "water": 0
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       820,
+       2300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1
+   }
+  },
+  {
+   "name": "bathtub_empty_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "empty"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bathtub",
+      "fields": {
+       "water": 200000
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       820,
+       -500
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bathtub_empty_water_unmet",
+   "act": {
+    "this": "t1",
+    "form": "empty"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bathtub",
+      "fields": {
+       "water": 0
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       820,
+       -500
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0
+   }
+  },
+  {
+   "name": "bathtub_empty_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "empty"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bathtub",
+      "fields": {
+       "water": 200000
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       820,
+       2300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1
+   }
+  }
+ ]
+}

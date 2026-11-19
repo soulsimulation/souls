@@ -1,0 +1,75 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:trough",
+  "owner": "thing",
+  "state": {
+    "water": {
+      "n": 1,
+      "type": "int",
+      "unit": "g",
+      "default": 300000,
+      "min": 0,
+      "max": 350000,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "side": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1570,
+      485,
+      670
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:trough",
+    "table": [
+      {
+        "part": "fill",
+        "field": "water",
+        "do": "slide",
+        "axis": "y",
+        "range": [
+          0,
+          350000
+        ],
+        "to": [
+          -380,
+          0
+        ]
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"extrude","at":[0,15,-290],"polygon":[[-785,-45],[785,-45],[785,45],[-785,45]],"h":470,"tint":"stone"},{"kind":"extrude","at":[0,15,290],"polygon":[[-785,-45],[785,-45],[785,45],[-785,45]],"h":470,"tint":"stone"},{"kind":"extrude","at":[-740,15,0],"polygon":[[-45,-335],[45,-335],[45,335],[-45,335]],"h":470,"tint":"stone"},{"kind":"extrude","at":[740,15,0],"polygon":[[-45,-335],[45,-335],[45,335],[-45,335]],"h":470,"tint":"stone"},{"kind":"box","at":[0,30,0],"size":[1500,60,600],"round":0,"tint":"stone"},{"kind":"box","at":[0,420,0],"size":[1460,20,500],"round":0,"tint":"water","role":"fill"}],"palette":{"stone":"#9c968a","water":"#5d8fa6"},"tags":["farm","trough","object"]}
+  },
+  "text": {
+    "card": "A stone water trough for animals; stand by it or lean on it.",
+    "water_trough": "water trough",
+    "drinking_trough": "drinking trough",
+    "water": "water"
+  },
+  "card": {
+    "text": "card",
+    "category": "water",
+    "synonyms": [
+      "water_trough",
+      "drinking_trough"
+    ]
+  }
+}

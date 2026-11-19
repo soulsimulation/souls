@@ -8,6 +8,7 @@
 //!   with O3's shipping, at R2's price (in memory; `v2/docs/archive.md`).
 //! - `cargo run -p archive --release -- corpus <dir>`: writes entry one of V18's corpus.
 //! - `cargo run -p archive --release -- seek [hours]`: V4's seek table and index sizes (`seek_bench.rs`).
+//! - `ship`, `rebuild` and `ship-count`: O3's drill and count (#2732), in `drill.rs`.
 //! - `cargo run -p archive --release -- pack <work dir> <out dir> [at µs ...]`: a stream-check run's log archived into
 //!   a folder the v2 page serves as history (V9), and each moment's state hash as `seek` gives it.
 //!
@@ -15,6 +16,7 @@
 //! (default `auto`), `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY` and `_PREFIX`: a local stand-in or a scratch bucket,
 //! never production's.
 
+mod drill;
 mod seek_bench;
 
 use std::cell::RefCell;
@@ -385,6 +387,18 @@ fn main() {
         "count" => count(),
         "corpus" => corpus(Path::new(&arg(2))),
         "seek" => seek_bench::run(arg(2).parse().unwrap_or(24)),
+        "ship" => store().and_then(|s| {
+            drill::ship(
+                s,
+                Path::new(&arg(2)),
+                Path::new(&arg(3)),
+                &arg(4),
+                arg(5).parse().unwrap_or(0),
+                arg(6).parse().unwrap_or(1),
+            )
+        }),
+        "rebuild" => store().and_then(|s| drill::rebuild(s, Path::new(&arg(2)), &arg(3))),
+        "ship-count" => drill::count(Path::new(&arg(2))),
         "pack" => pack(
             Path::new(&arg(2)),
             Path::new(&arg(3)),
@@ -395,7 +409,9 @@ fn main() {
         ),
         _ => refuse(
             "usage",
-            "record <dir> | restore <hash> | count | corpus <dir> | seek [hours]",
+            "record <dir> | restore <hash> | count | corpus <dir> | seek [hours] | ship <dir> <receipts> \
+             <even|uneven|still> <seconds> [seed] | rebuild <receipts> [kill] | ship-count <dir> \
+             | pack <work dir> <out dir> [at ...]",
         ),
     };
     if let Err(e) = out {

@@ -1,0 +1,274 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:see_saw. Two riders, one at each end (the activity's required role); whoever is down pushes off and the other end goes down.",
+  "cases": [
+    {
+      "name": "ride_a_free_end",
+      "act": {
+        "this": "t1",
+        "form": "ride",
+        "args": {
+          "place": "end_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:see_saw"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "ride_a_taken_end_offers_the_other",
+      "act": {
+        "this": "t1",
+        "form": "ride",
+        "args": {
+          "place": "end_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:see_saw",
+            "slots": {
+              "end_1": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "fix": {
+          "form": "ride",
+          "args": {
+            "place": "end_2"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_off",
+      "act": {
+        "this": "t1",
+        "form": "get_off"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:see_saw",
+            "slots": {
+              "end_1": [
+                "b1"
+              ]
+            },
+            "links": {
+              "rider": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "push_off_from_end_1",
+      "act": {
+        "this": "t1",
+        "form": "push_off_end_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:see_saw",
+            "links": {
+              "rider": [
+                "b1",
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "push_off_from_end_1_while_it_is_up",
+      "act": {
+        "this": "t1",
+        "form": "push_off_end_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:see_saw",
+            "fields": {
+              "low_end": "end_2"
+            },
+            "links": {
+              "rider": [
+                "b1",
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": null
+      }
+    },
+    {
+      "name": "push_off_from_end_2",
+      "act": {
+        "this": "t1",
+        "form": "push_off_end_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:see_saw",
+            "fields": {
+              "low_end": "end_2"
+            },
+            "links": {
+              "rider": [
+                "b1",
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "push_off_from_end_2_while_it_is_up",
+      "act": {
+        "this": "t1",
+        "form": "push_off_end_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:see_saw",
+            "links": {
+              "rider": [
+                "b1",
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": null
+      }
+    }
+  ]
+}

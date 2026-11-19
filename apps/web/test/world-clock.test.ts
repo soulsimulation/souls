@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {worldClockAt,worldTimeText} from '../src/world-clock.ts';
+import {worldClockAt,worldMinutes,worldTimeText} from '../src/world-clock.ts';
 import {popupMs} from '../src/dialogue-speaking.ts';
 
 const chunk=(start:number,iso:string)=>({fromTick:start,toTick:start+20,take:{startTick:start,ticks:20,finalState:{env:{datetime:iso}}}});
@@ -19,6 +19,15 @@ test('world time comes from the streamed clock, placed at the shown tick at the 
   assert.equal(worldClockAt([{take:{startTick:1,ticks:1,finalState:{}}}],5),null);
   assert.equal(worldClockAt(chunks,null),null);
   assert.equal(worldTimeText(null),'');
+});
+
+test('#3377 the time slider starts at the world\'s time, to its 15-minute step, morning and late evening', () => {
+  assert.equal(worldMinutes('2026-11-23T07:20:00Z'),435);     // 7:20 am → 7:15
+  assert.equal(worldMinutes('2026-11-23T07:23:00Z'),450);     // 7:23 am → 7:30
+  assert.equal(worldMinutes('2026-11-23T22:47:30'),1365);     // 10:47 pm → 10:45 pm (no zone: read as written)
+  assert.equal(worldMinutes('2026-11-23T23:55:00Z'),1425);    // never past the slider's last stop
+  assert.equal(worldMinutes(null),null);
+  assert.equal(worldMinutes('not a time'),null);
 });
 
 test('a pop-up stays ~4.5 s, a little longer for long lines, never past ~6.5 s', () => {

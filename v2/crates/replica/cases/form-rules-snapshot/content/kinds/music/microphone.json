@@ -1,0 +1,111 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:microphone",
+  "owner": "thing",
+  "state": {
+    "voice": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
+  },
+  "links": {"singer":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
+  "points": {"singer_spot":{"role":"stand","at_mm":[0,0,550]},"grip":{"role":"grip","at_mm":[0,1560,20]}},
+  "geometry": {"bounds_mm":[300,1600,300]},
+  "forms": {
+    "sing": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"voice","is":"silent"},{"need":"unlinked","link":"singer"}],
+      "steps": [{"step":"walk_to","point":"singer_spot"}],
+      "effects": [
+        {"change":"link","link":"singer","from":"actor","event":"took_up_singing"},
+        {"change":"set","field":"voice","to":"calm","event":"sang_calm"}
+      ]
+    },
+    "sing_happy": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"voice","is":"silent"},{"need":"unlinked","link":"singer"}],
+      "steps": [{"step":"walk_to","point":"singer_spot"}],
+      "effects": [
+        {"change":"link","link":"singer","from":"actor","event":"took_up_singing"},
+        {"change":"set","field":"voice","to":"happy","event":"sang_happy"}
+      ]
+    },
+    "sing_sad": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"voice","is":"silent"},{"need":"unlinked","link":"singer"}],
+      "steps": [{"step":"walk_to","point":"singer_spot"}],
+      "effects": [
+        {"change":"link","link":"singer","from":"actor","event":"took_up_singing"},
+        {"change":"set","field":"voice","to":"sad","event":"sang_sad"}
+      ]
+    },
+    "stop_singing": {
+      "who": {"link":"singer"},
+      "starts": "act",
+      "needs": [{"need":"state","field":"voice","not":"silent"}],
+      "steps": [],
+      "effects": [
+        {"change":"set","field":"voice","to":"silent","event":"stopped_singing"},
+        {"change":"unlink","link":"singer","from":"actor","event":"stepped_away"}
+      ]
+    }
+  },
+  "motion": {"how":"one_hand"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:microphone",
+    "table": [
+      {
+        "do": "sound",
+        "sound": "tune",
+        "mood": "calm",
+        "mode": "loop",
+        "field": "voice",
+        "at": {"calm":700},
+        "reach_mm": 12000,
+        "part": "head",
+        "link": "feed"
+      },
+      {
+        "do": "sound",
+        "sound": "tune",
+        "mood": "happy",
+        "mode": "loop",
+        "field": "voice",
+        "at": {"happy":700},
+        "reach_mm": 12000,
+        "part": "head",
+        "link": "feed"
+      },
+      {
+        "do": "sound",
+        "sound": "tune",
+        "mood": "sad",
+        "mode": "loop",
+        "field": "voice",
+        "at": {"sad":700},
+        "reach_mm": 12000,
+        "part": "head",
+        "link": "feed"
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"cyl","at":[0,800,0],"r":12,"h":1600,"color":"#222222","collide":false},
+        {"kind":"sphere","at":[0,1620,20],"r":35,"color":"#333333","collide":false,"role":"head"},
+        {"kind":"cyl","at":[0,10,0],"r":140,"h":20,"color":"#222222","collide":false}
+      ],
+      "tags": ["music","microphone"]
+    }
+  },
+  "text": {
+    "card": "A microphone on a stand: sing into it; a linked speaker carries it.",
+    "instrument": "instrument",
+    "mic": "mic",
+    "singing": "singing",
+    "howto_play": "Sing (sing, sing_happy or sing_sad), then stop singing."
+  },
+  "card": {"text":"card","category":"instrument","synonyms":["mic","singing"]},
+  "howtos": {"play":{"text":"howto_play","steps":[{"form":"sing"},{"form":"stop_singing"}]}}
+}

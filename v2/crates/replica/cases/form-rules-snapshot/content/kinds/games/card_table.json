@@ -1,0 +1,104 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:card_table",
+  "owner": "thing",
+  "state": {
+    "cards": {"n": 1, "type": "int", "unit": "count", "default": 52, "min": 0, "max": 52, "audience": {"rule": "everyone"}}
+  },
+  "links": {"player": {"n": 1, "from": "soul", "most": 4, "audience": {"rule": "everyone"}}},
+  "points": {
+    "north_stand": {"role": "stand", "at_mm": [520, 0, -620]},
+    "east_stand": {"role": "stand", "at_mm": [620, 0, 520]},
+    "south_stand": {"role": "stand", "at_mm": [520, 0, 620]},
+    "west_stand": {"role": "stand", "at_mm": [-620, 0, 520]}
+  },
+  "slots": {
+    "north": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 460, -620], "stand": "north_stand"},
+    "east": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [620, 460, 0], "stand": "east_stand"},
+    "south": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 460, 620], "stand": "south_stand"},
+    "west": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [-620, 460, 0], "stand": "west_stand"}
+  },
+  "geometry": {"bounds_mm": [1600, 940, 1600]},
+  "children": {"hand": {"kind": "eden:card_hand", "most": 4}},
+  "forms": {
+    "sit_in": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type": "slot", "select": {"of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1}}
+      },
+      "needs": [{"need": "slot_free", "slot": {"arg": "seat"}}],
+      "steps": [{"step": "walk_to", "point": {"arg": "seat"}}, {"step": "sit", "slot": {"arg": "seat"}}],
+      "effects": [
+        {"change": "link", "link": "player", "from": "actor", "event": "joined_the_game"},
+        {"change": "reparent", "what": "actor", "into": {"arg": "seat"}, "event": "sat_down"}
+      ]
+    },
+    "leave": {
+      "who": {"link": "player"},
+      "starts": "act",
+      "needs": [],
+      "steps": [{"step": "rise"}],
+      "effects": [
+        {"change": "unlink", "link": "player", "from": "actor", "event": "left_the_game"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "stood_up"}
+      ]
+    }
+  },
+  "roles": {
+    "player": {"need": "required", "places": {"in": "this", "slots": ["north", "east", "south", "west"], "posture": "sit"}}
+  },
+  "motion": {"how": "pushed_by_one"},
+  "loose": {"ever": true},
+  "looks": {
+    "model": "look:card_table",
+    "table": [{"part": "fill", "field": "cards", "do": "scale", "axis": "y", "range": [0, 52], "to": [0, 1000]}],
+    "shape": {
+      "round": 6,
+      "shapes": [
+        {"kind": "box", "at": [0, 720, 0], "size": [850, 40, 850], "tint": "wood"},
+        {"kind": "box", "at": [0, 742, 0], "size": [800, 6, 800], "tint": "felt"},
+        {"kind": "box", "at": [-365, 350, -365], "size": [60, 700, 60], "tint": "leg"},
+        {"kind": "box", "at": [-365, 350, 365], "size": [60, 700, 60], "tint": "leg"},
+        {"kind": "box", "at": [365, 350, -365], "size": [60, 700, 60], "tint": "leg"},
+        {"kind": "box", "at": [365, 350, 365], "size": [60, 700, 60], "tint": "leg"},
+        {"kind": "box", "at": [0, 760, 0], "size": [64, 30, 90], "tint": "back", "role": "fill"},
+        {"kind": "box", "at": [0, 440, -620], "size": [440, 40, 440], "tint": "chair"},
+        {"kind": "box", "at": [-180, 210, -800], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [-180, 210, -440], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [180, 210, -800], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [180, 210, -440], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [0, 700, -820], "size": [440, 480, 40], "tint": "chair"},
+        {"kind": "box", "at": [620, 440, 0], "size": [440, 40, 440], "tint": "chair"},
+        {"kind": "box", "at": [440, 210, -180], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [440, 210, 180], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [800, 210, -180], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [800, 210, 180], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [820, 700, 0], "size": [40, 480, 440], "tint": "chair"},
+        {"kind": "box", "at": [0, 440, 620], "size": [440, 40, 440], "tint": "chair"},
+        {"kind": "box", "at": [-180, 210, 440], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [-180, 210, 800], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [180, 210, 440], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [180, 210, 800], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [0, 700, 820], "size": [440, 480, 40], "tint": "chair"},
+        {"kind": "box", "at": [-620, 440, 0], "size": [440, 40, 440], "tint": "chair"},
+        {"kind": "box", "at": [-800, 210, -180], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [-800, 210, 180], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [-440, 210, -180], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [-440, 210, 180], "size": [40, 420, 40], "tint": "chair"},
+        {"kind": "box", "at": [-820, 700, 0], "size": [40, 480, 440], "tint": "chair"}
+      ],
+      "palette": {"felt": "#2e6b4e", "leg": "#4a2f1c", "wood": "#5b3a22", "chair": "#a0522d", "back": "#8c2f39"},
+      "tags": ["cards", "game", "table", "furniture"]
+    }
+  },
+  "text": {
+    "card": "A green card table for four: sit in, draw and play cards from the pack.",
+    "game": "game",
+    "cards": "cards",
+    "card_game": "card game",
+    "howto_sit": "Sit in at a free place, then take up a hand of cards."
+  },
+  "card": {"text": "card", "category": "game", "synonyms": ["cards", "card_game"]},
+  "howtos": {"sit": {"text": "howto_sit", "steps": [{"form": "sit_in"}]}}
+}

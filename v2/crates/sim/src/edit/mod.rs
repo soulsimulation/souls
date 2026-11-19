@@ -16,7 +16,8 @@
 pub mod safety;
 pub mod undo;
 
-use crate::commit::{off_clock, write};
+use crate::commit::{off_clock, write_guarded};
+use crate::structure::Structure;
 use replica::apply::Replica;
 use replica::edit::{Checked, Op, Ref, Refused, confirm};
 use replica::effects::{Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
@@ -99,6 +100,18 @@ pub fn commit(
     bodies: &[Who],
     at: Micros,
 ) -> Result<Committed, Refused> {
+    commit_guarded(live, minter, planned, bodies, at, &Structure::default())
+}
+
+/// [`commit`], with the world's structure rule checked on the write (B18, `crate::structure`).
+pub fn commit_guarded(
+    live: &mut Replica,
+    minter: &mut Minter,
+    planned: &Planned,
+    bodies: &[Who],
+    at: Micros,
+    structure: &Structure,
+) -> Result<Committed, Refused> {
     let checked = &planned.checked;
     confirm(live, checked)?;
     let unsafe_ = planned.guard.judge(bodies);
@@ -108,7 +121,7 @@ pub fn commit(
     }
     let names = names(checked, minter)?;
     let effects = effects(live.tree(), live.version(), checked, &names, at);
-    let part = write(live, &effects).map_err(|r| refused(r.name, r.detail))?;
+    let part = write_guarded(live, &effects, structure).map_err(|r| refused(r.name, r.detail))?;
     Ok(Committed { part, names })
 }
 

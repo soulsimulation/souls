@@ -1,0 +1,188 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:bowl (core/bowl@1, 160 placed): a bowl holding one portion, four spoonfuls. Eaten while held; an empty bowl is refused. Picked up with the body's pick_up.",
+ "cases": [
+  {
+   "name": "bowl_eat_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "eat"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bowl",
+      "fields": {
+       "food": 4
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bowl_eat_not_held",
+   "act": {
+    "this": "t1",
+    "form": "eat"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bowl",
+      "fields": {
+       "food": 4
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_held",
+    "need": 0
+   }
+  },
+  {
+   "name": "bowl_eat_food_unmet",
+   "act": {
+    "this": "t1",
+    "form": "eat"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bowl",
+      "fields": {
+       "food": 0
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1
+   }
+  }
+ ]
+}
