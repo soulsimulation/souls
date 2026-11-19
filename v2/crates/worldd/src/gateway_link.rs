@@ -92,7 +92,12 @@ fn stream(world: &Replica, www: PathBuf, text: Arc<Store>) -> Follow {
                 .display()
         );
         // The writer runs until the process ends.
-        drop(follow(writer, sub, Arc::new(AtomicBool::new(false))));
+        drop(follow(
+            writer,
+            sub,
+            Arc::new(AtomicBool::new(false)),
+            answers::now,
+        ));
         Box::new(move |n, bytes| tier.offer(n, bytes))
     })
 }
