@@ -7,7 +7,7 @@
 // - The world's page opens on the answer; the click's time goes with it, so that page can time its first frame.
 // - Sign-in here is W1's sign-in for test worlds (`Bearer test:<name>`); a provider's token rides the same header.
 
-export type Row = { name: string; label: string; template: string; awake: boolean; picture: string | null };
+export type Row = { name: string; label: string; template: string; awake: boolean; picture: string | null; closed?: boolean };
 export type Listing = { worlds: Row[]; templates: string[] };
 
 /** What a refusal says, in words: a limit's name and when to retry. */
@@ -54,7 +54,7 @@ function page(): void {
       a.textContent = w.name;
       a.href = `../../?world=${encodeURIComponent(w.name)}`;
       s.className = 'muted';
-      s.textContent = `${w.label} · ${w.template} · ${w.awake ? 'awake' : 'asleep'}`;
+      s.textContent = `${w.label} · ${w.template} · ${w.awake ? 'awake' : 'asleep'}${w.closed ? ' · closed to visitors' : ''}`;
       li.append(a, s);
       return li;
     }) : [Object.assign(document.createElement('li'), { className: 'muted', textContent: 'no worlds yet' })]));

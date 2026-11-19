@@ -12,6 +12,10 @@
 //! 4. **Per-account limits** ([`Limits`], today's): five worlds an account; an account in its first day two, and one
 //!    an hour. A refusal names the limit and when to retry. They stop abuse and count toward no bar.
 //! 5. **The label is free text, not identity.** A label already on another account's world is refused.
+//! 6. **A world's settings** (W9, #2827), today's two owner switches, by its creator alone: `unlisted` takes the row
+//!    off the list (the row's flag alone: it wakes no world), and `closed` closes it to visitors (today's one travel
+//!    switch; it refuses nothing until travel exists, X9). Each is a field of the row, written on condition of the
+//!    version read, and the list shows it from this machine's copy at once.
 
 pub mod http;
 
@@ -207,6 +211,7 @@ impl<S: Store> Worlds<S> {
         // Locks are taken in one order, the directory then the cached copy.
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let mut rows = self.rows(&inner)?;
+        rows.retain(|r| r.get("unlisted") != Some(&Json::Bool(true)));
         for row in &mut rows {
             let awake = (|| {
                 let lineage: [u8; 16] = from_hex(row.get("lineage")?.as_str()?)
@@ -322,6 +327,43 @@ impl<S: Store> Worlds<S> {
         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
         Ok(json!({"world": row, "epoch": claim.takeover.epoch}))
     }
+
+    /// A world's settings (rule 6): `creator` sets `unlisted` and `closed` on the row of `world` (either may be
+    /// `None`, left as it is; both `None` reads the row). Answers the row. Writes the list's one object alone.
+    pub fn settings(
+        &self,
+        world: &str,
+        creator: Id,
+        unlisted: Option<bool>,
+        closed: Option<bool>,
+    ) -> Result<Json, Refusal> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let who = principal_text(creator);
+        let (etag, rows) = read_rows(&inner.dir.store)?;
+        let set = |rows: &mut Vec<Json>| -> R<Json> {
+            let Some(row) = rows
+                .iter_mut()
+                .find(|r| r.get("name").and_then(Json::as_str) == Some(world))
+            else {
+                return refuse("world-missing", world.to_owned());
+            };
+            if row_creator(row) != Some(&who) {
+                return refuse("not-the-creator", world.to_owned());
+            }
+            for (k, v) in [("unlisted", unlisted), ("closed", closed)] {
+                if let Some(v) = v {
+                    row[k] = json!(v);
+                }
+            }
+            Ok(row.clone())
+        };
+        if unlisted.is_none() && closed.is_none() {
+            return set(&mut rows.clone());
+        }
+        let (rows, row) = write_rows(&inner.dir.store, etag, rows, set)?;
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
+        Ok(row)
+    }
 }
 
 fn read_rows<S: Store>(store: &S) -> R<(String, Vec<Json>)> {
@@ -341,13 +383,28 @@ fn read_rows<S: Store>(store: &S) -> R<(String, Vec<Json>)> {
 /// Adds `row` on condition of the version read; a write refused because another machine added a row reads again.
 fn add_row<S: Store>(
     store: &S,
-    mut etag: String,
-    mut rows: Vec<Json>,
+    etag: String,
+    rows: Vec<Json>,
     row: Json,
 ) -> R<(String, Vec<Json>)> {
+    let ((etag, rows), ()) = write_rows(store, etag, rows, |next| {
+        next.push(row.clone());
+        Ok(())
+    })?;
+    Ok((etag, rows))
+}
+
+/// Changes the rows with `change` and writes them on condition of the version read; a write refused because another
+/// machine wrote reads again and changes the new rows.
+fn write_rows<S: Store, T>(
+    store: &S,
+    mut etag: String,
+    mut rows: Vec<Json>,
+    change: impl Fn(&mut Vec<Json>) -> R<T>,
+) -> R<((String, Vec<Json>), T)> {
     for _ in 0..16 {
         let mut next = rows.clone();
-        next.push(row.clone());
+        let out = change(&mut next)?;
         let bytes = json!({ "worlds": next }).to_string().into_bytes();
         let when = if etag.is_empty() {
             When::Absent
@@ -355,7 +412,7 @@ fn add_row<S: Store>(
             When::Is(&etag)
         };
         match store.put(KEY, &bytes, when) {
-            Ok(e) => return Ok((e, next)),
+            Ok(e) => return Ok(((e, next), out)),
             Err(e) if e.name == "precondition-failed" => (etag, rows) = read_rows(store)?,
             Err(e) => return Err(e),
         }
