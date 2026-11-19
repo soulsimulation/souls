@@ -5,11 +5,12 @@
 import init, { historyAt } from 'replica';
 import { decode } from 'cborg';
 import type { NodeRec, SampleRec } from '../source/source.ts';
+import { happenedInBundle, type Happened } from '../sound/record.ts';
 
 /** What one seek gives the page. */
 export type Seeked = {
   seq: number; at: number; start: number; length: number; next: number | null;
-  hash: string; nodes: NodeRec[]; samples: SampleRec[]; bytes: number;
+  hash: string; nodes: NodeRec[]; samples: SampleRec[]; bytes: number; happened: Happened[];
   /** ms: fetched, inflated, applied (WASM), read into records. */
   ms: number[];
 };
@@ -102,7 +103,9 @@ async function seek(base: URL, seq: number, at: number, withHash: boolean) {
     const later = ix[i + 1]?.[0] ?? (await dayIndex(base, day + 1))?.[0]?.[0] ?? null;
     const transfer: Transferable[] = [];
     for (const n of nodes) for (const t of n.tiles ?? []) transfer.push(t[2].buffer as ArrayBuffer, t[3].buffer as ArrayBuffer);
-    post({ t: 'seeked', s: { seq, at, start, length, next: later, hash: hex(out.get(1) as Uint8Array), nodes, samples, bytes, ms } }, transfer);
+    let happened: Happened[] = [];
+    try { happened = happenedInBundle(body); } catch { /* sounds only: the moment opened */ }
+    post({ t: 'seeked', s: { seq, at, start, length, next: later, hash: hex(out.get(1) as Uint8Array), nodes, samples, bytes, ms, happened } }, transfer);
     return;
   }
   throw new Error(`no history in the year before ${at} µs`);

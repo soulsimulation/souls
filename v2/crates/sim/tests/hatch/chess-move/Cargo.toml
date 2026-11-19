@@ -1,0 +1,20 @@
+# The chess-move check, a code hatch's module (Engine v2 F8, #2823): built to ../chess-move.wasm by ./build.sh, which
+# the hatch test loads by its hash. Its own workspace, so the v2 workspace never builds it.
+[package]
+name = "chess-move"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "chess.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true
+
+[workspace]
