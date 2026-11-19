@@ -133,6 +133,8 @@ step client-command node --test client/src/brief/*.test.mjs client/src/find/*.te
 step client-stats node --test client/src/stats/*.test.mjs
 # The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
 step client-check node --test client/src/check/*.test.mjs
+# The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
+step client-reflex node --test client/src/reflex/*.test.mjs
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
