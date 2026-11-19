@@ -9,7 +9,10 @@ use import_eden::{
     F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import, PLACE, ROOM,
     WINDOW, base64, count, load, world_of,
 };
-use replica::encode::Value;
+use replica::effects::{Header, Part};
+use replica::encode::{Name, Value};
+use replica::sky::{self, Mist, Presentation};
+use replica::tree::Tree;
 use replica::world_model::plain;
 use sim::audit::Auditor;
 
@@ -163,6 +166,47 @@ fn a_small_world_loads_through_commit_with_its_rooms_doorways_windows_stairs_and
     assert_eq!(g.fields().get(&F_TILES), Some(&want));
 }
 
+/// V19c (#3521) A1, A3: Eden's sky settings (its presentation date, palette and morning mist) land on the world node,
+/// and a copy built from the import's log alone reads the same; facts without `sky` write none.
+#[test]
+fn the_sky_settings_land_on_the_world_node_and_a_replay_reads_the_same() {
+    let head = "\"format\": \"souls/import-eden/1\",";
+    let sky = "\"sky\": {\"calendar\": \"06-05\", \"palette\": \"eden-summer\", \"mist\": [390, 150, 100]},";
+    let im = load(&SMALL.replacen(head, &format!("{head} {sky}"), 1))
+        .expect("the small world with its sky loads");
+    let want = Presentation {
+        date: Some([6, 5]),
+        palette: Name::new("souls:eden-summer"),
+        mist: Some(Mist {
+            peak: 390 * 60_000_000,
+            half: 150 * 60_000_000,
+            strength: 100,
+        }),
+    };
+    let world = im.tree.node(im.tree.root()).unwrap();
+    assert_eq!(Presentation::read(world.fields()), want);
+    let (header, part) = &im.log;
+    let mut copy = Tree::start(world.id(), world.kind().clone());
+    copy.apply(&Header::read(header).unwrap(), &Part::read(part).unwrap())
+        .expect("the log applies");
+    let replayed = copy.node(copy.root()).unwrap();
+    assert_eq!(Presentation::read(replayed.fields()), want);
+    assert_eq!(replayed.fields(), world.fields());
+
+    let none = load(SMALL).unwrap();
+    let f = none.tree.node(none.tree.root()).unwrap().fields().clone();
+    assert!(
+        ![sky::F_SKY_DATE, sky::F_PALETTE, sky::F_MIST]
+            .iter()
+            .any(|k| f.contains_key(k))
+    );
+    let bad = "\"sky\": {\"calendar\": \"02-30\"},";
+    assert!(
+        load(&SMALL.replacen(head, &format!("{head} {bad}"), 1)).is_err(),
+        "a date no year has is refused"
+    );
+}
+
 /// N1b (#3197) A1: every terrain tile's heights and classes, read back from the tree, are the exported bytes.
 fn tiles_round_trip(im: &Import, facts: &Json) -> usize {
     let t = &im.tree;
@@ -202,6 +246,11 @@ fn eden_2026_loads_with_the_bakes_counts_and_its_poses_compose_to_the_world() {
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("{path}: {e}; run the exporter first"));
     let im = load(&text).expect("Eden 2026 loads through commit");
+    // V19c (#3521): Eden's sky is drawn on 5 June, in its summer palette, with today's morning mist.
+    let shown = Presentation::read(im.tree.node(im.tree.root()).unwrap().fields());
+    assert_eq!(shown.date, Some([6, 5]));
+    assert_eq!(shown.palette, Name::new("souls:eden-summer"));
+    assert_eq!(shown.mist.map(|m| m.strength), Some(100));
     let (rows, by_ref, extra) = count(&im);
     for r in &rows {
         println!("{}: tree {}, bake {}", r.what, r.tree, r.bake);
