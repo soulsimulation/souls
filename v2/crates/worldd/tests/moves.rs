@@ -908,3 +908,282 @@ fn a_walk_cancelled_mid_move_by_a_new_move_ends_in_the_same_tick() {
     );
     assert!(entry < next, "and written before it");
 }
+
+/// C19 beside C14: a partially occupied thing remains eligible, both bare and first in a ranked list.
+fn multi_slot_eligibility(ranked: bool) {
+    use worldd::bodies::{Ask, Asked};
+    type Admission = (Result<(), String>, Option<(usize, Option<Id>)>);
+
+    fn sit(b: &mut Bodies, body: Id, target: Id, fallbacks: &[Id], sequence: u64) -> Admission {
+        let intent = soul(20_000 + sequence);
+        let ask = Asked {
+            body,
+            actor: Actor::Soul(body),
+            ask: Ask::Sit { thing: target },
+            fallbacks: fallbacks.iter().map(|&thing| Ask::Sit { thing }).collect(),
+        };
+        let mut started = b.start(vec![(intent, ask)]);
+        if started.is_empty() {
+            b.step(b.runner.now + b.runner.tick);
+            started = b.start(Vec::new());
+        }
+        let result = started.remove(0).1.map_err(|r| r.name.to_owned());
+        (result, b.took(intent))
+    }
+
+    let (town, ground) = town();
+    let mut starts = Vec::new();
+    let people: Vec<Id> = (0..5).map(|n| soul(10_000 + n)).collect();
+    for (i, &person) in people.iter().enumerate() {
+        let (x, z) = if i < 4 {
+            (-37_000_000 + i as i64 * 1_000_000, 30_300_000)
+        } else {
+            (-34_000_000, 31_300_000)
+        };
+        let placed = town.surfaces[&ground]
+            .place(
+                person,
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                Vec3::new(x, 0, z),
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        starts.push(placed);
+    }
+    let mut b = Bodies::new(town, 50_000).unwrap();
+    for placed in starts {
+        b.add_body(humanoid(), placed).unwrap();
+    }
+    for slot in 1..=3 {
+        b.add_place(PlaceAt {
+            thing: thing(),
+            place: Place {
+                slot,
+                height: 450_000,
+                stand: [0, 300_000],
+            },
+            point: Vec3::new(-38_000_000 + slot as i64 * 1_000_000, 450_000, 30_000_000),
+            facing: Quat::IDENTITY,
+            floor: ground,
+        })
+        .unwrap();
+    }
+    b.add_place(PlaceAt {
+        thing: bed(),
+        place: Place {
+            slot: 1,
+            height: 450_000,
+            stand: [0, 300_000],
+        },
+        point: Vec3::new(-34_000_000, 450_000, 30_000_000),
+        facing: Quat::IDENTITY,
+        floor: ground,
+    })
+    .unwrap();
+    b.begin(0);
+    assert_eq!(
+        sit(&mut b, people[4], ground, &[], 1).0,
+        Err("place-unknown".into()),
+        "a known non-seat keeps its refusal"
+    );
+    assert_eq!(
+        sit(&mut b, people[4], soul(99_999), &[], 2).0,
+        Err("place-unknown".into()),
+        "an unknown seat keeps its refusal"
+    );
+    assert_eq!(sit(&mut b, people[0], thing(), &[], 3).0, Ok(()));
+    let fallback = [bed()];
+    let partial = sit(
+        &mut b,
+        people[1],
+        thing(),
+        if ranked { &fallback } else { &[] },
+        4,
+    );
+    assert_eq!(
+        partial.0,
+        Ok(()),
+        "one occupied slot leaves the other slots eligible"
+    );
+    assert_eq!(
+        partial.1,
+        Some((0, Some(thing()))),
+        "the partially occupied primary is selected"
+    );
+    assert_eq!(
+        sit(&mut b, people[2], thing(), &[], 5).0,
+        Ok(()),
+        "the third slot remains eligible"
+    );
+    let full = sit(&mut b, people[3], thing(), &fallback, 6);
+    assert_eq!(full.0, Ok(()), "a full primary selects its free fallback");
+    assert_eq!(full.1, Some((1, Some(bed()))));
+    assert_eq!(
+        sit(&mut b, people[4], thing(), &fallback, 7).0,
+        Err("place-taken".into()),
+        "a fully occupied list is refused"
+    );
+    assert!(
+        b.step(1_100_000).iter().all(|(_, r)| r.is_ok()),
+        "every admitted sit completes through the controller"
+    );
+    let placed = b.placed();
+    for (i, person) in people.iter().take(3).enumerate() {
+        assert_eq!(
+            (placed[person].0.frame.node, placed[person].0.frame.slot),
+            (thing(), Some(i as u64 + 1))
+        );
+    }
+    assert_eq!(
+        (
+            placed[&people[3]].0.frame.node,
+            placed[&people[3]].0.frame.slot
+        ),
+        (bed(), Some(1))
+    );
+}
+
+#[test]
+fn c19_a_partly_occupied_thing_accepts_a_bare_sit() {
+    multi_slot_eligibility(false);
+}
+
+#[test]
+fn c19_a_partly_occupied_primary_precedes_its_ranked_fallback() {
+    multi_slot_eligibility(true);
+}
+
+/// A free slot can change after the planner question: each current selection must use its own cached distance.
+fn exact_slot_reach(first_is_near: bool, replace_pending: bool) {
+    use worldd::bodies::{Ask, Asked};
+    let (town, ground) = town();
+    let people = [soul(40_001), soul(40_002)];
+    let positions = [
+        Vec3::new(-37_000_000, 0, 30_300_000),
+        Vec3::new(-37_400_000, 0, 30_300_000),
+    ];
+    let placed: Vec<_> = people
+        .iter()
+        .zip(positions)
+        .map(|(&body, at)| {
+            town.surfaces[&ground]
+                .place(
+                    body,
+                    Frame {
+                        node: ground,
+                        slot: None,
+                    },
+                    at,
+                    Quat::IDENTITY,
+                )
+                .unwrap()
+        })
+        .collect();
+    let mut b = Bodies::new(town, 50_000).unwrap();
+    for at in placed {
+        b.add_body(humanoid(), at).unwrap();
+    }
+    for slot in 1..=2 {
+        let near = (slot == 1) == first_is_near;
+        b.add_place(PlaceAt {
+            thing: thing(),
+            place: Place {
+                slot,
+                height: 450_000,
+                stand: [0, 300_000],
+            },
+            point: Vec3::new(
+                if near { -37_000_000 } else { -34_000_000 },
+                450_000,
+                30_000_000,
+            ),
+            facing: Quat::IDENTITY,
+            floor: ground,
+        })
+        .unwrap();
+    }
+    b.begin(0);
+    if replace_pending {
+        assert!(
+            b.start(vec![(
+                soul(40_999),
+                Asked {
+                    body: people[0],
+                    actor: Actor::Soul(people[0]),
+                    ask: Ask::Sit { thing: thing() },
+                    fallbacks: vec![]
+                }
+            )])
+            .is_empty()
+        );
+    }
+    let asks = people
+        .iter()
+        .take(if first_is_near { 2 } else { 1 })
+        .enumerate()
+        .map(|(i, &body)| {
+            (
+                soul(41_000 + i as u64),
+                Asked {
+                    body,
+                    actor: Actor::Soul(body),
+                    ask: Ask::Sit { thing: thing() },
+                    fallbacks: vec![],
+                },
+            )
+        })
+        .collect();
+    assert!(
+        b.start(asks).is_empty(),
+        "reach waits for the off-clock planner"
+    );
+    // Mark only after construction: routes/reach now must run on the planner thread, never this clock thread.
+    sim::commit::mark_clock_thread();
+    let replaced = b.step(50_000);
+    if replace_pending {
+        assert_eq!(
+            replaced,
+            vec![(soul(40_999), Err("claim-taken".into()))],
+            "the old order ends before the replacement's admission; its in-flight reply is stale"
+        );
+    }
+    let started = b.start(Vec::new());
+    assert_eq!(started[0].0, soul(41_000));
+    assert!(
+        started[0].1.is_ok(),
+        "the nearest exact slot is within reach: {:?}",
+        started[0]
+    );
+    if first_is_near {
+        assert_eq!(started[1].0, soul(41_001));
+        assert_eq!(
+            started[1].1.as_ref().unwrap_err().name,
+            "out-of-reach",
+            "the next request cannot reuse the occupied near slot's distance for the far free slot"
+        );
+    }
+    assert!(b.step(1_100_000).iter().all(|(_, r)| r.is_ok()));
+    assert_eq!(
+        b.placed()[&people[0]].0.frame.slot,
+        Some(if first_is_near { 1 } else { 2 })
+    );
+    assert!(b.slots.held_by(people[1]).is_none());
+}
+
+#[test]
+fn c19_planner_selected_slot_uses_its_own_reach_when_first_slot_is_far() {
+    exact_slot_reach(false, false);
+}
+
+#[test]
+fn c19_planner_changed_free_slot_cannot_reuse_another_slots_distance() {
+    exact_slot_reach(true, false);
+}
+
+#[test]
+fn c19_planner_replaced_order_cannot_admit_from_its_old_reply() {
+    exact_slot_reach(false, true);
+}

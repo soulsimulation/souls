@@ -15,6 +15,11 @@
 //!   the first tick after its reach is back, a tick later than asked. The clock commits: the claims, and the seat
 //!   held or free and the distance against the move's reach, as B3 reserves a seat: one tick's sits are taken
 //!   together, in B3's stable order. A move refused there ends by that name.
+//! - **A thing with several seats** (C19, #3457). A sit names a thing; the world picks its free slot whose stand point
+//!   is nearest the body (`Slots::free`, ties by slot), so three Souls share a sofa, each in its own slot, and a fourth
+//!   is refused `place-taken`. A walk to a thing with no point goes to that slot's stand point. A restart hands each
+//!   seated body back into the slot its logged pose names.
+
 //! - **Ends by name.** A walk ends when its skill does: done, or failed by name. A sit or a rise ends when its move
 //!   does: `done`, or cancelled by name (`claim-taken`, `out-of-reach`). A new move on a body whose walk is still
 //!   going ends that walk `claim-taken`.
@@ -52,7 +57,7 @@ use sim::commit::bind::{Bound, Slot, bind};
 use sim::commit::spot;
 use sim::controller::Stance;
 use sim::host::Runner;
-use sim::host::{Planned, Wants};
+use sim::host::{Planned, ReachKey, ReachQuestion, Wants};
 use sim::life::{Born, Life, Retired, Standing};
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
@@ -85,10 +90,27 @@ pub struct Asked {
     pub fallbacks: Vec<Ask>,
 }
 
+/// Whether `v` is a form's arguments: a list of `[name, value]` pairs, a name as bytes.
+fn form_args(v: Option<&Value>) -> bool {
+    match v {
+        Some(Value::Array(a)) => a.first().is_some_and(
+            |p| matches!(p, Value::Array(kv) if matches!(kv.first(), Some(Value::Bytes(_)))),
+        ),
+        _ => false,
+    }
+}
+
 /// Reads a move intent (`replica::move_check::read`, the client's own reading): `None` when its verb is not a move,
 /// else the ask and its fallbacks or the reason it is not one. A walk's point is parameter 1, `[x, y, z]` µm in its
 /// target's frame.
 pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
+    // A sit naming a form's arguments (`[[name, value], ...]`, its seat) is the entry's own form, run by the form
+    // runner with its walk (C17, #3453); a bare sit is the move.
+    if matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
+        && form_args(intent.parameters.get(&1))
+    {
+        return None;
+    }
     Some(move_check::read(intent)?.map(|mut asks| {
         let ask = asks.remove(0);
         Asked {
@@ -106,20 +128,23 @@ enum Live {
     Place(Instance),
 }
 
-/// The reach distances the planner found (K18b): by body and place, µm to the place's slot and stand points. The clock
-/// reads them and computes none.
-struct Reached<'a>(&'a BTreeMap<(Id, Id), [i64; 2]>);
+/// Only the exact slot and pending move's planner answer may supply a reach check.
+struct Reached<'a> {
+    cache: &'a BTreeMap<ReachKey, [i64; 2]>,
+    order: Option<Id>,
+    slot: Option<u64>,
+}
 
 impl Reach for Reached<'_> {
     fn distance(
         &self,
         body: Id,
-        _: &Effector,
-        _: Option<&Name>,
+        _effector: &Effector,
+        _part: Option<&Name>,
         target: Id,
         point: &Name,
     ) -> Option<i64> {
-        let [place, stand] = self.0.get(&(body, target))?;
+        let [place, stand] = self.cache.get(&(body, target, self.slot?, self.order?))?;
         match point.as_str() {
             "souls:slot" => Some(*place),
             "souls:stand" => Some(*stand),
@@ -171,7 +196,7 @@ pub struct Bodies {
     /// The planner's answers for the next tick.
     planned: Planned,
     /// The reach distances last found, by body and seat.
-    reached: BTreeMap<(Id, Id), [i64; 2]>,
+    reached: BTreeMap<ReachKey, [i64; 2]>,
     /// Sits and rises waiting for their reach, in the order asked.
     waiting: Vec<Waiting>,
     /// Every body's interest set (B11, R4), kept as the bodies move.
@@ -303,7 +328,8 @@ impl Bodies {
     }
 
     /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back
-    /// into it from where it was added, at body time `at`, and its seat is held again. A seat gone or taken leaves it
+    /// into that slot (its pose's frame names the thing and the slot, C19) from where it was added, at body time `at`,
+    /// and its seat is held again. A seat gone or taken leaves it
     /// standing, named in the result.
     pub fn seat_placed(&mut self, placed: &Placed, at: Micros) -> Vec<(Id, Refusal)> {
         let mut out = Vec::new();
@@ -311,11 +337,10 @@ impl Bodies {
             if pose.support != Support::Slot || self.runner.controller.body(body).is_none() {
                 continue;
             }
-            let thing = pose.frame.node;
             let r = self.slots.restore(
                 &mut self.runner.controller,
                 body,
-                thing,
+                (pose.frame.node, pose.frame.slot),
                 stance.unwrap_or(Stance::Sit),
                 at,
             );
@@ -382,22 +407,36 @@ impl Bodies {
         self.runner.now = now;
     }
 
-    /// The reach questions for the planner: each body's point (its feet, or its seat's point while it is in one) and
-    /// its seat's seat and stand points, µm, as the bodies stand now.
-    fn reach_of(&self, pairs: Vec<(Id, Id)>) -> Vec<(Id, Vec3, Id, [Vec3; 2])> {
+    /// Ask each candidate slot with its own identity. Both contacts use the stand point across x/z (C17/C19),
+    /// never seat height or another slot's geometry. Availability remains authoritative at commit.
+    fn reach_of(&self, pairs: Vec<(Id, Id, Id)>) -> Vec<ReachQuestion> {
         let c = &self.runner.controller;
-        pairs
-            .into_iter()
-            .filter_map(|(b, t)| {
-                let p = c.body(b)?.pose;
-                let at = match (p.support, self.slots.held_by(b)) {
-                    (Support::Slot, Some(h)) => self.slots.place(h)?.point,
-                    _ => p.position,
-                };
-                let s = self.slots.place(t)?;
-                Some((b, at, t, [s.point, s.stand().ok()?]))
-            })
-            .collect()
+        let mut questions = Vec::new();
+        for (body, thing, order) in pairs {
+            let Some(p) = c.body(body).map(|b| b.pose) else {
+                continue;
+            };
+            let at = match (p.support, self.slots.held_place(body)) {
+                (Support::Slot, Some(s)) => match s.stand() {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                },
+                _ => p.position,
+            };
+            for s in self.slots.places_of(thing) {
+                let Ok(stand) = s.stand() else { continue };
+                let stand = Vec3::new(stand.x, 0, stand.z);
+                questions.push(ReachQuestion {
+                    body,
+                    at: Vec3::new(at.x, 0, at.z),
+                    thing,
+                    slot: s.place.slot,
+                    order,
+                    points: [stand, stand],
+                });
+            }
+        }
+        questions
     }
 
     /// Route searches the planner ran so far, off the clock (K18b).
@@ -415,7 +454,7 @@ impl Bodies {
     /// batch out, waiting at most [`Bodies::wait`] for each; a shortfall is kept for the recorder.
     fn take(&mut self) {
         let at = self.runner.now;
-        let p = match self.schedule.remove(&at) {
+        let mut p = match self.schedule.remove(&at) {
             Some(n) => self
                 .planner
                 .take_n(usize::try_from(n).unwrap_or(usize::MAX)),
@@ -429,6 +468,20 @@ impl Bodies {
                 p
             }
         };
+        // A replaced move's in-flight answer cannot be used by a newer order on the same body/fixture/slot.
+        p.reach.retain(|(body, thing, slot, order), _| {
+            self.waiting
+                .iter()
+                .any(|w| w.body == *body && w.place == Some(*thing) && w.id == *order)
+                || (self
+                    .live
+                    .get(body)
+                    .is_some_and(|(id, l)| id == order && matches!(l, Live::Place(_)))
+                    && self
+                        .slots
+                        .held_place(*body)
+                        .is_some_and(|p| p.thing == *thing && p.place.slot == *slot))
+        });
         self.reached.extend(p.reach.iter().map(|(k, v)| (*k, *v)));
         self.planned.merge(p);
     }
@@ -450,11 +503,17 @@ impl Bodies {
     /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
     /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
     /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
-    fn goal(&self, node: Id, point: Option<Vec3>) -> R<Target> {
+    fn goal(&self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
         if let Some(p) = point {
             return Ok(Target::new(node, p));
         }
-        if let Some(s) = self.slots.place(node) {
+        // The stand point of the free slot the world picks for `body` (C19), else of the thing's seat.
+        let place = self
+            .slots
+            .free(&self.runner.controller, body, node)
+            .and_then(|slot| self.slots.place_in(node, slot))
+            .or_else(|| self.slots.place(node));
+        if let Some(s) = place {
             return s.stand().map(|p| Target::new(s.floor, p));
         }
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
@@ -472,7 +531,10 @@ impl Bodies {
                 self.slots.place(t).is_some() || self.town.tree.handle(t).is_some()
             }),
             seated: Some(self.slots.held_by(body).is_some()),
-            free: t.map(|t| self.slots.holder(t).is_none()),
+            free: t.and_then(|t| {
+                self.slots.place(t)?;
+                Some(self.slots.free(&self.runner.controller, body, t).is_some())
+            }),
         }
     }
 
@@ -489,7 +551,11 @@ impl Bodies {
                     .iter()
                     .filter_map(|k| k.target().map(Slot::Named))
                     .collect();
-                let free = |t: Id| self.slots.place(t).is_some() && self.slots.holder(t).is_none();
+                let free = |t: Id| {
+                    self.slots
+                        .free(&self.runner.controller, a.body, t)
+                        .is_some()
+                };
                 match bind(&slots, free, 0, true) {
                     Bound::Slot { rank, .. } => Ok((rank, list[rank].clone())),
                     Bound::Ended(n) => Err(Refusal {
@@ -503,7 +569,7 @@ impl Bodies {
                 let mut last = None;
                 for (rank, k) in list.iter().enumerate() {
                     if let Ask::Walk { node, point } = k {
-                        match self.goal(*node, *point) {
+                        match self.goal(a.body, *node, *point) {
                             Ok(_) => return Ok((rank, (*k).clone())),
                             Err(r) => last = Some(r),
                         }
@@ -546,7 +612,7 @@ impl Bodies {
             self.took.insert(id, (rank, ask.target()));
             match ask {
                 Ask::Walk { node, point } => {
-                    let goal = self.goal(node, point);
+                    let goal = self.goal(a.body, node, point);
                     self.replace(a.body);
                     let walk = Box::new(Route::sent(WALK, self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
@@ -588,13 +654,12 @@ impl Bodies {
         // The asks waiting from earlier ticks whose reach is back are committed; the new asks' reach goes to the
         // planner, for a later tick.
         out.extend(self.commit_waiting());
-        let pairs: Vec<(Id, Id)> = asked
+        let pairs: Vec<(Id, Id, Id)> = asked
             .iter()
-            .filter_map(|w| Some((w.body, w.place?)))
+            .filter_map(|w| Some((w.body, w.place?, w.id)))
             .collect();
-        for (b, t) in &pairs {
-            self.reached.remove(&(*b, *t));
-        }
+        self.reached
+            .retain(|(body, _, _, _), _| !asked.iter().any(|w| w.body == *body));
         if !pairs.is_empty() {
             let reach = self.reach_of(pairs);
             self.planner.send(Wants {
@@ -616,8 +681,11 @@ impl Bodies {
             // Ready: its reach is back, or there is none to ask (no such seat or body: B3 refuses it by name).
             .partition(|w| {
                 w.place.is_none_or(|t| {
-                    self.reached.contains_key(&(w.body, t))
-                        || self.reach_of(vec![(w.body, t)]).is_empty()
+                    self.slots
+                        .places_of(t)
+                        .filter(|p| p.stand().is_ok())
+                        .all(|p| self.reached.contains_key(&(w.body, t, p.place.slot, w.id)))
+                        || self.reach_of(vec![(w.body, t, w.id)]).is_empty()
                 })
             });
         self.waiting = still;
@@ -627,47 +695,57 @@ impl Bodies {
                 sits.push((w.id, w.body, thing, stance));
                 continue;
             }
+            let reach = Reached {
+                cache: &self.reached,
+                order: Some(w.id),
+                slot: self.slots.held_place(w.body).map(|p| p.place.slot),
+            };
             let r = self.slots.rise(
                 &mut self.runner.controller,
                 &mut self.due,
                 &mut self.mint,
                 &mut self.moves,
-                &Reached(&self.reached),
+                &reach,
                 w.body,
                 &self.rise,
                 now,
             );
             out.push((w.id, self.started(w.id, w.body, r)));
         }
-        if !sits.is_empty() {
-            let requests: Vec<Request> = sits
-                .iter()
-                .map(|&(_, body, thing, stance)| Request {
-                    body,
-                    thing,
-                    mv: if stance == Stance::Lie {
-                        &self.lie
-                    } else {
-                        &self.sit
-                    },
-                    stance,
-                })
-                .collect();
-            let done = self.slots.commit(
-                &mut self.runner.controller,
-                &mut self.due,
-                &mut self.mint,
-                &mut self.moves,
-                &Reached(&self.reached),
-                &requests,
-                now,
-            );
-            // Sits and lies, taken in B3's stable order, and each matched back to its intent by its body.
-            for (body, r) in done {
-                if let Some(&(id, ..)) = sits.iter().find(|s| s.1 == body) {
-                    out.push((id, self.started(id, body, r)));
-                }
-            }
+        // Preserve C19's stable request order and nearest currently free slot; each distance is keyed to that slot.
+        sits.sort_by_key(|s| (s.1, s.2));
+        for (id, body, thing, stance) in sits {
+            let slot = self.slots.free(&self.runner.controller, body, thing);
+            let reach = Reached {
+                cache: &self.reached,
+                order: Some(id),
+                slot,
+            };
+            let request = Request {
+                body,
+                thing,
+                slot,
+                mv: if stance == Stance::Lie {
+                    &self.lie
+                } else {
+                    &self.sit
+                },
+                stance,
+            };
+            let r = self
+                .slots
+                .commit(
+                    &mut self.runner.controller,
+                    &mut self.due,
+                    &mut self.mint,
+                    &mut self.moves,
+                    &reach,
+                    &[request],
+                    now,
+                )
+                .pop()
+                .map_or_else(|| Err(refusal("place-unknown", thing)), |(_, r)| r);
+            out.push((id, self.started(id, body, r)));
         }
         out
     }
@@ -689,12 +767,17 @@ impl Bodies {
             // host and the controller.
             let at = self.runner.now;
             while let Some(t) = self.due.fire(at + 1) {
+                let reach = Reached {
+                    cache: &self.reached,
+                    order: self.live.get(&t.node).map(|(id, _)| *id),
+                    slot: self.slots.held_place(t.node).map(|p| p.place.slot),
+                };
                 let fired = self.slots.fire(
                     &mut self.runner.controller,
                     &mut self.due,
                     &mut self.mint,
                     &mut self.moves,
-                    &Reached(&self.reached),
+                    &reach,
                     &self.town.surfaces,
                     &t,
                 );
@@ -720,11 +803,11 @@ impl Bodies {
             let planned = std::mem::take(&mut self.planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
-            let seated: Vec<(Id, Id)> = self
+            let seated: Vec<(Id, Id, Id)> = self
                 .live
                 .iter()
                 .filter(|(_, (_, l))| matches!(l, Live::Place(_)))
-                .filter_map(|(b, _)| Some((*b, self.slots.held_by(*b)?)))
+                .filter_map(|(b, (id, _))| Some((*b, self.slots.held_by(*b)?, *id)))
                 .collect();
             wants.reach = self.reach_of(seated);
             self.planner.send(wants);

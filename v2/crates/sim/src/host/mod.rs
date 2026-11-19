@@ -80,6 +80,14 @@ use crate::walk::{Leg, Mark, World, node_of};
 /// The N lane's answers to T9's closed list of geometry questions, asked for `body`.
 pub trait Geometry {
     fn ask(&self, body: Id, q: &Ask) -> Option<Answer>;
+    /// Where `body` may stand within `reach` of `at` to act there ([`Host::stand_near`], C15); `None` by default.
+    fn stand_near(&self, _body: Id, _at: Vec3, _reach: i64) -> Option<Vec3> {
+        None
+    }
+    /// The legs of `body`'s walk to `at` of `node`'s frame, or near it ([`Host::legs`], C17); `None` by default.
+    fn legs(&self, _body: Id, _node: Id, _at: Vec3, _reach: i64) -> Option<Vec<Leg>> {
+        None
+    }
     /// A node the world holds outside the tree for now (a body's pose in the controller, a link's turn state, T9b
     /// A3), as of the tick's start; `None` reads the tree.
     fn read(&self, _node: Id) -> Option<Seen> {
@@ -285,6 +293,17 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
     fn ask(&self, q: &Ask) -> Option<Answer> {
         self.count();
         self.geometry.ask(self.body, q)
+    }
+
+    fn stand_near(&self, at: Vec3, reach: i64) -> Option<Vec3> {
+        self.count();
+        self.geometry.stand_near(self.body, at, reach)
+    }
+
+    fn legs(&self, node: Id, at: Vec3, reach: i64) -> Option<Vec<(Vec3, Option<Id>)>> {
+        self.count();
+        let legs = self.geometry.legs(self.body, node, at, reach)?;
+        Some(legs.into_iter().map(|l| (l.to, l.link)).collect())
     }
 
     fn set_timer(&mut self, after: Micros, name: Name) -> Id {
@@ -607,6 +626,20 @@ fn route_value(count: u64, legs: &[Leg]) -> Value {
     Value::Array(vec![Value::Uint(count), Value::Array(legs)])
 }
 
+/// One exact slot's reach question, tied to the pending move's order so an older answer cannot serve a new move.
+#[derive(Clone, Debug)]
+pub struct ReachQuestion {
+    pub body: Id,
+    pub at: Vec3,
+    pub thing: Id,
+    pub slot: u64,
+    pub order: Id,
+    pub points: [Vec3; 2],
+}
+
+/// Body, fixture, exact slot, and move order.
+pub type ReachKey = (Id, Id, u64, Id);
+
 /// What a tick asks the world's planner (K18b, #3175), read as of the tick's start, for the planner to answer
 /// before the next tick: the route searches the clock does not run.
 #[derive(Clone, Debug, Default)]
@@ -620,8 +653,8 @@ pub struct Wants {
     /// The walkers that need a new line and whose straight way to the leg's end was not clear: the body as it stood
     /// and the leg's end.
     pub lines: Vec<(Moved, Vec3)>,
-    /// Reach questions (B2, B3) for the world's own use: a body, its point, a seat, and the seat's two points.
-    pub reach: Vec<(Id, Vec3, Id, [Vec3; 2])>,
+    /// Reach questions (B2, B3), retaining exact slot and pending move identity.
+    pub reach: Vec<ReachQuestion>,
 }
 
 /// A walk's place and legs, or a refusal's name.
@@ -638,8 +671,8 @@ pub struct Planned {
     /// Each walker's line (#3167's, found by the planning call `View::search`) toward the leg's end it asked for, or
     /// the search's refusal.
     pub lines: Found,
-    /// Straight distances, µm, from a body's point to a seat's seat and stand points, by body and seat.
-    pub reach: BTreeMap<(Id, Id), [i64; 2]>,
+    /// Straight distances, µm, for exactly the body, fixture, slot and move order asked.
+    pub reach: BTreeMap<ReachKey, [i64; 2]>,
     /// Route searches run for these answers (legs and lines).
     pub searched: u64,
 }

@@ -56,7 +56,7 @@ use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, SquareMeet, back, floor_joins, ground_doors};
 use crate::mover::{Body, Surface};
-use crate::routes::{HANDS, Hop, Map, Scratch, on_pieces};
+use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
 use crate::spots::{Ask, CLEAR, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
@@ -363,7 +363,7 @@ impl Town {
         let tree: &Tree = tree;
         let mut g = Grounds {
             tree,
-            map,
+            map: MapRef::Own(map),
             surfaces,
             buildings,
             ground: *ground,
@@ -1349,7 +1349,7 @@ pub fn in_passage(
 /// walk, N4's links for doorways and stairs.
 struct Grounds<'a> {
     tree: &'a Tree,
-    map: &'a mut Map,
+    map: MapRef<'a>,
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
     ground: Id,
@@ -1357,10 +1357,33 @@ struct Grounds<'a> {
     boxes: OnceCell<Vec<Option<[i64; 4]>>>,
 }
 
+/// N5's map as the spot tables search it: the town's own (its searches keep their caches), or a view's shared map
+/// searched with the view's own scratch (N17b, #3255; C15's [`View::stand_near`]).
+enum MapRef<'a> {
+    Own(&'a mut Map),
+    Shared(&'a Map, &'a mut Scratch),
+}
+
+impl MapRef<'_> {
+    fn get(&self) -> &Map {
+        match self {
+            MapRef::Own(m) => m,
+            MapRef::Shared(m, _) => m,
+        }
+    }
+
+    fn route(&mut self, tree: &Tree, from: Spot, to: Spot, has: Mask) -> Result<Route, Refusal> {
+        match self {
+            MapRef::Own(m) => m.route(tree, from, to, has),
+            MapRef::Shared(m, sc) => m.route_in(sc, tree, from, to, has),
+        }
+    }
+}
+
 impl Ground for Grounds<'_> {
     fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
-        let s = self.map.spot(node, p)?;
-        let w = self.map.world(s.piece, s.at);
+        let s = self.map.get().spot(node, p)?;
+        let w = self.map.get().world(s.piece, s.at);
         let um = |v: [i64; 3]| Vec3::new(v[0] * 1000, v[1] * 1000, v[2] * 1000);
         Some((um(s.at), um(w)))
     }
@@ -1391,8 +1414,8 @@ impl Ground for Grounds<'_> {
         {
             return Some(flat(a, b));
         }
-        let from = self.map.spot_near(an, a, AT_EDGE)?;
-        let to = self.map.spot_near(bn, b, AT_EDGE)?;
+        let from = self.map.get().spot_near(an, a, AT_EDGE)?;
+        let to = self.map.get().spot_near(bn, b, AT_EDGE)?;
         let r = self.map.route(self.tree, from, to, HANDS).ok()?;
         Some(r.length as i64 * 1000)
     }
@@ -1423,7 +1446,7 @@ impl World for Town {
         } = self;
         let mut g = Grounds {
             tree,
-            map,
+            map: MapRef::Own(map),
             surfaces,
             buildings,
             ground: *ground,
@@ -1506,60 +1529,90 @@ impl World for Town {
     }
 
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
-        let here = node_of(body);
-        let from = self
-            .map
-            .spot_near(here, body.pose.position, AT_EDGE)
-            .ok_or_else(|| refusal("off-ground", show(here)))?;
-        let to = self
-            .map
-            .spot(node, goal)
-            .ok_or_else(|| refusal("destination-gone", show(node)))?;
-        let route = self.map.route(&self.tree, from, to, HANDS)?;
-        let mut ground: Vec<(Id, u64)> = Vec::new();
-        let mut squares: Vec<(i32, i32)> = Vec::new();
-        for p in route.patches() {
-            if ground.last().map(|l| l.0) != Some(p.node) {
-                ground.push((p.node, p.version));
-            }
-            if p.node == self.ground
-                && let Some(sq) = p.square
-                && squares.last() != Some(&sq)
-            {
-                squares.push(sq);
-            }
-        }
+        let (legs, ground, squares) = plan_on(
+            &mut MapRef::Own(&mut self.map),
+            &self.tree,
+            &self.link_at,
+            &self.buildings,
+            self.ground,
+            body,
+            node,
+            goal,
+        )?;
         self.planned.insert(body.id, ground);
         self.planned_squares.insert(body.id, squares);
-        let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
-        for h in &route.hops {
-            let Hop::Link { id, .. } = h else { continue };
-            let l = self
-                .link(*id)
-                .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
-            let near = (0..2)
-                .filter(|&k| l.ends[k].is_some_and(|e| e.floor == on))
-                .min_by_key(|&k| l.ends[k].map_or(i128::MAX, |e| dist2(at, e.middle())))
-                .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
-            let (a, b) = (l.ends[near], l.ends[1 - near]);
-            let (Some(a), Some(b)) = (a, b) else {
-                return Err(refusal("link-not-walked", show(*id)));
-            };
-            legs.push(Leg {
-                to: a.middle(),
-                link: Some(*id),
-            });
-            (on, at) = (b.floor, b.middle());
-        }
-        legs.push(Leg {
-            to: goal,
-            link: None,
-        });
         Ok(legs)
     }
 }
 
-impl View<'_> {
+/// The ground a route crosses, each node with its version then (G3).
+type Crossed = Vec<(Id, u64)>;
+/// The open ground's squares a route crosses, in order (N17b).
+type Squares = Vec<(i32, i32)>;
+
+/// The legs from where `body` stands to `goal` (µm, `node`'s frame) over `map`, the ground the route crosses with its
+/// versions, and the open ground's squares it crosses (N17b): [`Town::plan`]'s, shared with [`View::plan`].
+#[allow(clippy::too_many_arguments)]
+fn plan_on(
+    map: &mut MapRef,
+    tree: &Tree,
+    link_at: &BTreeMap<Id, (usize, usize)>,
+    buildings: &[Building],
+    open: Id,
+    body: &Body,
+    node: Id,
+    goal: Vec3,
+) -> Result<(Vec<Leg>, Crossed, Squares), Refusal> {
+    let here = node_of(body);
+    let from = map
+        .get()
+        .spot_near(here, body.pose.position, AT_EDGE)
+        .ok_or_else(|| refusal("off-ground", show(here)))?;
+    let to = map
+        .get()
+        .spot(node, goal)
+        .ok_or_else(|| refusal("destination-gone", show(node)))?;
+    let route = map.route(tree, from, to, HANDS)?;
+    let mut ground: Vec<(Id, u64)> = Vec::new();
+    let mut squares: Vec<(i32, i32)> = Vec::new();
+    for p in route.patches() {
+        if ground.last().map(|l| l.0) != Some(p.node) {
+            ground.push((p.node, p.version));
+        }
+        if p.node == open
+            && let Some(sq) = p.square
+            && squares.last() != Some(&sq)
+        {
+            squares.push(sq);
+        }
+    }
+    let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
+    for h in &route.hops {
+        let Hop::Link { id, .. } = h else { continue };
+        let l = find_link(link_at, buildings, *id)
+            .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
+        let near = (0..2)
+            .filter(|&k| l.ends[k].is_some_and(|e| e.floor == on))
+            .min_by_key(|&k| l.ends[k].map_or(i128::MAX, |e| dist2(at, e.middle())))
+            .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
+        let (a, b) = (l.ends[near], l.ends[1 - near]);
+        let (Some(a), Some(b)) = (a, b) else {
+            return Err(refusal("link-not-walked", show(*id)));
+        };
+        legs.push(Leg {
+            to: a.middle(),
+            link: Some(*id),
+        });
+        (on, at) = (b.floor, b.middle());
+    }
+    legs.push(Leg {
+        to: goal,
+        link: None,
+    });
+    Ok((legs, ground, squares))
+}
+
+impl<'a> View<'a> {
     fn now(&self) -> u64 {
         self.meter.map_or(0, |m| m())
     }
@@ -1690,6 +1743,68 @@ impl View<'_> {
         let c = l.points[l.next];
         lines.insert(body.id, l);
         Ok(c)
+    }
+
+    /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):
+    /// [`crate::spots::within`] over this town's ground.
+    pub fn stand_near(&self, node: Id, at: Vec3, reach: i64, from: Option<&Body>) -> Option<Vec3> {
+        let from = from.map(|b| (node_of(b), b.pose.position));
+        let mut scratch = self.scratch.borrow_mut();
+        let (tree, surfaces, buildings, ground) =
+            (self.tree, self.surfaces, self.buildings, self.ground);
+        let mut g = Grounds {
+            tree,
+            map: MapRef::Shared(self.map, &mut scratch),
+            surfaces,
+            buildings,
+            ground,
+            boxes: OnceCell::new(),
+        };
+        crate::spots::within(&mut g, Target::new(node, at), reach, from)
+    }
+
+    /// The legs a form's walk takes from where `body` stands to `goal` (µm, `node`'s frame), across the links on the
+    /// way (C17, #3453): [`Town::plan`]'s route, the ground it crosses not recorded (a form's walk is not planned again
+    /// by the ladder).
+    pub fn plan(&self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
+        let mut scratch = self.scratch.borrow_mut();
+        plan_on(
+            &mut MapRef::Shared(self.map, &mut scratch),
+            self.tree,
+            self.link_at,
+            self.buildings,
+            self.ground,
+            body,
+            node,
+            goal,
+        )
+        .map(|(legs, _, _)| legs)
+    }
+
+    /// Each node's surface a body stands on.
+    pub fn surfaces(&self) -> &'a BTreeMap<Id, Surface> {
+        self.surfaces
+    }
+
+    /// Point `at` of node `node`'s frame (µm) carried up the tree to the first node a body stands on (the open ground,
+    /// or a building's floor), with the turn from `node`'s axes to that node's (C17, #3453). `None` when no node above
+    /// holds a surface.
+    pub fn on_floor(&self, node: Id, at: Vec3) -> Option<(Id, Vec3, Quat)> {
+        let (mut on, mut at, mut turn) = (node, at, Quat::IDENTITY);
+        for _ in 0..64 {
+            if self.surfaces.contains_key(&on) {
+                return Some((on, at, turn));
+            }
+            let n = self.tree.node(self.tree.handle(on)?)?;
+            let (place, parent) = (n.place()?, n.parent()?);
+            at = place
+                .position
+                .plus(place.orientation.rotate(at).ok()?)
+                .ok()?;
+            turn = place.orientation.then(turn).ok()?;
+            on = parent;
+        }
+        None
     }
 
     /// The planning call (#3167): the line from where `body` stands toward `to` on its node, `[here, to]` when a
