@@ -77,6 +77,15 @@ pub struct Records {
 }
 
 impl Records {
+    /// Keeps previously validated records, such as the blobs of a restored checkpoint.
+    pub fn extend<'a>(&mut self, records: impl IntoIterator<Item = (&'a [u8], &'a [u8])>) {
+        for (hash, bytes) in records {
+            self.by_hash
+                .entry(hash.to_vec())
+                .or_insert_with(|| bytes.to_vec());
+        }
+    }
+
     /// Keeps the records a seal gave.
     pub fn keep(&mut self, sealed: &Sealed) {
         for (h, bytes) in &sealed.nodes {
