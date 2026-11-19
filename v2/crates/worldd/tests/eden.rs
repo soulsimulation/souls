@@ -1130,37 +1130,15 @@ fn c22_a1_the_arcade_cabinets_play_ends_done() {
 }
 
 /// C22 (#3485) A2: born outside the library's door, a Soul walks to the reading room's desk (today's e_0f7fb44b) and
-/// writes at it by its own entry (`write`: a walk to `front`, a slide at `top`, 60 s, the page count up by one). On
-/// Eden as it is, its chair (e_975f923a) stands on the desk's `front`, as a chair does at every desk on Eden: the walk
-/// stops behind the chair, 1.3 m from the desk's edge, and the slide ends `out-of-reach` (a content cause, C18). With
-/// that chair taken out of the facts, the write ends `done`.
+/// writes at it by its own entry (`write`: a walk to `front`, a slide at `top`, 60 s, the page count up by one).
+/// C18 (#3454): a chair stands in front of every desk on Eden (here e_975f923a), so the desk's `front` is at its front
+/// left corner, beside the chair (`content/kinds/furniture/desk.json`), and the write ends `done` on Eden as it is.
+/// Before C18, `front` was where the chair stands: the walk stopped behind the chair, 1.3 m from the desk's edge, and
+/// the slide ended `out-of-reach`.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c22_a2_the_desks_write_ends_done() {
-    use replica::rules::json::{Value as J, parse};
-    let blocked = act_at("74.0,-1.0", "e_0f7fb44b", "eden:write", "c22a2b");
-    assert_eq!(
-        blocked,
-        Err("out-of-reach".to_owned()),
-        "the chair on its front"
-    );
-    let mut facts = parse(&std::fs::read_to_string(facts_path()).unwrap()).unwrap();
-    if let J::Obj(o) = &mut facts
-        && let Some((_, J::Arr(things))) = o.iter_mut().find(|(k, _)| k == "things")
-    {
-        things.retain(|t| t.get("id").and_then(J::str) != Some("e_975f923a"));
-    }
-    let path = std::env::temp_dir().join(format!("eden-c22-{}.facts.json", std::process::id()));
-    std::fs::write(&path, facts.to_json()).unwrap();
-    let done = act_in(
-        path.to_str().unwrap(),
-        "74.0,-1.0",
-        "e_0f7fb44b",
-        "eden:write",
-        "c22a2",
-    );
-    let _ = std::fs::remove_file(&path);
-    done.expect("written, done");
+    act_at("74.0,-1.0", "e_0f7fb44b", "eden:write", "c22a2").expect("written, done");
 }
 
 /// How one form of a sweep ended ([`sweep`]): `done`, `refused <name>` at its start, `failed <name>` by its run's
