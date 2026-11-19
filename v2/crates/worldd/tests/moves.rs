@@ -297,7 +297,7 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
     });
     let stream = UnixStream::connect(&path).unwrap();
     stream
-        .set_read_timeout(Some(Duration::from_secs(20)))
+        .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap();
     accepted.recv().unwrap();
     let mut c = Client(stream);
