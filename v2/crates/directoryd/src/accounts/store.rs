@@ -42,7 +42,7 @@ impl From<rusqlite::Error> for StoreError {
 }
 
 pub struct Store {
-    db: Mutex<Connection>,
+    pub(super) db: Mutex<Connection>,
 }
 
 impl Store {
@@ -69,6 +69,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS account_principals_v1(account_id TEXT PRIMARY KEY
                REFERENCES provider_accounts_v1(account_id), principal_id TEXT NOT NULL UNIQUE,
                created_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS mailbox_v1(id TEXT PRIMARY KEY, soul TEXT NOT NULL, text TEXT NOT NULL,
+               at INTEGER NOT NULL, state TEXT NOT NULL, outcome TEXT, closed_at INTEGER);
+             CREATE INDEX IF NOT EXISTS mailbox_v1_open ON mailbox_v1(state, at);
              COMMIT;",
         )
         .map_err(owned)?;

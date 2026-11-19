@@ -22,6 +22,11 @@
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
+//   and R13's (#2753), wake rules on R9's events within the owner's budget (`../wake/wake.mjs`), and the owner's
+//   messages from the mailbox, which reach `wait` as `mail` events whatever the budget:
+//     {"op":"wake","do":"add|remove|budget|list",...}   the wake rules; `wait` hands the queued wakes as `wakes`
+//     {"op":"act",...,"for":"<message id>"}           this act serves that message: its outcome closes it
+//     {"op":"event","event":{...}}                    an event as R9's matcher takes it, until frames carry them
 //   and R8's (#2703), checking with R2's form rules on the copy (`../check/`), kind entries from `<home>/kinds/`:
 //     {"op":"can","intent":{"verb":"..","this":"<id>","form":".."}}   yes, no with the reason, or unknown, and `current`
 //     {"op":"act","verbs":[{"verb":"..","this":"<id>","form":".."}, "..."]}   each candidate with a form is checked
@@ -53,6 +58,7 @@ import { ageOf } from './age.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { Table } from '../reflex/reflex.mjs';
+import { Wakes } from '../wake/wake.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -121,6 +127,12 @@ const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
 const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
+const wakes = new Wakes(soul); // R13: its budget's deliveries are kept on disk, so a restart never resets them
+if (state.wake) Object.assign(wakes, { budget: state.wake.budget, delivered: state.wake.delivered });
+const saveWakes = () => { state.wake = { budget: wakes.budget, delivered: wakes.delivered }; save(); };
+const mail = new Map(); // R13: the owner's open messages given to this daemon, by id
+const serving = new Map(); // sequence → the message its act serves
+const closes = []; // closes not yet sent, for the next sign-in
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
 const syncs = []; // the last syncs: kind, time and R5's counts
@@ -158,7 +170,26 @@ function send(bytes, sequence, ranked) {
 function current() {
   signedIn = true;
   attempt = 0;
+  while (closes.length > 0 && signedIn) ws.send(closes.shift());
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
+}
+
+/** R13: a text frame, the mailbox's: a message for this Soul, noted once. */
+function onText(text) {
+  let m;
+  try { m = JSON.parse(text).mail; } catch { return; }
+  if (!m || typeof m.id !== 'string' || mail.has(m.id)) return;
+  mail.set(m.id, m);
+  log(`message ${m.id}`); // never its words
+  note({ kind: 'mail', id: m.id, text: String(m.text), at: m.at });
+}
+
+/** R13: the message `id` closed with its act's outcome, now or at the next sign-in. */
+function closeMail(id, state, outcome) {
+  const line = JSON.stringify({ close: { id, state, outcome } });
+  mail.delete(id);
+  log(`message ${id} closed ${state} (${outcome})`);
+  if (ws && signedIn) ws.send(line); else closes.push(line);
 }
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
@@ -194,7 +225,7 @@ function syncAnswer(sock, n, refused, bytes) {
   syncs.push(done);
   if (syncs.length > SYNCS_KEPT) syncs.shift();
   log(`synced (${done.kind}): ${done.fetched} of ${done.held} records in ${done.rounds} rounds, ${done.got} B, ${done.ms} ms`);
-  note({ kind: 'synced', ...done });
+  note({ ...done, kind: 'synced', sync: done.kind }); // its own kind would read as news and end a wait at once
   current();
 }
 
@@ -212,6 +243,7 @@ function connect() {
   sock.onopen = () => { if (ended) sock.close(); else sock.send(wire.wireHello()); };
   sock.onmessage = (m) => {
     if (ended) { sock.close(); return; } // given up: it must not sign in and take the grant from its successor
+    if (typeof m.data === 'string') { onText(m.data); return; }
     const bytes = new Uint8Array(m.data);
     try {
       if (step === 'hello') {
@@ -240,6 +272,10 @@ function connect() {
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
         trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
+        if (serving.has(s) && Number(c) !== 3) {
+          closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
+          serving.delete(s);
+        }
       }
       save();
       note({ kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b });
@@ -314,9 +350,12 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'read', 'stats', 'reflex', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'read', 'stats', 'reflex', 'wake', 'event', 'stop']);
+const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 async function answer(req) {
+  // R13: a command from the model's turn shows that what a reader was handed was taken.
+  if (!['wait', 'status'].includes(req.op)) wakes.confirm();
   switch (req.op) {
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
@@ -334,12 +373,19 @@ async function answer(req) {
     });
     case 'find': return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50) }));
     case 'wait': {
-      const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000;
-      if (!events.some((e) => e.kind !== 'synced')) {
-        await new Promise((ok) => { const t = setTimeout(ok, ms); wakers.push(() => { clearTimeout(t); ok(); }); });
+      const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
+      // R13: the queued wakes are handed as one delivery when the budget allows; over it, they wait for it to.
+      let handed = wakes.deliver(Date.now());
+      while (handed.length === 0 && nothingYet() && Date.now() < until) {
+        const free = wakes.nextFree(Date.now());
+        const left = Math.min(until, free ?? until) - Date.now();
+        await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
+        handed = wakes.deliver(Date.now());
       }
+      if (handed.length) saveWakes();
       const got = events.splice(0);
-      return closing({ ok: true, events: got, ...(got.some((e) => e.kind !== 'synced') ? {} : { timedOut: true }) });
+      const timedOut = handed.length === 0 && !got.some((e) => e.kind !== 'synced');
+      return closing({ ok: true, events: got, ...(handed.length ? { wakes: handed } : {}), ...(timedOut ? { timedOut: true } : {}) });
     }
     case 'can': {
       const c = candidateOf(req.intent);
@@ -348,6 +394,7 @@ async function answer(req) {
       return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
     }
     case 'act': {
+      if (req.for !== undefined && !mail.has(req.for)) return { ok: false, code: 'mail-not-found', detail: 'for names an open message this daemon was given' };
       const candidates = (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf);
       if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
         return { ok: false, code: 'act-ranked-list', detail: `one to ${ACT_MOST} verbs, best first` };
@@ -370,6 +417,7 @@ async function answer(req) {
         basis ? unhex(basis) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER), String(req.target ?? ''));
       save();
       const sequence = state.sequence, sent = signedIn;
+      if (req.for !== undefined) serving.set(sequence, req.for);
       if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
@@ -377,6 +425,14 @@ async function answer(req) {
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
     case 'reflex': return reflexes.op(req, Date.now());
+    case 'wake': { const out = wakes.op(req, Date.now()); if (req.do === 'budget') saveWakes(); return out; }
+    case 'event': {
+      const e = req.event;
+      if (!e || typeof e.name !== 'string') return { ok: false, code: 'event-not-an-event', detail: 'an event has a name' };
+      const fired = wakes.onEvent(e, Date.now());
+      if (fired) for (const w of wakers.splice(0)) w();
+      return { ok: true, fired };
+    }
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }

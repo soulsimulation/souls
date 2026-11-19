@@ -22,13 +22,17 @@
 //!   request, not an intent. The gateway passes it to the world with the asking actor (key 23) under a number of its
 //!   own, and the world's answer back to that socket alone, under the client's number; it is not kept for a resume.
 //!   A client told `stream.cannot-resume` compares and descends this way, then carries on with the stream.
+//! - gateway → client and back, the owner's messages ([`mailbox`], R13, #2753): WebSocket text frames of JSON, not
+//!   CBOR, apart from the world's stream and never in its log: `{"mail": {"id", "text", "at"}}` out, once per
+//!   socket, and `{"close": {"id", "state", "outcome"}}` back when the act that served it ends.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 use replica::encode::Value;
 use tokio::sync::mpsc;
 
+pub mod mailbox;
 pub mod receipts;
 pub mod resume;
 pub mod socket;
@@ -60,6 +64,8 @@ pub struct Gateway {
     pub log: Log,
     /// The receipts file's writer (`--receipts`), or off.
     pub receipts: Receipts,
+    /// The directory's mailbox (`--mailbox`), set once at start; off if unset.
+    pub mailbox: std::sync::OnceLock<mailbox::Mailbox>,
     hub: Mutex<Hub>,
 }
 
@@ -76,6 +82,9 @@ struct Held {
     session: Option<(u64, mpsc::Sender<Vec<u8>>)>,
     /// Who the grant's answers count for in the receipts file, as of its latest sign-in.
     who: Option<Arc<Who>>,
+    /// The signed-in socket's queue for the owner's messages, and the ids already given to it.
+    mail: Option<mpsc::Sender<String>>,
+    mailed: HashSet<String>,
 }
 
 /// A signed-in socket's place in the hub.
@@ -86,6 +95,8 @@ pub struct Attached {
     pub outcome: &'static str,
     /// Kept frames after the cursor, sent right after the outcome.
     pub replay: Vec<Vec<u8>>,
+    /// The owner's messages for this socket, as text frames (R13).
+    pub mail: mpsc::Receiver<String>,
 }
 
 impl Gateway {
@@ -105,6 +116,7 @@ impl Gateway {
             link: world_link::Link::default(),
             log,
             receipts,
+            mailbox: std::sync::OnceLock::new(),
             hub: Mutex::new(Hub::default()),
         })
     }
@@ -113,12 +125,15 @@ impl Gateway {
     /// ends): the last device wins. `who` is whom its answers count for in the receipts file.
     pub fn attach(&self, grant: Grant, cursor: Option<&Value>, who: Arc<Who>) -> Attached {
         let (tx, rx) = mpsc::channel(OUTBOUND);
+        let (mail_tx, mail_rx) = mpsc::channel(OUTBOUND);
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         hub.next_session += 1;
         let session = hub.next_session;
         let held = hub.grants.entry(grant.key()).or_default();
         held.session = Some((session, tx));
         held.who = Some(who);
+        held.mail = Some(mail_tx);
+        held.mailed.clear();
         let (outcome, replay) = match cursor {
             None => (resume::STARTED, Vec::new()),
             Some(v) => match Cursor::from_value(v).map(|c| held.kept.resume(&c)) {
@@ -131,6 +146,7 @@ impl Gateway {
             frames: rx,
             outcome,
             replay,
+            mail: mail_rx,
         }
     }
 
@@ -141,6 +157,26 @@ impl Gateway {
             && held.session.as_ref().is_some_and(|(s, _)| *s == session)
         {
             held.session = None;
+            held.mail = None;
+        }
+    }
+
+    /// The mailbox's open messages, `(grant key, id, text frame)`: each given once to its grant's signed-in socket.
+    /// A message no longer open is forgotten, so ids given stay as few as the open messages.
+    pub fn post_mail(&self, open: Vec<(Vec<u8>, String, String)>) {
+        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        let ids: HashSet<&str> = open.iter().map(|(_, id, _)| id.as_str()).collect();
+        for held in hub.grants.values_mut() {
+            held.mailed.retain(|id| ids.contains(id.as_str()));
+        }
+        for (key, id, frame) in &open {
+            if let Some(held) = hub.grants.get_mut(key)
+                && let Some(tx) = &held.mail
+                && !held.mailed.contains(id)
+                && tx.try_send(frame.clone()).is_ok()
+            {
+                held.mailed.insert(id.clone());
+            }
         }
     }
 

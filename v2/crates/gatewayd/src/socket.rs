@@ -185,12 +185,20 @@ async fn serve(
                 let bytes = match incoming {
                     Some(Ok(Message::Binary(b))) => b.to_vec(),
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                    // R13: a message's close, the mailbox's alone.
+                    Some(Ok(Message::Text(t))) => {
+                        crate::mailbox::on_text(&gw, grant, t.as_str());
+                        continue;
+                    }
                     _ => break,
                 };
                 if let Some(answer) = take_intent(&gw, actor, grant, bytes, received) {
                     gw.receipts.write(&who, Outcome::Refusal);
                     ok = send(&mut socket, answer).await;
                 }
+            }
+            Some(mail) = attached.mail.recv() => {
+                ok = socket.send(Message::Text(mail.into())).await.is_ok();
             }
             out = attached.frames.recv() => match out {
                 Some(frame) => ok = send(&mut socket, times::finish(frame)).await,

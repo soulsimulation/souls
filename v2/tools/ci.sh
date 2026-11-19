@@ -135,6 +135,8 @@ step client-stats node --test client/src/stats/*.test.mjs
 step client-check node --test client/src/check/*.test.mjs
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
+# Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.
+step client-wake bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/wake/*.test.mjs'
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&

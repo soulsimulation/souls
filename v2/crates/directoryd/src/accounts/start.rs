@@ -29,10 +29,12 @@ pub struct Config {
     pub store: PathBuf,
     pub provider: Option<Provider>,
     pub test_sign_in: bool,
+    /// The file holding the key the gateway reads and closes the mailbox with (R13); without it those requests are off.
+    pub mailbox_key: Option<PathBuf>,
 }
 
 pub const USAGE: &str = "directoryd --listen <addr:port> --public-url <origin> --store <absolute path> \
-(--issuer <https origin> --parties <origin,origin> | --test-sign-in)";
+(--issuer <https origin> --parties <origin,origin> | --test-sign-in) [--mailbox-key <file>]";
 
 /// Reads the arguments (without the program's name) and refuses what must not run. A refusal starts with
 /// "refusing to start".
@@ -43,6 +45,7 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
     let mut issuer = None;
     let mut parties = None;
     let mut test_sign_in = false;
+    let mut mailbox_key = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || {
@@ -57,6 +60,7 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
             "--issuer" => issuer = Some(value()?),
             "--parties" => parties = Some(value()?),
             "--test-sign-in" => test_sign_in = true,
+            "--mailbox-key" => mailbox_key = Some(PathBuf::from(value()?)),
             _ => return Err(format!("refusing to start: unknown argument {a}; {USAGE}")),
         }
     }
@@ -117,6 +121,7 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
         store,
         provider,
         test_sign_in,
+        mailbox_key,
     })
 }
 
