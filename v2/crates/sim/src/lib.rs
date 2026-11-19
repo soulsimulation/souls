@@ -17,6 +17,7 @@ pub mod gesture;
 pub mod ground;
 pub mod host;
 pub mod index;
+pub mod life;
 pub mod links;
 pub mod log;
 pub mod mover;
