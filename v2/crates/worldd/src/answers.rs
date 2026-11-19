@@ -2857,6 +2857,12 @@ pub fn start<S: Storage + 'static>(
                             );
                         }
                         c.bodies = Some(b);
+                        // The activities the log holds, so their members speak in them and leave them again (E26).
+                        if let (Some(e), Some(b)) = (c.engine.as_mut(), c.bodies.as_mut())
+                            && let Err(r) = e.restore(c.replica.tree(), &mut b.runner.controller)
+                        {
+                            eprintln!("worldd: the activities were not restored: {r}");
+                        }
                     }
                     Err(e) => eprintln!("worldd: the bodies did not start, moves are refused: {e}"),
                 }
