@@ -90,6 +90,7 @@ pub struct Act {
 pub struct Engine {
     header: Header,
     rules: Rules,
+    kinds: Vec<ActivityKind>,
     activities: Activities,
     carries: BTreeMap<Id, Carry>,
     due: DueList,
@@ -123,7 +124,8 @@ impl Engine {
     /// The systems for a zone under `header`, checked by `rules`, with activities of `kinds`, minting ids of `scope`.
     pub fn new(header: Header, rules: Rules, kinds: Vec<ActivityKind>, scope: Scope) -> Engine {
         Engine {
-            activities: Activities::new(header.clone(), rules.clone(), 0, kinds),
+            activities: Activities::new(header.clone(), rules.clone(), 0, kinds.clone()),
+            kinds,
             header,
             rules,
             carries: BTreeMap::new(),
@@ -132,6 +134,14 @@ impl Engine {
             mint: Minter::new(scope),
             out: Vec::new(),
         }
+    }
+
+    /// The activities `live` holds after a restart (their nodes and membership links are in the log), so a member can
+    /// still speak in one and leave it: each started one takes its members' role claims again through `c`.
+    pub fn restore(&mut self, live: &Tree, c: &mut Controller) -> R<()> {
+        let kinds = self.kinds.clone();
+        self.activities = Activities::restore(self.header.clone(), self.rules.clone(), kinds, live, c)?;
+        Ok(())
     }
 
     /// Runs act `a` at `now` on a copy of `live`, the bodies' controller `c`. Its entries wait in [`Engine::out`].
