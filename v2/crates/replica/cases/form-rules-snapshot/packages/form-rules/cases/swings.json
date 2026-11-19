@@ -1,0 +1,276 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:swings. Two swings: anyone sits on a free one (linked as a swinger) and gets off again; pushing someone needs them here and a hand free.",
+  "cases": [
+    {
+      "name": "swing_on_a_free_swing",
+      "act": {
+        "this": "t1",
+        "form": "swing",
+        "args": {
+          "place": "swing_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:swings"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "swing_on_a_taken_swing_offers_the_other",
+      "act": {
+        "this": "t1",
+        "form": "swing",
+        "args": {
+          "place": "swing_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:swings",
+            "slots": {
+              "swing_1": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "fix": {
+          "form": "swing",
+          "args": {
+            "place": "swing_2"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_off",
+      "act": {
+        "this": "t1",
+        "form": "get_off"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:swings",
+            "slots": {
+              "swing_1": [
+                "b1"
+              ]
+            },
+            "links": {
+              "swinger": [
+                "b1"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "push_someone_here",
+      "act": {
+        "this": "t1",
+        "form": "push",
+        "args": {
+          "who": "b2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "t1",
+              "b1",
+              "b2"
+            ]
+          },
+          "t1": {
+            "kind": "eden:swings"
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "push_someone_elsewhere",
+      "act": {
+        "this": "t1",
+        "form": "push",
+        "args": {
+          "who": "b2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "t1",
+              "b1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:swings"
+          },
+          "away": {
+            "loose": [
+              "b2"
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 0
+      }
+    },
+    {
+      "name": "push_with_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "push",
+        "args": {
+          "who": "b2"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "t1",
+              "b1",
+              "b2",
+              "x1",
+              "x2"
+            ]
+          },
+          "t1": {
+            "kind": "eden:swings"
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:toy_blocks"
+          },
+          "x2": {
+            "kind": "eden:toy_blocks"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

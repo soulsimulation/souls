@@ -1,0 +1,172 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The flute stand in turn: a phrase is played and the world ends it at sixteen seconds; a second phrase is played and stopped at five seconds.",
+ "cases": [
+  {
+   "name": "play_ends_by_itself_then_play_and_stop",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "f1"
+      ]
+     },
+     "f1": {
+      "kind": "eden:flute_stand"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "f1",
+      "form": "play"
+     },
+     "now_us": 0,
+     "receipt": "rf1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "playing",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:began_phrase",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:phrase_will_end",
+        "node": "f1",
+        "changes": []
+       }
+      ],
+      "timers": [
+       {
+        "node": "f1",
+        "form": "phrase_ends",
+        "after_us": 16000000,
+        "event": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "phrase_ends"
+     },
+     "now_us": 16000000,
+     "receipt": "rf2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "playing",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:phrase_ended",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "play"
+     },
+     "now_us": 20000000,
+     "receipt": "rf3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "playing",
+        "n": 1,
+        "to": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "stop"
+     },
+     "now_us": 25000000,
+     "receipt": "rf4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "playing",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:stopped_playing",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "f1": {
+     "kind": "eden:flute_stand",
+     "fields": {
+      "playing": 0
+     }
+    }
+   }
+  }
+ ]
+}

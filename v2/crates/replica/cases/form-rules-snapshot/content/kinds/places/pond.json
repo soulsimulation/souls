@@ -1,0 +1,129 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pond",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      36000,
+      6000,
+      36000
+    ]
+  },
+  "areas": {
+    "shore_n": {
+      "at_mm": [
+        0,
+        0,
+        -19000
+      ],
+      "radius_mm": 1500
+    },
+    "shore_e": {
+      "at_mm": [
+        19000,
+        0,
+        0
+      ],
+      "radius_mm": 1500
+    },
+    "shore_s": {
+      "at_mm": [
+        0,
+        0,
+        19000
+      ],
+      "radius_mm": 1500
+    },
+    "shore_w": {
+      "at_mm": [
+        -19000,
+        0,
+        0
+      ],
+      "radius_mm": 1500
+    }
+  },
+  "forms": {
+    "walk_around": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "shore_s"
+        },
+        {
+          "step": "walk_to",
+          "point": "shore_e"
+        },
+        {
+          "step": "walk_to",
+          "point": "shore_n"
+        },
+        {
+          "step": "walk_to",
+          "point": "shore_w"
+        },
+        {
+          "step": "walk_to",
+          "point": "shore_s"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "looks": {
+    "model": "look:pond",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            50,
+            0
+          ],
+          "r": 18000,
+          "h": 100,
+          "segments": 24,
+          "tint": "bank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            120,
+            0
+          ],
+          "r": 16500,
+          "h": 100,
+          "segments": 24,
+          "tint": "water"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "water": "#4f86a6",
+        "bank": "#8a7a5a"
+      },
+      "tags": [
+        "water",
+        "pond"
+      ]
+    }
+  },
+  "text": {
+    "card": "A small pond of still water with a bank to walk round.",
+    "water": "water",
+    "pool": "pool"
+  },
+  "card": {
+    "text": "card",
+    "category": "water",
+    "synonyms": [
+      "pool",
+      "water"
+    ]
+  }
+}

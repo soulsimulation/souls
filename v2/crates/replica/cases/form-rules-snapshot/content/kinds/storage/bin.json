@@ -1,0 +1,157 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bin",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        620
+      ],
+      "yaw_mdeg": 180000
+    },
+    "lid": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        870,
+        0
+      ]
+    }
+  },
+  "slots": {
+    "inside": {
+      "admits": "thing",
+      "most": 10,
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "fits_mm": [
+        400,
+        600,
+        400
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      540,
+      894,
+      540
+    ],
+    "front": "none"
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "lid"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "lid"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "shut"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:bin",
+    "table": [
+      {
+        "part": "lid",
+        "field": "open",
+        "do": "rotate",
+        "axis": "x",
+        "at": {
+          "true": -100000,
+          "false": 0
+        },
+        "over_us": 400000
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"cyl","at":[0,390,0],"r":210,"h":780,"segments":10,"r2":240,"tint":"body"},{"kind":"cyl","at":[0,800,0],"r":270,"h":50,"segments":10,"tint":"lid","role":"lid","pivot":[0,800,-270]},{"kind":"sphere","at":[0,840,0],"r":90,"segments":6,"tint":"lid","scale":[1000,600,1000],"role":"lid","pivot":[0,800,-270]},{"kind":"cyl","at":[0,600,0],"r":245,"h":40,"segments":10,"tint":"band"}],"palette":{"body":"#3d5a45","lid":"#2b3a30","band":"#c9b26b"},"tags":["prop","street","bin","litter"]}
+  },
+  "text": {
+    "card": "A litter bin with a lid: open it to put rubbish in, carry it in both hands.",
+    "storage": "storage",
+    "rubbish": "rubbish",
+    "dustbin": "dustbin"
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "rubbish",
+      "dustbin"
+    ]
+  }
+}

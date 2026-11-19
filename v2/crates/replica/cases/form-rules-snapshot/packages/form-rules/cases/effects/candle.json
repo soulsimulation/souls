@@ -1,0 +1,149 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The candle (core/candle@1, 1 placed): light and put out, anyone, within touch, as today. Lighting needs nothing in the hand: today's candle lights the same way, and a match is not a kind yet.",
+ "cases": [
+  {
+   "name": "candle_light_then_put_out_then_light",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "l1"
+      ]
+     },
+     "l1": {
+      "kind": "eden:candle"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       186,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "l1",
+      "form": "put_out"
+     },
+     "now_us": 0,
+     "receipt": "rcandle0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "fix": {
+       "form": "light"
+      }
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "light"
+     },
+     "now_us": 1000000,
+     "receipt": "rcandle1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "lit",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lit",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "put_out"
+     },
+     "now_us": 2000000,
+     "receipt": "rcandle2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "lit",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:put_out",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "light"
+     },
+     "now_us": 4000000,
+     "receipt": "rcandle3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "lit",
+        "n": 1,
+        "to": 1
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "l1": {
+     "kind": "eden:candle",
+     "fields": {
+      "lit": 1
+     }
+    }
+   }
+  }
+ ]
+}

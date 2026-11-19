@@ -1,0 +1,76 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:ash_bucket (from #1761): a portable bucket for up to four measures of ash, taken with a hand free; what it holds goes with it.",
+ "cases": [
+  {
+   "name": "take_every_need_met",
+   "act": {
+    "this": "a1",
+    "form": "take"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "take_hands_full",
+   "act": {
+    "this": "a1",
+    "form": "take"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 0,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  }
+ ]
+}

@@ -90,14 +90,18 @@ pub fn wire_world_build(first: &[u8]) -> Result<String, JsError> {
     }
 }
 
-/// The sign-in `{1: token, 2: cursor}`; `cursor` is a version's bytes, empty for a fresh stream. A refusal never
+/// The sign-in `{1: token, 2: cursor, 3: seen}`; `cursor` is a version's bytes, empty for a fresh stream, and `seen`
+/// how many frames the client applied at that version (the gateway's default, 1, when left out). A refusal never
 /// carries the token.
 #[wasm_bindgen(js_name = wireSignIn)]
-pub fn wire_sign_in(token: &str, cursor: &[u8]) -> Result<Vec<u8>, JsError> {
+pub fn wire_sign_in(token: &str, cursor: &[u8], seen: Option<u32>) -> Result<Vec<u8>, JsError> {
     let token = Name::new(token).ok_or_else(|| JsError::new("token-not-a-name"))?;
     let mut m = BTreeMap::from([(1, Value::Text(token))]);
     if !cursor.is_empty() {
         m.insert(2, decode(cursor).map_err(js)?.value);
+        if let Some(n) = seen {
+            m.insert(3, Value::Uint(u64::from(n)));
+        }
     }
     encode(&Value::Map(m)).map_err(js)
 }
@@ -139,8 +143,10 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
 /// A Soul's intent with no parameters, `verb` a ranked list of verbs split by spaces (the rest are its fallbacks,
 /// R7), each on `target` (a node's id as `<scope hex>-<counter>`, or empty for none), decided against `basis` (a
 /// version's bytes; empty for the zero version) and expiring at `expiry` world microseconds; read back as the world
-/// reads it.
+/// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b).
 #[wasm_bindgen(js_name = wireIntent)]
+// JS calls it with positional arguments; the words came last (C4, #3368).
+#[allow(clippy::too_many_arguments)]
 pub fn wire_intent(
     scope: &[u8],
     counter: u64,
@@ -149,6 +155,7 @@ pub fn wire_intent(
     basis: &[u8],
     expiry: u64,
     target: &str,
+    words: Option<String>,
 ) -> Result<Vec<u8>, JsError> {
     let target = match target {
         "" => None,
@@ -198,7 +205,15 @@ pub fn wire_intent(
         actor: Actor::Soul(id),
         verb,
         target,
-        parameters: BTreeMap::new(),
+        parameters: words
+            .map(|w| {
+                (
+                    1,
+                    Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
+                )
+            })
+            .into_iter()
+            .collect(),
         sequence,
         basis,
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
@@ -260,6 +275,10 @@ impl WasmCopy {
         let (ids, hashes) = read_hashes(&m).map_err(js)?;
         let version = m.get(&1).ok_or_else(|| JsError::new("sync-answer"))?;
         let version = to_hex(&encode(version).map_err(js)?);
+        // A sync cut off before it finished (its socket closed) is let go first (#3424).
+        if let Some(old) = self.descent.take() {
+            self.copy.abandon(old);
+        }
         self.descent = Some(self.copy.compare(&ids, hashes));
         Ok(version)
     }

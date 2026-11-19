@@ -3,7 +3,7 @@ name = "gatewayd"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Agents' sockets (Engine v2, #2635): held apart from the world, so a world restarts without closing one (I1, #2683)."
+description = "Agents' sockets (Engine v2, #2635): held apart from the world, so a world restarts without closing one (I1, #2683), and the gate a moving world's intents pass through (O9, #2828)."
 
 [dependencies]
 replica = { path = "../replica" }

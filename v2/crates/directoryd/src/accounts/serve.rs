@@ -24,6 +24,8 @@ pub struct App {
     pub store: Store,
     pub verifier: Option<Verifier>,
     pub test_sign_in: bool,
+    /// Pairing a Soul to an agent (W2), if on.
+    pub pairing: Option<crate::pairing::Pairing>,
     pub log: Mutex<Box<dyn Write + Send>>,
 }
 
@@ -91,8 +93,18 @@ fn handle(mut stream: TcpStream, app: &App) {
         let _ = respond(&mut stream, 400, &json!({"refused": "request"}));
         return;
     };
-    let (status, body, note) = route(&req, app);
-    let _ = respond(&mut stream, status, &body);
+    let (status, kind, body, note) = crate::pairing::route::route(
+        app,
+        &req.method,
+        &req.path,
+        req.bearer.as_deref(),
+        &req.body,
+    )
+    .unwrap_or_else(|| {
+        let (status, body, note) = route(&req, app);
+        (status, "application/json", body.to_string(), note)
+    });
+    let _ = respond_as(&mut stream, status, kind, &body);
     let line = format!("directoryd: {} {} {status} {note}\n", req.method, req.path);
     let _ = app.log.lock().expect("the log").write_all(line.as_bytes());
 }
@@ -141,7 +153,10 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
 }
 
 fn respond(stream: &mut TcpStream, status: u16, body: &Value) -> std::io::Result<()> {
-    let body = body.to_string();
+    respond_as(stream, status, "application/json", &body.to_string())
+}
+
+fn respond_as(stream: &mut TcpStream, status: u16, kind: &str, body: &str) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
@@ -151,7 +166,7 @@ fn respond(stream: &mut TcpStream, status: u16, body: &Value) -> std::io::Result
     };
     write!(
         stream,
-        "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
+        "HTTP/1.1 {status} {reason}\r\ncontent-type: {kind}\r\ncontent-length: {}\r\n\
          cache-control: no-store\r\nconnection: close\r\n\r\n{body}",
         body.len()
     )
