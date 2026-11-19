@@ -49,7 +49,8 @@
 //! 6. the frozen copy is published (K8);
 //! 7. the answers thread appends and syncs the records, then hands the synced tick to the view tier (R3) and sends
 //!    the answers;
-//! 8. the auditor checks a slice of the tree (K11).
+//! 8. the auditor checks a slice of the tree (K11), at most [`AUDIT_TIME`] of it (K21); its faults are printed on
+//!    its own thread.
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
 //! handed to the log is on the disk, so it never holds a change the log lacks. A tree holding changes no checkpoint
@@ -84,7 +85,7 @@ use replica::pose::Pose;
 use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
-use sim::audit::Auditor;
+use sim::audit::{Auditor, Fault};
 use sim::checkpoint::{self, Blobs, Checkpoints};
 use sim::clock::{Clock as Pace, Heartbeat, Ticker};
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
@@ -110,6 +111,9 @@ pub type MakeBodies = Box<dyn FnOnce(&Placed) -> R<Bodies> + Send>;
 
 /// Where an answer frame goes: the connection the intent came on.
 pub type Reply = Sender<Vec<u8>>;
+
+/// The most the auditor's slice takes of a tick (K21, #3422): it stops there and carries on next tick.
+pub const AUDIT_TIME: Duration = Duration::from_millis(2);
 
 /// The field of a tick's part that lists the intents answered in it: `[{1: actor, 2: sequence, 3: intent id, 4:
 /// answer frame, 5: intent}]`, 3 left out for an intent refused before it got an id, 5 for one whose intent holds
@@ -532,6 +536,8 @@ struct Clock {
     outstanding: usize,
     auditor: Auditor,
     audit: usize,
+    /// The auditor's faults, to the thread that prints them (K21).
+    audit_faults: Sender<Vec<Fault>>,
     faults: u64,
     checkpoints: Option<Checkpoints>,
     /// Log records written, the input records included.
@@ -1058,12 +1064,19 @@ impl Clock {
         self.records += written;
         self.since += bytes as u64;
         at[7] = mark();
-        // 8. A slice of the auditor: faults named, nothing repaired, the clock never stopped.
-        let slice = self.auditor.slice(self.replica.tree(), self.audit);
-        for f in &slice.faults {
-            eprintln!("worldd: audit: {f:?}");
-        }
+        // 8. A slice of the auditor: faults named, nothing repaired, the clock never stopped. The slice stops at
+        // AUDIT_TIME (K21, #3422), and its faults are printed on the auditor's own thread: a write to stderr can block
+        // for hundreds of ms on a loaded machine, and printing them here once stalled the clock.
+        let until = Instant::now() + AUDIT_TIME;
+        let slice = self
+            .auditor
+            .slice_within(self.replica.tree(), self.audit, &mut || {
+                Instant::now() >= until
+            });
         self.faults += slice.faults.len() as u64;
+        if !slice.faults.is_empty() {
+            let _ = self.audit_faults.send(slice.faults);
+        }
         at[8] = mark();
         if let Some(m) = &self.measures {
             let mut phases = [0; measures::NPHASES];
@@ -1421,6 +1434,15 @@ pub fn start<S: Storage + 'static>(
         .name("answers".into())
         .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures, synced))
         .map_err(io)?;
+    let (audit_faults, faults_in) = channel::<Vec<Fault>>();
+    thread::Builder::new()
+        .name("audit".into())
+        .spawn(move || {
+            for f in faults_in.iter().flatten() {
+                eprintln!("worldd: audit: {f:?}");
+            }
+        })
+        .map_err(io)?;
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let build = move || Clock {
@@ -1452,6 +1474,7 @@ pub fn start<S: Storage + 'static>(
         outstanding: 0,
         auditor: Auditor::new(),
         audit: cfg.audit,
+        audit_faults,
         faults: 0,
         checkpoints,
         records,
