@@ -194,9 +194,9 @@ async fn serve(
             _ => return,
         },
     };
-    let signed = token.and_then(|t| {
+    let signed = token.as_ref().and_then(|t| {
         let tokens = gw.tokens.read().unwrap_or_else(|e| e.into_inner());
-        let grant = tokens.check(&t)?;
+        let grant = tokens.check(t)?;
         Some((grant, tokens.account(grant).map(str::to_owned)))
     });
     let Some((grant, account)) = signed else {
@@ -235,6 +235,11 @@ async fn serve(
                     }
                     view = Some(gw.views.subscribe(request, &views::audiences(grant)));
                     continue;
+                }
+                // A token revoked since sign-in (W9, #2827): its next intent is refused by name, and the socket ends.
+                if token.as_ref().and_then(|t| gw.tokens.read().unwrap_or_else(|e| e.into_inner()).check(t)).is_none() {
+                    let _ = send(&mut socket, control(token::REFUSED)).await;
+                    break;
                 }
                 if let Some(answer) = take_intent(&gw, actor, grant, bytes, received) {
                     gw.receipts.write(&who, Outcome::Refusal);

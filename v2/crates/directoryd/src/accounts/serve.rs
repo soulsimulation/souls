@@ -125,6 +125,7 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
     let (issuer, subject) = match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/healthz") => return (200, json!({"ok": true}), "ok".into()),
         ("GET" | "POST", "/v1/worlds") => return crate::worlds::list::http::route(req, app),
+        ("POST", "/v1/worlds/settings") => return crate::worlds::list::http::settings(req, app),
         ("POST", "/v1/account/session") => {
             let Some(v) = &app.verifier else {
                 return refuse(404, "no-provider");
@@ -179,6 +180,7 @@ fn respond_as(
         200 => "OK",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         409 => "Conflict",
         429 => "Too Many Requests",
         404 => "Not Found",
