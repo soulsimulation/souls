@@ -9,7 +9,10 @@
 //!   address.
 //! - [`serve`]: the sign-in requests over HTTP, the session exchange and sign-out.
 //! - [`view`]: a signed-in session exchanges for a short-lived gateway view token (V13b, #3407).
+//! - [`serve`]: the two sign-in requests over HTTP, and the mailbox's.
+//! - [`mailbox`]: the owner's messages to a Soul (R13, #2753), in the same file, never in a world's log.
 
+pub mod mailbox;
 pub mod serve;
 pub mod session;
 pub mod start;

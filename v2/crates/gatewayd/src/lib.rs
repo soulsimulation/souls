@@ -11,6 +11,8 @@
 //! - [`receipts`]: one line per answered intent in the world's receipts file, for the operator's usage roll-up.
 //! - [`views`]: a signed-in socket subscribes to R4's view items for its scope (#3292), on a second local socket to
 //!   the world; its frames are keys 30 to 32.
+//! - Stopping (O16, #2809): on SIGTERM the gateway stops accepting, closes each signed-in socket with 1012 (Service
+//!   Restart) and exits; it keeps nothing a new one does not rebuild (`v2/docs/runbook/gateway-upgrade.md`).
 //!
 //! Frames after the first, as CBOR in T0's profile (`v2/docs/encoding.md`):
 //!
@@ -31,14 +33,18 @@
 //!   request, not an intent. The gateway passes it to the world with the asking actor (key 23) under a number of its
 //!   own, and the world's answer back to that socket alone, under the client's number; it is not kept for a resume.
 //!   A client told `stream.cannot-resume` compares and descends this way, then carries on with the stream.
+//! - gateway → client and back, the owner's messages ([`mailbox`], R13, #2753): WebSocket text frames of JSON, not
+//!   CBOR (and read by the gateway without parsing JSON), apart from the world's stream and never in its log: `{"mail": {"id", "text", "at"}}` out, once per
+//!   socket, and `{"close": {"id", "state", "outcome"}}` back when the act that served it ends.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 use replica::encode::Value;
 use tokio::sync::mpsc;
 
 pub mod gate;
+pub mod mailbox;
 pub mod receipts;
 pub mod resume;
 pub mod socket;
@@ -90,8 +96,16 @@ pub struct Gateway {
     pub receipts: Receipts,
     /// The key view tokens are checked with (`--view-key`, V13b); unset, a view token is refused.
     pub view_key: std::sync::OnceLock<token::ViewKey>,
+    /// The directory's mailbox (`--mailbox`), set once at start; off if unset.
+    pub mailbox: std::sync::OnceLock<mailbox::Mailbox>,
+    /// Set once when the gateway stops: every signed-in socket closes with [`RESTART`].
+    pub closing: tokio::sync::watch::Sender<bool>,
     hub: Mutex<Hub>,
 }
+
+/// The close code a socket gets when the gateway stops for an upgrade: 1012, Service Restart. The client reconnects
+/// after a random wait, resumes by cursor and sends again every intent it has no answer for.
+pub const RESTART: u16 = 1012;
 
 #[derive(Default)]
 struct Hub {
@@ -106,6 +120,9 @@ struct Held {
     session: Option<(u64, mpsc::Sender<Vec<u8>>)>,
     /// Who the grant's answers count for in the receipts file, as of its latest sign-in.
     who: Option<Arc<Who>>,
+    /// The signed-in socket's queue for the owner's messages, and the ids already given to it.
+    mail: Option<mpsc::Sender<String>>,
+    mailed: BTreeSet<String>,
 }
 
 /// A signed-in socket's place in the hub.
@@ -116,6 +133,8 @@ pub struct Attached {
     pub outcome: &'static str,
     /// Kept frames after the cursor, sent right after the outcome.
     pub replay: Vec<Vec<u8>>,
+    /// The owner's messages for this socket, as text frames (R13).
+    pub mail: mpsc::Receiver<String>,
 }
 
 impl Gateway {
@@ -137,6 +156,8 @@ impl Gateway {
             log,
             receipts,
             view_key: std::sync::OnceLock::new(),
+            mailbox: std::sync::OnceLock::new(),
+            closing: tokio::sync::watch::channel(false).0,
             hub: Mutex::new(Hub::default()),
         })
     }
@@ -152,12 +173,15 @@ impl Gateway {
         who: Arc<Who>,
     ) -> Attached {
         let (tx, rx) = mpsc::channel(OUTBOUND);
+        let (mail_tx, mail_rx) = mpsc::channel(OUTBOUND);
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
         hub.next_session += 1;
         let session = hub.next_session;
         let held = hub.grants.entry(grant.key()).or_default();
         held.session = Some((session, tx));
         held.who = Some(who);
+        held.mail = Some(mail_tx);
+        held.mailed.clear();
         let (outcome, replay) = match cursor {
             None => (resume::STARTED, Vec::new()),
             Some(v) => match Cursor::from_value(v).map(|c| held.kept.resume(&c, seen)) {
@@ -170,6 +194,7 @@ impl Gateway {
             frames: rx,
             outcome,
             replay,
+            mail: mail_rx,
         }
     }
 
@@ -180,6 +205,26 @@ impl Gateway {
             && held.session.as_ref().is_some_and(|(s, _)| *s == session)
         {
             held.session = None;
+            held.mail = None;
+        }
+    }
+
+    /// The mailbox's open messages, `(grant key, id, text frame)`: each given once to its grant's signed-in socket.
+    /// A message no longer open is forgotten, so ids given stay as few as the open messages.
+    pub fn post_mail(&self, open: Vec<(Vec<u8>, String, String)>) {
+        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        let ids: BTreeSet<&str> = open.iter().map(|(_, id, _)| id.as_str()).collect();
+        for held in hub.grants.values_mut() {
+            held.mailed.retain(|id| ids.contains(id.as_str()));
+        }
+        for (key, id, frame) in &open {
+            if let Some(held) = hub.grants.get_mut(key)
+                && let Some(tx) = &held.mail
+                && !held.mailed.contains(id)
+                && tx.try_send(frame.clone()).is_ok()
+            {
+                held.mailed.insert(id.clone());
+            }
         }
     }
 

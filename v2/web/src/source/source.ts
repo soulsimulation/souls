@@ -38,8 +38,10 @@ export type NodeRec = {
   description?: string | null;
 };
 
-/** Where the world is: its newest part's end, and world time against wall time. */
-export type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number };
+/** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still
+ * world wrote nothing (V5b, #3460); the worker gives the latest `quietUntil` it found with every part before it
+ * played, and keeps it after (it never steps back). */
+export type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null };
 
 /** One motion sample, as the part carried it: node, frame (parent node and slot), world time µs, position µm (V6). */
 export type SampleRec = [string, string, number | null, number, number, number, number];

@@ -642,8 +642,10 @@ fn v13b_a3_an_expired_or_signed_out_session_gets_no_view_token() {
         test_sign_in: false,
         view_key: Some(ViewKey::new(&VIEW_KEY)),
         origin: Some(PAGE.to_string()),
+        mailbox_key: None,
         pairing: None,
         log: Mutex::new(Box::new(std::io::sink())),
+        worlds: None,
     };
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
@@ -683,8 +685,10 @@ fn v13c_a1_a_completed_pairing_records_the_soul_under_the_approving_account() {
         test_sign_in: true,
         view_key: Some(ViewKey::new(&VIEW_KEY)),
         origin: None,
+        mailbox_key: None,
         pairing: Some(pairing),
         log: Mutex::new(Box::new(std::io::sink())),
+        worlds: None,
     });
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
