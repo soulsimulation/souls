@@ -12,6 +12,13 @@ export function visibleViewport(width: number,height: number,insets?: ViewportIn
   return w>0 && h>0 ? {left,top,width:w,height:h,aspect:w/h} : null;
 }
 
+/** #3374: what the viewer says when there is no area to draw in. A box with no size yet (a hidden tab, the first
+ * layout, mid-resize) says nothing: the view waits. Only panels that really cover a sized box get a note. */
+export function viewportNote(width: number,height: number,insets?: ViewportInsets): string | null {
+  if (!(size(width)>0 && size(height)>0) || visibleViewport(width,height,insets)) return null;
+  return 'Close the panel to see the world.';
+}
+
 /** Make the logical target and vertical FOV occupy the unoccluded rectangle.
  * The camera position, target, rotation and Follow offset do not move. This is
  * an off-centre full-canvas frustum, not a cropped renderer or actor transform. */

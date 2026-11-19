@@ -116,7 +116,7 @@ import { WorldPreviewGhost } from './WorldPreviewGhost.ts';
 import {WorldEdgeItems} from './WorldEdgeItems.ts';
 import { WorldNavigation, createWorldOrbitControls, type ManualNavigation, type CameraMove } from './WorldNavigation.ts';
 import {WorldPlaceCamera} from './WorldPlaceCamera.ts';
-import { composeVisibleViewport, visibleViewport, type ViewportInsets } from './WorldViewport.ts';
+import { composeVisibleViewport, viewportNote, visibleViewport, type ViewportInsets } from './WorldViewport.ts';
 import { DOING_DISPLAY, nameTag, placeWorldLabels, plateAnchor, type LabelBox, type LabelOffset } from './WorldLabels.ts';
 import { cardLook, fadeCard } from './WorldCardSight.ts';
 import {projectSpeechAnchors,type SpeechAnchorPoint} from './WorldSpeechAnchors.ts';
@@ -1236,7 +1236,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
           drawnTick: drawnTick.current, history: !!past.current, playing: past.current?.playing ?? false,
           cameraMode: viewing, cameraAuto: !!autoFrame&&viewing==='manual',flyingTo:soulFlight?.soulId??null,followHeld:followView.held,broadcastSoulId:viewing==='broadcast'&&broadcast.subject?[...s.conn.replica.souls.values()].find(x=>x.entityId===broadcast.subject)?.id??null:null, manualNavigation: context.current.manualNavigation, inputOwned: navigation?.inputOwned ?? false, soulId, entityId: soulId ? s.conn.replica.souls.get(soulId)?.entityId ?? null : thingId,
           loading: initialGate?.snapshot().stage!=='ready'||context.current.loading || (!at.take && renderer.domElement.dataset.sceneBinding!=='unavailable'),
-          unavailableReason: context.current.graphicsUnavailable ?? sceneReason ?? (!area ? 'The world view is covered by controls or has no visible area.' : brokenTake ? 'A recorded moment could not be drawn.' : frameGap ? 'No recording covers that moment; displaying the nearest recorded frame.' : !at.take ? 'Waiting for a recorded world frame.' : connectionLost(s.conn) && !past.current ? 'Reconnecting; displaying the last recorded frame.' : null),
+          unavailableReason: context.current.graphicsUnavailable ?? sceneReason ?? (!area && viewportNote(host.clientWidth, host.clientHeight, context.current.viewportInsets) || (brokenTake ? 'A recorded moment could not be drawn.' : frameGap ? 'No recording covers that moment; displaying the nearest recorded frame.' : !at.take ? 'Waiting for a recorded world frame.' : connectionLost(s.conn) && !past.current ? 'Reconnecting; displaying the last recorded frame.' : null)),
           speechAnchors,
         }));
       }

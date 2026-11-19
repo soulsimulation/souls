@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PerspectiveCamera, Vector3 } from 'three';
-import { visibleViewport, composeVisibleViewport } from '../src/WorldViewport.ts';
+import { visibleViewport, composeVisibleViewport, viewportNote } from '../src/WorldViewport.ts';
 const close = (a:number,b:number) => assert.ok(Math.abs(a-b)<1e-8,`${a} != ${b}`);
 for (const [name,width,height,insets] of [
   ['phone bottom drawer',390,720,{bottom:280}],
@@ -38,4 +38,17 @@ test('invalid and fully covered edge insets have honest visible-area behavior',(
   const camera=new PerspectiveCamera();const before=camera.projectionMatrix.toArray();
   assert.equal(composeVisibleViewport(camera,390,720,{bottom:720},45),null);
   assert.deepEqual(camera.projectionMatrix.toArray(),before,'a covered view never invents a valid crop');
+});
+
+test('#3374 a box with no size raises no note; only panels that cover a sized box do, in plain words', () => {
+  // Hidden tab, first layout, mid-resize: the scene box has no width or height yet. The view waits.
+  for (const [w,h] of [[0,0],[1280,0],[0,720],[Number.NaN,720]]) assert.equal(viewportNote(w,h,{}),null);
+  assert.equal(viewportNote(0,0,{bottom:300}),null);
+  // A sized box with room left: no note.
+  assert.equal(viewportNote(390,720,{bottom:280}),null);
+  // Panels really cover a sized box: one short sentence a visitor understands.
+  const note=viewportNote(390,720,{bottom:720})!;
+  assert.equal(note,'Close the panel to see the world.');
+  assert.doesNotMatch(note,/no visible area/);
+  assert.equal(viewportNote(1280,720,{right:700,left:600}),note);
 });
