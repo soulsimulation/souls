@@ -26,7 +26,7 @@ use crate::structure::Structure;
 use replica::apply::Replica;
 use replica::edit::{Checked, Op, Ref, Refused, confirm};
 use replica::effects::{Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
-use replica::encode::{Value, encode};
+use replica::encode::{Name, Value, encode};
 use replica::ids::{Id, Minter, Scope};
 use replica::pose::Frame;
 use replica::time::Micros;
@@ -110,7 +110,7 @@ fn plan_with(
 fn names(checked: &Checked, minter: &mut Minter) -> Result<BTreeMap<u64, Id>, Refused> {
     let mut names = BTreeMap::new();
     for op in &checked.edit.ops {
-        if let Op::Place { name, .. } = op {
+        if let Op::Place { name, .. } | Op::Doorway { name, .. } = op {
             let id = minter
                 .mint()
                 .map_err(|e| refused("edit.ids-exhausted", e.to_string()))?;
@@ -180,14 +180,120 @@ fn effects(
     };
     let audience = |r: Ref| match r {
         Ref::New(n) => audiences[&n],
-        Ref::Node(id) => tree
-            .handle(id)
-            .and_then(|h| tree.node(h))
-            .map_or(Audience::Everyone, |n| n.audience()),
+        Ref::Node(id) => names
+            .iter()
+            .find_map(|(name, minted)| {
+                (*minted == id)
+                    .then(|| audiences.get(name))
+                    .flatten()
+                    .copied()
+            })
+            .or_else(|| {
+                tree.handle(id)
+                    .and_then(|h| tree.node(h))
+                    .map(|n| n.audience())
+            })
+            .unwrap_or(Audience::Everyone),
     };
     let mut frames: BTreeMap<Id, (Id, Option<u64>)> = BTreeMap::new();
+    let mut fields: BTreeMap<(Id, u64), Value> = BTreeMap::new();
+    let mut linked: BTreeMap<Id, [Id; 2]> = BTreeMap::new();
     let mut groups: Vec<(Id, Audience, Vec<Change>)> = Vec::new();
-    for op in &edit.ops {
+    for (index, op) in edit.ops.iter().enumerate() {
+        if let Some(geometry) = checked.geometry.get(&index) {
+            let wall = id(geometry.wall);
+            fields.insert(
+                (wall, crate::ground::scene::F_SOLIDS),
+                geometry.solids.clone(),
+            );
+            groups.push((
+                wall,
+                audience(geometry.wall),
+                vec![Change::Set {
+                    node: wall,
+                    field: crate::ground::scene::F_SOLIDS,
+                    to: geometry.solids.clone(),
+                    by: None,
+                }],
+            ));
+        }
+        if let Op::Doorway {
+            name,
+            door,
+            from,
+            to,
+            at: [x, z],
+            yaw,
+            width,
+            height,
+            wall,
+            closed,
+            open,
+        } = op
+        {
+            use crate::ground::scene::{DOORWAY, F_DOORWAYS, F_OPEN_DOOR_LINK};
+            let (owner_audience, leaf_audience) = (audience(*from), audience(*door));
+            let (from, to, door, link) = (id(*from), id(*to), id(*door), names[name]);
+            let mut rows_list = match field(tree, &fields, from, F_DOORWAYS) {
+                Value::Array(rows) => rows,
+                _ => Vec::new(),
+            };
+            rows_list.push(Value::Array(vec![
+                link.to_value(),
+                Value::Text(Name::new("door").unwrap()),
+                int(*x),
+                int(*z),
+                int(*yaw),
+                int(*width),
+                int(*height),
+            ]));
+            let rows = Value::Array(rows_list);
+            fields.insert((from, F_DOORWAYS), rows.clone());
+            fields.insert((door, F_OPEN_DOOR_LINK), link.to_value());
+            linked.insert(link, [from, to]);
+            groups.push((
+                from,
+                owner_audience,
+                vec![
+                    Change::Link {
+                        link,
+                        ty: Name::new(DOORWAY).unwrap(),
+                        ends: [from, to],
+                        owner: replica::world_model::End::First,
+                        audience: owner_audience,
+                    },
+                    Change::Set {
+                        node: from,
+                        field: F_DOORWAYS,
+                        to: rows,
+                        by: None,
+                    },
+                ],
+            ));
+            groups.push((
+                door,
+                leaf_audience,
+                vec![
+                    Change::Set {
+                        node: door,
+                        field: F_OPEN_DOOR_LINK,
+                        to: link.to_value(),
+                        by: None,
+                    },
+                    Change::Set {
+                        node: door,
+                        field: replica::edit::DOOR_GEOMETRY,
+                        to: Value::Array(vec![
+                            id(*wall).to_value(),
+                            Value::Array(closed.clone()),
+                            Value::Array(open.clone()),
+                        ]),
+                        by: None,
+                    },
+                ],
+            ));
+            continue;
+        }
         let (writer, seen_by, change) = match op {
             Op::Place {
                 name,
@@ -237,9 +343,54 @@ fn effects(
             }
             Op::Remove { node } => {
                 let n = id(*node);
+                use crate::ground::scene::{DOORWAY, F_DOORWAYS, F_OPEN_DOOR_LINK};
+                if let Ok(link) =
+                    replica::effects::read_id(&field(tree, &fields, n, F_OPEN_DOOR_LINK))
+                {
+                    let ends = linked.get(&link).copied().or_else(|| {
+                        tree.link(link)
+                            .filter(|(ty, ..)| ty.as_str() == DOORWAY)
+                            .map(|(_, ends, ..)| ends)
+                    });
+                    if let Some([owner, _]) = ends {
+                        let mut rows = field(tree, &fields, owner, F_DOORWAYS);
+                        if let Value::Array(ref mut rows_list) = rows {
+                            rows_list.retain(|r| !matches!(r, Value::Array(r) if r.first() == Some(&link.to_value())));
+                        }
+                        fields.insert((owner, F_DOORWAYS), rows.clone());
+                        groups.push((
+                            owner,
+                            audience(Ref::Node(owner)),
+                            vec![
+                                Change::Unlink { link },
+                                Change::Set {
+                                    node: owner,
+                                    field: F_DOORWAYS,
+                                    to: rows,
+                                    by: None,
+                                },
+                            ],
+                        ));
+                        linked.remove(&link);
+                    }
+                }
                 (n, audience(*node), Change::Remove { node: n })
             }
+            Op::Doorway { .. } => unreachable!("handled above"),
         };
+        match &change {
+            Change::Create {
+                node,
+                fields: added,
+                ..
+            } => fields.extend(added.iter().map(|(k, v)| ((*node, *k), v.clone()))),
+            Change::Set {
+                node, field, to, ..
+            } => {
+                fields.insert((*node, *field), to.clone());
+            }
+            _ => {}
+        }
         match groups.last_mut() {
             Some((w, a, changes)) if *w == writer && *a == seen_by => changes.push(change),
             _ => groups.push((writer, seen_by, vec![change])),
@@ -270,4 +421,20 @@ fn effects(
             rest: Rest::new(),
         })
         .collect()
+}
+
+fn field(tree: &Tree, staged: &BTreeMap<(Id, u64), Value>, node: Id, key: u64) -> Value {
+    staged
+        .get(&(node, key))
+        .cloned()
+        .or_else(|| {
+            tree.handle(node)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.fields().get(&key).cloned())
+        })
+        .unwrap_or_else(|| Value::Array(Vec::new()))
+}
+
+fn int(n: i64) -> Value {
+    u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
 }

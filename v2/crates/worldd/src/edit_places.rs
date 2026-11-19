@@ -68,10 +68,12 @@ impl Projection {
         for op in &plan.checked.edit.ops {
             let id = match op {
                 Op::Place { name, .. } => committed.names[name],
-                Op::Move { node, .. } | Op::Set { node, .. } | Op::Remove { node } => match node {
+                Op::Move { node, .. } | Op::Remove { node } => match node {
                     Ref::Node(id) => *id,
                     Ref::New(n) => committed.names[n],
                 },
+                // These do not change immutable declared slots or ancestor poses.
+                Op::Set { .. } | Op::Doorway { .. } => continue,
             };
             subtree(copy.tree(), id, &mut affected);
             subtree(preview.tree(), id, &mut affected);
@@ -139,6 +141,9 @@ impl Projection {
         slots: &mut Slots,
         names: &BTreeMap<u64, Id>,
     ) -> Result<(), replica::effects::Refusal> {
+        // Canonical slots have unique numbers, names come from this exact commit, and check() just confirmed
+        // occupancy on this tick. No body step interleaves commit and install, so legal prepared input cannot
+        // fail replacement after the replica has committed.
         let id = |r| match r {
             Ref::Node(id) => id,
             Ref::New(n) => names[&n],
