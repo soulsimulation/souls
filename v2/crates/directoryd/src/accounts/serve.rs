@@ -16,8 +16,9 @@
 //!   frame the gateway gives the Soul's socket as it is (`{"mail": {"id", "text", "at"}}`). The second's body is the
 //!   socket's own `{"close": {"id", "state", "outcome"}}`, with the socket's grant in a `souls-soul` header. So the
 //!   gateway reads no JSON.
-//! - `POST /v1/mailbox/put` `{"soul", "text"}` and `POST /v1/mailbox/read` `{"id"}`: the test call that stands in
-//!   for the page's box (W10) until it lands, with the sign-in for test worlds on only.
+//! - `POST /v1/mailbox/put` `{"soul", "text"}`: the gateway's, with the mailbox key, for the page's box (W10), which
+//!   checks the page's view token holds that Soul; also open with the sign-in for test worlds on, as is
+//!   `POST /v1/mailbox/read` `{"id"}`.
 //!
 //! Answers carry `cache-control: no-store` (the world list's a short while) and may be read by the page's own origin
 //! alone (CORS). A message's text is never in a log line. The log line of a request holds its method, path, status
@@ -258,7 +259,7 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
             )
         }
         ("GET", "/v1/mailbox/open") | ("POST", "/v1/mailbox/close") => refuse(401, "mailbox-key"),
-        ("POST", "/v1/mailbox/put") if app.test_sign_in => {
+        ("POST", "/v1/mailbox/put") if app.test_sign_in || gateway() => {
             let b = body();
             Some(
                 match app

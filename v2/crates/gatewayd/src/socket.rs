@@ -334,7 +334,8 @@ async fn serve(
 /// audiences are theirs, as an agent's are its actor's) and does nothing else: no intent, no stream, no place in the
 /// hub, so an owner watching never lets their agent's socket go. Before the token expires the page signs in again on
 /// the same socket (`{1: view token}`, answered `{4: "view.renewed"}`) and the subscription carries on with no gap;
-/// unrenewed, the socket is told `{4: "view.expired"}` and closed.
+/// unrenewed, the socket is told `{4: "view.expired"}` and closed. Its text frames are the owner's box (W10,
+/// `mailbox::on_view_text`): a message to its grants' agents, and what each agent is doing about it.
 async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToken) {
     let check = |t: &ViewToken| {
         gw.view_key
@@ -353,6 +354,8 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
     let mut ok = send(&mut socket, control(VIEW_STARTED)).await;
     let mut asked: Option<Value> = None;
     let mut sub: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
+    // W10 (#2802): the owner's box. Its grants' messages are told on `mail`, and its own puts answered there too.
+    let (watching, reply, mut mail) = gw.watch(&view.grants);
     while ok {
         let left = Duration::from_millis((view.expires * 1000).saturating_sub(crate::unix_ms()));
         tokio::select! {
@@ -360,6 +363,10 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                 let bytes = match incoming {
                     Some(Ok(Message::Binary(b))) => b.to_vec(),
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                    Some(Ok(Message::Text(t))) => {
+                        crate::mailbox::on_view_text(&gw, &view.grants, t.as_str(), reply.clone());
+                        continue;
+                    }
                     _ => break,
                 };
                 if let Some(request) = views::request(&bytes) {
@@ -390,7 +397,11 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     sub = Some(gw.views.subscribe(request.clone(), &audiences(&fresh)));
                 }
                 view = fresh;
+                gw.rewatch(watching, &view.grants);
                 ok = send(&mut socket, control(VIEW_RENEWED)).await;
+            }
+            Some(text) = mail.recv() => {
+                ok = socket.send(Message::Text(text.into())).await.is_ok();
             }
             _ = tokio::time::sleep(left) => {
                 let _ = send(&mut socket, control(VIEW_EXPIRED)).await;
@@ -410,6 +421,7 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
     if let Some((n, _)) = sub {
         gw.views.end(n);
     }
+    gw.unwatch(watching);
 }
 
 /// Returns once the gateway is stopping (at once if it already is).
@@ -465,11 +477,16 @@ fn take_intent(
         );
     }
     let left = intent.expiry.saturating_sub(unix_us());
+    let (sequence, verb) = (intent.sequence, intent.verb.clone());
     match gw
         .link
         .submit(grant.key(), actor, intent.sequence, bytes, received, left)
     {
-        Sent::Sent => None,
+        Sent::Sent => {
+            // W10: told to the owner while a message given to this agent is open.
+            gw.sent_intent(&grant.key(), sequence, verb.as_str());
+            None
+        }
         Sent::Restarting => refuse(gw, grant, actor, intent.sequence, RESTARTING),
     }
 }

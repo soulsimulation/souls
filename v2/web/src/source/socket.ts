@@ -221,6 +221,7 @@ export class SocketSource implements Source {
     let step = 0; // 0 hello sent, 1 sign-in sent, 2 subscribed
     ws.onopen = () => ws.send(frames.hello());
     ws.onmessage = (ev) => {
+      if (typeof ev.data === 'string') return void this.onText?.(ev.data); // W10: the owner's box (`owner/box.ts`)
       const b = new Uint8Array(ev.data as ArrayBuffer);
       this.bytes += b.byteLength;
       if (step === 0) return void ((step = 1), ws.send(frames.signIn(this.#token)));
@@ -229,6 +230,7 @@ export class SocketSource implements Source {
         const outcome = m.get(4) as string | undefined;
         if (outcome === 'token.refused') return void on.error('the gateway refused the sign-in');
         step = 2;
+        this.signedIn = ws;
         ws.send(frames.subscribe(this.o.follow, this.o.level, this.o.budget));
         this.scheduleRenewal(on);
         return;
@@ -252,6 +254,13 @@ export class SocketSource implements Source {
       if (!this.stopped) this.retry = setTimeout(() => this.start(on), RETRY_MS);
     };
     ws.onerror = () => ws.close();
+  }
+
+  /** W10: the owner's box's text frames, both ways, on the signed-in socket. */
+  onText: ((text: string) => void) | null = null;
+  private signedIn: WebSocket | null = null;
+  sendText(text: string): boolean {
+    return this.signedIn === this.ws && this.ws?.readyState === 1 ? (this.ws.send(text), true) : false;
   }
 
   stop(): void {
