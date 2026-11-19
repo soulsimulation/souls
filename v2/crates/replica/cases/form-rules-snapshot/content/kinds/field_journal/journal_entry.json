@@ -1,0 +1,165 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:journal_entry",
+  "owner": "thing",
+  "state": {
+    "words": {
+      "n": 1,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ink": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "links": {
+    "writer": {
+      "n": 1,
+      "from": "soul",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "line": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        4,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      380,
+      8,
+      40
+    ]
+  },
+  "forms": {
+    "write": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "words": {
+          "type": "text"
+        },
+        "desk": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:field_writing_desk",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "unlinked",
+          "link": "writer",
+          "says": "written_fixed"
+        },
+        {
+          "need": "state",
+          "of": {
+            "arg": "desk"
+          },
+          "field": "ink",
+          "at_least": 1,
+          "says": "no_ink"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "line"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "link",
+          "link": "writer",
+          "from": "actor",
+          "event": "entry_signed"
+        },
+        {
+          "change": "set",
+          "field": "words",
+          "to": {
+            "arg": "words"
+          },
+          "event": "entry_written"
+        },
+        {
+          "change": "transfer",
+          "field": "ink",
+          "from": {
+            "arg": "desk"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "ink_used"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,2,0],"size":[380,4,40],"tint":"page"},{"kind":"box","at":[-40,4,0],"size":[260,1,8],"when":"@ink>=1","tint":"ink"}],"palette":{"page":"#f1e3be","ink":"#273749"},"tags":["writing","line","object"]},
+    "model": "look:journal_entry"
+  },
+  "text": {
+    "card": "One signed entry in a field journal, in a desk's ink; it stays as written.",
+    "written_fixed": "Earlier entries remain unchanged; write the next entry instead.",
+    "no_ink": "Appending needs one unused ink charge.",
+    "put_down": "Put down what you are holding before writing.",
+    "writing": "writing",
+    "entry": "entry",
+    "howto_entry": "With empty hands at a writing desk, write the next entry for ten seconds; it uses one ink charge."
+  },
+  "card": {
+    "text": "card",
+    "category": "writing",
+    "synonyms": [
+      "entry"
+    ]
+  },
+  "howtos": {
+    "write": {
+      "text": "howto_entry",
+      "steps": [
+        {
+          "form": "write"
+        }
+      ]
+    }
+  }
+}

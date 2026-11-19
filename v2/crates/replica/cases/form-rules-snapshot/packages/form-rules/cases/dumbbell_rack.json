@@ -1,0 +1,75 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:dumbbell_rack. Anyone with a hand free does lifting a pair of weights from the rack; the apparatus does not change (the body moves, Engine v2's body look). Refused with both hands full.",
+  "cases": [
+    {
+      "name": "lift_weights_hands_free",
+      "act": {
+        "this": "t1",
+        "form": "lift_weights"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_rack"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "lift_weights_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "lift_weights"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:dumbbell_rack"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:toy_blocks"
+          },
+          "x2": {
+            "kind": "eden:toy_blocks"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

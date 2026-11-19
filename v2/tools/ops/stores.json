@@ -1,0 +1,7 @@
+{
+  "about": "Engine v2 O20 (#2812): every store that is not in a world's log, its path under the machine's folder, its kind and how it is copied. A task that adds a store adds a line.",
+  "stores": [
+    { "name": "usage", "task": "O21 (#3325)", "path": "ops/usage.sqlite", "kind": "sqlite", "copy": "sqlite-backup", "about": "per Soul and day: acts, refusals, latest client; the owning account id (operator's store only)" },
+    { "name": "health-history", "task": "O21 (#3325)", "path": "ops/health-history/", "kind": "folder", "copy": "files", "about": "bounded history of the health page's numbers, at most 64 MiB" }
+  ]
+}

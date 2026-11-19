@@ -1,0 +1,537 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:windmill",
+  "owner": "thing",
+  "state": {
+    "on": {
+      "n": 1,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "brake": {
+      "role": "contact",
+      "at_mm": [
+        700,
+        1000,
+        3000
+      ]
+    },
+    "door": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        3600
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      12800,
+      16800,
+      6350
+    ]
+  },
+  "areas": {
+    "mill": {
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "radius_mm": 2200
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "on",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "brake"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "brake"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "on",
+          "to": true,
+          "event": "switched_on"
+        }
+      ]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "on",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "brake"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "brake"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "on",
+          "to": false,
+          "event": "switched_off"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:windmill",
+    "table": [
+      {
+        "field": "on",
+        "do": "sound",
+        "sound": "creak",
+        "mode": "loop",
+        "reach_mm": 22000,
+        "at": {
+          "true": 500,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {
+      "shapes": [
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "profile": [
+            [
+              3000,
+              0
+            ],
+            [
+              3000,
+              600
+            ],
+            [
+              2200,
+              9200
+            ],
+            [
+              2400,
+              9300
+            ],
+            [
+              0,
+              9300
+            ]
+          ],
+          "segments": 10,
+          "tint": "paint"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            30,
+            2750
+          ],
+          "polygon": [
+            [
+              -570,
+              -170
+            ],
+            [
+              570,
+              -170
+            ],
+            [
+              570,
+              170
+            ],
+            [
+              -570,
+              170
+            ]
+          ],
+          "h": 2140,
+          "tint": "door"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            3130,
+            2596
+          ],
+          "polygon": [
+            [
+              -270,
+              -70
+            ],
+            [
+              270,
+              -70
+            ],
+            [
+              270,
+              70
+            ],
+            [
+              -270,
+              70
+            ]
+          ],
+          "h": 740,
+          "tint": "window"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            6130,
+            2335
+          ],
+          "polygon": [
+            [
+              -270,
+              -70
+            ],
+            [
+              270,
+              -70
+            ],
+            [
+              270,
+              70
+            ],
+            [
+              -270,
+              70
+            ]
+          ],
+          "h": 740,
+          "tint": "window"
+        },
+        {
+          "kind": "torus",
+          "at": [
+            0,
+            6000,
+            0
+          ],
+          "r": 2550,
+          "r2": 80,
+          "segments": 10,
+          "tint": "trim",
+          "pitch": 90000
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            9300,
+            0
+          ],
+          "profile": [
+            [
+              2300,
+              0
+            ],
+            [
+              2000,
+              1400
+            ],
+            [
+              1000,
+              2300
+            ],
+            [
+              0,
+              2500
+            ]
+          ],
+          "segments": 10,
+          "tint": "cap"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            10400,
+            2200
+          ],
+          "r": 220,
+          "h": 1400,
+          "segments": 6,
+          "tint": "wood",
+          "pitch": 90012
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            10400,
+            3000
+          ],
+          "r": 350,
+          "segments": 6,
+          "tint": "wood",
+          "role": "blade",
+          "pivot": [
+            0,
+            10400,
+            3000
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            3400,
+            10400,
+            3100
+          ],
+          "r": 80,
+          "h": 6000,
+          "segments": 4,
+          "tint": "wood",
+          "pitch": 90012,
+          "yaw": 90012,
+          "role": "blade",
+          "pivot": [
+            0,
+            10400,
+            3000
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            3700,
+            10980,
+            3120
+          ],
+          "size": [
+            5200,
+            1100,
+            40
+          ],
+          "round": 0,
+          "tint": "sail",
+          "role": "blade",
+          "pivot": [
+            0,
+            10400,
+            3000
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            13800,
+            3100
+          ],
+          "r": 80,
+          "h": 6000,
+          "segments": 4,
+          "tint": "wood",
+          "role": "blade",
+          "pivot": [
+            0,
+            10400,
+            3000
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -580,
+            14100,
+            3120
+          ],
+          "size": [
+            1100,
+            5200,
+            40
+          ],
+          "round": 0,
+          "tint": "sail",
+          "role": "blade",
+          "pivot": [
+            0,
+            10400,
+            3000
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -3400,
+            10400,
+            3100
+          ],
+          "r": 80,
+          "h": 6000,
+          "segments": 4,
+          "tint": "wood",
+          "pitch": 90012,
+          "yaw": -90012,
+          "role": "blade",
+          "pivot": [
+            0,
+            10400,
+            3000
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -3700,
+            9820,
+            3120
+          ],
+          "size": [
+            5200,
+            1100,
+            40
+          ],
+          "round": 0,
+          "tint": "sail",
+          "role": "blade",
+          "pivot": [
+            0,
+            10400,
+            3000
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            7000,
+            3100
+          ],
+          "r": 80,
+          "h": 6000,
+          "segments": 4,
+          "tint": "wood",
+          "pitch": 180023,
+          "yaw": -90012,
+          "role": "blade",
+          "pivot": [
+            0,
+            10400,
+            3000
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            580,
+            6700,
+            3120
+          ],
+          "size": [
+            1100,
+            5200,
+            40
+          ],
+          "round": 0,
+          "tint": "sail",
+          "role": "blade",
+          "pivot": [
+            0,
+            10400,
+            3000
+          ]
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "paint": "#f4f2ec",
+        "door": "#5e3d27",
+        "window": "#3b4b55",
+        "trim": "#9a6b43",
+        "cap": "#5a4636",
+        "wood": "#6b4a32",
+        "sail": "#e2cfa8"
+      },
+      "tags": [
+        "building",
+        "windmill",
+        "mill"
+      ]
+    }
+  },
+  "text": {
+    "card": "A white tower windmill whose four sails turn while it grinds; stop or start it.",
+    "building": "building",
+    "mill": "mill",
+    "grain_mill": "grain mill",
+    "tower_mill": "tower mill"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "mill",
+      "grain_mill",
+      "tower_mill"
+    ]
+  }
+}

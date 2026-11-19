@@ -1,0 +1,10 @@
+[package]
+name = "import-world"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Each world's built content brought over from a backup of its database (Engine v2 X6, #2819): N1's loader and the per-world row."
+
+[dependencies]
+import-eden = { path = "../import-eden" }
+replica = { path = "../../crates/replica" }

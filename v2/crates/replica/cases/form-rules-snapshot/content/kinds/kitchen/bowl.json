@@ -1,0 +1,113 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bowl",
+  "owner": "thing",
+  "state": {
+    "food": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "rim": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        100,
+        -110
+      ]
+    },
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        120,
+        80,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      250,
+      100,
+      250
+    ]
+  },
+  "forms": {
+    "eat": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "food",
+          "at_least": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "food",
+          "by": -1,
+          "event": "ate_a_spoonful"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:bowl",
+    "table": [
+      {
+        "part": "fill",
+        "field": "food",
+        "do": "scale",
+        "range": [
+          0,
+          4
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,0],[60,0],[110,50],[125,100],[115,100],[100,60],[0,20]],"segments":12,"tint":"glaze"},{"kind":"cyl","at":[0,70,0],"r":100,"h":20,"segments":12,"tint":"food","role":"fill"}],"palette":{"glaze":"#d9c7a8","food":"#c8873a"},"tags":["kitchen","bowl","object"]}
+  },
+  "text": {
+    "card": "A ceramic bowl of food: pick it up and eat, four spoonfuls to a bowl.",
+    "dish": "dish",
+    "soup_bowl": "soup bowl",
+    "kitchen": "kitchen"
+  },
+  "card": {
+    "text": "card",
+    "category": "kitchen",
+    "synonyms": [
+      "dish",
+      "soup_bowl"
+    ]
+  }
+}

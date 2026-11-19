@@ -1,16 +1,18 @@
 // The crowd's bench page (V6, #2715): 1,000 bodies on open ground, 400 walking at walking pace and 600 standing, the
 // three body files of today's people, the camera placed so the whole crowd is in view at any aspect. Served by
 // `vite` at /src/crowd/bench.html; `bench.mjs` drives it. Page parameters: `bodies` (the directory the body files are
-// served from, default ./bodies/), `n` (bodies, 1000), `walking` (400), `seed`.
+// served from, default ./bodies/), `n` (bodies, 1000), `walking` (400), `seed`, and `kind`: one body kind someone
+// authored (B13, #2744), the importer's `<name>.json` under `bodies`, drawn in place of today's three people; `area`,
+// the ground per body (m², 2.5), so a smaller crowd can still reach the farthest level.
 // `window.__crowd` reports readiness, the crowd's stats, the premise counts and the frame's own work time.
 import * as THREE from 'three';
 import { loadModel, type BakedModel } from './bake.ts';
-import { BODIES, CLIPS, WALK_STRIDE } from './bodies.ts';
+import { BODIES, CLIPS, WALK_STRIDE, loadKind } from './bodies.ts';
 import { Crowd } from './crowd.ts';
 
 const q = new URLSearchParams(location.search);
 const base = q.get('bodies') ?? './bodies/';
-const N = Number(q.get('n') ?? 1000), WALKING = Number(q.get('walking') ?? 400);
+const N = Number(q.get('n') ?? 1000), WALKING = Number(q.get('walking') ?? 400), KIND = q.get('kind'), AREA = Number(q.get('area') ?? 2.5);
 let seed = Number(q.get('seed') ?? 7);
 const rand = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
 
@@ -36,7 +38,7 @@ scene.add(ground);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 1000);
 
 // The crowd fills the ground the camera sees: a sector about the camera's foot, from NEAR m out to `far` (about
-// 2.5 m² a body), as wide as the view. The camera is raised and tilted so the sector's near and far edges meet the
+// `area` m² a body), as wide as the view. The camera is raised and tilted so the sector's near and far edges meet the
 // bottom and top of the view, so every body is in view at any aspect and some are near enough for level 0.
 const NEAR = 4;
 const sector = { half: 0, far: 0 };
@@ -46,7 +48,7 @@ const place = () => {
   camera.aspect = w / h;
   const halfV = THREE.MathUtils.degToRad(camera.fov / 2);
   sector.half = Math.atan(Math.tan(halfV) * camera.aspect) * 0.85;
-  sector.far = Math.sqrt((N * 2.5) / sector.half + NEAR * NEAR);
+  sector.far = Math.sqrt((N * AREA) / sector.half + NEAR * NEAR);
   // Height whose rays to NEAR and to 1.03 × far are the view's height apart.
   let lo = 0.5, hi = Math.sqrt(NEAR * sector.far * 1.03); // the lower of the two heights: the difference rises to here
   for (let k = 0; k < 60; k++) {
@@ -70,7 +72,7 @@ place();
 
 async function main() {
   const t0 = performance.now();
-  const models: BakedModel[] = await Promise.all(BODIES.map(([name, mesh, clips]) => loadModel(name, base + mesh, base + clips, CLIPS)));
+  const models: BakedModel[] = KIND ? (await loadKind(base, KIND)).models : await Promise.all(BODIES.map(([name, mesh, clips]) => loadModel(name, base + mesh, base + clips, CLIPS)));
   const bakeMs = performance.now() - t0;
   const crowd = new Crowd(models, N);
   scene.add(crowd.group);

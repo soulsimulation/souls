@@ -123,10 +123,12 @@ impl fmt::Display for Token {
 /// Why a token was refused. One name for every case, so a caller learns nothing about which part was wrong.
 pub const REFUSED: &str = "token.refused";
 
-/// The stored tokens: per grant (by its text), the SHA-256 of each live token.
+/// The stored tokens: per grant (by its text), the SHA-256 of each live token, and the account that owns the grant if
+/// the file names one (for the receipts file; never part of a check).
 #[derive(Default)]
 pub struct Tokens {
     by_grant: BTreeMap<String, (Grant, Vec<[u8; 32]>)>,
+    accounts: BTreeMap<String, String>,
 }
 
 impl Tokens {
@@ -137,6 +139,16 @@ impl Tokens {
             .or_insert_with(|| (grant, Vec::new()))
             .1
             .push(hash);
+    }
+
+    /// Names the account that owns `grant`.
+    pub fn set_account(&mut self, grant: Grant, account: &str) {
+        self.accounts.insert(grant.to_text(), account.to_owned());
+    }
+
+    /// The account that owns `grant`, if one is named.
+    pub fn account(&self, grant: Grant) -> Option<&str> {
+        self.accounts.get(&grant.to_text()).map(String::as_str)
     }
 
     /// Revokes the token with this hash. True if it was stored.
@@ -171,7 +183,7 @@ impl Tokens {
             .flat_map(|(g, hs)| hs.iter().map(move |h| (*g, h)))
     }
 
-    /// Reads a file of `<grant> <sha-256 hex>` lines.
+    /// Reads a file of `<grant> <sha-256 hex> [<account>]` lines.
     pub fn read(text: &str) -> Result<Tokens, String> {
         let mut t = Tokens::default();
         for (n, line) in text.lines().enumerate() {
@@ -179,14 +191,27 @@ impl Tokens {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let bad = || format!("tokens line {}: want `<grant> <sha-256 hex>`", n + 1);
-            let (g, h) = line.split_once(' ').ok_or_else(bad)?;
+            let bad = || {
+                format!(
+                    "tokens line {}: want `<grant> <sha-256 hex> [<account>]`",
+                    n + 1
+                )
+            };
+            let mut words = line.split_whitespace();
+            let (Some(g), Some(h), account, None) =
+                (words.next(), words.next(), words.next(), words.next())
+            else {
+                return Err(bad());
+            };
             let grant = Grant::parse(g).ok_or_else(bad)?;
-            let hash: [u8; 32] = from_hex(h.trim())
+            let hash: [u8; 32] = from_hex(h)
                 .ok()
                 .and_then(|b| b.try_into().ok())
                 .ok_or_else(bad)?;
             t.add(grant, hash);
+            if let Some(a) = account {
+                t.set_account(grant, a);
+            }
         }
         Ok(t)
     }

@@ -17,7 +17,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use replica::effects::{Body, Change, Effect, TransferRec};
 use replica::ids::Id;
-use replica::pose::{Pose, Support};
+use replica::pose::{Frame, Pose, Support};
+use replica::tree::Tree;
 use sim::index::Index;
 
 /// A body enters the set closer than [`ENTER`] and leaves it at [`LEAVE`] or farther: the rule speech shares (B11).
@@ -60,6 +61,33 @@ impl Places {
     fn put(&mut self, id: Id, p: &Pose) {
         let (node, at) = place(p);
         self.index.put_body(id, node, at);
+    }
+
+    /// Enters the bodies of a world as built, which no record of the log creates (C6, #3390): each `souls:body` node
+    /// of `tree` where it stands.
+    pub fn seed(&mut self, tree: &Tree) {
+        let mut todo = vec![tree.root()];
+        while let Some(h) = todo.pop() {
+            todo.extend(tree.children(h).unwrap_or_default());
+            let Some(n) = tree.node(h) else { continue };
+            let (Some(parent), Some(at)) = (n.parent(), n.place()) else {
+                continue;
+            };
+            if n.kind().as_str().split('@').next() != Some("souls:body") {
+                continue;
+            }
+            let pose = Pose {
+                frame: Frame {
+                    node: parent,
+                    slot: n.slot(),
+                },
+                position: at.position,
+                orientation: at.orientation,
+                support: at.support,
+            };
+            self.bodies.insert(n.id());
+            self.put(n.id(), &pose);
+        }
     }
 
     /// Follows one entry of the log.

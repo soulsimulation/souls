@@ -1,0 +1,142 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pie",
+  "owner": "thing",
+  "state": {
+    "slices": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 6,
+      "min": 1,
+      "max": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        30,
+        0
+      ]
+    },
+    "edge": {
+      "role": "contact",
+      "at_mm": [
+        180,
+        40,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      381,
+      61,
+      381
+    ]
+  },
+  "forms": {
+    "eat_a_slice": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "slices",
+          "at_least": 2
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "edge"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "slices",
+          "by": -1,
+          "event": "ate_a_slice"
+        }
+      ]
+    },
+    "finish": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "slices",
+          "at_most": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "edge"
+        }
+      ],
+      "effects": [
+        {
+          "change": "remove",
+          "what": "this",
+          "event": "finished"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:pie",
+    "table": [
+      {
+        "part": "fill",
+        "field": "slices",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          6
+        ],
+        "to": [
+          166,
+          1000
+        ]
+      }
+    ],
+    "shape": {"round":8,"shapes":[{"kind":"cyl","at":[0,30,0],"r":185,"h":55,"segments":16,"tint":"crust","role":"fill","pivot":[-185,30,0]},{"kind":"cyl","at":[0,8,0],"r":190,"h":16,"segments":16,"tint":"dish"}],"palette":{"crust":"#d39a4f","dish":"#e8e2d6"},"tags":["food","pie","dessert","object"]}
+  },
+  "text": {
+    "card": "A whole pie: pick it up and eat it a slice at a time.",
+    "tart": "tart",
+    "dessert": "dessert",
+    "food": "food"
+  },
+  "card": {
+    "text": "card",
+    "category": "food",
+    "synonyms": [
+      "tart",
+      "dessert"
+    ]
+  }
+}

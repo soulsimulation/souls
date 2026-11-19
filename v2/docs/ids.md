@@ -42,8 +42,9 @@ hash tree (K5) and loading kinds (K3) are not here.
 10. **A hash's input is its purpose label, as one profile text item, and then the stored bytes.** The labels are
     `souls/kind/1`, `souls/kind-beside/1`, `souls/geometry/1`, `souls/state-public/1`, `souls/state-private/1`
     and `souls/fixture/1`, with `souls/header/1` and `souls/schema/1` for the log ([effects.md](effects.md)) and
-    `souls/view/1` and `souls/redactions/1` for views ([views.md](views.md)), and `souls/model/1` for a stored
-    model of a kind's picture, binary glTF (V17, `v2/tools/import-eden/README.md`).
+    `souls/view/1` and `souls/redactions/1` for views ([views.md](views.md)), `souls/model/1` for a stored
+    model of a kind's picture, binary glTF (V17, `v2/tools/import-eden/README.md`), `souls/upload/1` for an
+    upload's stored bytes (G6, `v2/crates/assets`), and `souls/move/1` for a move's revision (rule 16, F13).
     Hashing something new, or the same thing differently, takes a new label.
 11. **Public and private state are hashed apart.** A node's public fields have one hash and each private audience's
     fields another. A hash of small private state can be guessed by trying values, so it is shown only to those
