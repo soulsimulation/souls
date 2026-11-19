@@ -1,0 +1,126 @@
+# soul.game after the switch (Engine v2 O19, #2830): the front door sends each world to the system that serves it. It
+# replaces tools/world-launcher/deploy/caddy/soul-game.caddy as /etc/caddy/sites/soul-game.caddy at the cut-over (X7);
+# sim-eden-art.caddy (beside today's file) stays as it is, souls-game.caddy (beside this one) is added, and
+# cdn-trust.snippet stays in the global options. Switch and switch back: v2/tools/ops/proxy/README.md.
+#
+# @@PRODUCTION_PORT@@ is a placeholder, never a real value in this repository: today's launcher's loopback port, as in
+# today's file. The new system's loopback addresses are the install's (v2/docs/runbook/install.md): the directory on
+# 7310, the viewers' origin on 7320, the page's files in /usr/local/lib/souls/web.
+#
+# - A slug routes by a map made from the directory: routes.mjs (beside this file, run each minute by
+#   souls-routes.timer) keeps one empty file per world the directory lists in /var/lib/souls-routes/slugs. A listed
+#   slug's page and its files come from the new system; every other address under /w/<slug>/ (today's API, the agent
+#   and god routes, sockets) still reaches today's launcher, which gives old clients its own answers (R18), never a
+#   redirect that would drop their token. Any slug not listed is today's launcher's, as before.
+# - Old page addresses (an alias, the /worlds prefix) are today's launcher's same-origin 308 to /w/<slug>/, keeping the
+#   query; the browser keeps the fragment. A redirected alias of a listed slug lands on the new system.
+# - / is the one list of both systems' worlds (v2/web/src/home/); its files are the new system's, found on disk
+#   (/assets/* is the new system's only where such a file exists, else today's).
+# - The visitor's address: X-Forwarded-For is replaced with {client_ip}, trusted only from cdn-trust.snippet's ranges.
+# - Pages refuse framing by other sites; API answers are not indexed. Neither replaces a header the answer already has
+#   (the sign-in bridge keeps its own CSP and DENY).
+# - /sitemap.xml is routes.mjs's: today's sitemap plus the directory's worlds; robots.txt stays today's.
+# - When an origin cannot answer, a page a browser asked for gets today's poster ("back in a moment"), as before.
+https://soul.game {
+	header {
+		?X-Frame-Options SAMEORIGIN
+		?Content-Security-Policy "frame-ancestors 'self'"
+	}
+	@api path /__sim/* /v1/* /w/*/v1/* /s/*
+	header @api ?X-Robots-Tag "noindex, nofollow"
+
+	@v2world {
+		path_regexp ^/w/[a-z0-9][a-z0-9-]*(/|$)
+		file {
+			root /var/lib/souls-routes/slugs
+			try_files /{http.request.uri.path.1}
+		}
+	}
+	handle @v2world {
+		@page path_regexp ^/w/[^/]+/(index\.html)?$
+		@files path_regexp files ^/w/[^/]+(/assets/.+)$
+		handle @page {
+			header X-Souls-System v2
+			rewrite * /?world={http.request.uri.path.1}&{query}
+			root * /usr/local/lib/souls/web
+			file_server
+		}
+		handle @files {
+			header X-Souls-System v2
+			rewrite * {re.files.1}
+			root * /usr/local/lib/souls/web
+			file_server
+		}
+		handle {
+			header X-Souls-System today
+			reverse_proxy localhost:@@PRODUCTION_PORT@@ {
+				header_up X-Forwarded-For {client_ip}
+			}
+		}
+	}
+
+	handle / {
+		header X-Souls-System v2
+		rewrite * /src/home/
+		root * /usr/local/lib/souls/web
+		file_server
+	}
+	@v2file {
+		path /assets/*
+		file {
+			root /usr/local/lib/souls/web
+		}
+	}
+	handle @v2file {
+		header X-Souls-System v2
+		root * /usr/local/lib/souls/web
+		file_server
+	}
+	@sitemap {
+		path /sitemap.xml
+		file {
+			root /var/lib/souls-routes
+		}
+	}
+	handle @sitemap {
+		root * /var/lib/souls-routes
+		file_server
+	}
+	@directory path /v1/worlds /v1/account/*
+	handle @directory {
+		header X-Souls-System v2
+		reverse_proxy localhost:7310 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle_path /s/* {
+		header X-Souls-System v2
+		reverse_proxy localhost:7320 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle {
+		header X-Souls-System today
+		reverse_proxy localhost:@@PRODUCTION_PORT@@ {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+
+	handle_errors {
+		@poster {
+			expression `{http.error.status_code} in [502, 503, 504]`
+			method GET
+			header Accept *text/html*
+			not path /__sim/* /v1/* /w/*/v1/* /s/*
+		}
+		handle @poster {
+			root * /srv/sim-worlds/production/tools/world-launcher/deploy/caddy
+			rewrite * /poster.html
+			header Cache-Control no-store
+			header Retry-After 5
+			file_server {
+				status 503
+			}
+		}
+	}
+}
