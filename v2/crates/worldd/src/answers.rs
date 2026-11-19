@@ -603,7 +603,7 @@ struct Clock {
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
     /// The mappings this start applies and the one in force, written at its first tick (E7b, [`Config::rate`]).
-    clock: Option<(Vec<Mapping>, Mapping)>,
+    clock: Option<Publish>,
 }
 
 /// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
@@ -1735,6 +1735,9 @@ fn time(e: replica::time::TimeRefusal) -> Refusal {
     }
 }
 
+/// The mappings a start applies, and the one in force, for its first tick to write (E7b).
+type Publish = (Vec<Mapping>, Mapping);
+
 /// The world's time line at a start (E7b, #3516): the first mapping (world time is real time), then each the log
 /// holds; with a rate (`Config::rate`), a new mapping at real time `real0` when the last one's rate differs, on its
 /// line, so world time does not jump. Gives the line, the mapping in force, and what the first tick writes: the
@@ -1744,7 +1747,7 @@ fn timeline(
     rate: Option<(i64, i64)>,
     real0: Micros,
     tick_us: Micros,
-) -> R<(Timeline, Mapping, Option<(Vec<Mapping>, Mapping)>)> {
+) -> R<(Timeline, Mapping, Option<Publish>)> {
     let first = Mapping::new(0, 0, 1, 1).map_err(time)?;
     let start = |m| -> R<Timeline> {
         let ticks = TickRate::new(0, 0, 1_000_000 / tick_us).map_err(time)?;
