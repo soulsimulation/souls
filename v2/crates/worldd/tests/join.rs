@@ -696,3 +696,65 @@ fn a3_a_walk_to_reaches_its_point_or_is_refused_by_name() {
     assert_eq!(strayed, Err("souls:no-way".to_owned()));
     run.stop();
 }
+
+/// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
+#[test]
+fn r21_joined_principal_private_turn_uses_body_and_rejects_nonmember() {
+    let (run, mut member, mut outsider) = serve("r21-private");
+    member
+        .act(JOIN, None, BTreeMap::new())
+        .expect("member joins world");
+    outsider
+        .act(JOIN, None, BTreeMap::new())
+        .expect("outsider joins world");
+    assert_ne!(
+        run.body_of(ada()).unwrap(),
+        ada(),
+        "body and principal differ"
+    );
+    let entries = member
+        .act(
+            "activity:propose",
+            Some(ground()),
+            p(&[(1, Value::Text(name(&fullname(PAIR))))]),
+        )
+        .expect("proposed");
+    let activity = run
+        .log()
+        .iter()
+        .flat_map(|p| p.effects.clone())
+        .filter(|e| entries.contains(&e.envelope.sequence))
+        .find_map(|e| match e.body {
+            Body::Changes(cs) => cs.into_iter().find_map(|c| match c.change {
+                Change::Create { node, .. } => Some(node),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .expect("activity");
+    member
+        .act(
+            "activity:join",
+            Some(activity),
+            p(&[(1, Value::Text(name("test:first")))]),
+        )
+        .expect("member joins activity");
+    let private = "member-only fixture";
+    member
+        .act("test:say", Some(activity), p(&[(1, words(private))]))
+        .expect("joined principal's body is a member");
+    let denied = "outsider fixture";
+    assert_eq!(
+        outsider.act("test:say", Some(activity), p(&[(1, words(denied))])),
+        Err("not-a-member".to_owned()),
+        "a joined nonmember is still refused"
+    );
+    let log = run.bytes();
+    for text in [private, denied] {
+        assert!(
+            !log.windows(text.len()).any(|w| w == text.as_bytes()),
+            "no private words in the log"
+        );
+    }
+    run.stop();
+}

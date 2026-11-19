@@ -77,6 +77,11 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 11. **A size limit applies before parsing:** an intent over 4,096 bytes is refused (`intent-too-large`) before any
     byte is read as CBOR.
 
+An activity offer or proposal carries its kind in parameter 1 as `[plain name, binary SHA-256 multihash]`.
+The client splits a pinned name there, preserving its exact revision while keeping the 64-byte text limit, as an
+edit does below. Roles remain names. Ordinary short activity-kind names remain accepted. The client validates its
+completed intent with the same form decoder as the gateway before sending it.
+
 ## Versions and the checker
 
 12. **The first frame each way never changes:** `{1: protocol version, 2: build hash}`, and, from a world that cannot
