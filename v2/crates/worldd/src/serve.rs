@@ -35,7 +35,9 @@
 //! the world's entry (`world.json`'s `entry`), linked to its Soul. `life:join` names it
 //! (words 1 and 2: its name and description); `life:leave` retires it. A restart stands each body where the log last
 //! had it, and its Soul finds it again by its link. A token the directory pairs later is added to `tokens` and the
-//! gateway reads the file again: no restart.
+//! gateway reads the file again: no restart. An owner's retire, or a name or description saved on the Soul's page,
+//! reaches the world by the directory's Souls file (W11b, `worldd::directory`), `tokens.souls` beside `tokens` unless
+//! `--directory <file>` names another: read at the start and whenever it changes, it retires the body or names it.
 //!
 //! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
 //! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
@@ -612,7 +614,7 @@ pub fn run(args: &[String]) -> i32 {
 fn serve(args: &[String]) -> R<()> {
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
-         [--machine <name>]",
+         [--machine <name>] [--directory <file>]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -728,6 +730,20 @@ fn serve(args: &[String]) -> R<()> {
         world.restart.checkpoint, world.restart.read, world.restart.applied
     );
     let door = world.door();
+    // The directory's word on the Souls (W11b): its file read now, before any intent is served, and again on a change.
+    let told = arg(args, "--directory")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| worldd::directory::beside(&dir.join("tokens")));
+    let (answers, answered) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        for frame in answered {
+            eprintln!(
+                "worldd: the directory's intent answered: {}",
+                worldd::directory::show(&frame)
+            );
+        }
+    });
+    worldd::directory::watch(told, world.events.clone(), answers);
     crate::watchdog::watch(
         world.beat.clone(),
         crate::watchdog::Real::start(),
