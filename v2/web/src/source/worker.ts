@@ -24,7 +24,7 @@ async function get(url: URL): Promise<Uint8Array | null> {
 
 function readPtr(bytes: Uint8Array): Pointer & { header: string } {
   const p = JSON.parse(readPointer(bytes));
-  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, header: p.header };
+  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header };
 }
 
 /** The reference in a `{21: id}` value, as the page keys it, or null. */
@@ -80,13 +80,21 @@ async function run(stream: URL) {
     if (!b) return;
     for (const [id, w] of decode(b, { useMaps: true }) as [IdValue, Uint8Array][]) words.set(key(id), text.decode(w));
   };
+  // A still world's "quiet until" (V5b) holds once every part before it is played, and goes on holding when a part
+  // is written after it (the writer then drops it from the pointer): the page's caught-up time never steps back.
+  let quiet: number | null = null;
+  const tell = () => {
+    const q = ptr.quietUntil;
+    if (q !== null && (ptr.newest === null || Number(player.next()) > ptr.newest)) quiet = Math.max(quiet ?? q, q);
+    post({ t: 'pointer', p: { ...ptr, quietUntil: quiet } });
+  };
   const poll = async () => {
     if (busy) return;
     busy = true;
     try {
       const b = await get(new URL('pointer', stream));
       if (b) ptr = readPtr(b);
-      post({ t: 'pointer', p: ptr });
+      tell();
       while (ptr.newest !== null && Number(player.next()) <= ptr.newest) {
         const n = Number(player.next());
         const bytes = await get(new URL(String(n), stream));
@@ -127,6 +135,7 @@ async function run(stream: URL) {
           if (r.description) r.description = words.get(r.description) ?? null;
         }
         post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, samples, hash: played.hash, said, happened } }, transfer);
+        if (Number(player.next()) > (ptr.newest ?? -1)) tell();
       }
     } catch (e) {
       post({ t: 'error', message: String((e as Error)?.message ?? e) });

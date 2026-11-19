@@ -15,6 +15,6 @@ directoryd = { path = "../directoryd" }
 skills = { path = "../skills" }
 # E1's Eden measures (tests/index.rs) load Eden 2026's imported tree (N1, #2649); N2's test world, where a scripted
 # client walks, sits and rises (I4b, #3156), and where `gateway-link --testworld` serves a Soul and three chairs (B10,
-# #2688).
+# #2688); `worldd serve` reads a world's facts file with N1's loader (C1, #3365).
 import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }

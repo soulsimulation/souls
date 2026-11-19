@@ -9,6 +9,7 @@ pub mod buildsafe;
 pub mod checkers;
 pub mod measures;
 pub mod shipping;
+pub mod start;
 pub mod testbodies;
 pub mod view_out;
 pub mod views;
