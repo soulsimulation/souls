@@ -1,0 +1,90 @@
+---
+name: souls-creator
+description: Build a Souls world live as its creator, through souls-god.mjs and the resident daemon. Use when asked to build, change or tidy a world you are the creator of.
+---
+
+# Building a Souls world
+
+You are the creator of one world. You change it with `node souls-god.mjs <verb> ...`. Every command prints one line
+of JSON. A small resident program (the daemon) holds your creator token and a copy of the world; you never see the
+token, and you never need it.
+
+## Start
+
+1. `node souls-god.mjs status`: `connected: true` means the daemon holds a current copy. If it is false, run it
+   again after a second or two.
+2. `node souls-god.mjs describe`: everything in the world (`nodes`: `id`, `kind`, `parent`) and what you can place
+   (`kinds`: each kind and the kinds it `admits`). Read it before you build, and again whenever you are unsure.
+
+If the home has no creator yet, pair first: `node souls-god.mjs pair <world url> --creator <creator grant>`. It prints
+a link and a short code; the world's owner opens the link signed in and approves. Then run `status`.
+
+## The world's shape
+
+- The world is a tree. The root is the place (kind `souls:place`). Rooms hang under the place; things and bodies stand
+  in rooms.
+- A thing can only go in something whose kind admits it. `describe` shows each kind's `admits`: a kind name, or a
+  category (`thing`, `body`) that admits every kind of that sort.
+- Use the kinds the world already pins. Pick the kind that already offers what Souls should do with it; you cannot
+  invent kinds here.
+- Positions are millimetres, `x,y,z`, in the parent's frame: `y` is up. A room's floor is `y` 0.
+- Ids look like `<32 hex>-<number>`. Copy them exactly from `describe` or from an answer.
+
+## Verbs
+
+| Verb | What it does |
+| --- | --- |
+| `place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]` | a new thing in `<id>`; the answer's `names["1"]` is its id |
+| `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
+| `set <id> <field> <value>` | one numbered field: an integer, `true`, `false` or a name |
+| `remove <id>` | it and everything in it |
+| `batch '<json list>'` | several operations at once: all happen, or none |
+| `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
+| `describe` | what is there, and what each kind admits |
+
+A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
+
+### Batches
+
+A batch is a JSON list. Each operation is one of:
+
+```json
+{"op": "place", "name": 1, "kind": "room", "in": "<id>", "at": [0, 0, 0]}
+{"op": "move", "node": "<id or name>", "at": [1000, 0, 500]}
+{"op": "set", "node": "<id or name>", "field": 1, "value": 1}
+{"op": "remove", "node": "<id or name>"}
+```
+
+`name` is a number you choose for each place in the batch. A later operation can use that number instead of an id,
+for example placing a thing `"in": 1` inside the room the same batch places. The answer maps each name to the id the
+world gave it: `"names": {"1": "<id>", "2": "<id>"}`.
+
+Example: a room with two things in it, in one step.
+
+```
+node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>"},{"op":"place","name":2,"kind":"<kind>","in":1,"at":[1000,0,1000]},{"op":"place","name":3,"kind":"<kind>","in":1,"at":[-1000,0,1000]}]'
+```
+
+## Answers and refusals
+
+- Success: `{"ok": true, "names": {...}, "at": <version>, "changed": ...}`.
+- Refusal: `{"ok": false, "code": "edit.<why>", "op": <which operation, from 0>, "fix": "<what to do>"}`. Nothing in
+  the batch happened. Do what `fix` says, then send it again. `"local": true` means your copy caught it before
+  anything was sent.
+
+| Code | Meaning |
+| --- | --- |
+| `edit.child-not-admitted` | that parent's kind does not admit that kind: pick another parent or kind |
+| `edit.kind-unknown` | the world does not pin that kind |
+| `edit.node-missing` | that id is not there (removed, or mistyped) |
+| `edit.name-unknown` | the batch uses a name no earlier place gave |
+| `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
+| `edit.not-the-creator` | this token is not the creator's |
+
+## Good habits
+
+- `describe` first; `check` anything unsure; then send. A `check` costs nothing.
+- Build a room and its contents in one batch, so it never stands half built.
+- Space things at least 500 mm apart, inside the room, on the floor (`y` 0), unless a slot holds them.
+- After building, `describe` once and confirm each id you were given is where you meant.
+- Report what you built: each thing's kind and id.
