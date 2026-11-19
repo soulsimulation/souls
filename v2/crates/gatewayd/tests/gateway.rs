@@ -383,6 +383,99 @@ async fn a4_a_client_resumes_from_its_cursor_or_is_told_it_cannot() {
     assert_eq!(o, "stream.cannot-resume");
 }
 
+/// The wall clock, µs from the Unix epoch, for an intent's expiry (world time is real time).
+#[allow(clippy::disallowed_methods)] // a test that sets real expiries reads the wall clock
+fn unix_us() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as i64
+}
+
+/// A stand-in world that takes `n` intents, never answers, then goes away for good.
+async fn mute_world(listener: UnixListener, n: usize) {
+    let (mut s, _) = listener.accept().await.unwrap();
+    for _ in 0..n {
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).await.unwrap();
+        let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut bytes).await.unwrap();
+    }
+}
+
+/// The answer's sequence and refusal name in a frame the gateway gave itself (`{2: answer}`).
+fn refusal(v: &Value) -> (Option<u64>, String) {
+    let Value::Map(m) = v else {
+        return (None, String::new());
+    };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return (None, String::new());
+    };
+    let name = match a.get(&4) {
+        Some(Value::Text(n)) => n.as_str().to_owned(),
+        _ => String::new(),
+    };
+    (frame_sequence(v), name)
+}
+
+/// C8 (#3396) A3: intents the world took and never answered, the world then away, are answered by the gateway by
+/// their deadlines: `intent.expired` at the expiry when that comes first, else `act.timed-out` 10 s after receipt.
+/// Never silence, each answered once, and neither kept to send again.
+#[allow(clippy::disallowed_methods)] // the test times the answers against the deadline
+#[tokio::test]
+async fn c8_an_intent_with_no_answer_by_its_deadline_is_answered_by_name() {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("gw-c8.sock");
+    let _ = std::fs::remove_file(&path);
+    let world = tokio::spawn(mute_world(UnixListener::bind(&path).unwrap(), 2));
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(30));
+    let gw = Gateway::new(tokens, BUILD.to_vec(), Arc::new(|_: &str| {}));
+    tokio::spawn(world_link::run(gw.clone(), path.clone()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}{}", listener.local_addr().unwrap(), socket::PATH);
+    tokio::spawn(axum::serve(listener, socket::router(gw.clone())).into_future());
+    while !gw.link.up() {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let (mut ws, o) = connect(&url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let with_expiry = |sequence: u64, expiry: i64| {
+        let mut v = decode(&intent(soul(30), sequence)).unwrap().value;
+        if let Value::Map(m) = &mut v {
+            m.insert(7, Value::Uint(u64::try_from(expiry).unwrap()));
+        }
+        encode(&v).unwrap()
+    };
+    let start = std::time::Instant::now();
+    // One expires in 1.5 s; the other's expiry is a minute off, so its deadline is the gateway's 10 s.
+    put(&mut ws, with_expiry(1, unix_us() + 1_500_000)).await;
+    put(&mut ws, with_expiry(2, unix_us() + 60_000_000)).await;
+    // The world takes both and goes away, its socket gone.
+    world.await.unwrap();
+    let _ = std::fs::remove_file(&path);
+    let first = next(&mut ws).await.unwrap();
+    let at_first = start.elapsed().as_secs_f64();
+    assert_eq!(refusal(&first), (Some(1), "intent.expired".to_owned()));
+    let bars = std::env::var_os("V2_SPEED_BARS").is_some();
+    assert!(
+        at_first >= 1.4,
+        "expired at {at_first} s, before its expiry"
+    );
+    assert!(!bars || at_first < 2.0, "expired at {at_first} s");
+    let second = next(&mut ws).await.unwrap();
+    let at_second = start.elapsed().as_secs_f64();
+    assert_eq!(refusal(&second), (Some(2), "act.timed-out".to_owned()));
+    assert!(
+        at_second >= 9.9,
+        "timed out at {at_second} s, before its deadline"
+    );
+    assert!(!bars || at_second < 10.5, "timed out at {at_second} s");
+    assert_eq!(gw.link.unanswered(), 0, "neither is kept to send again");
+    println!(
+        "C8: intent.expired after {at_first:.2} s, act.timed-out after {at_second:.2} s, none kept"
+    );
+}
+
 /// The next frame within 30 s: an answer that never comes fails the test rather than hanging it.
 async fn soon(ws: &mut Ws) -> Value {
     tokio::time::timeout(std::time::Duration::from_secs(30), next(ws))
