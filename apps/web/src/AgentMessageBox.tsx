@@ -57,12 +57,13 @@ export function receiptState(latest: NonNullable<AgentInbox['latest']>, queued: 
 }
 /** #3378: how long the newest message waits unanswered before the box suggests nudging the agent. */
 export const CHECK_MESSAGES_MS = 10_000;
-/** #3378: the one thing that usually helps when an agent is not listening, or null while the page can tell it is on it
- * (presence listening or working, or the message picked up, thinking, acknowledged or under way). */
+/** #3378: the one thing that usually helps when an agent is not reading its messages, or null once it is on this one
+ * (picked up, thinking, acknowledged or under way). Gene, 19 Nov: whatever presence reads, since a listen can be open (or
+ * inside its 60 s grace) while the agent never reads it. */
 export function checkMessagesHint(inbox: AgentInbox | null, name: string | undefined, now: number): string | null {
   const latest = inbox?.latest;
   if (!inbox || !latest || !name || latest.state !== 'sent' || latest.sentAt === undefined) return null;
-  if (inbox.presence === 'listening' || inbox.presence === 'working' || inbox.doing) return null;
+  if (inbox.doing) return null;
   return now - latest.sentAt > CHECK_MESSAGES_MS ? `If this is taking long, try telling ${name}'s agent "check your messages".` : null;
 }
 type Transport = (text?: string) => Promise<AgentInbox>;

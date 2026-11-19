@@ -175,7 +175,7 @@ test('#1313: a Soul card says Thinking… while picked up and unanswered, then t
   assert.doesNotMatch(at({...base, latest: null, doing: {phase: 'running', text: 'x'}}), /agent-message-act/, 'no message, no act line');
 });
 
-test('#3378 a message unanswered past 10 s suggests "check your messages", never while the agent is seen on it', () => {
+test('#3378 a message unanswered past 10 s suggests "check your messages", whatever presence reads, until the agent is on it', () => {
   const at = 1_000_000, sent = (extra = {}, latest = {}) => ({connected: false, lastSeenAt: null, latest: {id: 'm', text: 'come home', state: 'sent', sentAt: at, ...latest}, ...extra});
   const hint = (inbox, now) => render(h(AgentMessageBoxView, {...props, kind: 'soul', name: 'Oriel', inbox, now})).includes('data-check-messages');
   const line = render(h(AgentMessageBoxView, {...props, kind: 'soul', name: 'Oriel', inbox: sent(), now: at + 10_001}));
@@ -183,9 +183,10 @@ test('#3378 a message unanswered past 10 s suggests "check your messages", never
   // The threshold: not at 10 s, yes just past it.
   assert.equal(hint(sent(), at + 10_000), false);
   assert.equal(hint(sent(), at + 10_001), true);
-  // Each state that hides it: presence listening or working; picked up, thinking, acknowledged or under way.
-  assert.equal(hint(sent({presence: 'listening'}), at + 60_000), false);
-  assert.equal(hint(sent({presence: 'working'}), at + 60_000), false);
+  // Gene, 19 Nov: presence does not hide it (a listen can be open, or in its grace, while the agent never reads it).
+  assert.equal(hint(sent({presence: 'listening'}), at + 60_000), true);
+  assert.equal(hint(sent({presence: 'working'}), at + 60_000), true);
+  // Each state that hides it: picked up, thinking, acknowledged or under way.
   assert.equal(hint(sent({}, {state: 'delivered'}), at + 60_000), false);
   assert.equal(hint(sent({doing: {phase: 'thinking'}}, {state: 'delivered'}), at + 60_000), false);
   assert.equal(hint(sent({}, {state: 'acknowledged'}), at + 60_000), false);
