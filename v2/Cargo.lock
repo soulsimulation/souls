@@ -704,7 +704,6 @@ dependencies = [
  "directoryd",
  "futures-util",
  "gatewayd",
- "import-eden",
  "replica",
  "sim",
  "supervisor",
