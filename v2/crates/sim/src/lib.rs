@@ -7,6 +7,7 @@ pub mod checkpoint;
 pub mod clock;
 pub mod commit;
 pub mod controller;
+pub mod courses;
 pub mod daylight;
 pub mod edit;
 pub mod forms;
