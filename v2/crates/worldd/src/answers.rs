@@ -157,6 +157,8 @@ pub struct Config {
     /// Called once at start with the log's durable mark; what it gives is handed each record as it is appended (its
     /// number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
+    /// The view tier, handed each tick's record once it is on the disk (#3292).
+    pub views: Option<crate::views::served::Feed>,
 }
 
 /// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
@@ -180,6 +182,7 @@ impl Config {
             bodies: None,
             text: None,
             follow: None,
+            views: None,
         }
     }
 }
@@ -908,6 +911,7 @@ fn answer_loop<S: Storage + 'static>(
     ticks: Receiver<Tick>,
     measures: Option<Arc<Measures>>,
     mut follow: Option<Offer>,
+    views: Option<crate::views::served::Feed>,
 ) {
     for (n, t) in ticks.into_iter().enumerate() {
         let n = n as u64;
@@ -916,6 +920,7 @@ fn answer_loop<S: Storage + 'static>(
         }
         if let Some(record) = t.record {
             let kept = follow.as_ref().map(|_| record.clone());
+            let copy = views.as_ref().map(|v| (v, record.clone()));
             let appended = log.append(record);
             if let (Ok(n), Some(f), Some(r)) = (&appended, follow.as_mut(), kept) {
                 f(*n, r);
@@ -923,6 +928,9 @@ fn answer_loop<S: Storage + 'static>(
             if let Err(e) = appended.and_then(|n| log.wait_durable(n + 1)) {
                 eprintln!("worldd: the log failed, nothing more is answered: {e}");
                 return;
+            }
+            if let Some((v, r)) = copy {
+                v.record(r);
             }
         }
         let synced = measures.as_ref().map(|_| measures::steady_us());
@@ -1015,10 +1023,10 @@ pub fn start<S: Storage + 'static>(
     };
     let follow = cfg.follow.take().map(|f| f(log.durable_mark()));
     let (answers, ticks) = channel();
-    let m = measures.clone();
+    let (m, views) = (measures.clone(), cfg.views.take());
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks, m, follow))
+        .spawn(move || answer_loop(log, ticks, m, follow, views))
         .map_err(io)?;
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.

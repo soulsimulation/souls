@@ -8,6 +8,8 @@
 //! - [`world_link`]: one local socket to the world; intents not yet answered are kept and sent again on reconnect.
 //! - [`resume`]: a client resumes its stream from a cursor, or is told by name that it must start again.
 //! - [`receipts`]: one line per answered intent in the world's receipts file, for the operator's usage roll-up.
+//! - [`views`]: a signed-in socket subscribes to R4's view items for its scope (#3292), on a second local socket to
+//!   the world; its frames are keys 30 to 32.
 //!
 //! Frames after the first, as CBOR in T0's profile (`v2/docs/encoding.md`):
 //!
@@ -37,6 +39,7 @@ pub mod resume;
 pub mod socket;
 pub mod times;
 pub mod token;
+pub mod views;
 pub mod world_link;
 
 use receipts::{Outcome, Receipts, Who};
@@ -60,6 +63,8 @@ pub struct Gateway {
     /// The world's pinned build hash, sent in the first frame (T10 rule 12).
     pub build: Vec<u8>,
     pub link: world_link::Link,
+    /// The sockets' view subscriptions and their link to the world's view tier.
+    pub views: views::Views,
     pub log: Log,
     /// The receipts file's writer (`--receipts`), or off.
     pub receipts: Receipts,
@@ -106,6 +111,7 @@ impl Gateway {
             tokens: RwLock::new(tokens),
             build,
             link: world_link::Link::default(),
+            views: views::Views::default(),
             log,
             receipts,
             hub: Mutex::new(Hub::default()),
