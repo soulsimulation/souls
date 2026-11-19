@@ -224,6 +224,10 @@ impl<S: Store> Store for Shared<S> {
     fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
         self.0.put(key, bytes, when)
     }
+
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        self.0.list(prefix)
+    }
 }
 
 /// Writes `bytes` at `key`: create only when `etag` is none, else only over that version. Returns the new ETag.
