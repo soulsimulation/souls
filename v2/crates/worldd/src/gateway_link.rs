@@ -108,7 +108,7 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
              [--bodies <n>] [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
-             [--stall-after <s> --stall-for <s>] [--www <dir>]"
+             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>]"
         );
         2
     };
@@ -182,11 +182,11 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     // K7's watchdog on the world's own loop (K18): no tick for the limit ends the process by name.
-    crate::watchdog::watch(
-        world.beat.clone(),
-        crate::watchdog::Real::start(),
-        crate::watchdog::LIMIT_MS,
-    );
+    // `--watchdog-ms` widens it for a debug build's big world (C11's Eden-sized sync test), as `worldd --dir` takes.
+    let limit = arg("--watchdog-ms")
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(crate::watchdog::LIMIT_MS);
+    crate::watchdog::watch(world.beat.clone(), crate::watchdog::Real::start(), limit);
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
