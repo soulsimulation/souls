@@ -131,7 +131,14 @@ impl W {
         });
         let c = self
             .history
-            .edit(&mut self.live, &mut self.minter, &planned, &[], self.at, step)
+            .edit(
+                &mut self.live,
+                &mut self.minter,
+                &planned,
+                &[],
+                self.at,
+                step,
+            )
             .expect("committed");
         self.append(&c.part);
         c

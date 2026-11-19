@@ -8,7 +8,7 @@
 
 use super::{Guard, Who, check, guard};
 use crate::ground::exits;
-use crate::ground::scene::F_SOLIDS;
+use crate::ground::scene::{F_SLOTS, F_SOLIDS};
 use crate::ground::{HUMAN_RADIUS, Scene, Turn, cut_floor};
 use crate::links::{Building, F_STAIRS, Kind};
 use crate::routes::{CLIMB, HANDS};
@@ -237,6 +237,17 @@ impl W {
         (node, change)
     }
 
+    /// A body's node at `pose` with a slot 1 at its origin, for a thing it holds (the scene places a held thing from its
+    /// slot's point since #3344).
+    fn new_holder(&mut self, pose: Pose) -> (Id, Change) {
+        let (node, mut change) = self.new_box(pose, &[]);
+        if let Change::Create { fields, .. } = &mut change {
+            let slot = Value::Array([1, 0, 0, 0].into_iter().map(int).collect());
+            fields.insert(F_SLOTS, Value::Array(vec![slot]));
+        }
+        (node, change)
+    }
+
     /// A move of `node` from where it is to `pose`.
     fn moved(&self, node: Id, pose: Pose) -> Change {
         let n = self.tree.node(self.tree.handle(node).unwrap()).unwrap();
@@ -344,7 +355,7 @@ fn a2_what_a_body_uses_is_refused_by_name() {
         on(g, Vec3::new(14 * M, 0, -10 * M), surface(g)),
         &[solid(0, 0, 1_000, 300, 900)],
     );
-    let (body, c3) = w.new_box(on(g, Vec3::new(18 * M, 0, -10 * M), surface(g)), &[]);
+    let (body, c3) = w.new_holder(on(g, Vec3::new(18 * M, 0, -10 * M), surface(g)));
     w.setup(vec![c1, c2, c3]);
     let (held, c4) = w.new_box(in_slot(body, 1), &[solid(0, 0, 100, 100, 200)]);
     let (spare, c5) = w.new_box(
@@ -464,7 +475,7 @@ fn a4_a_crate_set_down_in_the_only_doorway_and_an_undo_are_refused() {
     let mut w = world();
     let f = w.floor1;
     // The carrier's body node on the landing, holding a crate in its slot 1.
-    let (body, c1) = w.new_box(w.floor1_pose([-7_000, 5_000]), &[]);
+    let (body, c1) = w.new_holder(w.floor1_pose([-7_000, 5_000]));
     w.setup(vec![c1]);
     let (crate_, c2) = w.new_box(in_slot(body, 1), &[solid(0, 0, 700, 300, 1_500)]);
     w.setup(vec![c2]);
