@@ -34,14 +34,22 @@
 //!
 //! - **Steps.** A low floor's open edge (a porch's front, N3's steps) is a [`Kind::Step`] read with the open ground:
 //!   one end on the floor's patch, the other where its passage meets the ground's squares, walked. It is no link of
-//!   the tree (its id is derived, `ground::scene::step_id`), and an edge with nothing to step down to is no link.
+//!   the tree (its id is derived, `ground::scene::step_id`), and an edge with nothing to step down to is no link. A
+//!   step between two of a floor's own surfaces (a bridge's deck) has both ends on the floor's patch, each carried
+//!   onto its piece as a stair's end is, and joins the floor to itself, read alone or with the ground. An outline
+//!   step that meets no open ground beyond ([`Building::loose`]) but lies over another thing's floor within [`crate::ground::STEP`]
+//!   of it joins the two floors ([`floor_joins`], #3227: the botanic red bridge's east end onto the tea house's
+//!   floor); its far end is the near end carried across the edge onto that floor's patch, and its line is in the
+//!   first building's frame.
+//! - **Ends on the terrain.** An end on the open ground stands at the ground's height there (#3227,
+//!   `ground::scene::Terrain::ground`), as a body on it does (N11a), though N3's pieces of it are a plan at 0.
 //!
 //! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
 //! locked door (the door's `locked` field is not read yet), the durable log (K4).
 
 pub mod turns;
 
-use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Xform};
+use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Terrain, Xform};
 use crate::ground::{HUMAN_RADIUS, MARGIN, Meet, Patch, SQUARE, Scene, Turn, cut_floor};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Header, Part, Refusal, Rest,
@@ -83,7 +91,8 @@ pub enum Kind {
     Stairs,
     Ramp,
     Ladder,
-    /// A low floor's open edge stepped down to the open ground (N3's steps): no link of the tree, walked.
+    /// A low floor's open edge stepped down to the open ground, or a step between two of a floor's surfaces (N3's
+    /// steps): no link of the tree, walked.
     Step,
 }
 
@@ -172,6 +181,94 @@ pub struct Building {
     pub floors: BTreeMap<Id, (i64, Patch)>,
     /// The building's frame on the open ground it was read with (the identity when read alone).
     pub place: Xform,
+    /// Its floors' outline steps that meet no open ground beyond (#3227): another thing's floor may lie there
+    /// ([`floor_joins`]).
+    pub loose: Vec<Loose>,
+}
+
+/// An outline step of a building's floor whose far side meets no open ground: its link, its end on the floor (the
+/// building's frame), the unit off the floor (µm per metre), its width (µm) and the radius it was cut for (mm).
+#[derive(Clone, Copy, Debug)]
+pub struct Loose {
+    pub link: Id,
+    pub end: End,
+    pub across: [i64; 2],
+    pub width: i64,
+    pub radius: i64,
+}
+
+/// Steps between two things' floors (#3227): where an outline step of one building's floor ([`Building::loose`])
+/// lies over a floor of another, within [`crate::ground::STEP`] of it (the botanic red bridge's east end over the tea
+/// house's floor, 82 mm below), the step joins the two floors: a [`Kind::Step`] link owned by the first building,
+/// its far end the near end carried across the edge, by twice the clearance it was cut with, onto the other floor's
+/// patch. Each is returned with the index in `bs` of the building that owns it. A step over open ground, or over
+/// nothing a body can stand on, joins nothing.
+pub fn floor_joins(bs: &[&Building]) -> Vec<(usize, Link)> {
+    let mut out = Vec::new();
+    for (i, b) in bs.iter().enumerate() {
+        for s in &b.loose {
+            let d = 2 * (s.radius + MARGIN + 1) * 1000;
+            let over = |p: Vec3| {
+                Vec3::new(
+                    p.x + s.across[0] * d / 1_000_000,
+                    p.y,
+                    p.z + s.across[1] * d / 1_000_000,
+                )
+            };
+            let (Ok(wa), Ok(wb)) = (b.place.point(over(s.end.a)), b.place.point(over(s.end.b)))
+            else {
+                continue;
+            };
+            let found = bs
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .find_map(|(_, c)| {
+                    let (a, bb) = (back(&c.place, wa).ok()?, back(&c.place, wb).ok()?);
+                    c.floors.iter().find_map(|(&f, (_, patch))| {
+                        // The heights of the floor's pieces within a step of the step's, in that building's frame.
+                        let ys: BTreeSet<i32> = patch
+                            .pieces
+                            .iter()
+                            .filter_map(|pc| pc.vertices.first().map(|v| v[1]))
+                            .filter(|&y| {
+                                (i64::from(y) * 1000 - a.y).abs() <= crate::ground::STEP * 1000
+                            })
+                            .collect();
+                        ys.into_iter().find_map(|y| {
+                            let at = |p: Vec3| Vec3::new(p.x, i64::from(y) * 1000, p.z);
+                            let e = End {
+                                floor: f,
+                                a: at(a),
+                                b: at(bb),
+                            };
+                            on_patch(patch, e.middle(), MEET_ON).then_some((e, c.place))
+                        })
+                    })
+                });
+            if let Some((far, place)) = found {
+                let there = place.point(far.middle()).and_then(|p| back(&b.place, p));
+                let Ok(there) = there else {
+                    continue;
+                };
+                out.push((
+                    i,
+                    Link {
+                        id: s.link,
+                        kind: Kind::Step,
+                        nodes: [s.end.floor, far.floor],
+                        owner: s.end.floor,
+                        width: s.width,
+                        ends: [Some(s.end), Some(far)],
+                        line: vec![s.end.middle(), there],
+                        door: None,
+                        blocked: None,
+                    },
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// A meet of one of the open ground's squares, with that square.
@@ -192,6 +289,20 @@ pub struct Open<'a> {
     /// The doors standing on the open ground, by the doorway each stands in ([`ground_doors`]): a building's outer
     /// door may be a thing of the ground, not of the building.
     pub doors: &'a BTreeMap<Id, Id>,
+    /// The open ground's terrain (N1b), if any: an end on the open ground stands at its height (#3227), as a body
+    /// there does (N11a's mover), though N3's pieces of it are a plan at 0.
+    pub terrain: Option<&'a Terrain>,
+}
+
+/// An end on the open ground lifted onto its terrain `t`: each of its points at the open ground's height there under
+/// something at `y` (µm, the ground's frame; [`Terrain::ground`]).
+fn lift(e: End, t: Option<&Terrain>, y: i64) -> End {
+    let up = |p: Vec3| Vec3::new(p.x, Terrain::ground(t, p.x, p.z, y), p.z);
+    End {
+        a: up(e.a),
+        b: up(e.b),
+        ..e
+    }
 }
 
 /// The doors that stand on the open ground `ground` (its children), by the doorway link each stands in.
@@ -237,22 +348,55 @@ fn own_part(on: &dyn Fn((i32, i32), [i64; 2]) -> bool, (sq, m): &SquareMeet) -> 
     })
 }
 
-/// One segment holding every meet in `ms` (on one line): its two farthest points, on `node`'s patch.
+/// One segment for the meets in `ms` (on one line), on `node`'s patch: the longest unbroken stretch of them (meets
+/// that touch or overlap, within [`MEET_ON`]), from its two farthest points. A mouth broken by ground of another
+/// height (Eden's pond jetty, a deck 200 mm up, between the outer ends of the kerb's two gates, #3187) is never
+/// spanned: the end's middle is where a crossing starts or lands, so it must lie on the ground.
 fn joined(ms: &[&Meet], node: Id) -> Option<End> {
     let pts: Vec<[i32; 3]> = ms.iter().flat_map(|m| [m.a, m.b]).collect();
     let d2 = |p: [i32; 3], q: [i32; 3]| sq(i64::from(p[0] - q[0])) + sq(i64::from(p[2] - q[2]));
-    let mut best: Option<([i32; 3], [i32; 3])> = None;
+    let mut far: Option<([i32; 3], [i32; 3])> = None;
     for (u, &p) in pts.iter().enumerate() {
         for &q in &pts[u..] {
-            if best.is_none_or(|(a, b)| d2(p, q) > d2(a, b)) {
-                best = Some((p, q));
+            if far.is_none_or(|(a, b)| d2(p, q) > d2(a, b)) {
+                far = Some((p, q));
             }
         }
     }
-    best.map(|(a, b)| End {
+    let (o, f) = far?;
+    // Each meet as a span along the line from `o` to `f`, in mm (the projection of its ends).
+    let (dx, dz) = (i64::from(f[0] - o[0]), i64::from(f[2] - o[2]));
+    let len = (sq(dx) + sq(dz)).isqrt().max(1) as i64;
+    let along = |p: [i32; 3]| (i64::from(p[0] - o[0]) * dx + i64::from(p[2] - o[2]) * dz) / len;
+    let mut spans: Vec<(i64, i64, [i32; 3], [i32; 3])> = ms
+        .iter()
+        .map(|m| {
+            let (s, t) = (along(m.a), along(m.b));
+            if s <= t {
+                (s, t, m.a, m.b)
+            } else {
+                (t, s, m.b, m.a)
+            }
+        })
+        .collect();
+    spans.sort_by_key(|s| (s.0, s.1));
+    // Unbroken stretches, each as (start, end, its first point, its last point); the longest wins, the first on a tie.
+    let mut runs: Vec<(i64, i64, [i32; 3], [i32; 3])> = Vec::new();
+    for s in spans {
+        match runs.last_mut() {
+            Some(r) if s.0 <= r.1 + MEET_ON => {
+                if s.1 > r.1 {
+                    (r.1, r.3) = (s.1, s.3);
+                }
+            }
+            _ => runs.push(s),
+        }
+    }
+    let r = runs.iter().rev().max_by_key(|r| r.1 - r.0).copied()?;
+    Some(End {
         floor: node,
-        a: um(a),
-        b: um(b),
+        a: um(r.2),
+        b: um(r.3),
     })
 }
 
@@ -361,10 +505,22 @@ impl Building {
 
     /// As [`Building::read`], with the open ground it stands on: each doorway to the open ground gets its end there.
     pub fn read_on(tree: &Tree, thing: Id, open: Option<Open>) -> Result<Building, String> {
+        Building::read_sized(tree, thing, open, HUMAN_RADIUS)
+    }
+
+    /// As [`Building::read_on`], for a body of `radius` mm (B12: one cut per size class).
+    pub fn read_sized(
+        tree: &Tree,
+        thing: Id,
+        open: Option<Open>,
+        radius: i64,
+    ) -> Result<Building, String> {
         let th = tree.handle(thing).ok_or("no such thing")?;
         let mut floors = BTreeMap::new();
         let mut doors: BTreeMap<Id, Id> = BTreeMap::new();
         let mut widths: BTreeMap<Id, i64> = BTreeMap::new();
+        let mut acrosses: BTreeMap<Id, [i64; 2]> = BTreeMap::new();
+        let mut loose = Vec::new();
         let mut all_floors = Vec::new();
         for &c in tree.children(th).ok_or("a node that is gone")? {
             let n = tree.node(c).ok_or("a node that is gone")?;
@@ -378,8 +534,9 @@ impl Building {
                 };
                 for d in &scene.doorways {
                     widths.insert(d.link, d.width);
+                    acrosses.insert(d.link, d.across);
                 }
-                if let Ok(patch) = cut_floor(&scene, HUMAN_RADIUS, Turn::NONE) {
+                if let Ok(patch) = cut_floor(&scene, radius, Turn::NONE) {
                     floors.insert(n.id(), (level, patch));
                 }
             } else if let Some(l) = n.fields().get(&F_OPEN_DOOR_LINK) {
@@ -401,7 +558,14 @@ impl Building {
                 // A step (N3's steps) is no link of the tree: it joins its floor to the open ground, owned by the floor.
                 // Read alone it joins nothing, so it is not a link.
                 let step = ms.iter().any(|m| m.step);
+                // A step between two of this floor's surfaces (N3's inner steps) meets the floor on both sides, at two
+                // heights: it joins the floor to itself, read alone or with the ground.
+                let inner = step
+                    && ms.iter().any(|m| m.side < 0)
+                    && ms.iter().any(|m| m.side > 0)
+                    && ms.iter().any(|m| m.a[1] != ms[0].a[1]);
                 let (kind, nodes, owner) = match open {
+                    _ if inner => (Kind::Step, [floor, floor], floor),
                     Some(o) if step => (Kind::Step, [floor, o.ground], floor),
                     None if step => continue,
                     _ => {
@@ -426,8 +590,26 @@ impl Building {
                         .map(end)
                 };
                 let mut ends = [side(-1), side(1)];
+                // An inner step's ends lie on its pieces' edges, within the grid's rounding (a deck along a slant): each
+                // is carried onto its piece, away from the other end, as a stair's is (its apron), so a body that
+                // crosses it stands on the far piece.
+                if inner && let [Some(e0), Some(e1)] = ends {
+                    for (k, (e, o)) in [(e0, e1), (e1, e0)].into_iter().enumerate() {
+                        let (m, to) = (e.middle(), o.middle());
+                        if let Some(q) = apron(patch, m, unit(to, m)) {
+                            let shift = |p: Vec3| Vec3::new(p.x + q.x - m.x, p.y, p.z + q.z - m.z);
+                            ends[k] = Some(End {
+                                floor,
+                                a: shift(e.a),
+                                b: shift(e.b),
+                            });
+                        }
+                    }
+                }
                 let mut width_left = ms.iter().map(|m| m.width_left).max().unwrap_or(0);
-                let mut through = ms.iter().all(|m| m.through);
+                // N3 cuts a floor's heights one at a time, so an inner step's two sides come from two cuts, neither of
+                // which sees the other side: met on both, it goes through, as a step to the ground does below.
+                let mut through = inner || ms.iter().all(|m| m.through);
                 // A doorway to the open ground: its other end is where its passage meets the ground's squares. Each
                 // patch holds one end, so there is no one passage through a patch to ask for.
                 let to_ground = open.filter(|o| nodes.contains(&o.ground));
@@ -442,7 +624,11 @@ impl Building {
                         .filter_map(|sm| own_part(o.on, sm))
                         .collect();
                     if let Some(e) = joined(&gm.iter().collect::<Vec<_>>(), o.ground) {
-                        ends[k] = Some(e);
+                        // At the height of the open ground beside the floor's end, in the ground's frame.
+                        let y = ends[1 - k]
+                            .and_then(|f| o.place.point(f.middle()).ok())
+                            .map_or(0, |p| p.y);
+                        ends[k] = Some(lift(e, o.terrain, y));
                         width_left = gm.iter().map(|m| m.width_left).fold(width_left, i64::min);
                         through = true;
                     }
@@ -461,7 +647,20 @@ impl Building {
                 // A step that cannot be crossed is an edge with nothing to step down to (a wall, a rail, water): no
                 // link at all.
                 let ground = to_ground.map(|o| o.ground);
-                if step && (blocked.is_some() || ends[1].is_none_or(|e| Some(e.floor) != ground)) {
+                if step
+                    && (blocked.is_some()
+                        || (!inner && ends[1].is_none_or(|e| Some(e.floor) != ground)))
+                {
+                    // Met on the floor and nothing beyond: another thing's floor may lie there (#3227).
+                    if let (Some(e), None, Some(_), false) = (ends[0], ends[1], ground, inner) {
+                        loose.push(Loose {
+                            link: id,
+                            end: e,
+                            across: acrosses.get(&id).copied().unwrap_or([0, 0]),
+                            width: widths.get(&id).copied().unwrap_or(0),
+                            radius,
+                        });
+                    }
                     continue;
                 }
                 let line = match (blocked, ends) {
@@ -540,7 +739,7 @@ impl Building {
                 let lo = patch(nodes[0]).map(|p| apron(p, line[0], unit(line[1], line[0])));
                 let hi =
                     patch(nodes[1]).map(|p| apron(p, line[k - 1], unit(line[k - 2], line[k - 1])));
-                let half = (width / 2 - (HUMAN_RADIUS + MARGIN) * 1000).max(0);
+                let half = (width / 2 - (radius + MARGIN) * 1000).max(0);
                 let end = |f: Id, at: Vec3, d: [i64; 2]| End {
                     floor: f,
                     a: Vec3::new(
@@ -591,6 +790,7 @@ impl Building {
             links,
             floors,
             place: open.map_or(Xform::IDENTITY, |o| o.place),
+            loose,
         })
     }
 
@@ -609,13 +809,14 @@ impl Building {
                 by_link.entry(sm.1.link).or_default().push(sm);
             }
         }
-        let widths: BTreeMap<Id, i64> = if by_link.is_empty() {
+        // Each gate's width, and its height (in the ground's frame: its ends stand on the ground there).
+        let widths: BTreeMap<Id, (i64, i64)> = if by_link.is_empty() {
             BTreeMap::new()
         } else {
             Scene::of(tree, open.ground)?
                 .doorways
                 .iter()
-                .map(|d| (d.link, d.width))
+                .map(|d| (d.link, (d.width, d.y)))
                 .collect()
         };
         let mut links = Vec::new();
@@ -628,7 +829,9 @@ impl Building {
                     .filter(|sm| sm.1.side == s)
                     .filter_map(|sm| own_part(open.on, sm))
                     .collect();
+                let y = widths.get(&id).map_or(0, |w| w.1);
                 joined(&of.iter().collect::<Vec<_>>(), open.ground)
+                    .map(|e| lift(e, open.terrain, y))
             };
             let ends = [side(-1), side(1)];
             let both = |sq: (i32, i32)| {
@@ -658,7 +861,7 @@ impl Building {
                 kind: Kind::of(ty.as_str()).unwrap_or(Kind::Doorway),
                 nodes,
                 owner,
-                width: widths.get(&id).copied().unwrap_or(0),
+                width: widths.get(&id).map_or(0, |w| w.0),
                 ends,
                 line,
                 door: open.doors.get(&id).copied(),
@@ -670,6 +873,7 @@ impl Building {
             links,
             floors: BTreeMap::new(),
             place: Xform::IDENTITY,
+            loose: Vec::new(),
         })
     }
 }

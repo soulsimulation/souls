@@ -1,15 +1,15 @@
 //! Postures and seats (Engine v2 B3, #2682): a body sits, lies and rises by moves (B2's data) that hand it between the
 //! floor and a seat's slot through the controller, and a seat holds one body.
 //!
-//! - **A seat** is one slot of a thing, with its kind's data ([`replica::moves::Seat`]): the slot's height above the
+//! - **A seat** is one slot of a thing, with its kind's data ([`replica::moves::Place`]): the slot's height above the
 //!   floor from the kind's model geometry, and a stand point. A seat higher than the move's reach (the body's standing
-//!   reach) is refused `seat-out-of-reach`, by its height alone.
+//!   reach) is refused `place-out-of-reach`, by its height alone.
 //! - **Reserved at commit.** The requests of one tick are taken together ([`Slots::commit`]) and ordered by a stable
 //!   key, the body's id and then the seat's, never by arrival. The first takes the seat; every later one is refused
-//!   `seat-taken`, naming the holder. The hold is a field of this table, keyed by the seat's thing, so the holder is
+//!   `place-taken`, naming the holder. The hold is a field of this table, keyed by the seat's thing, so the holder is
 //!   one lookup and never a scan.
 //! - **Contact hands the body over.** At the sit's (or lie's) contact instant the body is handed from the floor into
-//!   the slot ([`Controller::seat`], T4's hand-off from mover to slot) with the stance the request named; at the rise's
+//!   the slot ([`Controller::slot_in`], T4's hand-off from mover to slot) with the stance the request named; at the rise's
 //!   contact it is handed back onto the floor at the seat's stand point ([`Controller::stand`]), standing. Postures
 //!   are the controller's stance input: stand, sit, lie.
 //! - **A seated body has no timer and no mover.** When the move is done, a driver with no timer ([`seated_shape`])
@@ -23,6 +23,11 @@
 //!
 //! Not here: choosing among seats (I5), queueing for one (B7), sitting where there is no seat (E3), sleep, a seat
 //! edited away under its sitter (G2), a thing with several seats, writing the hold into the tree (the writer's).
+//!
+//! **Hands** (B4, #2739, [`hands`]) are slots of the same model: a slot of a node, named by a [`Frame`], holds one
+//! occupant. A seat holds a body (this table, until the hold is written into the tree); a hand's slot, a shelf's or a
+//! table's holds a thing, as a child of that slot in the tree. [`Slots::occupant`] answers who is in a slot for both,
+//! so a thing is never put into a seat a body holds, and take and put refuse a filled slot by one name.
 
 use std::collections::BTreeMap;
 
@@ -30,9 +35,10 @@ use replica::bodies::{Class, SkillShape, Want};
 use replica::effects::Refusal;
 use replica::encode::Name;
 use replica::ids::{Id, Minter};
-use replica::moves::{Move, Seat};
+use replica::moves::{Move, Place};
 use replica::pose::{Frame, HandOff, Quat, Vec3};
 use replica::time::Micros;
+use replica::tree::Tree;
 use replica::world_model::show;
 
 use crate::controller::{Controller, Driver, Part, Stance};
@@ -52,18 +58,18 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
 /// A seat where it is: its thing, its kind's data, its slot's point and facing in the floor's frame (µm), and the
 /// floor's node, whose surface a body stands on to sit and is set back on.
 #[derive(Clone, Debug)]
-pub struct SeatAt {
+pub struct PlaceAt {
     pub thing: Id,
-    pub seat: Seat,
+    pub place: Place,
     pub point: Vec3,
     pub facing: Quat,
     pub floor: Id,
 }
 
-impl SeatAt {
+impl PlaceAt {
     /// The stand point in the floor's frame, µm (its height is the floor's, found when the body is placed).
     pub fn stand(&self) -> R<Vec3> {
-        let [x, z] = self.seat.stand;
+        let [x, z] = self.place.stand;
         let d = self
             .facing
             .rotate(Vec3::new(x, 0, z))
@@ -116,7 +122,7 @@ pub fn seated_shape() -> SkillShape {
 /// Every seat, and who holds each.
 #[derive(Default)]
 pub struct Slots {
-    seats: BTreeMap<Id, SeatAt>,
+    places: BTreeMap<Id, PlaceAt>,
     held: BTreeMap<Id, Hold>,
     by_body: BTreeMap<Id, Id>,
 }
@@ -126,22 +132,33 @@ impl Slots {
         Slots::default()
     }
 
-    /// Adds a seat (`seat-duplicate` when its thing has one).
-    pub fn add(&mut self, seat: SeatAt) -> R<()> {
-        if self.seats.contains_key(&seat.thing) {
-            return refuse("seat-duplicate", show(seat.thing));
+    /// Adds a seat (`place-duplicate` when its thing has one).
+    pub fn add(&mut self, place: PlaceAt) -> R<()> {
+        if self.places.contains_key(&place.thing) {
+            return refuse("place-duplicate", show(place.thing));
         }
-        self.seats.insert(seat.thing, seat);
+        self.places.insert(place.thing, place);
         Ok(())
     }
 
-    pub fn seat(&self, thing: Id) -> Option<&SeatAt> {
-        self.seats.get(&thing)
+    pub fn place(&self, thing: Id) -> Option<&PlaceAt> {
+        self.places.get(&thing)
     }
 
     /// Who holds the seat of `thing`: one lookup.
     pub fn holder(&self, thing: Id) -> Option<Id> {
         self.held.get(&thing).map(|h| h.body)
+    }
+
+    /// Who is in slot `at` (a node and its slot): the body holding it when it is a seat, else the thing the tree
+    /// holds there. None for a frame with no slot, or an empty one.
+    pub fn occupant(&self, tree: &Tree, at: Frame) -> Option<Id> {
+        let slot = at.slot?;
+        self.places
+            .get(&at.node)
+            .filter(|s| s.place.slot == slot)
+            .and_then(|_| self.holder(at.node))
+            .or_else(|| in_slot(tree, at.node, slot))
     }
 
     /// The seat `body` holds, if any.
@@ -169,8 +186,8 @@ impl Slots {
     }
 
     /// Commits one tick's requests at `now`, in the stable order (body id, then seat), whatever order they came in.
-    /// Each is reserved and its move started, or refused by name: `seat-unknown`, `seat-taken` (naming the holder),
-    /// `seat-already-held` (the body holds another), `seat-out-of-reach`, or the move's own refusals (B2).
+    /// Each is reserved and its move started, or refused by name: `place-unknown`, `place-taken` (naming the holder),
+    /// `place-already-held` (the body holds another), `place-out-of-reach`, or the move's own refusals (B2).
     #[allow(clippy::too_many_arguments)]
     pub fn commit(
         &mut self,
@@ -201,28 +218,28 @@ impl Slots {
         r: &Request,
         now: Micros,
     ) -> R<Instance> {
-        let Some(at) = self.seats.get(&r.thing) else {
-            return refuse("seat-unknown", show(r.thing));
+        let Some(at) = self.places.get(&r.thing) else {
+            return refuse("place-unknown", show(r.thing));
         };
         if let Some(h) = self.held.get(&r.thing) {
             return refuse(
-                "seat-taken",
+                "place-taken",
                 format!("{}: held by {}", show(r.thing), show(h.body)),
             );
         }
         if let Some(t) = self.by_body.get(&r.body) {
             return refuse(
-                "seat-already-held",
+                "place-already-held",
                 format!("{} holds {}", show(r.body), show(*t)),
             );
         }
-        if at.seat.height > r.mv.reach {
+        if at.place.height > r.mv.reach {
             return refuse(
-                "seat-out-of-reach",
+                "place-out-of-reach",
                 format!(
                     "{}: {} µm above the floor, standing reach {} µm",
                     show(r.thing),
-                    at.seat.height,
+                    at.place.height,
                     r.mv.reach
                 ),
             );
@@ -260,7 +277,7 @@ impl Slots {
 
     /// A restart (K18c, #3176): `body`, standing on the floor, is handed back into the seat of `thing` at `at`, held
     /// there in `stance` by a driver with no timer, as a sit that finished leaves it. The hold is this table's again,
-    /// so a rise or another sit sees the seat taken. `seat-unknown`, `seat-taken` or `seat-already-held` as for a sit.
+    /// so a rise or another sit sees the seat taken. `place-unknown`, `place-taken` or `place-already-held` as for a sit.
     pub fn restore(
         &mut self,
         c: &mut Controller,
@@ -269,24 +286,24 @@ impl Slots {
         stance: Stance,
         at: Micros,
     ) -> R<()> {
-        let Some(seat) = self.seats.get(&thing) else {
-            return refuse("seat-unknown", show(thing));
+        let Some(place) = self.places.get(&thing) else {
+            return refuse("place-unknown", show(thing));
         };
         if let Some(h) = self.held.get(&thing) {
             return refuse(
-                "seat-taken",
+                "place-taken",
                 format!("{}: held by {}", show(thing), show(h.body)),
             );
         }
         if self.by_body.contains_key(&body) {
-            return refuse("seat-already-held", show(body));
+            return refuse("place-already-held", show(body));
         }
         let frame = Frame {
             node: thing,
-            slot: Some(seat.seat.slot),
+            slot: Some(place.place.slot),
         };
         let d = c.claim(body, &seated_shape())?;
-        c.seat(body, d, frame, at)?;
+        c.slot_in(body, d, frame, at)?;
         c.set(body, d, Part::Stance(stance))?;
         self.held.insert(
             thing,
@@ -372,7 +389,7 @@ impl Slots {
     fn give_way(
         &mut self,
         c: &mut Controller,
-        at: &SeatAt,
+        at: &PlaceAt,
         floors: &BTreeMap<Id, Surface>,
         thing: Id,
         now: Micros,
@@ -417,7 +434,7 @@ impl Slots {
         };
         let (hold, at) = (
             self.held.get(&thing).copied()?,
-            self.seats.get(&thing)?.clone(),
+            self.places.get(&thing)?.clone(),
         );
         let instance = match hold.state {
             State::Lowering { instance, .. } | State::Rising(instance) => instance,
@@ -433,11 +450,11 @@ impl Slots {
             (Fired::Phase { phase: 1, .. }, State::Lowering { .. }) => {
                 let frame = Frame {
                     node: thing,
-                    slot: Some(at.seat.slot),
+                    slot: Some(at.place.slot),
                 };
                 let d = moves.driver(instance).unwrap_or(0);
                 let h = c
-                    .seat(body, d, frame, now)
+                    .slot_in(body, d, frame, now)
                     .and_then(|h| c.set(body, d, Part::Stance(hold.stance)).map(|()| h));
                 if h.is_ok() {
                     self.set(
@@ -485,7 +502,7 @@ impl Slots {
     fn stand(
         &self,
         c: &mut Controller,
-        at: &SeatAt,
+        at: &PlaceAt,
         floors: &BTreeMap<Id, Surface>,
         body: Id,
         driver: Driver,
@@ -545,5 +562,12 @@ pub fn clear_spot(
         })
 }
 
+pub mod hands;
+pub use hands::{
+    Cx, Entry, Hand, Holding, Log, free_hands, hands, in_slot, occupies, steer, transfer,
+};
+
+#[cfg(test)]
+mod hands_tests;
 #[cfg(test)]
 mod tests;

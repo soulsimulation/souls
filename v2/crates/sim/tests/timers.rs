@@ -366,8 +366,9 @@ fn a_jump_equals_every_tick_with_the_rate_changed_in_the_gap() {
     );
 }
 
-#[test]
-fn removing_a_node_cancels_its_subtrees_timers() {
+/// A world with timers on a node with children (5 and 9), on its first child (3) and on a sibling outside its subtree
+/// (4), committed: the world, the node, the child, the sibling and the timer ids in that order.
+fn subtree_with_timers() -> (World, Id, Id, Id, Vec<Id>) {
     let mut w = World::new(&Scenario { timers: 0, ..SMALL });
     let root = w.tree.node(w.tree.root()).expect("a root").id();
     // A node with children, its first child, and a sibling of the node, outside its subtree.
@@ -398,7 +399,12 @@ fn removing_a_node_cancels_its_subtrees_timers() {
         ids.push(t);
     }
     w.commit();
+    (w, parent, child, other, ids)
+}
 
+#[test]
+fn removing_a_node_cancels_its_subtrees_timers() {
+    let (mut w, parent, child, other, ids) = subtree_with_timers();
     let gone = w.due.cancel_under(&w.tree, parent);
     assert_eq!(
         gone.iter().map(|t| (t.node, t.due)).collect::<Vec<_>>(),
@@ -435,6 +441,40 @@ fn removing_a_node_cancels_its_subtrees_timers() {
         [],
         "nothing left under it"
     );
+}
+
+#[test]
+fn a_remove_alone_drops_its_subtrees_timers_and_the_due_list_agrees() {
+    // K2b (#3132): no clears written before the remove; the tree drops them in the remove's own commit.
+    let (mut w, parent, _, other, ids) = subtree_with_timers();
+    assert_eq!(w.due.next_due(), Some(3), "the child's timer is next");
+    let gone = w.due.cancel_under(&w.tree, parent);
+    assert_eq!(gone.len(), 3);
+    let remove = Change::Remove { node: parent };
+    w.entry(
+        parent,
+        10,
+        Body::Changes(vec![ChangeRec {
+            change: remove,
+            rest: Rest::new(),
+        }]),
+    );
+    w.commit();
+    assert!(w.tree.handle(parent).is_none(), "the node is removed");
+    let state = w.tree.to_state();
+    assert_eq!(
+        state.timers.keys().copied().collect::<Vec<_>>(),
+        [ids[2]],
+        "the tree holds only the other node's timer"
+    );
+    assert_eq!(
+        DueList::from_state(&state.timers),
+        w.due,
+        "the list rebuilt from the tree is the list cancel_under left"
+    );
+    assert_eq!(w.due.next_due(), Some(4), "next_due names the other node's");
+    assert_eq!(w.due.fire(i64::MAX).map(|t| t.node), Some(other));
+    assert_eq!(w.due.fire(i64::MAX), None);
 }
 
 #[test]

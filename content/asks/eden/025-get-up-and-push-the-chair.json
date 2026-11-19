@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":25,"group":"object","words":"get up and push the chair in","obvious":3,"things":{"chair":"eden:chair","table":"eden:table"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"chair"}},{"this":"me","form":"stand"},{"this":"chair","form":"push_in"}]}

@@ -1,0 +1,44 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Weaving (from #1634): stripes are woven (thread 2 to 1, a striped cloth made on the tray in the same batch), a second weave is refused while the cloth is on the tray, and the cloth is taken. With one portion left, checks are woven (1 to 0), a further weave is refused for want of thread, and the checked cloth is taken.",
+  "cases": [
+    {
+      "name": "weave_stripes_tray_taken_then_take",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","l1"]},"l1":{"kind":"eden:table_loom"},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"l1","form":"weave_stripes"},"receipt":"rw1","expect":{"verdict":"yes","changes":[{"change":"set","node":"l1","field":"thread","n":1,"to":1},{"change":"create","node":"rw1.0","kind":"eden:striped_cloth","to":{"node":"l1","slot":"out"}}],"events":[{"event":"eden:thread_used","node":"l1","changes":[0]},{"event":"eden:woven_stripes","node":"l1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"l1","form":"weave_checks"},"receipt":"rw2","expect":{"verdict":"no","reason":"slot_taken","need":1}},
+        {"act":{"this":"rw1.0","form":"take"},"receipt":"rw3","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"rw1.0","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"rw1.0","changes":[0]}],"timers":[]}}
+      ],
+      "after": {"l1":{"kind":"eden:table_loom","fields":{"thread":1},"slots":{"out":[]}},"rw1.0":{"kind":"eden:striped_cloth"},"b1":{"hands":{"left":"rw1.0","right":null}}}
+    },
+    {
+      "name": "weave_checks_last_thread_then_none",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","l1"]},"l1":{"kind":"eden:table_loom","fields":{"thread":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"l1","form":"weave_checks"},"receipt":"rw1","expect":{"verdict":"yes","changes":[{"change":"set","node":"l1","field":"thread","n":1,"to":0},{"change":"create","node":"rw1.0","kind":"eden:checked_cloth","to":{"node":"l1","slot":"out"}}],"events":[{"event":"eden:thread_used","node":"l1","changes":[0]},{"event":"eden:woven_checks","node":"l1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"rw1.0","form":"take"},"receipt":"rw2","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"rw1.0","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"rw1.0","changes":[0]}],"timers":[]}},
+        {"act":{"this":"l1","form":"weave_stripes"},"receipt":"rw3","expect":{"verdict":"no","reason":"field_differs","need":0}}
+      ],
+      "after": {"l1":{"kind":"eden:table_loom","fields":{"thread":0},"slots":{"out":[]}},"rw1.0":{"kind":"eden:checked_cloth"},"b1":{"hands":{"left":"rw1.0","right":null}}}
+    },
+    {
+      "name": "take_a_striped_cloth_left_on_the_tray",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","l1","c1"]},"l1":{"kind":"eden:table_loom","fields":{"thread":0},"slots":{"out":["c1"]}},"c1":{"kind":"eden:striped_cloth"},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"c1","form":"take"},"receipt":"rw1","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"c1","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"c1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"l1","form":"weave_stripes"},"receipt":"rw2","expect":{"verdict":"no","reason":"field_differs","need":0}}
+      ],
+      "after": {"l1":{"kind":"eden:table_loom","fields":{"thread":0},"slots":{"out":[]}},"c1":{"kind":"eden:striped_cloth"},"b1":{"hands":{"left":"c1","right":null}}}
+    },
+    {
+      "name": "take_a_checked_cloth_left_on_the_tray",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","l1","c1"]},"l1":{"kind":"eden:table_loom","fields":{"thread":0},"slots":{"out":["c1"]}},"c1":{"kind":"eden:checked_cloth"},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"c1","form":"take"},"receipt":"rw1","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"c1","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"c1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"l1","form":"weave_stripes"},"receipt":"rw2","expect":{"verdict":"no","reason":"field_differs","need":0}}
+      ],
+      "after": {"l1":{"kind":"eden:table_loom","fields":{"thread":0},"slots":{"out":[]}},"c1":{"kind":"eden:checked_cloth"},"b1":{"hands":{"left":"c1","right":null}}}
+    }
+  ]
+}

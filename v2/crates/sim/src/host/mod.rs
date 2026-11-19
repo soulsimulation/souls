@@ -26,9 +26,21 @@
 //! - **The runner** ([`Runner`], T9c #3127): skills on bodies in the controller over a town, a tick at a time. The
 //!   marks are read for the turns, the skills step, their inputs and crossings are handed on, their entries set their
 //!   bodies' fields, and the controller steps. It answers the walk's questions: the next corner (the town), the bodies
-//!   near (a grid of the bodies as of the tick's start, in cells of [`CELL`]), and reads of bodies and links.
+//!   near (the controller's spatial index, N16 `crate::index`: the bodies as the mover left them at the last tick's
+//!   end), and reads of bodies and links.
 //!
-//! Not here: handing intents back after a restart (K13b #3119), entries to the log, timers (K9).
+//! - **Changed ground** (G3, #2760). At the start of each tick, after an edit's ground is installed
+//!   (`Town::install`), each body not carried whose node's ground version moved since it last stood is found again
+//!   on that ground where it stands ([`Runner::reground`]). One that stands on none now is marked off the ground
+//!   ([`Runner::off_ground`]): it is held (`F_HELD`), stands, and no skill moves it until N10's last rung walks it out
+//!   by name. The walks planned on the changed ground are planned again by the ladder (`crate::unstick`).
+//!
+//! - **After a restart** ([`restart`], K13b #3119): each order the log holds as accepted and not ended is handed to
+//!   its skill again, from where its body stands, or ended with a named reason.
+//!
+//! Not here: entries to the log, timers (K9).
+
+pub mod restart;
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -60,6 +72,15 @@ pub trait Geometry {
     /// A3), as of the tick's start; `None` reads the tree.
     fn read(&self, _node: Id) -> Option<Seen> {
         None
+    }
+    /// One field of such a node as [`Geometry::read`] shows it (the inner `None`: the node holds no such field);
+    /// `None` reads the tree.
+    fn field(&self, node: Id, field: u64) -> Option<Option<Value>> {
+        self.read(node).map(|mut s| s.fields.remove(&field))
+    }
+    /// Such a node's position as [`Geometry::read`] shows it; `None` reads the tree.
+    fn position(&self, node: Id) -> Option<Vec3> {
+        self.read(node).map(|s| s.position)
     }
 }
 
@@ -230,6 +251,24 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
         })
     }
 
+    fn field(&self, node: Id, field: u64) -> Option<Value> {
+        self.count();
+        if let Some(v) = self.geometry.field(node, field) {
+            return v;
+        }
+        let n = self.tree.node(self.tree.handle(node)?)?;
+        n.fields().get(&field).cloned()
+    }
+
+    fn position(&self, node: Id) -> Option<Vec3> {
+        self.count();
+        if let Some(p) = self.geometry.position(node) {
+            return Some(p);
+        }
+        let n = self.tree.node(self.tree.handle(node)?)?;
+        Some(n.place().map_or(Vec3::ZERO, |p| p.position))
+    }
+
     fn ask(&self, q: &Ask) -> Option<Answer> {
         self.count();
         self.geometry.ask(self.body, q)
@@ -362,6 +401,35 @@ pub fn step_in_units(
     staged
 }
 
+/// Lends `f` the host `body` sees under `driver`, outside the tick's skill phase, its calls staged and counted in
+/// `staged` as [`step`]'s are: for a skill the world wakes on an event instead of stepping it each tick (F1 #2766).
+#[allow(clippy::too_many_arguments)]
+pub fn lend<T>(
+    tree: &Tree,
+    geometry: &impl Geometry,
+    now: Micros,
+    seed: u64,
+    minter: &mut Minter,
+    (body, driver): (Id, Driver),
+    staged: &mut Staged,
+    f: impl FnOnce(&mut dyn Host) -> T,
+) -> T {
+    let mut host = WorldHost {
+        tree,
+        geometry,
+        now,
+        seed,
+        body,
+        driver,
+        minter,
+        staged,
+        calls: Cell::new(0),
+    };
+    let out = f(&mut host);
+    host.staged.calls += host.calls.get();
+    out
+}
+
 impl Staged {
     /// Adds one run's stage to the tick's, in order; its draws count on from where the tick's stood.
     fn merge(&mut self, own: Staged) {
@@ -380,13 +448,7 @@ impl Staged {
 /// inputs go on (B1 #2680). An input whose driver does not hold the body's locomotion is refused by the controller and
 /// changes nothing; the refusals are returned with their bodies.
 pub fn hand_on(staged: &Staged, controller: &mut Controller) -> Vec<(Id, Refusal)> {
-    let mut refused = Vec::new();
-    for &(body, driver, input) in &staged.controls {
-        if let Err(r) = controller.set(body, driver, Part::Velocity(input.velocity, input.mode)) {
-            refused.push((body, r));
-        }
-    }
-    refused
+    controller.set_velocities(&staged.controls)
 }
 
 /// Hands a tick's staged crossings on: for each, the world's [`Links`] gives the track (or opens a shut door, and the
@@ -426,9 +488,6 @@ pub fn carry(
     refused
 }
 
-/// The cell of the runner's grid of bodies, µm: the walk's push range (`skills::route::RANGE`).
-pub const CELL: i64 = 1_200_000;
-
 /// Skills on bodies in the controller over a town, a tick at a time (T9c #3127).
 pub struct Runner {
     pub controller: Controller,
@@ -449,12 +508,19 @@ pub struct Runner {
     pub asks: BTreeMap<Id, (Target, Id)>,
     /// The place each asker was granted (µm, the target node's frame).
     pub granted: BTreeMap<Id, Vec3>,
+    /// The last tick's refusals, each of one body (the tick went on for the others), in the order they came; each
+    /// refused body's run ended by the first one's name.
+    pub refused: Vec<(Id, Refusal)>,
+    /// The bodies found off the ground after an edit (G3): held, standing, until they are walked out.
+    pub off_ground: BTreeSet<Id>,
+    /// The node each body stood on and that node's ground version, as of the last [`Runner::reground`] (G3).
+    stood: BTreeMap<Id, (Id, u64)>,
+    /// When [`Runner::reground`] last ran (the tick's start).
+    grounded: Option<Micros>,
     /// The routes the world gave each body (`F_ROUTE`), counted.
     routes: BTreeMap<Id, u64>,
     seed: u64,
     minter: Minter,
-    /// The bodies not carried across a link, by node and cell of [`CELL`], as of the end of the last tick.
-    grid: BTreeMap<(Id, i64, i64), Vec<Near>>,
     /// Each skill's step is a unit in K11's wrapper: a panic ends that run, a third retires the skill (K18 #3160).
     pub units: Units,
 }
@@ -474,10 +540,6 @@ pub fn waiting(fields: Option<&BTreeMap<u64, Value>>) -> Option<(Id, i64)> {
     };
     let [l, g] = a.as_slice() else { return None };
     Some((read_id(l).ok()?, decode_int(g)?))
-}
-
-fn key(node: Id, x: i64, z: i64) -> (Id, i64, i64) {
-    (node, x.div_euclid(CELL), z.div_euclid(CELL))
 }
 
 fn body_kind() -> Name {
@@ -514,8 +576,9 @@ struct Here<'a> {
     town: View<'a>,
     controller: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
-    grid: &'a BTreeMap<(Id, i64, i64), Vec<Near>>,
     settled: BTreeSet<Id>,
+    /// A body's kind, named once a tick, not at each read (#3213).
+    kind: Name,
 }
 
 impl Geometry for Here<'_> {
@@ -530,22 +593,16 @@ impl Geometry for Here<'_> {
                     z,
                 ))
             }),
-            Ask::Near { radius } => Some(Answer::Near(near(
-                self.grid,
-                body,
-                node_of(me),
-                me.pose.position,
-                *radius,
-            ))),
+            Ask::Near { radius } => Some(Answer::Near(near(self.controller, body, *radius))),
         }
     }
 
     fn read(&self, node: Id) -> Option<Seen> {
-        let Some(b) = self.controller.body(node) else {
+        let Some((b, carrying)) = self.controller.seen(node) else {
             return self.town.read_link(node);
         };
         let mut fields = self.fields.get(&node).cloned().unwrap_or_default();
-        if let Some(l) = self.controller.carrying(node) {
+        if let Some(l) = carrying {
             fields.insert(F_CROSSING, l.to_value());
         }
         if self.settled.contains(&node) {
@@ -553,37 +610,59 @@ impl Geometry for Here<'_> {
         }
         Some(Seen {
             id: node,
-            kind: body_kind(),
+            kind: self.kind.clone(),
             parent: Some(node_of(b)),
             position: b.pose.position,
             fields,
         })
     }
-}
 
-/// The bodies in `grid` other than `body` on `node` within `radius` of `at` (x and z), in id order.
-fn near(
-    grid: &BTreeMap<(Id, i64, i64), Vec<Near>>,
-    body: Id,
-    node: Id,
-    at: Vec3,
-    radius: i64,
-) -> Vec<Near> {
-    let (_, i, j) = key(node, at.x, at.z);
-    let k = (radius.max(0) + CELL - 1) / CELL;
-    let r = i128::from(radius);
-    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-    let mut out = Vec::new();
-    for di in -k..=k {
-        for dj in -k..=k {
-            for n in grid.get(&(node, i + di, j + dj)).into_iter().flatten() {
-                if n.id != body && d(at.x, n.position.x) + d(at.z, n.position.z) < r * r {
-                    out.push(*n);
-                }
-            }
+    /// As [`Here::read`] shows it, without copying the body's other fields: each walker reads the waiting mark of
+    /// every body near it each tick.
+    fn field(&self, node: Id, field: u64) -> Option<Option<Value>> {
+        let Some((_, carrying)) = self.controller.seen(node) else {
+            return self
+                .town
+                .read_link(node)
+                .map(|mut s| s.fields.remove(&field));
+        };
+        Some(match carrying {
+            Some(l) if field == F_CROSSING => Some(l.to_value()),
+            _ if field == F_SETTLED && self.settled.contains(&node) => Some(Value::Uint(1)),
+            _ => self.fields.get(&node).and_then(|f| f.get(&field)).cloned(),
+        })
+    }
+
+    fn position(&self, node: Id) -> Option<Vec3> {
+        match self.controller.seen(node) {
+            Some((b, _)) => Some(b.pose.position),
+            None => self.town.read_link(node).map(|s| s.position),
         }
     }
-    out.sort_by_key(|n| n.id);
+}
+
+/// The other bodies not carried across a link, on `body`'s node within `radius` of it (x and z), in id order, as
+/// the controller's index holds them: where the mover left them at the end of the last tick (N16).
+fn near(controller: &Controller, body: Id, radius: i64) -> Vec<Near> {
+    let Some(me) = controller.body(body) else {
+        return Vec::new();
+    };
+    let (node, p) = crate::index::place_of(me);
+    let found = controller.near().bodies_within(node, p, radius);
+    // Sized once: in a crowd each walker has many near it, every tick.
+    let mut out = Vec::with_capacity(found.len());
+    for (id, _) in found {
+        if id == body {
+            continue;
+        }
+        if let Some(b) = controller.body(id) {
+            out.push(Near {
+                id: b.id,
+                position: b.pose.position,
+                velocity: b.linear,
+            });
+        }
+    }
     out
 }
 
@@ -600,26 +679,26 @@ impl Runner {
             ended: BTreeMap::new(),
             asks: BTreeMap::new(),
             granted: BTreeMap::new(),
+            refused: Vec::new(),
+            off_ground: BTreeSet::new(),
+            stood: BTreeMap::new(),
+            grounded: None,
             routes: BTreeMap::new(),
             seed: 1,
             minter: Minter::new(Scope([0x9b; 16])),
-            grid: BTreeMap::new(),
             units: Units::new(),
         }
     }
 
     /// Adds a body of `family`, standing as the mover placed it, with no skill.
     pub fn add_body(&mut self, family: Family, body: Moved) -> Result<(), Refusal> {
-        self.controller.add(family, body)?;
-        self.index();
-        Ok(())
+        self.controller.add(family, body)
     }
 
-    /// Forgets the routes given to a body taken out of the controller, and drops it from the grid of bodies (a
-    /// retirement, K10 #2673).
+    /// Forgets the routes given to a body taken out of the controller (a retirement, K10 #2673); the controller's
+    /// spatial index drops it as it is taken out.
     pub fn forget(&mut self, body: Id) {
         self.routes.remove(&body);
-        self.index();
     }
 
     /// Adds a body of `family`, standing as the mover placed it, and runs `skill` on it.
@@ -634,12 +713,15 @@ impl Runner {
         self.start(who, skill)
     }
 
-    /// Runs `skill` on `body`, under a new driver claiming what the skill's shape claims.
+    /// Runs `skill` on `body`, under a new driver claiming what the skill's shape claims. The marks a run before it
+    /// left on the body go (#3168): a route the world gave it (`F_ROUTE`; a new walk would take it for its own and
+    /// walk the old route's legs from wherever it stands now), its waiting mark and the shoulder turn.
     pub fn start(&mut self, body: Id, skill: Box<dyn Skill>) -> Result<(), Refusal> {
         let driver = self.controller.claim(body, &skill.shape())?;
-        // A route the world gave an earlier walk is not this one's (#3167: a new walk took it, and ended at once).
         if let Some(f) = self.fields.get_mut(&body) {
             f.remove(&F_ROUTE);
+            f.remove(&F_WAITING);
+            f.remove(&F_SHOULDER);
         }
         self.ended.remove(&body);
         self.asks.remove(&body);
@@ -691,6 +773,11 @@ impl Runner {
         self.runs.iter().any(|r| r.body == body)
     }
 
+    /// The bodies a skill runs on: [`Runner::running`] for many bodies at once, without a scan of the runs each.
+    pub fn running_bodies(&self) -> BTreeSet<Id> {
+        self.runs.iter().map(|r| r.body).collect()
+    }
+
     /// The world ends `body`'s run by `name` (N10's last rung): its driver ends, and its walk's marks go.
     pub fn end(&mut self, body: Id, name: Name) {
         let Some(k) = self.runs.iter().position(|r| r.body == body) else {
@@ -729,34 +816,62 @@ impl Runner {
     /// The other bodies not carried across a link, on `body`'s node within `radius` of it (x and z), in id order, as
     /// they stood at the end of the last tick.
     pub fn near(&self, body: Id, radius: i64) -> Vec<Near> {
-        let Some(b) = self.controller.body(body) else {
-            return Vec::new();
-        };
-        near(&self.grid, body, node_of(b), b.pose.position, radius)
+        near(&self.controller, body, radius)
     }
 
-    fn index(&mut self) {
-        self.grid.clear();
-        for b in self.controller.bodies() {
-            if self.controller.carrying(b.id).is_some() {
+    /// Changed ground (G3), at the start of a tick (once a tick): each body not carried whose node's ground version
+    /// moved since it last stood (or that stood off the ground) is found again on that ground where it stands
+    /// ([`Town::relocate`]), or marked off the ground and held. Nothing while no ground has changed.
+    pub fn reground(&mut self, town: &Town) {
+        if town.versions.is_empty() || self.grounded == Some(self.now) {
+            return;
+        }
+        self.grounded = Some(self.now);
+        let ids: Vec<Id> = self.controller.bodies().map(|b| b.id).collect();
+        for who in ids {
+            let Some(b) = self.controller.body(who).copied() else {
+                continue;
+            };
+            let n = node_of(&b);
+            let now = (n, town.versions.of(n));
+            let off = self.off_ground.contains(&who);
+            if self.controller.carried(who) || (self.stood.get(&who) == Some(&now) && !off) {
                 continue;
             }
-            let p = b.pose.position;
-            self.grid
-                .entry(key(node_of(b), p.x, p.z))
-                .or_default()
-                .push(Near {
-                    id: b.id,
-                    position: p,
-                    velocity: b.linear,
-                });
+            match town.relocate(&b) {
+                Ok(placed) if self.controller.regrounded(who, Some(placed)).is_ok() => {
+                    if self.off_ground.remove(&who)
+                        && let Some(f) = self.fields.get_mut(&who)
+                    {
+                        f.remove(&F_HELD);
+                    }
+                }
+                _ => {
+                    let _ = self.controller.regrounded(who, None);
+                    if !off && self.running(who) {
+                        self.fields
+                            .entry(who)
+                            .or_default()
+                            .insert(F_HELD, Value::Uint(1));
+                    }
+                    self.off_ground.insert(who);
+                }
+            }
+            self.stood.insert(who, now);
         }
     }
 
     /// One tick over `town`: the marks read for the turns, every skill stepped against the bodies as they stood at
     /// the tick's start, inputs and crossings handed on, the skills' entries set on their bodies, and the controller
-    /// stepped. The first refusal is returned once the tick is done; the others went on.
+    /// stepped.
+    ///
+    /// A refusal of one body mid-tick (its input, its crossing's track, the carry or its landing, its step on the
+    /// surface) is that body's fault alone (#3275): it is kept in [`Runner::refused`], and the body's run ends by the
+    /// refusal's name ([`Runner::end`]), so it does not ask again into the same refusal; every other body's tick is
+    /// as it would be without it, and the tick returns `Ok`. A refusal of the world's own (the turns' or the spot
+    /// tables' write) does not stop the tick either: the tick goes on to its end and returns it.
     pub fn tick(&mut self, town: &mut Town) -> Result<(), Refusal> {
+        self.reground(town);
         let at = self.now + self.tick;
         let marks: Vec<Mark> = self
             .controller
@@ -781,13 +896,15 @@ impl Runner {
                     .copied(),
             })
             .collect();
-        town.turns(&marks, at)?;
-        town.spots(&marks, at)?;
+        // The world's own refusals: the tick goes on, and the first is returned at its end.
+        let world = town.turns(&marks, at).err();
+        let world = world.or(town.spots(&marks, at).err());
         // A walk sent to a point gets its route once its place is granted; a refusal ends it by name.
+        let running = self.running_bodies();
         let waiting: Vec<(Id, Target)> = self
             .asks
             .iter()
-            .filter(|(who, _)| self.running(**who) && !self.granted.contains_key(who))
+            .filter(|(who, _)| running.contains(*who) && !self.granted.contains_key(who))
             .map(|(who, (t, _))| (*who, *t))
             .collect();
         for (who, target) in waiting {
@@ -820,8 +937,8 @@ impl Runner {
                 town: view,
                 controller: &self.controller,
                 fields: &self.fields,
-                grid: &self.grid,
                 settled,
+                kind: body_kind(),
             };
             step_in_units(
                 tree,
@@ -857,10 +974,16 @@ impl Runner {
         }
         let stepped = self.controller.step(&town.surfaces, self.tick, at);
         refused.extend(stepped.refused);
+        // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
+        for (who, r) in &refused {
+            if self.running(*who) {
+                self.end(*who, named(r.name));
+            }
+        }
         self.now = at;
-        self.index();
-        match refused.into_iter().next() {
-            Some((_, r)) => Err(r),
+        self.refused = refused;
+        match world {
+            Some(r) => Err(r),
             None => Ok(()),
         }
     }

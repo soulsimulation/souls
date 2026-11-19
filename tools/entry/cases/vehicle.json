@@ -1,0 +1,18 @@
+{
+  "about": "Vehicle cases (SA-F14, #2884): data the entry tools and the new engine read unchanged. A case names an entry file, whether the vehicle is moving, and the spot a rider would step onto; it says whether getting off is allowed and, if not, the refusal's code and a word its reason names.",
+  "dismount": [
+    { "entry": "content/kinds/vehicles/bicycle.json", "moving": false, "spot": "level", "ok": true },
+    { "entry": "content/kinds/vehicles/bicycle.json", "moving": false, "spot": "shallow", "ok": true },
+    { "entry": "content/kinds/vehicles/bicycle.json", "moving": true, "spot": "level", "ok": false, "code": "moving", "reason_has": "stands still" },
+    { "entry": "content/kinds/vehicles/bicycle.json", "moving": false, "spot": "stairs", "ok": false, "code": "no_footing", "reason_has": "stairs" },
+    { "entry": "content/kinds/vehicles/bicycle.json", "moving": false, "spot": "ladder", "ok": false, "code": "no_footing", "reason_has": "ladder" },
+    { "entry": "content/kinds/vehicles/bicycle.json", "moving": false, "spot": "door", "ok": false, "code": "no_footing", "reason_has": "door" },
+    { "entry": "content/kinds/vehicles/rowing_boat.json", "moving": false, "spot": "deep_water", "ok": true },
+    { "entry": "content/kinds/vehicles/rowing_boat.json", "moving": false, "spot": "level", "ok": true },
+    { "entry": "content/kinds/vehicles/rowing_boat.json", "moving": true, "spot": "deep_water", "ok": false, "code": "moving", "reason_has": "stands still" },
+    { "entry": "content/kinds/vehicles/rowing_boat.json", "moving": false, "spot": "blocked", "ok": false, "code": "no_footing", "reason_has": "blocked" },
+    { "entry": "content/kinds/vehicles/sailboat.json", "moving": false, "spot": "ladder", "ok": false, "code": "no_footing", "reason_has": "ladder" },
+    { "entry": "content/kinds/vehicles/sailboat.json", "moving": true, "spot": "level", "ok": false, "code": "moving", "reason_has": "stands still" },
+    { "entry": "content/kinds/vehicles/sailboat.json", "moving": false, "spot": "level", "ok": true }
+  ]
+}

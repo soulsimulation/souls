@@ -30,7 +30,7 @@ use replica::ids::{Id, Scope, Version};
 use replica::intents::{ANSWER_TIMES, Fallback, Hello, Intent, PROTOCOL, Target};
 use tokio_tungstenite::tungstenite::Message;
 use worldd::answers::now;
-use worldd::checkers::lamps;
+use worldd::checkers::toggles;
 use worldd::measures::{Measures, Stamps};
 
 const LINEAGE: [u8; 16] = [0x4f; 16];
@@ -224,7 +224,7 @@ fn kill(c: &mut Child) {
 async fn sum(dir: &Path, acts: u64, rate: u64, sockets: u64) {
     std::fs::create_dir_all(dir).unwrap_or_else(|e| fail(format!("{}: {e}", dir.display())));
     let _ = std::fs::remove_file(dir.join("world.log"));
-    let world = lamps::World::build(1, usize::try_from(sockets).unwrap_or(1), 0);
+    let world = toggles::World::build(1, usize::try_from(sockets).unwrap_or(1), 0);
     let mut tokens = Vec::new();
     let mut file = String::new();
     for (body, _) in &world.pairs {

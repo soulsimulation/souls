@@ -9,8 +9,11 @@
 //!    is sent of it changes with the level: `full` every entry of a body in the set, on the tick it is read; `sampled`
 //!    one entry a body a world second, and every one that is not a plain motion sample or hands motion off; `outline`
 //!    who entered and left the set; `counts` nothing of it.
-//! 3. **The rest of a scope's node** is sent once a world second: counts by N16's cell at `full`, `sampled` and
-//!    `outline`, the node's one count at `counts`. Each node's is encoded once for every subscriber.
+//! 3. **The rest of a scope's node** is sent once a world second: counts by cell at `full`, `sampled` and `outline`,
+//!    the node's one count at `counts`. Each node's is encoded once for every subscriber. The counts by cell go as
+//!    the cells that changed since the last world second ([`Kind::Changes`]); the whole table ([`Kind::Cells`]) only
+//!    when the node is added, after a second whose counts were not sent (a resync), or when the grid's size changes
+//!    (#3151). The grid is [`GRID`] times N16's cells.
 //! 4. **The budget holds in every world second.** Each second the hub reckons what every level would have cost; at the
 //!    second's end it grants the highest level, from the one asked for down, whose busiest second of the last
 //!    [`WINDOW`] fits the budget (T7's [`grant`]), and names a change in the stream: `{1: level}`, or with `2: level
@@ -18,13 +21,15 @@
 //!    the next second opens with a marked gap, `{1: 8, 2: second, 3: items not sent}`.
 //! 5. **Addressed events have their own queue** ([`Hub::address`]: a receipt, an utterance to this Soul, from inside
 //!    the set or from outside it, E13): sent first, never merged and never dropped. One that does not fit this second
-//!    waits for the next. Grants, scope changes and gaps travel in the same queue.
+//!    waits for the next. Grants, scope changes and gaps travel in the same queue. An utterance (`souls:said`, B11) is
+//!    addressed by the hub itself from the log's part (#3231): its whole entry, to each subscription that follows one
+//!    of the hearers the entry records, and to no other; nothing is worked out again.
 //!
 //! Every item is a map whose field 1 names it ([`Kind`]). The hub reads only the log's parts; the view tier's thread
 //! runs it, never the clock thread.
 //!
 //! Not here: the socket and its request format (gatewayd), the world-wide index and finding a Soul (E1), speech and
-//! its reach (B11, E13), words beside references (K16).
+//! who hears (B11's `sim::speech`, E13), words beside references (K16).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -33,9 +38,10 @@ use replica::effects::{Body, Change, Effect, Part, Refusal};
 use replica::encode::{Value, encode};
 use replica::ids::Id;
 use replica::pose::Vec3;
+use replica::speech::{SAID, Said};
 use replica::views::{Grant, Level, ORDER, SAMPLE_US, Scope as ViewScope, Subscription, grant};
 
-use super::interest::{Interest, Places};
+use super::interest::{Interest, Places, Table};
 
 type R<T> = Result<T, Refusal>;
 
@@ -46,6 +52,9 @@ type ByBody = BTreeMap<Id, Vec<(Arc<[u8]>, bool)>>;
 pub const START_BUDGET: u64 = 8_000;
 /// How many world seconds a grant looks back over for the busiest.
 pub const WINDOW: usize = 10;
+/// How many times coarser than N16's cells the counts by cell are, by side: chosen by measured bytes (#3151, the
+/// `subscription` bench's table of forms).
+pub const GRID: i64 = 4;
 
 fn fault(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
@@ -97,7 +106,8 @@ pub enum Kind {
     Entry = 1,
     /// 2: who entered and left the set, `{1: 2, 2: [id, ...], 3: [id, ...]}`.
     Members = 2,
-    /// 3: a node's bodies by cell, `{1: 3, 2: node, 3: second, 4: [[i, j, bodies], ...]}`.
+    /// 3: a node's bodies by cell, the whole table, `{1: 3, 2: node, 3: second, 4: [[i, j, bodies], ...], 5: cell
+    /// size µm}`.
     Cells = 3,
     /// 4: a node's bodies, `{1: 4, 2: node, 3: second, 4: bodies}`.
     Count = 4,
@@ -111,6 +121,9 @@ pub enum Kind {
     Gap = 8,
     /// 9: an event addressed to this subscriber, `{1: 9, 2: bytes}`.
     Addressed = 9,
+    /// 10: the cells of a node whose count changed since the last world second, on the grid of the last whole table,
+    /// `{1: 10, 2: node, 3: second, 4: [[i, j, bodies], ...]}` (0 bodies: the cell emptied).
+    Changes = 10,
 }
 
 /// One item sent, and its bytes (shared with every subscriber sent the same).
@@ -159,6 +172,10 @@ struct Sub {
     interest: Interest,
     /// The world second each body of the set was last sent at `sampled`.
     sampled: BTreeMap<Id, i64>,
+    /// The held nodes whose whole table this subscriber has, kept up to date by every second's changes since.
+    tables: BTreeSet<Id>,
+    /// Counts by cell were not sent this second: every table is sent whole next second.
+    resync: bool,
     urgent: VecDeque<Out>,
     out: Vec<Out>,
     spent: u64,
@@ -170,6 +187,14 @@ struct Sub {
 }
 
 impl Sub {
+    fn address(&mut self, bytes: &[u8]) -> R<()> {
+        self.stats.addressed_in += 1;
+        self.push_urgent(
+            Kind::Addressed,
+            map(vec![(1, Value::Uint(9)), (2, Value::Bytes(bytes.to_vec()))]),
+        )
+    }
+
     fn push_urgent(&mut self, kind: Kind, v: Value) -> R<()> {
         let bytes = bytes_of(v)?;
         self.urgent.push_back(Out { kind, bytes });
@@ -191,6 +216,7 @@ impl Sub {
         let still = self.scopes.contains(&Scope::Node(node));
         if !still && let Some(i) = self.held.iter().position(|h| *h == node) {
             self.held.remove(i);
+            self.tables.remove(&node);
             self.push_urgent(
                 Kind::Dropped,
                 map(vec![(1, Value::Uint(7)), (2, node.to_value())]),
@@ -219,6 +245,7 @@ impl Sub {
             let n = o.bytes.len() as u64;
             if blocked || self.spent + n > self.budget {
                 self.dropped += 1;
+                self.resync |= matches!(o.kind, Kind::Cells | Kind::Changes);
                 continue;
             }
             self.spent += n;
@@ -274,6 +301,8 @@ impl Sub {
 /// A node's items for one world second, encoded once.
 struct NodeSecond {
     cells: Arc<[u8]>,
+    /// The changes since the last second, unless the node is new or its grid's size changed.
+    changes: Option<Arc<[u8]>>,
     count: Arc<[u8]>,
 }
 
@@ -284,6 +313,8 @@ pub struct Hub {
     subs: Vec<Option<Sub>>,
     second: Option<i64>,
     nodes: BTreeMap<Id, NodeSecond>,
+    /// Every node's counts by cell at the last world second, and the grid's size.
+    tables: BTreeMap<Id, (i64, Table)>,
 }
 
 impl Hub {
@@ -317,6 +348,8 @@ impl Hub {
             grant: g,
             interest: Interest::default(),
             sampled: BTreeMap::new(),
+            tables: BTreeSet::new(),
+            resync: false,
             urgent: VecDeque::new(),
             out: Vec::new(),
             spent: 0,
@@ -354,12 +387,7 @@ impl Hub {
     /// Queues an event addressed to subscriber `sub` (a receipt, an utterance): sent ahead of any detail, never merged
     /// or dropped.
     pub fn address(&mut self, sub: usize, bytes: &[u8]) -> R<()> {
-        let s = self.sub_mut(sub)?;
-        s.stats.addressed_in += 1;
-        s.push_urgent(
-            Kind::Addressed,
-            map(vec![(1, Value::Uint(9)), (2, Value::Bytes(bytes.to_vec()))]),
-        )
+        self.sub_mut(sub)?.address(bytes)
     }
 
     fn sub_mut(&mut self, sub: usize) -> R<&mut Sub> {
@@ -408,11 +436,21 @@ impl Hub {
         let second = at.div_euclid(SAMPLE_US);
         // The entries of bodies, each encoded once: (bytes, whether `sampled` keeps it whatever the second).
         let mut by_body: ByBody = BTreeMap::new();
+        // The utterances: each entry's bytes and the hearers it records.
+        let mut said: Vec<(Arc<[u8]>, BTreeSet<Id>)> = Vec::new();
         for e in &part.effects {
             self.places.apply(e);
             if let Some((body, keep)) = self.body_of(e) {
                 let bytes = bytes_of(map(vec![(1, Value::Uint(1)), (2, e.to_value())]))?;
                 by_body.entry(body).or_default().push((bytes, keep));
+            }
+            for ev in e.events.iter().flatten() {
+                if ev.name.as_str() == SAID {
+                    let s = Said::read(&ev.to_value(), e.envelope.audience)?;
+                    if !s.hearers.is_empty() {
+                        said.push((bytes_of(e.to_value())?, s.hearers));
+                    }
+                }
             }
         }
         let new_second = self.second != Some(second);
@@ -424,6 +462,17 @@ impl Hub {
             }
             self.second = Some(second);
             self.nodes = self.node_seconds(second)?;
+        }
+        for (bytes, hearers) in &said {
+            for s in self.subs.iter_mut().flatten() {
+                let hears = s
+                    .scopes
+                    .iter()
+                    .any(|sc| matches!(sc, Scope::Follow(b) if hearers.contains(b)));
+                if hears {
+                    s.address(bytes)?;
+                }
+            }
         }
         for i in 0..self.subs.len() {
             self.serve(i, second, new_second, &by_body)?;
@@ -455,11 +504,18 @@ impl Hub {
         None
     }
 
-    fn node_seconds(&self, second: i64) -> R<BTreeMap<Id, NodeSecond>> {
-        let mut out = BTreeMap::new();
-        for (node, cells) in self.places.cells() {
-            out.insert(node, node_second(node, second, &cells)?);
+    /// Every node's items for a new world second, and its counts by cell kept for the next.
+    fn node_seconds(&mut self, second: i64) -> R<BTreeMap<Id, NodeSecond>> {
+        let mut now = self.places.cells(GRID);
+        // A node whose last body left keeps an empty table, so its cells go as emptied and then as no changes.
+        for (node, (size, _)) in &self.tables {
+            now.entry(*node).or_insert_with(|| (*size, Table::new()));
         }
+        let mut out = BTreeMap::new();
+        for (node, t) in &now {
+            out.insert(*node, node_second(*node, second, t, self.tables.get(node))?);
+        }
+        self.tables = now;
         Ok(out)
     }
 
@@ -479,10 +535,11 @@ impl Hub {
                 if let Some(n) = now {
                     s.add(n)?;
                     // Its counts as they are now, before the old room goes (a change of room is rare: one pass).
-                    let cells = places.cells().remove(&n).unwrap_or_default();
+                    // Built from mid-second, so not a table the next second's changes apply to: that one is whole.
+                    let t = places.cells(GRID).remove(&n).unwrap_or_default();
                     s.urgent.push_back(Out {
                         kind: Kind::Cells,
-                        bytes: node_second(n, second, &cells)?.cells,
+                        bytes: node_second(n, second, &t, None)?.cells,
                     });
                 }
                 if let Some(o) = was {
@@ -534,18 +591,33 @@ impl Hub {
         let mut cells: Vec<Out> = Vec::new();
         let mut counts: Vec<Out> = Vec::new();
         if new_second {
+            // A table is kept only while every second's changes reach the client.
+            if s.resync || s.grant.level == Level::Counts {
+                s.tables.clear();
+                s.resync = false;
+            }
             for n in &s.held {
                 let built;
                 let ns = match nodes.get(n) {
                     Some(ns) => ns,
                     None => {
-                        built = node_second(*n, second, &[])?;
+                        built = node_second(*n, second, &(0, Table::new()), None)?;
                         &built
                     }
                 };
-                cells.push(Out {
-                    kind: Kind::Cells,
-                    bytes: ns.cells.clone(),
+                let changes = ns.changes.clone().filter(|_| s.tables.contains(n));
+                cells.push(match changes {
+                    Some(bytes) => Out {
+                        kind: Kind::Changes,
+                        bytes,
+                    },
+                    None => {
+                        s.tables.insert(*n);
+                        Out {
+                            kind: Kind::Cells,
+                            bytes: ns.cells.clone(),
+                        }
+                    }
                 });
                 counts.push(Out {
                     kind: Kind::Count,
@@ -574,24 +646,61 @@ impl Hub {
     }
 }
 
-fn node_second(node: Id, second: i64, cells: &[(i64, i64, u32)]) -> R<NodeSecond> {
-    let total: u64 = cells.iter().map(|c| u64::from(c.2)).sum();
-    let list = cells
-        .iter()
-        .map(|&(i, j, n)| Value::Array(vec![int(i), int(j), Value::Uint(n.into())]))
-        .collect();
+/// A node's items for world second `second`: its whole table (`now`, with its grid's size), the cells changed since
+/// `prev` (unless there is none or its grid's size differs), and its one count.
+fn node_second(
+    node: Id,
+    second: i64,
+    now: &(i64, Table),
+    prev: Option<&(i64, Table)>,
+) -> R<NodeSecond> {
+    let (size, t) = now;
+    let total: u64 = t.values().map(|n| u64::from(*n)).sum();
+    let row =
+        |(i, j): (i64, i64), n: u32| Value::Array(vec![int(i), int(j), Value::Uint(n.into())]);
+    let head = |k: u64| vec![(1, Value::Uint(k)), (2, node.to_value()), (3, int(second))];
+    let mut cells = head(3);
+    cells.push((
+        4,
+        Value::Array(t.iter().map(|(c, n)| row(*c, *n)).collect()),
+    ));
+    cells.push((5, int(*size)));
+    let changes = match prev {
+        Some((was_size, was)) if was_size == size => {
+            let mut rows = Vec::new();
+            for c in t.keys().chain(was.keys().filter(|c| !t.contains_key(c))) {
+                let n = t.get(c).copied().unwrap_or(0);
+                if was.get(c) != Some(&n) {
+                    rows.push((*c, n));
+                }
+            }
+            rows.sort_unstable();
+            let mut v = head(10);
+            v.push((
+                4,
+                Value::Array(rows.into_iter().map(|(c, n)| row(c, n)).collect()),
+            ));
+            Some(bytes_of(map(v))?)
+        }
+        _ => None,
+    };
+    let mut count = head(4);
+    count.push((4, Value::Uint(total)));
     Ok(NodeSecond {
-        cells: bytes_of(map(vec![
-            (1, Value::Uint(3)),
-            (2, node.to_value()),
-            (3, int(second)),
-            (4, Value::Array(list)),
-        ]))?,
-        count: bytes_of(map(vec![
-            (1, Value::Uint(4)),
-            (2, node.to_value()),
-            (3, int(second)),
-            (4, Value::Uint(total)),
-        ]))?,
+        cells: bytes_of(map(cells))?,
+        changes,
+        count: bytes_of(map(count))?,
     })
+}
+
+/// The bytes of a node's counts by cell in one world second, whole and as changes since `prev`: for measuring the
+/// forms (the `subscription` bench).
+pub fn cell_bytes(
+    node: Id,
+    second: i64,
+    now: &(i64, Table),
+    prev: Option<&(i64, Table)>,
+) -> R<(usize, Option<usize>)> {
+    let ns = node_second(node, second, now, prev)?;
+    Ok((ns.cells.len(), ns.changes.map(|c| c.len())))
 }

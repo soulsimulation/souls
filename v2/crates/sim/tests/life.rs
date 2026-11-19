@@ -9,7 +9,7 @@ use replica::bodies::{Class, Family};
 use replica::effects::{Change, fixture_bytes};
 use replica::encode::{Name, Value, decode};
 use replica::ids::{Id, Minter, Scope};
-use replica::moves::{Effector, Move, Seat};
+use replica::moves::{Effector, Move, Place};
 use replica::pose::{Quat, Support, Vec3, fixture};
 use sim::controller::Stance;
 use sim::ground::Piece;
@@ -17,7 +17,7 @@ use sim::host::{Runner, named};
 use sim::life::{Birth, Life, Ring};
 use sim::mover::Surface;
 use sim::moves::{Moves, Reach, load};
-use sim::slots::{Request, SeatAt, Slots};
+use sim::slots::{PlaceAt, Request, Slots};
 use sim::timers::{DueList, Timer};
 
 const FAMILIES: &str = include_str!("../../replica/fixtures/bodies/families.diag");
@@ -95,13 +95,13 @@ fn world() -> World {
     let mut mint = Minter::new(Scope([0xb3; 16]));
     let thing = mint.mint().expect("id");
     let entry = mint.mint().expect("id");
-    let seat = Seat::from_value(&value(CHAIR)).expect("the chair's seat");
+    let place = Place::from_value(&value(CHAIR)).expect("the chair's place");
     let mut slots = Slots::new();
     slots
-        .add(SeatAt {
+        .add(PlaceAt {
             thing,
-            point: Vec3::new(0, seat.height, 0),
-            seat,
+            point: Vec3::new(0, place.height, 0),
+            place,
             facing: Quat::IDENTITY,
             floor,
         })

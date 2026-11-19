@@ -16,15 +16,15 @@ use replica::effects::{Actor, Cause, Header, Part, fixture_bytes, read_id, schem
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Purpose, Scope, Version};
 use replica::intents::{Intent, Target};
-use replica::moves::Seat;
+use replica::moves::Place;
 use replica::pose::{Frame, Quat, Vec3};
 use sim::links::Doors;
 use sim::log::{Mem, recover};
-use sim::slots::SeatAt;
+use sim::slots::PlaceAt;
 use sim::walk::town::Town;
 use worldd::answers::{self, Config, MOVE_ENDED, MOVE_STARTED};
 use worldd::bodies::Bodies;
-use worldd::checkers::lamps;
+use worldd::checkers::toggles;
 
 const LINEAGE: Scope = Scope([0x4b; 16]);
 const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
@@ -101,10 +101,10 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     )?;
     let mut b = Bodies::new(town, 50_000)?;
     b.add_body(humanoid(), at)?;
-    let seat = Seat::from_value(&decode(&fixture_bytes(CHAIR)?).unwrap().value)?;
-    b.add_seat(SeatAt {
+    let place = Place::from_value(&decode(&fixture_bytes(CHAIR)?).unwrap().value)?;
+    b.add_place(PlaceAt {
         thing: thing(),
-        seat,
+        place,
         point: seat_at(),
         facing: Quat::IDENTITY,
         floor: ground,
@@ -224,8 +224,8 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
     cfg.tick = Duration::from_millis(50);
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     let world = answers::start(
-        lamps::World::build(0, 0, 0).replica,
-        lamps::rules(),
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
         store.clone(),
         cfg,
     )

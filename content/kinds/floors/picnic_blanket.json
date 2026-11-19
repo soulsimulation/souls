@@ -1,0 +1,52 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:picnic_blanket",
+  "owner": "thing",
+  "state": {"spread":{"n":1,"type":"bool","default":true,"audience":{"rule":"everyone"}}},
+  "points": {"side":{"role":"stand","at_mm":[0,0,1100]}},
+  "geometry": {"bounds_mm":[1800,250,1800]},
+  "forms": {
+    "fold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"spread","is":true},{"need":"hand","free":true}],
+      "steps": [{"step":"walk_to","point":"side"},{"step":"wait","us":4000000}],
+      "effects": [{"change":"set","field":"spread","to":false,"event":"folded"}]
+    },
+    "spread": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"hand","free":true}],
+      "steps": [{"step":"walk_to","point":"side"},{"step":"wait","us":4000000}],
+      "effects": [{"change":"set","field":"spread","to":true,"event":"spread_out"}]
+    }
+  },
+  "areas": {"top":{"allows":{"sit":"on","lie":"on"}}},
+  "motion": {"how":"two_hands"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:picnic_blanket",
+    "table": [
+      {"part":"body","field":"spread","do":"show","at":{"true":1,"false":0}},
+      {"part":"flip","field":"spread","do":"show","at":{"true":0,"false":1}}
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"box","at":[0,10,0],"size":[1600,20,1600],"color":"#c94a4a","role":"body"},
+        {"kind":"box","at":[300,120,300],"size":[400,220,280],"color":"#a07a4a"},
+        {"kind":"box","at":[-300,60,-300],"size":[450,120,400],"color":"#c94a4a","role":"flip"}
+      ],
+      "tags": ["picnic","picnic-blanket"]
+    }
+  },
+  "text": {
+    "card": "A checked picnic blanket with a basket: spread it, sit on it, fold it.",
+    "picnic": "picnic",
+    "blanket": "blanket",
+    "rug": "rug",
+    "howto_fold": "Fold it, then spread it out again."
+  },
+  "card": {"text":"card","category":"picnic","synonyms":["blanket","rug"]},
+  "howtos": {"fold":{"text":"howto_fold","steps":[{"form":"fold"},{"form":"spread"}]}}
+}

@@ -11,8 +11,13 @@
 // Times its own runs: the wall-clock rule (K7) binds the engine, not this test.
 #![allow(clippy::disallowed_methods)]
 
+mod common;
+
 use replica::encode::Name;
 use replica::ids::{Id, Scope};
+use replica::pose::Vec3;
+use sim::controller::Controller;
+use sim::host::Runner;
 use sim::index::{Index, Layers, Rect};
 use std::hint::black_box;
 use std::time::Instant;
@@ -183,11 +188,72 @@ fn a2_thing_queries_match_a_scan() {
     }
 }
 
-/// A4: an index kept across 400 steps of a seeded crowd that gathers into one square and spreads out again, so its
-/// node splits and merges, asked the same questions as an index that never splits. (Its half on N7's `Crowd` went
-/// with the `Crowd`, retired by T9c #3127; the walk skill through the host keeps its own neighbour grid.)
+/// Every walker's position and velocity, tick by tick: its effect stream, walked by the walk skill through the host's
+/// runner on the test world's open ground, its neighbours read from the controller's index (split or fixed).
+fn walk_crowd(split: bool) -> Vec<Vec<(Vec3, Vec3)>> {
+    let (mut t, _) = common::town(b"souls/index-test/1");
+    let ground = t.ground;
+    let mut c = Runner::new(50_000);
+    if !split {
+        c.controller = Controller::with_index(Index::fixed());
+    }
+    let mut r = Rng(5);
+    // 64 walkers packed 0.2 m apart in one 2 m square (over the split mark), each bound for a seeded spot 20 m off,
+    // and 64 more coming the other way through them.
+    for k in 0..128u64 {
+        let (i, j) = ((k % 64) / 8, k % 8);
+        let x = if k < 64 { -10_000_000 } else { 10_000_000 };
+        let at = Vec3::new(
+            x + 100_000 + i as i64 * 200_000,
+            0,
+            100_000 + j as i64 * 200_000,
+        );
+        let goal = Vec3::new(
+            -x + r.range(-3_000_000, 3_000_000),
+            0,
+            r.range(-6_000_000, 6_000_000),
+        );
+        let body = common::stand(&t, id(10 + k), ground, at);
+        common::walk(&mut c, &mut t, body, 1_400_000, ground, goal)
+            .unwrap_or_else(|e| panic!("no plan: {}: {}", e.name, e.detail));
+    }
+    let mut out = vec![Vec::new(); 128];
+    for _ in 0..1_200 {
+        if c.runs.is_empty() {
+            break;
+        }
+        c.tick(&mut t)
+            .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
+        for (k, b) in c.controller.bodies().enumerate() {
+            out[k].push((b.pose.position, b.linear));
+        }
+    }
+    assert!(c.runs.is_empty(), "the crowd arrives");
+    let ix = c.controller.near();
+    if split {
+        assert!(ix.splits > 0, "the crowded square split");
+    } else {
+        assert_eq!((ix.splits, ix.merges), (0, 0));
+    }
+    out
+}
+
+/// A4: each body's stream is identical with cell splitting on and off: the walk skill's crowd on the host's runner (its
+/// neighbours read from the controller's index), and an index kept across 400 steps of a seeded crowd that gathers into one square and spreads
+/// out again, so its node splits and merges, asked the same questions as an index that never splits.
 #[test]
 fn a4_streams_identical_with_splitting_on_and_off() {
+    let (on, off) = (walk_crowd(true), walk_crowd(false));
+    assert_eq!(
+        on, off,
+        "the crowd walks the same with splitting on and off"
+    );
+    println!(
+        "A4: 128 walkers through one another, from two 2 m squares of 64: {} ticks, every walker's position and \
+         velocity equal with splitting on and off",
+        on[0].len()
+    );
+
     let node = id(3);
     let (mut a, mut b) = (Index::new(), Index::fixed());
     let mut r = Rng(9);

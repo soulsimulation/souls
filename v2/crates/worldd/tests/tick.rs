@@ -16,16 +16,16 @@ use replica::encode::{Name, Value, decode, encode};
 use replica::host::{Host, Progress, Skill};
 use replica::ids::{Hash, Id, Purpose, Scope, Version};
 use replica::intents::{Intent, Target};
-use replica::moves::Seat;
+use replica::moves::Place;
 use replica::pose::{Frame, Quat, Vec3};
 use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::recorder;
-use sim::slots::SeatAt;
+use sim::slots::PlaceAt;
 use sim::walk::town::Town;
 use worldd::answers::{self, Config, Event, Ran, STATE, World};
 use worldd::bodies::{Bodies, Placed};
-use worldd::checkers::lamps;
+use worldd::checkers::toggles;
 
 const LINEAGE: Scope = Scope([0x18; 16]);
 const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
@@ -78,8 +78,8 @@ fn chair() -> Id {
 }
 
 /// The lamps world: one room, three bodies, each with its lamp.
-fn lamp_world() -> lamps::World {
-    lamps::World::build(1, 3, 0)
+fn lamp_world() -> toggles::World {
+    toggles::World::build(1, 3, 0)
 }
 
 fn pairs() -> Vec<(Id, Id)> {
@@ -135,10 +135,10 @@ fn bodies(placed: &Placed, panic: bool) -> Result<Bodies, replica::effects::Refu
     if panic {
         b.runner.add(humanoid(), panicker, Box::new(Panics))?;
     }
-    let seat = Seat::from_value(&decode(&fixture_bytes(CHAIR)?).unwrap().value)?;
-    b.add_seat(SeatAt {
+    let place = Place::from_value(&decode(&fixture_bytes(CHAIR)?).unwrap().value)?;
+    b.add_place(PlaceAt {
         thing: chair(),
-        seat,
+        place,
         point: Vec3::new(-36_000_000, 450_000, 30_000_000),
         facing: Quat::IDENTITY,
         floor: ground,
@@ -157,7 +157,7 @@ fn start_with(store: Mem, panic: bool, checkpoints: Option<std::path::PathBuf>) 
     cfg.checkpoints = checkpoints.map(|d| (d, 4_096));
     cfg.views = true;
     cfg.bodies = Some(Box::new(move |p: &Placed| bodies(p, panic)));
-    answers::start(w.replica, lamps::rules(), store, cfg).expect("the world starts")
+    answers::start(w.replica, toggles::rules(), store, cfg).expect("the world starts")
 }
 
 fn intent(body: Id, sequence: u64, verb: &str, target: Option<Id>, point: Option<Vec3>) -> Vec<u8> {
@@ -505,7 +505,7 @@ fn k18c_a1_a2_restart_from_the_newest_checkpoint_seated_stays_seated() {
         answer(&rise)
     );
     assert!(
-        matches!(&refused, Err(r) if r == "seat-taken"),
+        matches!(&refused, Err(r) if r == "place-taken"),
         "the seat is held: {refused:?}"
     );
     assert!(after.seated.is_empty(), "risen: {:?}", after.seated);
@@ -534,7 +534,7 @@ fn a1_the_real_clock_paces_the_loop() {
     let w = lamp_world();
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.bodies = Some(Box::new(|p: &Placed| bodies(p, false)));
-    let world = answers::start(w.replica, lamps::rules(), Mem::with(Vec::new()), cfg).unwrap();
+    let world = answers::start(w.replica, toggles::rules(), Mem::with(Vec::new()), cfg).unwrap();
     std::thread::sleep(Duration::from_millis(200));
     let (t0, _) = world.beat.read();
     std::thread::sleep(Duration::from_secs(2));

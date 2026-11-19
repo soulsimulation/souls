@@ -254,6 +254,11 @@ impl NodeRef<'_> {
         self.tree.place_of(self.rec)
     }
 
+    /// Its hash as last sealed (K5), covering its children's: none once changed and not sealed since (R5 reads it).
+    pub fn sealed(&self) -> Option<Hash> {
+        self.rec.hash
+    }
+
     /// The motion its last sample gave it, while it moves.
     pub fn moved(&self) -> Option<Moved> {
         match self.rec.at {
@@ -284,9 +289,15 @@ pub struct Tree {
     in_flight: BTreeMap<Id, Away>,
     arrived: BTreeSet<Id>,
     timers: BTreeMap<Id, TimerState>,
+    /// Pending timer ids by their node, so a remove drops its subtree's timers without walking them all. Lookup only.
+    timers_of: HashMap<Id, BTreeSet<Id>>,
     time: Vec<TimeEffect>,
     undo: Vec<Undo>,
     dead: Vec<u32>,
+    /// The gaps a view declared for the part being applied ([`Tree::apply_gaps`]), each `(first, count)`, and how many
+    /// were met. Empty between parts.
+    gaps: Vec<(u64, u64)>,
+    gaps_met: usize,
     node_reads: Reads,
     link_reads: Reads,
 }
@@ -319,9 +330,12 @@ impl Tree {
             in_flight: BTreeMap::new(),
             arrived: BTreeSet::new(),
             timers: BTreeMap::new(),
+            timers_of: HashMap::new(),
             time: Vec::new(),
             undo: Vec::new(),
             dead: Vec::new(),
+            gaps: Vec::new(),
+            gaps_met: 0,
             node_reads: Reads(Some(AtomicU64::new(0))),
             link_reads: Reads(Some(AtomicU64::new(0))),
         };
@@ -438,9 +452,12 @@ impl Tree {
             in_flight: self.in_flight.clone(),
             arrived: self.arrived.clone(),
             timers: self.timers.clone(),
+            timers_of: self.timers_of.clone(),
             time: self.time.clone(),
             undo: Vec::new(),
             dead: self.dead.clone(),
+            gaps: Vec::new(),
+            gaps_met: 0,
             node_reads: Reads(None),
             link_reads: Reads(None),
         }
@@ -874,6 +891,19 @@ impl Tree {
         self.transact(header, part, None)
     }
 
+    /// Applies a part of a view (T7 rule 4) as a viewer does: a view skips the entries it does not hold, and says which.
+    /// Each declared gap, `(first, count)` in sequence order, is the sequences `first..first + count` the view did not
+    /// hold; the entry after it must come at exactly `first + count`, every gap must be met, and any other jump is still
+    /// `sequence-gap`. All of it or none.
+    pub fn apply_gaps(&mut self, header: &Header, part: &Part, gaps: &[(u64, u64)]) -> R<()> {
+        self.gaps = gaps.to_vec();
+        self.gaps_met = 0;
+        let r = self.transact(header, part, None);
+        self.gaps.clear();
+        self.gaps_met = 0;
+        r
+    }
+
     /// Applies a part as the zone's writer commits it: the same apply, plus T2's checks on each change and the
     /// balance of amounts moved over the part ([`Rules`]). All of it or none.
     pub fn commit(&mut self, header: &Header, part: &Part, rules: &Rules) -> R<()> {
@@ -907,6 +937,12 @@ impl Tree {
         {
             result = rules.balanced(effects);
         }
+        if result.is_ok() && self.gaps_met != self.gaps.len() {
+            result = refuse(
+                "gap-unmet",
+                format!("{} declared gaps, {} met", self.gaps.len(), self.gaps_met),
+            );
+        }
         if result.is_err() {
             while let Some(u) = self.undo.pop() {
                 u(self);
@@ -923,6 +959,18 @@ impl Tree {
 
     fn entry(&mut self, header: &Header, e: &Effect, rules: Option<&Rules>) -> R<()> {
         let env = e.envelope;
+        if let Some(&(first, count)) = self.gaps.get(self.gaps_met)
+            && first == self.next
+            && first.checked_add(count) == Some(env.sequence)
+        {
+            // A gap the view declared (`apply_gaps`): the entries it did not hold.
+            self.gaps_met += 1;
+            self.next = env.sequence;
+            self.log(move |t| {
+                t.next = first;
+                t.gaps_met -= 1;
+            });
+        }
         if env.sequence != self.next {
             return refuse(
                 "sequence-gap",
@@ -982,25 +1030,42 @@ impl Tree {
                     due: *due,
                     name: name.clone(),
                 };
-                self.timers.insert(*timer, state);
+                self.timer_put(*timer, state);
                 let timer = *timer;
                 self.log(move |t| {
-                    t.timers.remove(&timer);
+                    t.timer_take(timer);
                 });
             }
             TimerRec::Clear { timer } => match self.timers.get(timer) {
-                Some(s) if s.node == node => {
-                    let timer = *timer;
-                    let old = self.timers.remove(&timer);
-                    self.log(move |t| {
-                        t.timers.extend(old.map(|o| (timer, o)));
-                    });
-                }
+                Some(s) if s.node == node => self.timer_drop(*timer),
                 Some(_) => return refuse("not-own-node", show(*timer)),
                 None => return refuse("timer-missing", show(*timer)),
             },
         }
         Ok(())
+    }
+
+    fn timer_put(&mut self, id: Id, state: TimerState) {
+        self.timers_of.entry(state.node).or_default().insert(id);
+        self.timers.insert(id, state);
+    }
+
+    fn timer_take(&mut self, id: Id) -> Option<TimerState> {
+        let state = self.timers.remove(&id)?;
+        if let Some(ids) = self.timers_of.get_mut(&state.node) {
+            ids.remove(&id);
+            if ids.is_empty() {
+                self.timers_of.remove(&state.node);
+            }
+        }
+        Some(state)
+    }
+
+    /// Drops a pending timer (a clear, or its node's remove), logged so a refused part puts it back.
+    fn timer_drop(&mut self, id: Id) {
+        if let Some(old) = self.timer_take(id) {
+            self.log(move |t| t.timer_put(id, old));
+        }
     }
 
     fn fresh(&self, id: Id) -> R<()> {
@@ -1086,6 +1151,11 @@ impl Tree {
                         .collect();
                     for l in ends {
                         self.link_take(l);
+                    }
+                    // The subtree's pending timers go with it, in the same commit (K2b, #3132).
+                    let id = self.nodes[*s as usize].id;
+                    for timer in self.timers_of.get(&id).cloned().unwrap_or_default() {
+                        self.timer_drop(timer);
                     }
                 }
                 for s in gone {
