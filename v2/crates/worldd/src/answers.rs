@@ -145,6 +145,8 @@ pub struct Config {
     /// Makes the world's bodies, on the clock thread, for move intents (I4b, #3156); without them a move is refused
     /// `intent.not-a-form-on-a-node`.
     pub bodies: Option<MakeBodies>,
+    /// The view tier, handed each tick's record once it is on the disk (#3292).
+    pub views: Option<crate::views::served::Feed>,
 }
 
 impl Config {
@@ -161,6 +163,7 @@ impl Config {
             health: None,
             now,
             bodies: None,
+            views: None,
         }
     }
 }
@@ -769,17 +772,22 @@ fn answer_loop<S: Storage + 'static>(
     mut log: Log<S>,
     ticks: Receiver<Tick>,
     measures: Option<Arc<Measures>>,
+    views: Option<crate::views::served::Feed>,
 ) {
     for (n, t) in ticks.into_iter().enumerate() {
         let n = n as u64;
         if let Some(m) = &measures {
             m.queues[measures::LOG].enter(n, t.handed.unwrap_or_else(measures::steady_us));
         }
-        if let Some(record) = t.record
-            && let Err(e) = log.append(record).and_then(|n| log.wait_durable(n + 1))
-        {
-            eprintln!("worldd: the log failed, nothing more is answered: {e}");
-            return;
+        if let Some(record) = t.record {
+            let copy = views.as_ref().map(|v| (v, record.clone()));
+            if let Err(e) = log.append(record).and_then(|n| log.wait_durable(n + 1)) {
+                eprintln!("worldd: the log failed, nothing more is answered: {e}");
+                return;
+            }
+            if let Some((v, r)) = copy {
+                v.record(r);
+            }
         }
         let synced = measures.as_ref().map(|_| measures::steady_us());
         for (waiters, frame, mut stamps) in t.replies {
@@ -866,10 +874,10 @@ pub fn start<S: Storage + 'static>(
         measures::write_health(Arc::clone(m), path, measures::EVERY);
     }
     let (answers, ticks) = channel();
-    let m = measures.clone();
+    let (m, views) = (measures.clone(), cfg.views.take());
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks, m))
+        .spawn(move || answer_loop(log, ticks, m, views))
         .map_err(io)?;
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
