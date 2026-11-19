@@ -4001,3 +4001,79 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+mod standing_order_carry_tests {
+    use super::*;
+
+    fn effect(intent: Id, ended: bool) -> Effect {
+        Effect {
+            envelope: Envelope {
+                sequence: 0,
+                at: 1,
+                cause: Cause::Intent(intent),
+                actor: Actor::Soul(intent),
+                audience: Audience::Everyone,
+                node: intent,
+            },
+            body: Body::Changes(Vec::new()),
+            events: Some(vec![replica::effects::Event {
+                name: name(if ended {
+                    "souls:order-ended"
+                } else {
+                    "souls:order"
+                }),
+                fields: BTreeMap::from([
+                    (1, intent.to_value()),
+                    (
+                        2,
+                        Value::Text(name(if ended {
+                            "souls:order-cancelled"
+                        } else {
+                            "souls:hold"
+                        })),
+                    ),
+                ]),
+                changes: Vec::new(),
+                rest: Rest::new(),
+            }]),
+            rest: Rest::new(),
+        }
+    }
+
+    #[test]
+    fn carry_preserves_fifo_ignores_overlap_and_forgets_ended_orders() {
+        let a = Id::new(Scope([0x73; 16]), 1).unwrap();
+        let b = Id::new(Scope([0x73; 16]), 2).unwrap();
+        let mut active = Vec::new();
+        remember_orders(&mut active, &[effect(a, false), effect(b, false)]);
+        remember_orders(&mut active, &[effect(a, false)]); // checkpoint/tail overlap is idempotent.
+        assert_eq!(
+            active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
+            vec![a, b]
+        );
+        let carry = Carry {
+            orders: active.iter().map(Effect::to_value).collect(),
+            ..Carry::default()
+        };
+        let bytes = carry.to_bytes();
+        assert_eq!(Carry::read(&bytes).unwrap().orders, carry.orders);
+        let Value::Map(mut old) = decode(&bytes).unwrap().value else {
+            panic!("carry")
+        };
+        old.remove(&5);
+        assert!(
+            Carry::read(&encode(&Value::Map(old)).unwrap())
+                .unwrap()
+                .orders
+                .is_empty(),
+            "older carry reads without orders"
+        );
+        remember_orders(&mut active, &[effect(a, true)]);
+        assert_eq!(
+            active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
+            vec![b],
+            "cancelled order cannot restart"
+        );
+    }
+}

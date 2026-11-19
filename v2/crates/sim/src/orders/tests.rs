@@ -860,6 +860,10 @@ fn served_soul_body_is_resolved_internally_and_restored_without_a_wire_body_fiel
     let soul = Id::new(Scope([0x11; 16]), 99).unwrap();
     let mut i = w.intent(soul, "souls:hold", None, Vec::new(), 600_000_000);
     i.body = Some(body); // Only the authenticated world's resolver supplies this internal field.
+    assert!(
+        Intent::read(&encode(&i.to_value()).unwrap()).is_err(),
+        "client-selected Soul body refused on wire"
+    );
     let id = w.accept(&i).expect("resolved body accepted");
     assert_eq!(w.orders.open(body).unwrap().actor, Actor::Soul(soul));
     let ev = event(&w.orders.log[0]);

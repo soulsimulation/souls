@@ -530,3 +530,28 @@ fn c19_three_bodies_share_a_thing_each_in_its_own_slot() {
         assert_eq!(w.slots.held_by(b[3]), None);
     }
 }
+
+#[test]
+fn seat_ownership_changes_wake_once_for_take_and_release() {
+    let mut w = world(chair());
+    assert!(w.slots.changes().is_empty());
+    let sit = mv("souls:sit");
+    w.sit(&[0], &sit)[0].1.as_ref().expect("taken");
+    assert_eq!(w.slots.changes(), vec![w.chair]);
+    assert!(w.slots.changes().is_empty(), "taking events drains them");
+    w.c.claim(w.bodies[0], &seated_shape())
+        .expect("cancel before contact");
+    w.run(i64::MAX);
+    assert_eq!(
+        w.slots.changes(),
+        vec![w.chair],
+        "phase release wakes the line"
+    );
+    assert!(w.slots.changes().is_empty());
+    w.sit(&[1], &sit)[0].1.as_ref().expect("taken again");
+    assert_eq!(w.slots.changes(), vec![w.chair]);
+    w.slots
+        .release_body(w.bodies[1])
+        .expect("retirement releases seat");
+    assert_eq!(w.slots.changes(), vec![w.chair]);
+}
