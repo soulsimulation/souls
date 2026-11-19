@@ -18,7 +18,9 @@
 //! - `log.text/`: K16's text store, every word said in the world (O20b, #3523).
 //! - `views/`: V1's stream of the zone's root (full, everyone), written by a view tier of the process's own, and
 //!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
-//!   folder (history is V3's, not written here yet), which the page reads for `?world=`.
+//!   folder, which the page reads for `?world=` and pairing for the Soul's `history` (R16b, #3480). With a store
+//!   (below) the history is the archive's, `../../s/h/<world name>/<lineage hex>/`: the origin serves worlds under
+//!   `w/` and the store beside them under `s/`, as the page's own links do (V9).
 //! - `gateway.sock`: the gateway's local socket (I1's framing, `answers::serve`), unless `--socket` or
 //!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
 //!   name is 67). `health.json`: O4's.
@@ -494,6 +496,9 @@ fn bodies(
 
 type Bucket = Shared<supervisor::bucket::Bucket>;
 
+/// How often a running world's open event index is written, at most (R16b): a question sees acts this old.
+const VIEWS_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The archive's store on a restart (O3b): V3's shelf starts from record 0 again and writes its bundles and indexes
 /// as new. A create refused because the key exists is passed when the bytes are the same, and otherwise writes over
 /// them (a day's index, or a window closed at a graceful stop, made again from more records).
@@ -557,22 +562,34 @@ fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Resu
 }
 
 /// V3's archiver on a thread of its own: each part as it comes, and the day's bundle index written again each time a
-/// bundle closes, so a running world's bundles are found before its day ends.
+/// bundle closes, so a running world's bundles are found before its day ends. The open day's event index and counts
+/// (V4) are written as they stand at most each [`VIEWS_EVERY`] while new parts come, so R16's `history` reads a
+/// running world's day (R16b, #3480).
 fn archiving(
     mut a: Archiver<Again>,
     rx: Receiver<(u64, Vec<u8>)>,
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
     std::thread::spawn(move || {
         let mut indexed = a.shelf.writes.bundles;
+        let (mut fresh, mut viewed) = (false, std::time::Instant::now());
         loop {
             match rx.recv_timeout(shipping::POLL * 20) {
-                Ok((n, bytes)) => a.push(n, bytes)?,
+                Ok((n, bytes)) => {
+                    a.push(n, bytes)?;
+                    fresh = true;
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return a.flush(),
             }
             if a.shelf.writes.bundles != indexed {
                 a.shelf.flush()?;
                 indexed = a.shelf.writes.bundles;
+            }
+            if fresh && viewed.elapsed() >= VIEWS_EVERY {
+                for (k, v) in a.open_views()? {
+                    a.shelf.put_view(&k, &v)?;
+                }
+                (fresh, viewed) = (false, std::time::Instant::now());
             }
         }
     })
@@ -838,8 +855,13 @@ fn serve(args: &[String]) -> R<()> {
     let now = answers::now();
     let writer =
         Writer::create(&views, &built.header, &key, (now, (now / 1000) as u64)).map_err(refusal)?;
+    // The history the world advertises (R16b): the archive's when it runs, as the origin serves the store.
+    let history = match off.as_ref().and_then(|o| o.archive.as_ref()) {
+        Some(_) => format!("../../s/h/{name}/{}/", to_hex(&built.root.scope().0)),
+        None => "history/".to_owned(),
+    };
     let pointer = format!(
-        "{{\"stream\": \"views/{}/\", \"history\": \"history/\"}}\n",
+        "{{\"stream\": \"views/{}/\", \"history\": \"{history}\"}}\n",
         stream::dir(&built.header, &key)
     );
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;

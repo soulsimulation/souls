@@ -3,7 +3,7 @@
 // `elongation / 15` hours earlier (good to a few degrees), and the star field turned about the celestial pole at the
 // sidereal rate. On the record's calendar and today's equator sun (`sun.ts`), so a seek draws what playing draws.
 import * as THREE from 'three';
-import { civil, localAt, offsetAt, type SkyRecord } from './record.ts';
+import { civil, offsetAt, skyLocalAt, type SkyRecord } from './record.ts';
 import { daylightFactors, solar } from './sun.ts';
 
 const SYNODIC = 29.530588853, NEW_MOON_MS = Date.UTC(2000, 0, 6, 18, 14), DEG = Math.PI / 180, HOUR_US = 3_600_000_000;
@@ -35,9 +35,9 @@ function sunLocal(local: number, tz: number) {
   return solar(y, m, d, hour, tz, 0, 15 * tz);
 }
 
-/** The sky's bodies at world time `t` (µs) on the record's calendar. */
+/** The sky's bodies at world time `t` (µs) on the record's calendar, on its sky date when it has one. */
 export function skyBodies(r: SkyRecord, t: number): SkyBodies {
-  const local = localAt(r, t), tz = offsetAt(r, t) / HOUR_US, ms = local / 1000;
+  const local = skyLocalAt(r, t), tz = offsetAt(r, t) / HOUR_US, ms = local / 1000;
   const phase = moonPhase(ms), elong = phase * 360;
   const s = sunLocal(local, tz), m = sunLocal(local - (elong / 15) * HOUR_US, tz);
   const a = sunLocal(local - 3 * HOUR_US, tz), b = sunLocal(local + 3 * HOUR_US, tz);
