@@ -1,7 +1,8 @@
 //! Agents' sockets (Engine v2 I1, #2683). `gatewayd` is a program of its own that holds every agent's socket, so a
 //! world restarts without closing one: the agent sees a pause, and each intent it sent is answered once, by its
 //! receipt, by `world.restarting`, or, when the world is away past the intent's deadline, by `act.timed-out` or
-//! `intent.expired` (C8, `world_link`).
+//! `intent.expired` (C8, `world_link`). An act the world says is in progress is passed on as such, and waited for to
+//! the world's own deadline (C20).
 //!
 //! - [`socket`]: one WebSocket per agent, through axum's upgrade, one task and one bounded outbound queue each. The
 //!   first frame each way is T10's (`v2/docs/intents.md` rule 12); sign-in follows it, by header or first message.
@@ -10,6 +11,8 @@
 //! - [`resume`]: a client resumes its stream from a cursor, or is told by name that it must start again.
 //! - [`gate`]: the gate a world's intents pass through while it moves to another machine (O9, #2828).
 //! - [`receipts`]: one line per answered intent in the world's receipts file, for the operator's usage roll-up.
+//! - [`creator`]: a page signed in with W1's session exchanges it for a short token for the world's one creator (W5,
+//!   #2801), so a browser holds the creator's socket.
 //! - [`views`]: a signed-in socket subscribes to R4's view items for its scope (#3292), on a second local socket to
 //!   the world; its frames are keys 30 to 32.
 //! - Stopping (O16, #2809): on SIGTERM the gateway stops accepting, closes each signed-in socket with 1012 (Service
@@ -37,6 +40,12 @@
 //! - gateway → client and back, the owner's messages ([`mailbox`], R13, #2753): WebSocket text frames of JSON, not
 //!   CBOR (and read by the gateway without parsing JSON), apart from the world's stream and never in its log: `{"mail": {"id", "text", "at"}}` out, once per
 //!   socket, and `{"close": {"id", "state", "outcome"}}` back when the act that served it ends.
+//! - page → gateway → page, the owner's box (W10, #2802), on a view socket: text frames, apart from the stream too.
+//!   `put <grant>\n<words>` puts a message for one of the view token's grants (`mailbox::on_view_text`), answered
+//!   `{"sent": {"id"}}` or `{"sent": {"refused"}}`; then, to every view socket whose token holds that grant and to no
+//!   other, `{"mail": {"id", "state": "picked"}}` when it is given to the agent's socket, `{"doing": {"seq", "verb",
+//!   "phase", "outcome"}}` for each intent the agent sends while it is open (the phase is the answer's own: `sent`,
+//!   `accepted`, `receipt`, `refused`, `resolved`), and the agent's own `{"close": …}` once the directory took it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, RwLock};
@@ -44,6 +53,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use replica::encode::Value;
 use tokio::sync::mpsc;
 
+pub mod creator;
 pub mod gate;
 pub mod mailbox;
 pub mod receipts;
@@ -87,6 +97,8 @@ pub const OUTBOUND: usize = 64;
 /// The gateway's shared state.
 pub struct Gateway {
     pub tokens: RwLock<Tokens>,
+    /// The tokens file, read again at a sign-in when it changed (C3, #3367); unset, the tokens are as given.
+    pub tokens_file: std::sync::OnceLock<token::Source>,
     /// The world's pinned build hash, sent in the first frame (T10 rule 12).
     pub build: Vec<u8>,
     pub link: world_link::Link,
@@ -99,10 +111,16 @@ pub struct Gateway {
     pub view_key: std::sync::OnceLock<token::ViewKey>,
     /// The directory's mailbox (`--mailbox`), set once at start; off if unset.
     pub mailbox: std::sync::OnceLock<mailbox::Mailbox>,
+    /// The world's creator and the directory that checks sessions (`--creator`), set once at start; off if unset.
+    pub exchange: std::sync::OnceLock<creator::Exchange>,
     /// Set once when the gateway stops: every signed-in socket closes with [`RESTART`].
     pub closing: tokio::sync::watch::Sender<bool>,
     hub: Mutex<Hub>,
+    /// The view sockets that watch their grants' messages (W10): by number, the grants' keys and the socket's queue.
+    watchers: Mutex<Watchers>,
 }
+
+type Watchers = BTreeMap<u64, (Vec<Vec<u8>>, mpsc::Sender<String>)>;
 
 /// The close code a socket gets when the gateway stops for an upgrade: 1012, Service Restart. The client reconnects
 /// after a random wait, resumes by cursor and sends again every intent it has no answer for.
@@ -124,6 +142,9 @@ struct Held {
     /// The signed-in socket's queue for the owner's messages, and the ids already given to it.
     mail: Option<mpsc::Sender<String>>,
     mailed: BTreeSet<String>,
+    /// W10: the grant's intents sent while a message given to it is open, by sequence, and their verbs. Only acts
+    /// begun after the pickup are told to the owner, so an older act never reads as the answer.
+    doing: BTreeMap<u64, String>,
 }
 
 /// A signed-in socket's place in the hub.
@@ -151,6 +172,7 @@ impl Gateway {
     ) -> Arc<Gateway> {
         Arc::new(Gateway {
             tokens: RwLock::new(tokens),
+            tokens_file: std::sync::OnceLock::new(),
             build,
             link: world_link::Link::default(),
             views: views::Views::default(),
@@ -158,8 +180,10 @@ impl Gateway {
             receipts,
             view_key: std::sync::OnceLock::new(),
             mailbox: std::sync::OnceLock::new(),
+            exchange: std::sync::OnceLock::new(),
             closing: tokio::sync::watch::channel(false).0,
             hub: Mutex::new(Hub::default()),
+            watchers: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -218,6 +242,11 @@ impl Gateway {
         for held in hub.grants.values_mut() {
             held.mailed.retain(|id| ids.contains(id.as_str()));
         }
+        for held in hub.grants.values_mut() {
+            if held.mailed.is_empty() {
+                held.doing.clear();
+            }
+        }
         for (key, id, frame) in &open {
             if let Some(held) = hub.grants.get_mut(key)
                 && let Some(tx) = &held.mail
@@ -225,7 +254,87 @@ impl Gateway {
                 && tx.try_send(frame.clone()).is_ok()
             {
                 held.mailed.insert(id.clone());
+                if mailbox::id_like(id) {
+                    let picked = format!(r#"{{"mail":{{"id":"{id}","state":"picked"}}}}"#);
+                    self.tell_watchers(key, picked);
+                }
             }
+        }
+    }
+
+    /// W10: a view socket watches the messages of `grants`; its number, and the queue its text frames arrive on.
+    pub fn watch(&self, grants: &[Grant]) -> (u64, mpsc::Sender<String>, mpsc::Receiver<String>) {
+        let (tx, rx) = mpsc::channel(OUTBOUND);
+        let mut w = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
+        let n = w.keys().next_back().map_or(1, |n| n + 1);
+        w.insert(n, (grants.iter().map(|g| g.key()).collect(), tx.clone()));
+        (n, tx, rx)
+    }
+
+    /// W10: what a watching view socket may see changed (its token was renewed for other grants).
+    pub fn rewatch(&self, n: u64, grants: &[Grant]) {
+        let mut w = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((keys, _)) = w.get_mut(&n) {
+            *keys = grants.iter().map(|g| g.key()).collect();
+        }
+    }
+
+    /// W10: a view socket stops watching.
+    pub fn unwatch(&self, n: u64) {
+        self.watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&n);
+    }
+
+    /// W10: a text frame for every view socket whose token holds the grant `key`, and no other. A full queue drops it.
+    pub fn tell_watchers(&self, key: &[u8], text: String) {
+        let w = self.watchers.lock().unwrap_or_else(|e| e.into_inner());
+        for (keys, tx) in w.values() {
+            if keys.iter().any(|k| k == key) {
+                let _ = tx.try_send(text.clone());
+            }
+        }
+    }
+
+    /// W10: the grant `key` sent intent `sequence` (`verb`) to the world. Noted, and told to its owner, only while a
+    /// message given to it is open.
+    pub fn sent_intent(&self, key: &[u8], sequence: u64, verb: &str) {
+        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(held) = hub.grants.get_mut(key)
+            && !held.mailed.is_empty()
+        {
+            held.doing.insert(sequence, verb.to_owned());
+            self.tell_watchers(key, mailbox::doing(sequence, verb, "sent", None));
+        }
+    }
+
+    /// W10: a frame for the grant `key` that answers an intent noted by [`Gateway::sent_intent`]: its phase, told to
+    /// the owner. Read only while some are noted, so the stream pays nothing otherwise.
+    fn answered(&self, held: &mut Held, key: &[u8], frame: &[u8]) {
+        if held.doing.is_empty() {
+            return;
+        }
+        let Some((sequence, phase, outcome)) = mailbox::phase_of(frame) else {
+            return;
+        };
+        let Some(verb) = held.doing.get(&sequence).cloned() else {
+            return;
+        };
+        if phase != "accepted" {
+            held.doing.remove(&sequence);
+        }
+        self.tell_watchers(
+            key,
+            mailbox::doing(sequence, &verb, phase, outcome.as_deref()),
+        );
+    }
+
+    /// A text frame for `key`'s signed-in socket alone, now (G11: the directory's reply to that socket's prayer frame).
+    pub fn post_text(&self, key: &[u8], frame: String) {
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(tx) = hub.grants.get(key).and_then(|h| h.mail.as_ref()) {
+            let _ = tx.try_send(frame);
         }
     }
 
@@ -266,7 +375,8 @@ impl Gateway {
     /// signed in. A socket whose queue is full is let go; it resumes from its cursor.
     pub fn deliver(&self, key: Vec<u8>, at: Cursor, frame: Vec<u8>) {
         let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
-        let held = hub.grants.entry(key).or_default();
+        let held = hub.grants.entry(key.clone()).or_default();
+        self.answered(held, &key, &frame);
         held.kept.push(at, frame.clone());
         if let Some((_, tx)) = &held.session
             && tx.try_send(frame).is_err()

@@ -752,6 +752,11 @@ impl<S: Store> Archiver<S> {
         self.shelf.flush()
     }
 
+    /// The open day's event index and counts as they stand, without closing them (a running world's, R16b).
+    pub fn open_views(&self) -> R<Vec<(String, Vec<u8>)>> {
+        self.indexer.clone().finish()
+    }
+
     pub fn writes(&self) -> Writes {
         let mut w = self.packer.writes;
         w.add(self.shelf.writes);

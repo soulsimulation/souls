@@ -75,9 +75,26 @@ fn changes(c: Vec<Change>) -> Body {
 }
 
 /// A link of type `ty` from the actor's end (its Soul when `soul`, else its body) to the node, owned by the node and
-/// seen by everyone.
-pub(super) fn link(cx: &Cx, m: &mut Minter, ty: &Name, soul: bool) -> R<Vec<Entry>> {
+/// seen by everyone; refused `link-full` when the node already owns `most` of that type (C24).
+pub(super) fn link(
+    cx: &Cx,
+    m: &mut Minter,
+    ty: &Name,
+    soul: bool,
+    most: Option<u64>,
+) -> R<Vec<Entry>> {
     let end = if soul { cx.soul } else { cx.body };
+    let has = owned(&cx.view, cx.node, ty).len() as u64;
+    if most.is_some_and(|m| has >= m) {
+        return Err(Refusal {
+            name: "link-full",
+            detail: format!(
+                "{} has {has} of {}",
+                replica::world_model::show(cx.node),
+                ty.as_str()
+            ),
+        });
+    }
     let link = m.mint().map_err(|e| Refusal {
         name: "id-counter-exhausted",
         detail: e.to_string(),

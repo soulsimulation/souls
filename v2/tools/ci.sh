@@ -29,15 +29,19 @@ step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
-# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md).
+# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md); the site's pages it serves (O23, #3324).
 # The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
-step origin-headers node --test tools/origin/origin.test.mjs
+step origin-headers node --test tools/origin/origin.test.mjs tools/origin/site.test.mjs
 # The install (O17, #2810): nothing it would write, and no unit, user or port it names, is today's system's.
 step install-apart bash tools/ops/install.sh check
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
 step cost node --test tools/ops/cost/cost.test.mjs
+# The cut-over's count of what a rollback leaves in the new system (X7, #2836).
+step cutover-count node --test tools/ops/cutover/count.test.mjs
 # The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
+# Imported Souls approved again per day (X15, #3322): counts only, no Soul or account id.
+step ops-reapproved node --test tools/ops/reapproved.test.mjs
 # The watcher (O15, #2808): one message per trouble and recovery, none for a deploy, a stop or a sleep; no look wakes a world.
 step ops-watch node --test tools/ops/watch/watch.test.mjs
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
@@ -132,7 +136,7 @@ step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p re
 # The client's library by build hash (R5, #2699): cached or downloaded, refused by name, run in a worker with a limit.
 step client-sync node --test client/src/sync/*.test.mjs
 # The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4); R5b's resync after a long cut.
-step client-daemon bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/daemon/*.test.mjs'
+step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/daemon/*.test.mjs'
 # The world's clock on every copy (E7b, #3516): world now from the root's fields, against `worldd serve` across a rate change.
 step client-clock bash -c 'cargo build -p gatewayd -p worldd -p testworld --locked --quiet && node --test client/src/clock/*.test.mjs'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
@@ -146,12 +150,22 @@ step client-check node --test client/src/check/*.test.mjs
 step client-memory node --test client/src/memory/*.test.mjs
 # Asking what happened (R16, #2817): a recorded Eden of 100 acting Souls in V4's files, by place, thing and Soul.
 step client-history node --test client/src/history/*.test.mjs
-# Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else.
-step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
+# A home on today's client comes across (R18, #2821): the released 2.36.2 client against the new answers, from v2/ alone.
+step client-upgrade node --test client/test/compat/*.test.mjs client/src/upgrade/*.test.mjs
+# Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else;
+# then a paired Soul joins a served world, acts and leaves, through the gateway (C3, #3367).
+# Pairing to a served world writes the history it advertises, which `history --at` reads (R16b, #3480).
+step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
+  node --test client/src/pair/*.test.mjs'
+# The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.
+step client-served bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
 # Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.
 step client-wake bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/wake/*.test.mjs'
+# The owner's box (W10, #2802): the page's message reaches the waiting agent, the act's phases and the close come back
+# to the owner's view socket alone, and the words are in no log, stream part or world file.
+step web-owner-box node --test web/src/owner/box.e2e.ts
 # The Soul's own schedule (R15, #2757): sent on time with no model turn, once across a kill, missed while off told.
 step client-schedule bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/schedule/*.test.mjs'
 # The MCP endpoint on v2 (R21, #3334): six tools, each answer the thin command's; 401, 405, 413; the card and page.
@@ -177,6 +191,10 @@ step rules-equal node --input-type=module -e '
 # from the same WASM build in Node as natively (tools/facts/wasm.mjs).
 step facts-wasm bash -c 'cargo run -p facts --release --locked --quiet -- vectors target/facts-vectors &&
   node tools/facts/wasm.mjs target/wasm-load/pkg target/facts-vectors'
+# R16's history against the sheet (R16b, #3480): a 120 s recording's event index, asked by place, thing and Soul.
+step facts-history bash -c 'cargo run -p facts --release --locked --quiet -- record target/facts-history 120 &&
+  cargo run -p facts --release --locked --quiet -- sheet target/facts-history history 0 120 target/facts-history/sheet &&
+  node tools/facts/history.mjs target/facts-history target/facts-history/sheet 120'
 # The code hatch (F8, #2823): the world's 1,000 chess-move cases (crates/sim/tests/hatch.rs, in the tests step) through
 # the same WASM build in Node, the daemon's runtime, and in a headless browser, each giving the world's table exactly.
 step hatch-three-hosts bash -c 'node --test client/src/hatch/*.test.mjs && node web/src/hatch/hatch.browser.mjs'
