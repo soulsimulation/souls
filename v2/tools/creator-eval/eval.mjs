@@ -19,7 +19,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,13 +38,15 @@ const opt = (n, d) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] :
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Spawns `cmd` and resolves with the first match of `re` in its standard output. */
-function started(cmd, argv, re, procs) {
-  const p = spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'ignore'] });
+function started(cmd, argv, re, procs, log) {
+  const p = spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'pipe'] });
   procs.push(p);
   return new Promise((ok, fail) => {
     let out = '';
-    p.stdout.on('data', (d) => { out += d; const m = re.exec(out); if (m) ok(m[1]); });
-    p.on('exit', (c) => fail(new Error(`${cmd} ended (${c})`)));
+    p.stdout.on('data', (d) => { appendFileSync(log, d); out += d; const m = re.exec(out); if (m) ok(m[1]); });
+    p.stderr.on('data', (d) => appendFileSync(log, d));
+    p.on('error', fail);
+    p.on('exit', (c) => fail(new Error(`${cmd} ended (${c}); see its service log`)));
   });
 }
 
@@ -56,10 +58,10 @@ async function world(dir, facts, creator) {
     await new Promise((ok, fail) => execFile(bin('worldd'), ['seed', '--facts', facts, '--dir', w, '--souls', '1', '--creator', creator],
       (e) => (e ? fail(e) : ok())));
     writeFileSync(tokens, '');
-    await started(bin('worldd'), ['serve', '--dir', w, '--socket', sock], /(listening) /, procs);
+    await started(bin('worldd'), ['serve', '--dir', w, '--socket', sock], /(listening) /, procs, join(dir, 'worldd.log'));
     const directory = await started(bin('directoryd'), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1', '--store', join(dir, 'directory'),
-      '--test-sign-in', '--test-own', `creator=creator-${creator}`, '--pairing', join(dir, 'pairing.sqlite'), '--gateway-tokens', tokens], /listening on (\S+)\n/, procs);
-    const gw = await started(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', sock, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/, procs);
+      '--test-sign-in', '--test-own', `creator=creator-${creator}`, '--pairing', join(dir, 'pairing.sqlite'), '--gateway-tokens', tokens], /listening on (\S+)\n/, procs, join(dir, 'directoryd.log'));
+    const gw = await started(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', sock, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/, procs, join(dir, 'gatewayd.log'));
     return { directory: `http://${directory}`, gateway: `ws://${gw}/v2/ws`, kinds: join(w, 'world.kinds'), stop: () => procs.forEach((p) => p.kill()) };
   } catch (e) {
     procs.forEach((p) => p.kill());
@@ -127,9 +129,11 @@ export function measure(transcript) {
 
 /** What the run built: each node not in the world before (`before`, ids), by kind, with the kinds of its parents. */
 function built(home, before) {
-  return new Promise((ok) => execFile(process.execPath, [GOD, 'describe'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, maxBuffer: 256 << 20 }, (_, out) => {
-    const d = JSON.parse(String(out).trim().split('\n').at(-1) || '{}');
-    const nodes = d.nodes ?? [];
+  return new Promise((ok, fail) => execFile(process.execPath, [GOD, 'describe'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, maxBuffer: 256 << 20 }, (error, out) => {
+    let d;
+    try { d = JSON.parse(String(out).trim().split('\n').at(-1) || '{}'); } catch { return fail(new Error('describe returned invalid JSON')); }
+    if (error || d.ok === false || !Array.isArray(d.nodes)) return fail(new Error(`describe refused: ${d.code ?? 'no-world'}`));
+    const nodes = d.nodes;
     const kind = new Map(nodes.map((n) => [n.id, n.kind]));
     const parent = new Map(nodes.map((n) => [n.id, n.parent]));
     const path = (id) => { const p = []; for (let at = parent.get(id); at; at = parent.get(at)) p.push(kind.get(at)); return p; };
@@ -160,14 +164,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const pairing = { other: refused.code ?? null, creator: paired.ok ? paired.soul : paired.code };
       if (!paired.ok) throw new Error(`pairing refused: ${paired.code}`);
       copyFileSync(w.kinds, join(f.home, 'kinds', 'local.kinds'));
+      // The gateway rereads the directory's token hashes every two seconds.
+      await sleep(2200);
       for (let k = 0; k < 50; k++) {
         const s = await new Promise((ok) => execFile(process.execPath, [GOD, 'status'], { env: { PATH: process.env.PATH, SOULS_HOME: f.home, SOULS_REPLICA_PKG: PKG } }, (_, o) => ok(String(o))));
         if (/"connected":\s*true/.test(s)) break;
         await sleep(200);
       }
       const before = await built(f.home, new Set());
+      writeFileSync(join(dir, 'describe-before.json'), before.text);
       if (pairOnly) {
-        const row = { run: n, pairing, nodes: before.ids.size };
+        const row = { run: n, pairing, nodes: before.ids.size, describeBytes: Buffer.byteLength(before.text) };
         console.log(JSON.stringify(row));
         all.push(row);
         continue;
@@ -184,6 +191,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(JSON.stringify(row));
       all.push(row);
     } finally {
+      const daemonLog = join(f.home, 'souls', id, 'runtime', 'daemon.log');
+      try { copyFileSync(daemonLog, join(dir, 'daemon.log')); } catch {}
       await new Promise((ok) => execFile(process.execPath, [GOD, 'stop'], { env: { PATH: process.env.PATH, SOULS_HOME: f.home, SOULS_REPLICA_PKG: PKG } }, ok));
       w.stop();
       rmSync(f.at, { recursive: true, force: true });
