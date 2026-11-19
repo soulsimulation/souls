@@ -23,7 +23,7 @@
 // v2/clippy.toml).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,8 +51,21 @@ pub const PARTS: [&str; 6] = [
     "log.sync",  // handed -> on the disk
     "world.out", // on the disk -> its answer handed to the gateway's socket (its writer)
 ];
-/// A tick's phases, in order.
-pub const PHASES: [&str; 4] = ["commit", "deadlines", "record", "publish"];
+/// A tick's phases, in the loop's order (K18's tick, `crate::answers`; #3160): the intents taken, due timers,
+/// the bodies (skills and the controller), committed acts and new moves, the tick's records, the frozen copy and the
+/// hand-off to the answers thread, the auditor's slice, and a checkpoint when one is due.
+pub const PHASES: [&str; 8] = [
+    "take",
+    "timers",
+    "bodies",
+    "commit",
+    "record",
+    "publish",
+    "audit",
+    "checkpoint",
+];
+/// How many phases a tick has.
+pub const NPHASES: usize = PHASES.len();
 /// The world process's queues.
 pub const QUEUES: [&str; 4] = [
     "arrivals", // read off the socket, not yet taken by the clock thread
@@ -178,7 +191,7 @@ impl Hist {
 
 /// A queue's items by key, with the instant each entered: its oldest item's age is read by the health thread.
 #[derive(Default)]
-pub struct Queue(Mutex<HashMap<u64, u64>>);
+pub struct Queue(Mutex<BTreeMap<u64, u64>>);
 
 impl Queue {
     pub fn enter(&self, key: u64, at: u64) {
@@ -207,11 +220,11 @@ impl Queue {
 #[derive(Default)]
 pub struct Measures {
     pub parts: [Hist; 6],
-    pub phases: [Hist; 4],
+    pub phases: [Hist; NPHASES],
     pub ticks: Hist,
     pub queues: [Queue; 4],
     /// The last tick's phases, µs.
-    last: [AtomicU64; 4],
+    last: [AtomicU64; NPHASES],
     over_budget: AtomicU64,
     inverted: AtomicU64,
     /// Keys for arrivals, minted where they are read.
@@ -263,7 +276,7 @@ impl Measures {
     }
 
     /// Clock thread: a tick's phases, µs.
-    pub fn tick(&self, phases: [u64; 4]) {
+    pub fn tick(&self, phases: [u64; NPHASES]) {
         let total: u64 = phases.iter().sum();
         for (i, us) in phases.iter().enumerate() {
             self.phases[i].record(*us);

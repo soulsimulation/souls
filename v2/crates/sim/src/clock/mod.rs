@@ -203,8 +203,12 @@ impl Ticker {
 
     /// Sleeps until the next tick is due: its start's real time, an absolute deadline.
     pub fn wait(&mut self, clock: &mut dyn Clock) -> Result<(), TimeRefusal> {
-        let due = self.real_of(self.line.tick_start(self.next)?)?;
-        clock.sleep_until(due);
+        clock.sleep_until(self.due()?);
         Ok(())
+    }
+
+    /// The real time the next tick is due: a loop that takes work while it waits (K18's zone loop) waits until it.
+    pub fn due(&self) -> Result<Micros, TimeRefusal> {
+        self.real_of(self.line.tick_start(self.next)?)
     }
 }

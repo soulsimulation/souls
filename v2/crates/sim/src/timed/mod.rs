@@ -19,7 +19,7 @@
 //! instant (the second is refused `form-running`), rebuilding the values from a checkpoint, any trigger but a value
 //! crossing a level (E18).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use replica::effects::{Actor, Refusal};
 use replica::encode::Name;
@@ -115,7 +115,7 @@ struct Kept {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Values {
     kept: BTreeMap<(Id, u64), Kept>,
-    by_entry: HashMap<Id, (Id, u64)>,
+    by_entry: BTreeMap<Id, (Id, u64)>,
 }
 
 fn timed_refusal(r: replica::timed::TimedRefusal, node: Id) -> Refusal {
