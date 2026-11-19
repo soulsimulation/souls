@@ -163,7 +163,6 @@ move() {
   grep -qxF -- "$canary" <<< "$all" || refuse "release.no-such-world: $canary"
   order=("$canary")
   while IFS= read -r w; do [ "$w" = "$canary" ] || order+=("$w"); done <<< "$all"
-  for w in "${order[@]}"; do [ -f "$ETC/probe/$w" ] || refuse "release.no-probe: $w has no $ETC/probe/$w"; done
   directory_env
   echo "move: ${sha:0:12}: worldd ${worldd:0:16}…, canary $canary, then ${#order[@]} worlds in all"
   for w in "${order[@]}"; do
@@ -210,7 +209,6 @@ rollback() {
   [ -n "$rel" ] || refuse "rollback.from-unknown: no staged release has worldd $from"
   rel=$(dirname "$rel")
   [ -f "$WORLDS_ROOT/builds/$to/worldd" ] || refuse "rollback.to-missing: $to is not on this machine"
-  for w in "$@"; do [ -f "$ETC/probe/$w" ] || refuse "release.no-probe: $w has no $ETC/probe/$w"; done
   directory_env
   for w in "$@"; do
     echo "rollback: $w to ${to:0:16}… from ${from:0:16}…"

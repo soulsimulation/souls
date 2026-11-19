@@ -1,4 +1,4 @@
-//! The scripted agents' load shapes, as O3's drill has them (`v2/tools/archive/src/drill.rs`, from
+//! The scripted agents' load shapes, as O3's drill has them (`v2/tools/ops/src/drill.rs`, from
 //! `tools/bench/capacity/profiles/shapes.json`): which of the agents send an intent each tick.
 
 use archive::{R, refuse};
