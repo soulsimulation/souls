@@ -26,7 +26,7 @@ as a bill.
 As the user that owns `$WORLDS_ROOT`, sample every minute (a loop, or a timer running `sample`):
 
 ```sh
-node v2/tools/ops/cost/cost.mjs run "$WORLDS_ROOT" 60
+node v2/tools/ops/cost/cost.mjs run /var/lib/souls/worlds 60
 ```
 
 Each sample appends one line per world to `$WORLDS_ROOT/health/cost/<UTC day>.jsonl`:
@@ -41,10 +41,10 @@ Each sample appends one line per world to `$WORLDS_ROOT/health/cost/<UTC day>.js
 ## Read the page
 
 ```sh
-node v2/tools/ops/cost/cost.mjs page "$WORLDS_ROOT"            # today so far
-node v2/tools/ops/cost/cost.mjs page "$WORLDS_ROOT" 2026-11-18 # a whole day
+bash v2/tools/ops/world-cost.sh <world>   # one world's row today so far, the unused share and the machine
 ```
 
+`node v2/tools/ops/cost/cost.mjs page /var/lib/souls/worlds [<UTC day>]` is the whole table, for today or a whole day.
 It prints the table and writes it to `$WORLDS_ROOT/health/cost.html`, mode 0600: the machine's owner reads it (copy
 it off the machine to open it); nothing serves it. One row per world, then "unused", then the machine. A cell under a
 cent reads "under $0.01".
