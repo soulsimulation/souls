@@ -22,7 +22,7 @@ import { openSoulMemory } from '../../../../tools/world-launcher/soul/memory.mjs
 import { digest, readLog, renderDigest } from '../../../../tools/world-launcher/soul/digest.mjs';
 import { answerOf, consolidate, fakeMind, ownerMind, settingsOf } from '../../../../tools/world-launcher/soul/consolidate.mjs';
 
-export { openSoulMemory };
+export { openSoulMemory, readLog };
 
 export const ALIASES = 'aliases.json';
 const ALIASES_VERSION = 'souls-aliases/1';

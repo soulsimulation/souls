@@ -32,7 +32,7 @@ use replica::pose::Frame;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::Audience;
-use safety::{Guard, Who, guard};
+use safety::{Guard, Known, Who, guard, guard_on};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -65,6 +65,25 @@ fn refused(name: &'static str, detail: impl Into<String>) -> Refused {
 /// Off the clock thread, after `replica::edit::check` on the same copy: the safety rule's guard for the part the edit
 /// would commit (see the module's notes). `ground` is the zone's open ground, none in a zone without one.
 pub fn plan(checked: Checked, copy: &Replica, ground: Option<Id>) -> Result<Planned, Refused> {
+    plan_with(checked, copy, ground, |part| {
+        guard(copy.tree(), copy.header(), ground, part)
+    })
+}
+
+/// [`plan`] in a zone with a town (G2b, #3488): the guard cuts only what the edit can affect ([`safety::guard_on`]).
+/// `known` is the town as it stood at the copy's version.
+pub fn plan_on(checked: Checked, copy: &Replica, known: &Known) -> Result<Planned, Refused> {
+    plan_with(checked, copy, Some(known.ground), |part| {
+        guard_on(copy.tree(), copy.header(), part, known)
+    })
+}
+
+fn plan_with(
+    checked: Checked,
+    copy: &Replica,
+    ground: Option<Id>,
+    guard: impl FnOnce(&Part) -> Result<Guard, String>,
+) -> Result<Planned, Refused> {
     off_clock();
     let mut minter = Minter::new(PROVISIONAL);
     let names = names(&checked, &mut minter)?;
@@ -79,8 +98,7 @@ pub fn plan(checked: Checked, copy: &Replica, ground: Option<Id>) -> Result<Plan
     .map_err(|e| refused("encoding", e.to_string()))?;
     let part = Part::read(&bytes).map_err(|r| refused(r.name, r.detail))?;
     let terrain = terrain::guard(copy.tree(), copy.header(), ground, &checked, &part)?;
-    let guard = guard(copy.tree(), copy.header(), ground, &part)
-        .map_err(|e| refused("edit.unchecked", e))?;
+    let guard = guard(&part).map_err(|e| refused("edit.unchecked", e))?;
     Ok(Planned {
         checked,
         guard,

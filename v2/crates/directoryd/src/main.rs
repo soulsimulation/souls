@@ -2,7 +2,7 @@
 //! `listening on <address>` once it serves, and refuses to start, with a line saying why, on what [`start::parse`]
 //! refuses.
 
-use directoryd::accounts::serve::{App, run};
+use directoryd::accounts::serve::{App, key_digest, run};
 use directoryd::accounts::session::{Jwks, Verifier};
 use directoryd::accounts::start;
 use directoryd::accounts::store::Store;
@@ -40,12 +40,21 @@ fn main() {
             std::process::exit(2);
         }
     };
+    let mailbox_key = match config.mailbox_key.as_deref().map(std::fs::read_to_string) {
+        None => None,
+        Some(Ok(k)) if !k.trim().is_empty() => Some(key_digest(k.trim())),
+        Some(_) => {
+            eprintln!("directoryd: refusing to start: --mailbox-key names no readable key");
+            std::process::exit(2);
+        }
+    };
     let addr = listener.local_addr().expect("a bound address");
     println!("listening on {addr}");
     let app = App {
         store,
         verifier,
         test_sign_in: config.test_sign_in,
+        mailbox_key,
         pairing,
         log: Mutex::new(Box::new(std::io::stderr())),
         worlds: match directoryd::worlds::list::from_env("directoryd") {
