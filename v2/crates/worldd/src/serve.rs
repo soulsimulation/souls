@@ -478,7 +478,7 @@ fn off_machine(
 ) -> R<Off> {
     let store: Bucket = Shared(Arc::new(Folder::new(root.to_path_buf())));
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
-    let mut d = Directory::new(store.clone(), machine);
+    let mut d = Directory::new(store, machine);
     let (lineage, zone) = (built.root.scope().0, built.header.zone);
     match d.world(&lineage, zone) {
         Err(e) if e.name == "record-missing" => {
@@ -519,16 +519,14 @@ fn off_machine(
         .cloned();
     let archive = match kind {
         Some(kind) => {
-            let prefix = format!("h/{name}/{}/", to_hex(&lineage));
-            let again = Again(store);
+            // A store of its own at the history's folder: the day's index names each bundle by its key, which the
+            // page reads relative to that folder.
+            let at = root.join("h").join(name).join(to_hex(&lineage));
+            let again = Again(Shared(Arc::new(Folder::new(at))));
             again
-                .put(
-                    &format!("{prefix}header"),
-                    built.header.stored(),
-                    When::Absent,
-                )
+                .put("header", built.header.stored(), When::Absent)
                 .map_err(refusal)?;
-            let a = Archiver::open(again, &prefix, &built.header, zone, kind).map_err(refusal)?;
+            let a = Archiver::open(again, "", &built.header, zone, kind).map_err(refusal)?;
             let (tx, rx) = channel();
             report("the archiver", archiving(a, rx));
             Some(tx)

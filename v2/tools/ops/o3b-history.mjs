@@ -1,8 +1,8 @@
 // The rewind page plays a moment a running world archived (Engine v2 O3b, #3458, A3), end to end on a local store
 // stand-in: `worldd serve --store <folder>` archives its history under `h/<world>/<lineage>/` in the folder (O9's
 // folder store), and the page (V9's history, `v2/web/src/history`) opens a link to a moment there, served by vite with
-// `V2_STREAM_DIR` set to the folder. Checks that the page seeks to the moment and draws it: the state hash it reports
-// and the bodies drawn. Run from `v2/`, after `npm ci --prefix web` and the WASM build (`tools/ci.sh` makes both):
+// `V2_STREAM_DIR` set to the folder. Checks that the page seeks to the moment from a bundle and plays it: the state
+// hash it reports at the link's moment, and no error on its status. Run from `v2/`, after `npm ci --prefix web` and the WASM build (`tools/ci.sh` makes both):
 //
 //   O3B_KEEP=1 cargo test -p worldd --test serve o3b -- --nocapture   # prints "A3: history ... world W lineage L at T"
 //   node tools/ops/o3b-history.mjs <store folder> <world> <lineage> <at µs> [screenshot.png]
@@ -48,10 +48,20 @@ const browser = await pw.chromium.launch({ headless: true, args: platform.launch
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on('pageerror', (e) => console.error(`page: ${e.message}`));
+  // The history's files the page asks for (its worker's requests included), and how each was answered.
+  const asked = [];
+  page.context().on('response', (r) => r.url().includes('/s/h/') && asked.push(`${r.status()} ${r.url().split('/s/h/')[1]}`));
   const link = `${origin}/#w=${encodeURIComponent(world)}&l=${encodeURIComponent(lineage)}&t=${at}`;
   console.log(`open ${link.replace(origin, '<page>')}`);
   await page.goto(link);
-  await page.waitForFunction(() => globalThis.v2?.history?.opened?.hash, null, { timeout: 60_000 });
+  try {
+    await page.waitForFunction(() => globalThis.v2?.history?.opened?.hash, null, { timeout: 60_000 });
+  } catch (e) {
+    const status = await page.evaluate(() => document.getElementById('status')?.textContent ?? '');
+    console.error(`o3b-history: the moment did not open: ${status.trim()}\nasked: ${asked.join(', ') || 'nothing'}`);
+    throw e;
+  }
+  console.log(`asked: ${asked.join(', ')}`);
   // A few frames, so the moment is drawn.
   await page.waitForTimeout(3_000);
   const got = await page.evaluate(() => ({
@@ -63,8 +73,9 @@ try {
     `${got.opened.bytes} bytes fetched, ${drawn} bodies drawn`);
   console.log(got.status.trim());
   if (shot) await page.screenshot({ path: shot });
-  code = drawn > 0 ? 0 : 1;
-  if (code) console.error('o3b-history: the moment drew no body');
+  // Played: the state hash at the link's moment, from a bundle, and no error on the page's status.
+  code = got.opened.hash && !/no bundle|error/i.test(got.status) ? 0 : 1;
+  if (code) console.error('o3b-history: the moment was not played');
 } finally {
   await browser.close();
   vite.kill();
