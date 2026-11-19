@@ -119,7 +119,14 @@ impl Geometry for Sight<'_> {
 }
 
 impl Reach for Sight<'_> {
-    fn distance(&self, body: Id, _: &Effector, _: Option<&Name>, target: Id, _: &Name) -> Option<i64> {
+    fn distance(
+        &self,
+        body: Id,
+        _: &Effector,
+        _: Option<&Name>,
+        target: Id,
+        _: &Name,
+    ) -> Option<i64> {
         let a = self.bodies.get(&body)?.pose.position;
         let b = match self.bodies.get(&target) {
             Some(t) => t.pose.position,
@@ -165,13 +172,32 @@ fn plain(kind: &Name) -> &str {
 }
 
 impl Acts {
-    /// No forms yet, over the world's entries by kind and the moves' library ([`library`]).
-    pub fn new(kinds: Json, library: Vec<Move>) -> Acts {
+    /// No forms yet, over the world's entries by kind and the moves' library ([`library`]), in the zone `header`
+    /// names, minting ids of `scope`: F4's amounts read the entries' fields (`Forms::kinds`), and a take or a put writes under the zone.
+    pub fn new(
+        kinds: Json,
+        library: Vec<Move>,
+        header: replica::effects::Header,
+        scope: Scope,
+    ) -> Acts {
+        let mut forms = Forms::new();
+        let mut loaded = replica::kinds::Kinds::default();
+        for (_, entry) in kinds.obj().unwrap_or(&[]) {
+            let mut e = entry.clone();
+            if let Json::Obj(o) = &mut e {
+                o.retain(|(k, _)| k != "forms");
+            }
+            if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
+                loaded.load(&[("entry", text.as_str())]);
+            }
+        }
+        forms.kinds(&loaded);
+        forms.zone(header);
         Acts {
-            forms: Forms::new(),
+            forms,
             kinds,
             due: DueList::new(),
-            mint: Minter::new(Scope([0xc2; 16])),
+            mint: Minter::new(scope),
             moves: Moves::new(),
             library,
             own: Controller::new(),
@@ -220,6 +246,7 @@ impl Acts {
         bodies: Option<&mut Bodies>,
         body: Id,
         candidates: &[(Id, String)],
+        args: &BTreeMap<String, Id>,
         intent: Intent,
         tick: u64,
         now: Micros,
@@ -231,8 +258,9 @@ impl Acts {
                 .handle(*node)
                 .and_then(|h| tree.node(h))
                 .map(|n| plain(n.kind()).to_owned());
+            // A thing already gone is refused by name here, never handed to the runner (F4's known gap).
             let Some(kind) = kind else {
-                first.get_or_insert(refusal("no_such_node", replica::world_model::show(*node)));
+                first.get_or_insert(refusal("thing-missing", replica::world_model::show(*node)));
                 continue;
             };
             let Some(entry) = self.kinds.get(&kind).cloned() else {
@@ -245,15 +273,31 @@ impl Acts {
             }
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
-                forms.commit(
+                if args.is_empty() {
+                    return forms.commit(
+                        w,
+                        &audiences,
+                        &|_| None,
+                        body,
+                        *node,
+                        &entry,
+                        form,
+                        intent,
+                        Limits::default(),
+                        now,
+                    );
+                }
+                // Thing arguments (F4): bound here, as `Forms::commit` binds none yet.
+                let steps = skills::form_runner::bind(&entry, form)?;
+                let effects = skills::form_runner::bind_effects_with(&entry, form, args)?;
+                sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
+                forms.start(
                     w,
-                    &audiences,
-                    &|_| None,
                     body,
                     *node,
-                    &entry,
-                    form,
                     intent,
+                    steps,
+                    effects,
                     Limits::default(),
                     now,
                 )

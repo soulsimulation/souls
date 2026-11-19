@@ -611,6 +611,11 @@ impl Hub {
                         let b = bytes_of(e.to_value())?;
                         said.push((b, hearers, readers.clone(), s.words));
                     }
+                } else if let Some(to) = replica::activity::addressed(ev.name.as_str(), &ev.fields)
+                    && !to.is_empty()
+                {
+                    // An offer to each body asked, its decline or lapse to the asker (E8, C2): addressed like speech.
+                    said.push((bytes_of(e.to_value())?, to));
                 }
             }
         }
