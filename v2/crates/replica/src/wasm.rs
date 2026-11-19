@@ -907,14 +907,14 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     }
                     if kinds
                         .as_ref()
-                        .is_some_and(|k| !k.get(&kind).is_some_and(|k| k.owner == "thing"))
+                        .is_some_and(|k| k.get(&kind).is_none_or(|k| k.owner != "thing"))
                     {
                         return Err(("edit.kind-unknown", kind));
                     }
                     let (wall_kind, _) = named(*wall)?;
                     if kinds
                         .as_ref()
-                        .is_some_and(|k| !k.get(&wall_kind).is_some_and(|k| k.owner == "thing"))
+                        .is_some_and(|k| k.get(&wall_kind).is_none_or(|k| k.owner != "thing"))
                     {
                         return Err((
                             "edit.doorway-geometry",
@@ -945,7 +945,7 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                         let (kind, _) = named(end)?;
                         if kinds
                             .as_ref()
-                            .is_some_and(|k| !k.get(&kind).is_some_and(|k| k.owner == "place"))
+                            .is_some_and(|k| k.get(&kind).is_none_or(|k| k.owner != "place"))
                         {
                             return Err(("edit.doorway", "a doorway joins places".into()));
                         }
