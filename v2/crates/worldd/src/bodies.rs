@@ -1,10 +1,11 @@
-//! A committed move reaches the body (Engine v2 I4b, #3156): walk, sit and rise from the gateway.
+//! A committed move reaches the body (Engine v2 I4b, #3156): walk, sit, lie and rise from the gateway.
 //!
-//! [`crate::answers`] takes a move intent (a form's verb named `walk`, `sit` or `rise`, as `eden:sit`; T10 rule 4
+//! [`crate::answers`] takes a move intent (a form's verb named `walk`, `sit`, `lie` or `rise`, as `eden:sit`; T10 rule 4
 //! keeps `souls:` verbs for the engine's own) like any act: an id, a deadline and a place in the next tick. At that
 //! tick it is committed here, and the body is driven only through what already moves bodies (`v2/docs/bodies.md`): a
 //! walk is N7's walk skill run behind the host (`sim::host::Runner`, T9b/T9c), sent to a point (N9); a sit is B3's
-//! reserved seat and B2's sit move (`sim::slots`, `sim::moves`); a rise is B3's rise. Each steps the one controller
+//! reserved seat and B2's sit move (`sim::slots`, `sim::moves`); a lie is the same with B2's lie move and the stance
+//! lie (C4, #3368); a rise is B3's rise. Each steps the one controller
 //! (B1). Nothing here sets a pose or a position.
 //!
 //! - **Checked at commit.** A move's checks are its own: the controller's claims (T9 rule 4), the reach (B2), the seat
@@ -22,6 +23,10 @@
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
 //!   the seat is held in the slots table again and a rise or another sit sees it.
 //!
+//! - **Who hears** (#3369). After each step of the controller the bodies call `sim::speech::heard`, which brings every
+//!   body's interest set up to date and gives each utterance the step started its hearers as they are then; the world
+//!   writes each as `sim::speech::entry` says ([`Bodies::heard`]).
+//!
 //! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
 use std::collections::BTreeMap;
@@ -34,6 +39,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::intents::{Intent, Target as Aim};
 use replica::moves::{Effector, Move};
 use replica::pose::{Pose, Support, Vec3};
+use replica::speech::Said;
 use replica::time::Micros;
 use sim::controller::Stance;
 use sim::host::Runner;
@@ -41,6 +47,7 @@ use sim::life::{Born, Life, Retired, Standing};
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
 use sim::slots::{PlaceAt, Request, Slots};
+use sim::speech::{self, Hearing};
 use sim::spots::Target;
 use sim::timers::DueList;
 use sim::walk::town::Town;
@@ -50,6 +57,7 @@ type R<T> = Result<T, Refusal>;
 
 const SIT: &str = include_str!("../../replica/fixtures/moves/sit.diag");
 const RISE: &str = include_str!("../../replica/fixtures/moves/rise.diag");
+const LIE: &str = include_str!("../../replica/fixtures/moves/lie.diag");
 
 /// A walk's speed, µm a second.
 pub const WALK: i64 = 1_400_000;
@@ -64,6 +72,10 @@ pub enum Ask {
     },
     /// Sit on the seat of `thing`.
     Sit {
+        thing: Id,
+    },
+    /// Lie down in the slot of `thing`.
+    Lie {
         thing: Id,
     },
     Rise,
@@ -123,6 +135,7 @@ pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
         // form runner with its walk (C17, #3453); a bare sit is the move.
         "sit" if form_args(intent.parameters.get(&1)) => return None,
         "sit" => node.ok_or("move.no-target").map(|thing| Ask::Sit { thing }),
+        "lie" => node.ok_or("move.no-target").map(|thing| Ask::Lie { thing }),
         "rise" => Ok(Ask::Rise),
         _ => return None,
     };
@@ -174,6 +187,7 @@ pub struct Bodies {
     due: DueList,
     mint: Minter,
     sit: Move,
+    lie: Move,
     rise: Move,
     /// The move each body is doing for an intent.
     live: BTreeMap<Id, (Id, Live)>,
@@ -181,6 +195,11 @@ pub struct Bodies {
     ended: Vec<(Id, Result<(), String>)>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
+    /// Every body's interest set (B11, R4), kept as the bodies move.
+    hearing: Hearing,
+    /// The utterances started since the world last took them, each with its speaker, its record (hearers resolved
+    /// when it started) and the world time it started: the world writes each.
+    pub heard: Vec<(Id, Said, Micros)>,
 }
 
 /// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
@@ -239,10 +258,13 @@ impl Bodies {
             due: DueList::new(),
             mint: Minter::new(Scope([0xb4; 16])),
             sit: load(SIT)?,
+            lie: load(LIE)?,
             rise: load(RISE)?,
             live: BTreeMap::new(),
             ended: Vec::new(),
             logged: BTreeMap::new(),
+            hearing: Hearing::new(),
+            heard: Vec::new(),
         })
     }
 
@@ -308,19 +330,20 @@ impl Bodies {
         out
     }
 
-    /// Every body in id order, those the controller steps and those resting in a seat's slot (which it keeps apart),
-    /// each with its stance when in a slot.
+    /// Every body the controller holds, in id order: those it steps and those resting in a seat's slot (which it keeps
+    /// apart), a rising one included, each with its stance when in a slot.
     fn every(&self) -> Placed {
         let c = &self.runner.controller;
-        let mut out: Placed = c.bodies().map(|b| (b.id, (b.pose, None))).collect();
-        for (body, _, stance) in self.slots.seated() {
-            if let Some(b) = c.body(body)
-                && b.pose.support == Support::Slot
-            {
-                out.insert(body, (b.pose, Some(stance)));
-            }
-        }
-        out
+        c.ids()
+            .filter_map(|id| {
+                let b = c.body(id)?;
+                let stance = match b.pose.support {
+                    Support::Slot => self.slots.stance(id),
+                    _ => None,
+                };
+                Some((id, (b.pose, stance)))
+            })
+            .collect()
     }
 
     /// Where each body is now, a seated one with its stance: what a checkpoint carries (K18c, #3176).
@@ -420,7 +443,11 @@ impl Bodies {
                 }
                 Ask::Sit { thing } => {
                     self.replace(a.body);
-                    sits.push((id, a.body, thing));
+                    sits.push((id, a.body, thing, Stance::Sit));
+                }
+                Ask::Lie { thing } => {
+                    self.replace(a.body);
+                    sits.push((id, a.body, thing, Stance::Lie));
                 }
                 Ask::Rise => {
                     self.replace(a.body);
@@ -446,11 +473,15 @@ impl Bodies {
             let geo = self.geo(&bodies, &things);
             let requests: Vec<Request> = sits
                 .iter()
-                .map(|&(_, body, thing)| Request {
+                .map(|&(_, body, thing, stance)| Request {
                     body,
                     thing,
-                    mv: &self.sit,
-                    stance: Stance::Sit,
+                    mv: if stance == Stance::Lie {
+                        &self.lie
+                    } else {
+                        &self.sit
+                    },
+                    stance,
                 })
                 .collect();
             let done = self.slots.commit(
@@ -462,7 +493,7 @@ impl Bodies {
                 &requests,
                 now,
             );
-            // Taken in B3's stable order, and each matched back to its intent by its body.
+            // Sits and lies, taken in B3's stable order, and each matched back to its intent by its body.
             for (body, r) in done {
                 if let Some(&(id, ..)) = sits.iter().find(|s| s.1 == body) {
                     out.push((id, self.started(id, body, r)));
@@ -520,6 +551,15 @@ impl Bodies {
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
             let _ = self.runner.tick(&mut self.town);
+            // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
+            // zone, a seated or lying one included (#3393).
+            let said = std::mem::take(&mut self.runner.said);
+            let c = &self.runner.controller;
+            let ids: Vec<Id> = c.ids().collect();
+            let at = self.runner.now;
+            for (speaker, s) in speech::heard(&mut self.hearing, c.near(), ids, &said) {
+                self.heard.push((speaker, s, at));
+            }
             let walks: Vec<(Id, Id)> = self
                 .live
                 .iter()

@@ -1,0 +1,146 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The mural panel (from #1493): painted by one Soul (picture, title, painter link), then repainted by another: the picture and title are replaced and both painters stay linked, as the original kept the earlier provenance.",
+ "cases": [
+  {
+   "name": "paint_then_repaint_by_another",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "m1"
+      ]
+     },
+     "m1": {
+      "kind": "eden:mural_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "m1",
+      "form": "paint",
+      "args": {
+       "picture": "t_mural_1",
+       "title": "t_title_1"
+      }
+     },
+     "receipt": "rm1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "m1",
+        "field": "picture",
+        "n": 1,
+        "to": {
+         "text": "t_mural_1"
+        }
+       },
+       {
+        "change": "set",
+        "node": "m1",
+        "field": "title",
+        "n": 2,
+        "to": {
+         "text": "t_title_1"
+        }
+       },
+       {
+        "change": "link",
+        "node": "m1",
+        "link": "painter",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:painted",
+        "node": "m1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:titled",
+        "node": "m1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:credited",
+        "node": "m1",
+        "changes": [
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "m1",
+      "form": "paint",
+      "args": {
+       "picture": "t_mural_2",
+       "title": "t_title_2"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rm2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "m1",
+        "field": "picture",
+        "n": 1,
+        "to": {
+         "text": "t_mural_2"
+        }
+       },
+       {
+        "change": "set",
+        "node": "m1",
+        "field": "title",
+        "n": 2,
+        "to": {
+         "text": "t_title_2"
+        }
+       },
+       {
+        "change": "link",
+        "node": "m1",
+        "link": "painter",
+        "n": 1,
+        "end": "b2"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

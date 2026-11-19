@@ -1,0 +1,592 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:phone_box",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "doorway": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        900
+      ],
+      "yaw_mdeg": 180000
+    },
+    "handle": {
+      "role": "grip",
+      "at_mm": [
+        320,
+        1100,
+        560
+      ]
+    }
+  },
+  "slots": {
+    "inside": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        0,
+        120,
+        0
+      ],
+      "stand": "doorway"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1120,
+      2690,
+      1140
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "doorway"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "closed"
+        }
+      ]
+    },
+    "step_in": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        },
+        {
+          "need": "slot_free",
+          "slot": "inside"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "doorway"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "actor",
+          "into": "inside",
+          "event": "stepped_in"
+        }
+      ]
+    },
+    "step_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "doorway"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "actor",
+          "into": "here",
+          "event": "stepped_out"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:phone_box",
+    "table": [
+      {
+        "part": "door",
+        "field": "open",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": -86000,
+          "false": 0
+        },
+        "over_us": 700000
+      }
+    ],
+    "shape": {
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            30,
+            0
+          ],
+          "polygon": [
+            [
+              -495,
+              -495
+            ],
+            [
+              495,
+              -495
+            ],
+            [
+              495,
+              495
+            ],
+            [
+              -495,
+              495
+            ]
+          ],
+          "h": 60,
+          "tint": "paint"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -480,
+            130,
+            -480
+          ],
+          "polygon": [
+            [
+              -20,
+              -20
+            ],
+            [
+              20,
+              -20
+            ],
+            [
+              20,
+              20
+            ],
+            [
+              -20,
+              20
+            ]
+          ],
+          "h": 2240,
+          "tint": "paint"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            480,
+            130,
+            -480
+          ],
+          "polygon": [
+            [
+              -20,
+              -20
+            ],
+            [
+              20,
+              -20
+            ],
+            [
+              20,
+              20
+            ],
+            [
+              -20,
+              20
+            ]
+          ],
+          "h": 2240,
+          "tint": "paint"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -480,
+            130,
+            480
+          ],
+          "polygon": [
+            [
+              -20,
+              -20
+            ],
+            [
+              20,
+              -20
+            ],
+            [
+              20,
+              20
+            ],
+            [
+              -20,
+              20
+            ]
+          ],
+          "h": 2240,
+          "tint": "paint"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            480,
+            130,
+            480
+          ],
+          "polygon": [
+            [
+              -20,
+              -20
+            ],
+            [
+              20,
+              -20
+            ],
+            [
+              20,
+              20
+            ],
+            [
+              -20,
+              20
+            ]
+          ],
+          "h": 2240,
+          "tint": "paint"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            1300,
+            0
+          ],
+          "size": [
+            40,
+            1900,
+            860
+          ],
+          "round": 0,
+          "tint": "glass",
+          "material": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            1300,
+            0
+          ],
+          "size": [
+            40,
+            1900,
+            860
+          ],
+          "round": 0,
+          "tint": "glass",
+          "material": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1300,
+            -480
+          ],
+          "size": [
+            860,
+            1900,
+            40
+          ],
+          "round": 0,
+          "tint": "glass",
+          "material": "glass"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            2380,
+            0
+          ],
+          "polygon": [
+            [
+              -520,
+              -520
+            ],
+            [
+              520,
+              -520
+            ],
+            [
+              520,
+              520
+            ],
+            [
+              -520,
+              520
+            ]
+          ],
+          "h": 100,
+          "tint": "paint"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2430,
+            556
+          ],
+          "size": [
+            700,
+            100,
+            10
+          ],
+          "round": 0,
+          "tint": "sign",
+          "glow": 600
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            2510,
+            0
+          ],
+          "profile": [
+            [
+              560,
+              0
+            ],
+            [
+              500,
+              80
+            ],
+            [
+              300,
+              160
+            ],
+            [
+              0,
+              180
+            ]
+          ],
+          "segments": 8,
+          "tint": "paint",
+          "scale": [
+            1000,
+            1000,
+            1000
+          ]
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            1030,
+            -380
+          ],
+          "polygon": [
+            [
+              -120,
+              -40
+            ],
+            [
+              120,
+              -40
+            ],
+            [
+              120,
+              40
+            ],
+            [
+              -120,
+              40
+            ]
+          ],
+          "h": 340,
+          "tint": "iron"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1250,
+            500
+          ],
+          "size": [
+            860,
+            2200,
+            50
+          ],
+          "round": 0,
+          "tint": "paint",
+          "role": "door",
+          "pivot": [
+            -430,
+            1250,
+            500
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1400,
+            530
+          ],
+          "size": [
+            660,
+            1400,
+            20
+          ],
+          "round": 0,
+          "tint": "glass",
+          "material": "glass",
+          "role": "door",
+          "pivot": [
+            -430,
+            1250,
+            500
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            320,
+            1100,
+            560
+          ],
+          "size": [
+            40,
+            300,
+            40
+          ],
+          "round": 0,
+          "tint": "brass",
+          "role": "door",
+          "pivot": [
+            -430,
+            1250,
+            500
+          ]
+        }
+      ],
+      "palette": {
+        "paint": "#c23a2b",
+        "glass": "#bcd9e0",
+        "sign": "#f4f2ec",
+        "iron": "#3b3d40",
+        "brass": "#b8913f"
+      },
+      "tags": [
+        "utility",
+        "comms"
+      ]
+    }
+  },
+  "text": {
+    "card": "A red telephone box: open the door and step inside, one at a time.",
+    "post": "post",
+    "phone_booth": "phone booth",
+    "call_box": "call box",
+    "kiosk": "kiosk",
+    "howto_in": "Open the door, step in, and close it behind you."
+  },
+  "card": {
+    "text": "card",
+    "category": "post",
+    "synonyms": [
+      "phone_booth",
+      "call_box",
+      "kiosk"
+    ]
+  },
+  "howtos": {
+    "in": {
+      "text": "howto_in",
+      "steps": [
+        {
+          "form": "open"
+        },
+        {
+          "form": "step_in"
+        },
+        {
+          "form": "close"
+        }
+      ]
+    }
+  }
+}

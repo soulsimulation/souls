@@ -1,0 +1,272 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:parasol",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        600,
+        0,
+        0
+      ],
+      "yaw_mdeg": 270000
+    },
+    "crank": {
+      "role": "grip",
+      "at_mm": [
+        40,
+        1100,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      440,
+      2610,
+      440
+    ],
+    "front": "none"
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "shut"
+        }
+      ]
+    }
+  },
+  "areas": {
+    "shade": {
+      "at_mm": [
+        0,
+        0,
+        0
+      ],
+      "radius_mm": 1300
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:parasol",
+    "table": [
+      {
+        "part": "canopy",
+        "field": "open",
+        "do": "scale",
+        "axis": "x",
+        "at": {
+          "true": 11800,
+          "false": 1000
+        },
+        "over_us": 1500000
+      },
+      {
+        "part": "canopy",
+        "field": "open",
+        "do": "scale",
+        "axis": "z",
+        "at": {
+          "true": 11800,
+          "false": 1000
+        },
+        "over_us": 1500000
+      },
+      {
+        "part": "canopy",
+        "field": "open",
+        "do": "scale",
+        "axis": "y",
+        "at": {
+          "true": 450,
+          "false": 1000
+        },
+        "over_us": 1500000
+      }
+    ],
+    "shape": {
+      "round": 6,
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            40,
+            0
+          ],
+          "r": 220,
+          "h": 80,
+          "segments": 12,
+          "tint": "base"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1300,
+            0
+          ],
+          "r": 22,
+          "h": 2500,
+          "segments": 8,
+          "tint": "pole"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            40,
+            1100,
+            0
+          ],
+          "r": 20,
+          "h": 60,
+          "segments": 8,
+          "tint": "valve",
+          "roll": 90000
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            2580,
+            0
+          ],
+          "r": 30,
+          "tint": "pole"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            2000,
+            0
+          ],
+          "r": 110,
+          "h": 1100,
+          "segments": 8,
+          "tint": "cloth",
+          "role": "canopy",
+          "pivot": [
+            0,
+            2550,
+            0
+          ]
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            2352,
+            0
+          ],
+          "r": 46,
+          "h": 396,
+          "segments": 8,
+          "tint": "trim",
+          "role": "canopy",
+          "pivot": [
+            0,
+            2550,
+            0
+          ]
+        }
+      ],
+      "palette": {
+        "base": "#5d5a54",
+        "pole": "#8a6f4d",
+        "cloth": "#d9c9a3",
+        "trim": "#a4553f",
+        "valve": "#3f3a34"
+      },
+      "tags": [
+        "garden",
+        "parasol",
+        "shade"
+      ]
+    }
+  },
+  "text": {
+    "card": "A garden parasol: open it at the crank to shade whoever stands under it.",
+    "garden": "garden",
+    "umbrella": "garden umbrella",
+    "sunshade": "sunshade"
+  },
+  "card": {
+    "text": "card",
+    "category": "garden",
+    "synonyms": [
+      "umbrella",
+      "sunshade"
+    ]
+  }
+}

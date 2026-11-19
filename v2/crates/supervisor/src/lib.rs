@@ -3,17 +3,24 @@
 //!
 //! - **The launcher** ([`pin`], [`build_path`]): the unit's `ExecStart`. It reads the world's pin from its directory
 //!   record (W8), through this machine's cached copy when the store is out of reach, so an unreachable store holds no
-//!   world down, and runs `builds/<hash>/worldd`. A build that is not on the machine is a failed start like any other,
-//!   `build.missing`, and is retried.
+//!   world down, and runs `builds/<hash>/worldd serve` on the world's folder (C1, #3365). A build that is not on the
+//!   machine is a failed start like any other, `build.missing`, and is retried.
 //! - **The restart record and the health record** ([`health`]): a world that cannot start writes nothing, so the
 //!   supervisor keeps its own. A world started five times in five minutes and not serving is `restart-loop`, with
 //!   its count, its last exit and its next try.
 //!
+//! - **Deploy and roll back** ([`deploy`], O7 #2804): a rehearsal on a scratch copy, a canary watch, and a rollback
+//!   the machine takes on a fault, refused when the old build cannot read what the new one wrote.
+//!
 //! There is no start limit, no breaker and no resting state: systemd retries every failure, with a delay that grows
 //! from [`RESTART_SEC_MS`] to [`RESTART_MAX_MS`].
+//!
+//! Moving a live world to another machine (O9, #2828) is [`moving`].
 
+pub mod deploy;
 pub mod folder;
 pub mod health;
+pub mod moving;
 
 use std::path::{Path, PathBuf};
 

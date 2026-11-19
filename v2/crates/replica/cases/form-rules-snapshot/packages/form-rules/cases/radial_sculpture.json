@@ -1,0 +1,1070 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:radial_sculpture (from #1879). A portable wooden post of eight bands, 1 at the bottom to 8 at the top, each of radius 4 to begin with. Carving a band (three seconds, a hand free) takes it one radius thinner; it can never grow back and stops at 1, a solid core ('A cut must reduce that band radius; choose a smaller radius. Removed wood cannot be added back.'). Full hands refuse ('Empty your hands before carving the supported blank.'). The shavings are not a stored field: they are always 128 less the sum of the squared radii, so they are conserved by construction. Changed from the original: one cut is one radius (a cut from 4 to 2 is two acts), and the band is eight forms; a set whose field or value comes from an argument is a later format. Handed back: resting on a fixed work table, both hands empty, the maker credit replaced at each cut.",
+ "cases": [
+  {
+   "name": "carve_band_1_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_1"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_band_1_down_to_its_core",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_1"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture",
+      "fields": {
+       "band_1": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "band_1",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_band_1_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_1"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_band_2_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_2"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_band_2_down_to_its_core",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_2"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture",
+      "fields": {
+       "band_2": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "band_2",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_band_2_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_2"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_band_3_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_3"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_band_3_down_to_its_core",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_3"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture",
+      "fields": {
+       "band_3": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "band_3",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_band_3_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_3"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_band_4_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_4"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_band_4_down_to_its_core",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_4"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture",
+      "fields": {
+       "band_4": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "band_4",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_band_4_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_4"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_band_5_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_5"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_band_5_down_to_its_core",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_5"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture",
+      "fields": {
+       "band_5": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "band_5",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_band_5_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_5"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_band_6_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_6"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_band_6_down_to_its_core",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_6"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture",
+      "fields": {
+       "band_6": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "band_6",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_band_6_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_6"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_band_7_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_7"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_band_7_down_to_its_core",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_7"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture",
+      "fields": {
+       "band_7": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "band_7",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_band_7_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_7"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_band_8_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_8"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_band_8_down_to_its_core",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_8"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture",
+      "fields": {
+       "band_8": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "band_8",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_band_8_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_band_8"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:radial_sculpture"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  }
+ ]
+}

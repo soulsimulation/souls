@@ -1,0 +1,791 @@
+{
+ "format": "souls-activity-steps/1",
+ "about": "eden:hall_lecture (SA-V5, #2877) in three rooms: a speaker at its own lectern (required) and six listeners (optional) in the seats near it, nearest first: three benches; one block of theatre seats, where a seventh finds no free place; a bench near and theatre seats further, with a bench beyond 12 m never chosen. Each Soul enters and leaves by its own act. A listener leaving changes nothing; the speaker leaving releases every member, who stay seated, and removes the lecture.",
+ "cases": [
+  {
+   "name": "room_of_benches_six_listeners_sit_three_leave_and_the_speaker_leaving_ends_it",
+   "activity": "h1",
+   "state": {
+    "nodes": {
+     "r1": {
+      "loose": [
+       "h1",
+       "k1",
+       "k2",
+       "k3",
+       "b1",
+       "b2",
+       "b3",
+       "b4",
+       "b5",
+       "b6",
+       "b7"
+      ]
+     },
+     "h1": {
+      "kind": "eden:hall_lecture",
+      "at_mm": [
+       0,
+       0,
+       0
+      ]
+     },
+     "k1": {
+      "kind": "eden:bench",
+      "at_mm": [
+       -1000,
+       0,
+       3000
+      ]
+     },
+     "k2": {
+      "kind": "eden:bench",
+      "at_mm": [
+       1000,
+       0,
+       3000
+      ]
+     },
+     "k3": {
+      "kind": "eden:bench",
+      "at_mm": [
+       0,
+       0,
+       5000
+      ]
+     },
+     "b1": {
+      "hands": {}
+     },
+     "b2": {
+      "hands": {}
+     },
+     "b3": {
+      "hands": {}
+     },
+     "b4": {
+      "hands": {}
+     },
+     "b5": {
+      "hands": {}
+     },
+     "b6": {
+      "hands": {}
+     },
+     "b7": {
+      "hands": {}
+     }
+    }
+   },
+   "steps": [
+    {
+     "do": "now",
+     "expect": {
+      "verdict": "yes",
+      "now": {
+       "floor": [],
+       "stage": "announced",
+       "ends_us": 3600000000
+      },
+      "unseen": []
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b1",
+     "form": "take_the_lectern",
+     "receipt": "e1",
+     "expect": {
+      "verdict": "yes",
+      "role": "speaker",
+      "place": {
+       "node": "h1",
+       "slot": "lectern"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b2",
+     "form": "attend",
+     "receipt": "e2",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "k1",
+       "slot": "left"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b3",
+     "form": "attend",
+     "receipt": "e3",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "k1",
+       "slot": "right"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b4",
+     "form": "attend",
+     "receipt": "e4",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "k2",
+       "slot": "left"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b5",
+     "form": "attend",
+     "receipt": "e5",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "k2",
+       "slot": "right"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b6",
+     "form": "attend",
+     "receipt": "e6",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "k3",
+       "slot": "left"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b7",
+     "form": "attend",
+     "receipt": "e7",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "k3",
+       "slot": "right"
+      }
+     }
+    },
+    {
+     "do": "now",
+     "expect": {
+      "verdict": "yes",
+      "now": {
+       "floor": [
+        "b1"
+       ],
+       "stage": "speaking",
+       "ends_us": 3600000000
+      },
+      "unseen": []
+     }
+    },
+    {
+     "do": "leave",
+     "actor": "b2",
+     "form": "leave",
+     "receipt": "x2",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "ended": 0
+     }
+    },
+    {
+     "do": "leave",
+     "actor": "b3",
+     "form": "leave",
+     "receipt": "x3",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "ended": 0
+     }
+    },
+    {
+     "do": "leave",
+     "actor": "b4",
+     "form": "leave",
+     "receipt": "x4",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "ended": 0
+     }
+    },
+    {
+     "do": "leave",
+     "actor": "b1",
+     "form": "step_down",
+     "receipt": "x1",
+     "expect": {
+      "verdict": "yes",
+      "role": "speaker",
+      "ended": 1
+     }
+    }
+   ],
+   "after": {
+    "k1": {
+     "kind": "eden:bench",
+     "at_mm": [
+      -1000,
+      0,
+      3000
+     ],
+     "slots": {
+      "left": [],
+      "right": []
+     }
+    },
+    "k2": {
+     "kind": "eden:bench",
+     "at_mm": [
+      1000,
+      0,
+      3000
+     ],
+     "slots": {
+      "left": [],
+      "right": [
+       "b5"
+      ]
+     }
+    },
+    "k3": {
+     "kind": "eden:bench",
+     "at_mm": [
+      0,
+      0,
+      5000
+     ],
+     "slots": {
+      "left": [
+       "b6"
+      ],
+      "right": [
+       "b7"
+      ]
+     }
+    }
+   },
+   "gone": [
+    "h1"
+   ]
+  },
+  {
+   "name": "room_of_theatre_seats_six_listeners_fill_it_one_leaves_and_the_speaker_leaving_ends_it",
+   "activity": "h2",
+   "state": {
+    "nodes": {
+     "r2": {
+      "loose": [
+       "h2",
+       "t1",
+       "b1",
+       "b2",
+       "b3",
+       "b4",
+       "b5",
+       "b6",
+       "b7",
+       "b8"
+      ]
+     },
+     "h2": {
+      "kind": "eden:hall_lecture",
+      "at_mm": [
+       0,
+       0,
+       0
+      ]
+     },
+     "t1": {
+      "kind": "eden:theatre_seats",
+      "at_mm": [
+       0,
+       0,
+       4000
+      ]
+     },
+     "b1": {
+      "hands": {}
+     },
+     "b2": {
+      "hands": {}
+     },
+     "b3": {
+      "hands": {}
+     },
+     "b4": {
+      "hands": {}
+     },
+     "b5": {
+      "hands": {}
+     },
+     "b6": {
+      "hands": {}
+     },
+     "b7": {
+      "hands": {}
+     },
+     "b8": {
+      "hands": {}
+     }
+    }
+   },
+   "steps": [
+    {
+     "do": "enter",
+     "actor": "b1",
+     "form": "take_the_lectern",
+     "receipt": "e1",
+     "expect": {
+      "verdict": "yes",
+      "role": "speaker",
+      "place": {
+       "node": "h2",
+       "slot": "lectern"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b2",
+     "form": "attend",
+     "receipt": "e2",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "front_1"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b3",
+     "form": "attend",
+     "receipt": "e3",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "front_2"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b4",
+     "form": "attend",
+     "receipt": "e4",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "front_3"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b5",
+     "form": "attend",
+     "receipt": "e5",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "back_1"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b6",
+     "form": "attend",
+     "receipt": "e6",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "back_2"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b7",
+     "form": "attend",
+     "receipt": "e7",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "back_3"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b8",
+     "form": "attend",
+     "receipt": "e8",
+     "expect": {
+      "verdict": "no",
+      "reason": "no_free_place",
+      "role": "listener",
+      "detail": {
+       "places": 6
+      }
+     }
+    },
+    {
+     "do": "leave",
+     "actor": "b5",
+     "form": "leave",
+     "receipt": "x5",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "ended": 0
+     }
+    },
+    {
+     "do": "leave",
+     "actor": "b1",
+     "form": "step_down",
+     "receipt": "x1",
+     "expect": {
+      "verdict": "yes",
+      "role": "speaker",
+      "ended": 1
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:theatre_seats",
+     "at_mm": [
+      0,
+      0,
+      4000
+     ],
+     "slots": {
+      "front_1": [
+       "b2"
+      ],
+      "front_2": [
+       "b3"
+      ],
+      "front_3": [
+       "b4"
+      ],
+      "back_1": [],
+      "back_2": [
+       "b6"
+      ],
+      "back_3": [
+       "b7"
+      ]
+     }
+    }
+   },
+   "gone": [
+    "h2"
+   ]
+  },
+  {
+   "name": "mixed_room_six_listeners_nearest_first_one_leaves_and_returns_and_the_speaker_leaving_ends_it",
+   "activity": "h3",
+   "state": {
+    "nodes": {
+     "r3": {
+      "loose": [
+       "h3",
+       "k1",
+       "t1",
+       "k9",
+       "b1",
+       "b2",
+       "b3",
+       "b4",
+       "b5",
+       "b6",
+       "b7"
+      ]
+     },
+     "h3": {
+      "kind": "eden:hall_lecture",
+      "at_mm": [
+       0,
+       0,
+       0
+      ]
+     },
+     "k1": {
+      "kind": "eden:bench",
+      "at_mm": [
+       0,
+       0,
+       2000
+      ]
+     },
+     "t1": {
+      "kind": "eden:theatre_seats",
+      "at_mm": [
+       3000,
+       0,
+       6000
+      ]
+     },
+     "k9": {
+      "kind": "eden:bench",
+      "at_mm": [
+       0,
+       0,
+       13000
+      ]
+     },
+     "b1": {
+      "hands": {}
+     },
+     "b2": {
+      "hands": {}
+     },
+     "b3": {
+      "hands": {}
+     },
+     "b4": {
+      "hands": {}
+     },
+     "b5": {
+      "hands": {}
+     },
+     "b6": {
+      "hands": {}
+     },
+     "b7": {
+      "hands": {}
+     }
+    }
+   },
+   "steps": [
+    {
+     "do": "enter",
+     "actor": "b1",
+     "form": "take_the_lectern",
+     "receipt": "e1",
+     "expect": {
+      "verdict": "yes",
+      "role": "speaker",
+      "place": {
+       "node": "h3",
+       "slot": "lectern"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b2",
+     "form": "attend",
+     "receipt": "e2",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "k1",
+       "slot": "left"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b3",
+     "form": "attend",
+     "receipt": "e3",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "k1",
+       "slot": "right"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b4",
+     "form": "attend",
+     "receipt": "e4",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "front_1"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b5",
+     "form": "attend",
+     "receipt": "e5",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "front_2"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b6",
+     "form": "attend",
+     "receipt": "e6",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "front_3"
+      }
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b7",
+     "form": "attend",
+     "receipt": "e7",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "t1",
+       "slot": "back_1"
+      }
+     }
+    },
+    {
+     "do": "leave",
+     "actor": "b2",
+     "form": "leave",
+     "receipt": "x2",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "ended": 0
+     }
+    },
+    {
+     "do": "enter",
+     "actor": "b2",
+     "form": "attend",
+     "receipt": "e9",
+     "expect": {
+      "verdict": "yes",
+      "role": "listener",
+      "place": {
+       "node": "k1",
+       "slot": "left"
+      }
+     }
+    },
+    {
+     "do": "leave",
+     "actor": "b1",
+     "form": "step_down",
+     "receipt": "x1",
+     "expect": {
+      "verdict": "yes",
+      "role": "speaker",
+      "ended": 1
+     }
+    }
+   ],
+   "after": {
+    "k1": {
+     "kind": "eden:bench",
+     "at_mm": [
+      0,
+      0,
+      2000
+     ],
+     "slots": {
+      "left": [
+       "b2"
+      ],
+      "right": [
+       "b3"
+      ]
+     }
+    },
+    "t1": {
+     "kind": "eden:theatre_seats",
+     "at_mm": [
+      3000,
+      0,
+      6000
+     ],
+     "slots": {
+      "front_1": [
+       "b4"
+      ],
+      "front_2": [
+       "b5"
+      ],
+      "front_3": [
+       "b6"
+      ],
+      "back_1": [
+       "b7"
+      ]
+     }
+    },
+    "k9": {
+     "kind": "eden:bench",
+     "at_mm": [
+      0,
+      0,
+      13000
+     ]
+    }
+   },
+   "gone": [
+    "h3"
+   ]
+  }
+ ]
+}
