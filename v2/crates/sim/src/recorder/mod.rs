@@ -6,7 +6,9 @@
 //! 1. **An input record** is `{0: "souls:input", 1: tick, 2: [input, ...]}` in T0's bytes, one per tick that took
 //!    any input, appended before that tick's effects. Key 0 is never a part's (T6 parts are `{1: header, 2: effects}`),
 //!    so [`is_input`] tells the two apart from the first bytes, and K5's replay passes input records by.
-//! 2. **The inputs** ([`Input`]): T5's mapping to real time, a birth, an edit, an intent. **Words are never
+//! 2. **The inputs** ([`Input`]): T5's mapping to real time, a birth, an edit, an intent, and where a free-running
+//!    clock read the bodies' planner batches late (K18b, #3175: a replay in lockstep takes them at the same body
+//!    tick, so the planner's timing is part of the record). **Words are never
 //!    recorded:** an intent's words are their reference (T8, K16: `{21: reference}`), so the type has no place for
 //!    text, and an edit whose value holds words holds their reference too.
 //! 3. **The log hash** ([`effect_hash`]) covers effect records only: input records and measures stay out of it, so
@@ -58,6 +60,10 @@ pub enum Input {
         verb: Name,
         words: Option<Id>,
     },
+    /// K18b (#3175): at body time `at` a free-running clock took only the first `taken` of the planner's batches
+    /// outstanding (the rest came back late, for a later tick). Recorded only then: at every other body tick each
+    /// outstanding batch is taken, as lockstep takes them.
+    Planned { at: u64, taken: u64 },
 }
 
 /// Words held by reference, as T8 writes them: `{21: reference}`.
@@ -107,6 +113,11 @@ impl Input {
                 }
                 map(p)
             }
+            Input::Planned { at, taken } => map(vec![
+                (1, Value::Uint(5)),
+                (2, Value::Uint(*at)),
+                (3, Value::Uint(*taken)),
+            ]),
         }
     }
 
@@ -152,6 +163,10 @@ impl Input {
                     Some(_) => return refuse("input-bad", "words are {21: reference}"),
                     None => None,
                 },
+            },
+            5 => Input::Planned {
+                at: uint(take(2)?)?,
+                taken: uint(take(3)?)?,
             },
             n => return refuse("input-bad", format!("input kind {n}")),
         };

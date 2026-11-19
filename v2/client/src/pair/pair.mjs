@@ -7,9 +7,9 @@
 // world), whose `history` is relative to the world's folder. No advert, no `history`; the pairing still succeeds.
 //
 //   node v2/client/src/pair/pair.mjs --directory <origin> --world <key> --gateway <ws url> --device <name>
-//        --label <agent label> [--soul <grant> [--force]] [--advert <url of world.json>]
-//   Prints one JSON line with the link and code, then one with the outcome: `{ok, soul, history}` or
-//   `{ok: false, code}`.
+//        --label <agent label> [--soul <grant> | --creator <creator grant>] [--force] [--advert <url of world.json>]
+//   With --creator (G7, #2796) it asks for the world's creator scope: `creator-<scope hex>-<n>`, kept as `c_<...>`.
+//   Prints one JSON line with the link and code, then one with the outcome: `{ok, soul, history}` or `{ok: false, code}`.
 //   The home is SOULS_HOME, else the nearest .souls, else ./.souls.
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -55,15 +55,18 @@ export async function advertisedHistory(advert, { within = 5000 } = {}) {
   }
 }
 
-/** The local id the daemon knows a Soul by, from its grant: `soul-<scope>-<n>` is `s_<scope>-<n>`. */
-export const localId = (grant) => `s_${grant.slice('soul-'.length)}`;
+/**
+ * The local id the daemon knows a Soul by, from its grant: `soul-<scope>-<n>` is `s_<scope>-<n>`; a world's creator,
+ * `creator-<scope>-<n>`, is `c_<scope>-<n>` (G7, #2796).
+ */
+export const localId = (grant) => grant.startsWith('creator-') ? `c_${grant.slice('creator-'.length)}` : `s_${grant.slice('soul-'.length)}`;
 
 /**
  * Asks, waits for the owner's approval, and keeps the token. `onAsk({link, code})` is called once the directory has
  * given the code; `unit` is the milliseconds in a second of polling interval (tests shorten it). Resolves to
  * `{soul, grant}`; rejects with a `Refused` naming why (and the device, for `soul-connected`).
  */
-export async function pair({ home, directory, world, gateway, device, label, soul, force = false, onAsk, unit = 1000, sleep, onPoll, advert }) {
+export async function pair({ home, directory, world, gateway, device, label, soul, creator, force = false, onAsk, unit = 1000, sleep, onPoll, advert }) {
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   // The token comes back in the poll's answer: over https, or plain http to this machine only.
   const at = new URL(directory);
@@ -76,7 +79,9 @@ export async function pair({ home, directory, world, gateway, device, label, sou
   const secret = randomBytes(32).toString('hex');
   const asked = await post('/v1/pair/request', {
     secret_hash: createHash('sha256').update(secret).digest('hex'),
-    device, label, scope: 'soul', force, world, ...(soul ? { soul } : { new: true }),
+    // A creator (G7) names the world's creator grant its account holds; the directory never makes one. A Soul's
+    // request names the world it is paired for (W11).
+    device, label, force, ...(creator ? { scope: 'creator', soul: creator } : { scope: 'soul', world, ...(soul ? { soul } : { new: true }) }),
   });
   if (asked.refused) throw new Refused(asked.refused, 'the directory refused the request');
   onAsk?.({ link: asked.link, code: asked.code });
@@ -117,7 +122,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const out = await pair({
       home, directory: opt('--directory'), world: opt('--world'), gateway: opt('--gateway'),
       device: opt('--device') ?? hostname().slice(0, 64), label: opt('--label') ?? 'agent',
-      soul: opt('--soul'), force: args.includes('--force'), advert: opt('--advert'),
+      soul: opt('--soul'), creator: opt('--creator'), force: args.includes('--force'), advert: opt('--advert'),
       onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: 'Open the link signed in, check the code matches, and approve.' }),
     });
     say({ ok: true, ...out });
