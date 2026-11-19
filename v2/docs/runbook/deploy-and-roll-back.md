@@ -41,7 +41,8 @@ it keeps in `$WORLDS_ROOT/deploys/<world>` for `world-rollback.sh`.
 
 `deploy` prints the timeline (ms from its start), then `Kept`, `RolledBack { fault }`, `NotDeployed { why }` or
 `Refused { why }`; it exits 0 only for `Kept`. `deploy rollback` takes a world back by hand, with the same schema check
-(it assumes the build being left wrote records). Put the build on the machine first
+(it assumes the build being left wrote records), and refuses `rollback.wrong-from`, changing nothing, unless the
+world is pinned to `--from`; `rollback-v2.yml` runs it ([release.md](../release.md)). Put the build on the machine first
 (`$WORLDS_ROOT/builds/<hash>/worldd`, `supervisor hash <file>` for its hash).
 
 ## The proof run

@@ -37,6 +37,11 @@
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
+//   and R13's (#2753), wake rules on R9's events within the owner's budget (`../wake/wake.mjs`), and the owner's
+//   messages from the mailbox, which reach `wait` as `mail` events whatever the budget:
+//     {"op":"wake","do":"add|remove|budget|list",...}   the wake rules; `wait` hands the queued wakes as `wakes`
+//     {"op":"act",...,"for":"<message id>"}           this act serves that message: its outcome closes it
+//     {"op":"event","event":{...}}                    an event as R9's matcher takes it, until frames carry them
 //   and R16's (#2817), from the world's public history (`history` in its config) and the Soul's memory, the copy as
 //   it is (naming only), so it ends with `at` and not `changed`:
 //     {"op":"history","at":"<place>"} | {"thing":"<id>"} | {"soul":"<id or name>"}, "since"/"until": world µs
@@ -75,6 +80,7 @@ import { ageOf } from './age.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { Table } from '../reflex/reflex.mjs';
+import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { feederFor } from '../memory/feeder.mjs';
@@ -148,6 +154,12 @@ const heardSince = []; // what this Soul heard since its last turn (a look or a 
 const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, entries: 0, follows: 0, build: null };
 const reflexes = new Table(soul); // R9: onEvent(event, now) per named event, from the stream (R9b)
+const wakes = new Wakes(soul); // R13: its budget's deliveries are kept on disk, so a restart never resets them
+if (state.wake) Object.assign(wakes, { budget: state.wake.budget, delivered: state.wake.delivered });
+const saveWakes = () => { state.wake = { budget: wakes.budget, delivered: wakes.delivered }; save(); };
+const mail = new Map(); // R13: the owner's open messages given to this daemon, by id
+const serving = new Map(); // sequence → the message its act serves
+const closes = []; // closes not yet sent, for the next sign-in
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
 // Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
@@ -187,6 +199,7 @@ function send(bytes, sequence, ranked) {
 function current() {
   signedIn = true;
   attempt = 0;
+  while (closes.length > 0 && signedIn) ws.send(closes.shift());
   if (ws && !ws.hearing) { ws.hearing = true; ws.send(wire.wireSubscribe(scope, seat.grant.counter, BigInt(HEARING_BUDGET))); }
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
   follow();
@@ -202,6 +215,24 @@ function follow() {
   followWanted = false;
   counts.follows++;
   startSync(ws, 'follow');
+}
+
+/** R13: a text frame, the mailbox's: a message for this Soul, noted once. */
+function onText(text) {
+  let m;
+  try { m = JSON.parse(text).mail; } catch { return; }
+  if (!m || typeof m.id !== 'string' || mail.has(m.id)) return;
+  mail.set(m.id, m);
+  log(`message ${m.id}`); // never its words
+  note({ kind: 'mail', id: m.id, text: String(m.text), at: m.at });
+}
+
+/** R13: the message `id` closed with its act's outcome, now or at the next sign-in. */
+function closeMail(id, state, outcome) {
+  const line = JSON.stringify({ close: { id, state, outcome } });
+  mail.delete(id);
+  log(`message ${id} closed ${state} (${outcome})`);
+  if (ws && signedIn) ws.send(line); else closes.push(line);
 }
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
@@ -263,6 +294,7 @@ function connect() {
   sock.onopen = () => { if (ended) sock.close(); else sock.send(wire.wireHello()); };
   sock.onmessage = (m) => {
     if (ended) { sock.close(); return; } // given up: it must not sign in and take the grant from its successor
+    if (typeof m.data === 'string') { onText(m.data); return; }
     const bytes = new Uint8Array(m.data);
     try {
       if (step === 'hello') {
@@ -295,6 +327,10 @@ function connect() {
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
         trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
+        if (serving.has(s) && Number(c) !== 3) {
+          closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
+          serving.delete(s);
+        }
       }
       save();
       // C4: the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason, by name.
@@ -440,7 +476,8 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'history', 'read', 'stats', 'reflex', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop']);
+const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
 // the world's key when it is a plain name.
@@ -502,6 +539,8 @@ function sendIntent(ranked, { target, words, args, basis, expiry }) {
 }
 
 async function answer(req) {
+  // R13: a command from the model's turn shows that what a reader was handed was taken.
+  if (!['wait', 'status'].includes(req.op)) wakes.confirm();
   switch (req.op) {
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
@@ -520,14 +559,21 @@ async function answer(req) {
     });
     case 'find': return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50) }));
     case 'wait': {
-      const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000;
-      if (!events.some((e) => e.kind !== 'synced')) {
-        await new Promise((ok) => { const t = setTimeout(ok, ms); wakers.push(() => { clearTimeout(t); ok(); }); });
+      const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
+      // R13: the queued wakes are handed as one delivery when the budget allows; over it, they wait for it to.
+      let handed = wakes.deliver(Date.now());
+      while (handed.length === 0 && nothingYet() && Date.now() < until) {
+        const free = wakes.nextFree(Date.now());
+        const left = Math.min(until, free ?? until) - Date.now();
+        await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
+        handed = wakes.deliver(Date.now());
       }
+      if (handed.length) saveWakes();
       const got = events.splice(0);
+      const timedOut = handed.length === 0 && !got.some((e) => e.kind !== 'synced');
       heardSince.length = 0; // shown here, so not again in the next brief
       const said = got.some((e) => e.kind === 'heard') ? { note: QUOTED_NOTE } : {};
-      return closing({ ok: true, events: got, ...said, ...(got.some((e) => e.kind !== 'synced') ? {} : { timedOut: true }) },
+      return closing({ ok: true, events: got, ...said, ...(handed.length ? { wakes: handed } : {}), ...(timedOut ? { timedOut: true } : {}) },
         (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }));
     }
     case 'can': {
@@ -537,6 +583,7 @@ async function answer(req) {
       return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
     }
     case 'act': {
+      if (req.for !== undefined && !mail.has(req.for)) return { ok: false, code: 'mail-not-found', detail: 'for names an open message this daemon was given' };
       const candidates = Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf);
       if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
         return { ok: false, code: 'act-ranked-list', detail: `one to ${ACT_MOST} verbs, best first` };
@@ -557,6 +604,7 @@ async function answer(req) {
       const target = Array.isArray(req.acts) ? keep.map((c) => c.this ?? '').join(' ') : req.target;
       const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, basis, expiry: req.expiry });
+      if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
     }
@@ -571,6 +619,14 @@ async function answer(req) {
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
     case 'reflex': return reflexes.op(req, Date.now());
+    case 'wake': { const out = wakes.op(req, Date.now()); if (req.do === 'budget') saveWakes(); return out; }
+    case 'event': {
+      const e = req.event;
+      if (!e || typeof e.name !== 'string') return { ok: false, code: 'event-not-an-event', detail: 'an event has a name' };
+      const fired = wakes.onEvent(e, Date.now());
+      if (fired) for (const w of wakers.splice(0)) w();
+      return { ok: true, fired };
+    }
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
