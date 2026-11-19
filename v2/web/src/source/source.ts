@@ -31,6 +31,9 @@ export type NodeRec = {
   /** The open ground's terrain tiles: side mm (field 24) and `[tx, tz, heights, classes]` (field 25). */
   tileSize?: number;
   tiles?: [number, number, Uint8Array, Uint8Array][];
+  /** A body's public name and one-line description (fields 30, 31, by reference; V1b), null while unknown. */
+  name?: string | null;
+  description?: string | null;
 };
 
 /** Where the world is: its newest part's end, and world time against wall time. */
@@ -39,8 +42,13 @@ export type Pointer = { newest: number | null; newestTo: number | null; period: 
 /** One motion sample, as the part carried it: node, frame (parent node and slot), world time µs, position µm (V6). */
 export type SampleRec = [string, string, number | null, number, number, number, number];
 
-/** What one part changed, in the order played; `samples` is every motion sample in it, in entry order. */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null };
+/** One `souls:said` event (V1b): the speaker's body, world time µs, length µs, reach mm, its words' reference and the
+ * words from the part's text file (null when the file does not hold them, e.g. removed). */
+export type SaidRec = { speaker: string; at: number; length: number; reach: number; ref: string; words: string | null };
+
+/** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
+ * utterance in it (V1b). */
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[] };
 
 export type SourceEvents = {
   pointer(p: Pointer): void;
