@@ -68,7 +68,8 @@
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
 //       intent's basis is the version the model was last shown, not the send-time version.
 //   and R15's (#2757), the Soul's own schedule (`../schedule/schedule.mjs`): the owner's `memory/schedule.md`, read
-//   again when it changes and checked each second (no long timer: Node turns one over 24.8 days into 1 ms). An entry's
+//   again when it changes and real times checked each second. World times use one deadline from the copy's published
+//   mapping/calendar, re-armed after sync or a rate change (R15b); very long timers stay within Node's limit. An entry's
 //   acts are checked (R8) and sent with no model turn; a wake goes through R13's budget. A change entry fires on R9's
 //   events (the `event` op, and what this Soul hears). Each occurrence is marked on disk with its sequence before
 //   it is sent. What was missed while the daemon was off is listed once, in the next answer, as `missed`.

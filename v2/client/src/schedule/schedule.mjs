@@ -121,7 +121,8 @@ const writeAtomic = (file, text) => {
 
 /**
  * `schedule add`: one entry appended. `when` is a real time, `in <n>s|m|h`, a world time (`world 20:00`, or
- * `at 20:00`, `20:00`), or a pattern as JSON; `does` the words after it. A real time already passed is refused.
+ * `at 20:00`, `20:00`, or `world <µs>us` from published hours), or a pattern as JSON; `does` the words after it.
+ * A real time already passed is refused.
  */
 export function addEntry(file, { when, does, until, missed }, now) {
   let w = String(when ?? '').trim();
