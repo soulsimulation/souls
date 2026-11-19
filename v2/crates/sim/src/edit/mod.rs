@@ -448,6 +448,7 @@ mod doorway_lowering_tests {
 
     #[test]
     fn g1f_lowered_doorway_part_uses_the_importers_qualified_row_label() {
+        assert_eq!(DOOR_GEOMETRY, 29, "field 28 belongs to terrain parameters");
         let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
         let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
         let door = im.nodes["door-building-to-b"];
