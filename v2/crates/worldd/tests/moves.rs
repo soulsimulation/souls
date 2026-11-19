@@ -908,3 +908,149 @@ fn a_walk_cancelled_mid_move_by_a_new_move_ends_in_the_same_tick() {
     );
     assert!(entry < next, "and written before it");
 }
+
+/// C19 beside C14: a partially occupied thing remains eligible, both bare and first in a ranked list.
+fn multi_slot_eligibility(ranked: bool) {
+    use worldd::bodies::{Ask, Asked};
+    type Admission = (Result<(), String>, Option<(usize, Option<Id>)>);
+
+    fn sit(b: &mut Bodies, body: Id, target: Id, fallbacks: &[Id], sequence: u64) -> Admission {
+        let intent = soul(20_000 + sequence);
+        let ask = Asked {
+            body,
+            actor: Actor::Soul(body),
+            ask: Ask::Sit { thing: target },
+            fallbacks: fallbacks.iter().map(|&thing| Ask::Sit { thing }).collect(),
+        };
+        let result = b
+            .start(vec![(intent, ask)])
+            .remove(0)
+            .1
+            .map_err(|r| r.name.to_owned());
+        (result, b.took(intent))
+    }
+
+    let (town, ground) = town();
+    let mut starts = Vec::new();
+    let people: Vec<Id> = (0..5).map(|n| soul(10_000 + n)).collect();
+    for (i, &person) in people.iter().enumerate() {
+        let (x, z) = if i < 4 {
+            (-37_000_000 + i as i64 * 1_000_000, 30_300_000)
+        } else {
+            (-34_000_000, 31_300_000)
+        };
+        let placed = town.surfaces[&ground]
+            .place(
+                person,
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                Vec3::new(x, 0, z),
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        starts.push(placed);
+    }
+    let mut b = Bodies::new(town, 50_000).unwrap();
+    for placed in starts {
+        b.add_body(humanoid(), placed).unwrap();
+    }
+    for slot in 1..=3 {
+        b.add_place(PlaceAt {
+            thing: thing(),
+            place: Place {
+                slot,
+                height: 450_000,
+                stand: [0, 300_000],
+            },
+            point: Vec3::new(-38_000_000 + slot as i64 * 1_000_000, 450_000, 30_000_000),
+            facing: Quat::IDENTITY,
+            floor: ground,
+        })
+        .unwrap();
+    }
+    b.add_place(PlaceAt {
+        thing: bed(),
+        place: Place {
+            slot: 1,
+            height: 450_000,
+            stand: [0, 300_000],
+        },
+        point: Vec3::new(-34_000_000, 450_000, 30_000_000),
+        facing: Quat::IDENTITY,
+        floor: ground,
+    })
+    .unwrap();
+    b.begin(0);
+    assert_eq!(
+        sit(&mut b, people[4], ground, &[], 1).0,
+        Err("place-unknown".into()),
+        "a known non-seat keeps its refusal"
+    );
+    assert_eq!(
+        sit(&mut b, people[4], soul(99_999), &[], 2).0,
+        Err("place-unknown".into()),
+        "an unknown seat keeps its refusal"
+    );
+    assert_eq!(sit(&mut b, people[0], thing(), &[], 3).0, Ok(()));
+    let fallback = [bed()];
+    let partial = sit(
+        &mut b,
+        people[1],
+        thing(),
+        if ranked { &fallback } else { &[] },
+        4,
+    );
+    assert_eq!(
+        partial.0,
+        Ok(()),
+        "one occupied slot leaves the other slots eligible"
+    );
+    assert_eq!(
+        partial.1,
+        Some((0, Some(thing()))),
+        "the partially occupied primary is selected"
+    );
+    assert_eq!(
+        sit(&mut b, people[2], thing(), &[], 5).0,
+        Ok(()),
+        "the third slot remains eligible"
+    );
+    let full = sit(&mut b, people[3], thing(), &fallback, 6);
+    assert_eq!(full.0, Ok(()), "a full primary selects its free fallback");
+    assert_eq!(full.1, Some((1, Some(bed()))));
+    assert_eq!(
+        sit(&mut b, people[4], thing(), &fallback, 7).0,
+        Err("place-taken".into()),
+        "a fully occupied list is refused"
+    );
+    assert!(
+        b.step(1_100_000).iter().all(|(_, r)| r.is_ok()),
+        "every admitted sit completes through the controller"
+    );
+    let placed = b.placed();
+    for (i, person) in people.iter().take(3).enumerate() {
+        assert_eq!(
+            (placed[person].0.frame.node, placed[person].0.frame.slot),
+            (thing(), Some(i as u64 + 1))
+        );
+    }
+    assert_eq!(
+        (
+            placed[&people[3]].0.frame.node,
+            placed[&people[3]].0.frame.slot
+        ),
+        (bed(), Some(1))
+    );
+}
+
+#[test]
+fn c19_a_partly_occupied_thing_accepts_a_bare_sit() {
+    multi_slot_eligibility(false);
+}
+
+#[test]
+fn c19_a_partly_occupied_primary_precedes_its_ranked_fallback() {
+    multi_slot_eligibility(true);
+}

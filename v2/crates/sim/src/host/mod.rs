@@ -80,6 +80,14 @@ use crate::walk::{Leg, Mark, World, node_of};
 /// The N lane's answers to T9's closed list of geometry questions, asked for `body`.
 pub trait Geometry {
     fn ask(&self, body: Id, q: &Ask) -> Option<Answer>;
+    /// Where `body` may stand within `reach` of `at` to act there ([`Host::stand_near`], C15); `None` by default.
+    fn stand_near(&self, _body: Id, _at: Vec3, _reach: i64) -> Option<Vec3> {
+        None
+    }
+    /// The legs of `body`'s walk to `at` of `node`'s frame, or near it ([`Host::legs`], C17); `None` by default.
+    fn legs(&self, _body: Id, _node: Id, _at: Vec3, _reach: i64) -> Option<Vec<Leg>> {
+        None
+    }
     /// A node the world holds outside the tree for now (a body's pose in the controller, a link's turn state, T9b
     /// A3), as of the tick's start; `None` reads the tree.
     fn read(&self, _node: Id) -> Option<Seen> {
@@ -285,6 +293,17 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
     fn ask(&self, q: &Ask) -> Option<Answer> {
         self.count();
         self.geometry.ask(self.body, q)
+    }
+
+    fn stand_near(&self, at: Vec3, reach: i64) -> Option<Vec3> {
+        self.count();
+        self.geometry.stand_near(self.body, at, reach)
+    }
+
+    fn legs(&self, node: Id, at: Vec3, reach: i64) -> Option<Vec<(Vec3, Option<Id>)>> {
+        self.count();
+        let legs = self.geometry.legs(self.body, node, at, reach)?;
+        Some(legs.into_iter().map(|l| (l.to, l.link)).collect())
     }
 
     fn set_timer(&mut self, after: Micros, name: Name) -> Id {
