@@ -92,12 +92,13 @@ impl Gaze {
 }
 
 /// One utterance for a voice to carry: the reference its words are kept under, how long it lasts (from its words,
-/// `replica::speech::length_of`), and whether it replaces the one under way or waits behind it.
+/// `replica::speech::length_of`), whether it replaces the one under way or waits behind it, and its reach (E13).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
     pub words: Id,
     pub length: Micros,
     pub replace: bool,
+    pub reach: replica::speech::Reach,
 }
 
 /// A body's voice: the utterance under way, until when, and those waiting, in order.
