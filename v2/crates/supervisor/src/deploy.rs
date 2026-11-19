@@ -349,6 +349,8 @@ pub fn rehearse(
         .map_err(|e| format!("rehearsal.scratch: {e}"))?;
     drop(log.close());
 
+    let err = std::fs::File::create(scratch.join("worldd.err"))
+        .map_err(|e| format!("rehearsal.scratch: {e}"))?;
     let child = Command::new(build)
         .arg("serve")
         .arg("--dir")
@@ -358,6 +360,8 @@ pub fn rehearse(
         .env("WORLDD_REHEARSAL", "1")
         .env_remove("WORLDD_SOCKET")
         .stdout(Stdio::null())
+        // What the build says goes beside its scratch copy, out of the deploy's timeline.
+        .stderr(err)
         .spawn()
         .map_err(|e| format!("rehearsal.no-start: {e}"))?;
     let _child = Killed(child);
