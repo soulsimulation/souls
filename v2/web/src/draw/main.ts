@@ -7,6 +7,7 @@ import { CameraDirector } from '../camera/director.ts';
 import { PlaybackClock, caughtUp } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
+import { SocketSource } from '../source/socket.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
@@ -25,7 +26,14 @@ installNightLighting(); // V19b: the lamps' night pools, before any lit material
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
 const address = new URLSearchParams(location.search).get('stream');
+// C1 (#3365): `?world=<name>` names a placed world instead: its `views/world.json` (under `?worlds=`, default `./w/`)
+// gives its stream's folder and its history's, both relative to the world's own folder.
+const worldName = new URLSearchParams(location.search).get('world');
+let worldHistory: string | null = null;
 const moment = readMoment(location.hash); // V9: a link to a moment opens history
+const q = new URLSearchParams(location.search), token = new URLSearchParams(location.hash.slice(1)).get('token'); // V13
+if (token) window.history.replaceState(null, '', location.pathname + location.search); // the token leaves the address
+const near = q.get('gateway') && token ? new SocketSource({ url: q.get('gateway')!, token, follow: q.get('follow') ?? '' }) : null;
 
 // The GL renderer's name, from a throwaway context, picks the tier before the real one is made (antialiasing is fixed
 // at creation).
@@ -82,7 +90,6 @@ addEventListener('resize', resize);
 resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
-const worldName = new URLSearchParams(location.search).get('world');
 const firstFrame = arrive(worldName, status);
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
@@ -99,13 +106,26 @@ const live = (address: string) => new StreamSource(address).start({
   },
   error: (m) => (error = m),
 });
+/** A placed world's stream and history folders, from its `world.json`. */
+async function resolveWorld(name: string, root: string, get = fetch): Promise<{ stream: string; history: string }> {
+  const base = new URL(`${root.replace(/\/?$/, '/')}${encodeURIComponent(name)}/`, location.href);
+  const res = await get(new URL('views/world.json', base).href);
+  if (!res.ok) throw new Error(`world ${name}: world.json ${res.status}`);
+  const j = (await res.json()) as { stream?: string; history?: string };
+  if (typeof j.stream !== 'string') throw new Error(`world ${name}: world.json names no stream`);
+  return { stream: new URL(j.stream.replace(/\/?$/, '/'), base).href, history: new URL(j.history ?? 'history/', base).href };
+}
 let history = moment && new HistoryPage(moment, cam, {
   apply: (n, r, s, h) => (world.apply(n, r, s), sky.apply(n), things.apply(n, r), sound.part(n, r, s, h ?? [])), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
   frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
 });
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
-else if (!address) worldName || (status.textContent = 'no stream: open this page with ?stream=<the stream directory>');
-else live(address);
+else if (address) (live(address), near?.start({ pointer: () => {}, part: (p) => world.apply([], [], p.samples), error: (m) => (error = m) }));
+else if (worldName) resolveWorld(worldName, new URLSearchParams(location.search).get('worlds') ?? './w/').then(
+  (w) => ((worldHistory = w.history), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, stream: w.stream, worldHistory } }), live(w.stream)),
+  (e) => (error = String(e)),
+);
+else status.textContent = 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>';
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
@@ -123,13 +143,14 @@ renderer.setAnimationLoop((now) => {
   const texel = (2 * SHADOW) / sun.shadow.mapSize.x, at = cam.controls.target;
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
-  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
+  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   director.update(Math.min(100, dt), t);
   sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
   tickWater((t ?? 0) / 1e6);
   setNightStrength(sky.state.daylight);
   const pools = frames++ % 60 === 0 && things.layer ? nightPools(world, things.layer.opts.index) : null; // the lamps, once a second
   if (pools) paintNightSources(pools.sources, pools.bounds);
+  const ck = near?.clock ?? clock;
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {
@@ -147,10 +168,11 @@ renderer.setAnimationLoop((now) => {
   sound.frame(t, { pos: c.position.toArray(), forward: fwd.toArray(), up: c.up.toArray() });
   if (t !== null) souls.draw(t, cam.camera);
   if (history) return void (status.textContent = `${history.status()}\nbodies drawn      ${drawn}   frames a second ${fps.toFixed(0)}`);
-  if (!address && !moment) return;
+  if (!address && !moment && !worldName) return;
   status.textContent = t === null || worldNow === null
     ? `waiting for the stream${error ? `\n${error}` : ''}`
-    : `behind the world  ${secs(worldNow - t)} s   (${clock.state}, ×${clock.rate.toFixed(3)})\n`
+    : `behind the world  ${secs(worldNow - t)} s   (${ck.state}, ×${ck.rate.toFixed(3)})\n`
+      + (near?.grant?.asked ? `view lowered to   ${near.grant.level} (asked ${near.grant.asked}: ${near.grant.reason})\n` : '')
       + `world time        ${clockText(t)}\n`
       + `parts played      ${played}   hashes equal ${hashesEqual}/${hashes}\n`
       + `bodies drawn      ${drawn}   frames a second ${fps.toFixed(0)}`

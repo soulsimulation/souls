@@ -9,7 +9,8 @@ use std::time::Duration;
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::http::HeaderMap;
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 use axum::routing::get;
 use replica::effects::Actor;
@@ -76,7 +77,8 @@ async fn upgrade(
         .iter()
         .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()))
         .map(str::to_owned);
-    ws.read_buffer_size(READ_BUFFER)
+    let mut res = ws
+        .read_buffer_size(READ_BUFFER)
         .write_buffer_size(0)
         .max_write_buffer_size(SEND_MOST)
         .max_message_size(MESSAGE_MOST)
@@ -90,7 +92,11 @@ async fn upgrade(
                 client,
             )
             .await;
-        })
+        });
+    // The socket carries an owner's private view (V13, #2745): no cache keeps any response of it.
+    res.headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    res
 }
 
 fn control(name: &str) -> Vec<u8> {
@@ -120,6 +126,7 @@ fn refuse(
         reason: Name::new(reason).unwrap_or_else(|| unreachable!("a fixed name")),
         now: now.clone(),
         changed: Vec::new(),
+        op: None,
     };
     let Some(at) = Cursor::from_value(&now) else {
         return Some(own_answer(answer));
@@ -234,6 +241,11 @@ async fn serve(
                 let bytes = match incoming {
                     Some(Ok(Message::Binary(b))) => b.to_vec(),
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                    // R13: a message's close, the mailbox's alone.
+                    Some(Ok(Message::Text(t))) => {
+                        crate::mailbox::on_text(&gw, grant, t.as_str());
+                        continue;
+                    }
                     _ => break,
                 };
                 if let Some(request) = views::request(&bytes) {
@@ -247,6 +259,9 @@ async fn serve(
                     gw.receipts.write(&who, Outcome::Refusal);
                     ok = send(&mut socket, answer).await;
                 }
+            }
+            Some(mail) = attached.mail.recv() => {
+                ok = socket.send(Message::Text(mail.into())).await.is_ok();
             }
             out = attached.frames.recv() => match out {
                 Some(frame) => ok = send(&mut socket, times::finish(frame)).await,
