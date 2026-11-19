@@ -1479,8 +1479,11 @@ name = "worldd"
 version = "0.0.0"
 dependencies = [
  "archive",
+ "axum",
  "backup",
  "directoryd",
+ "futures-util",
+ "gatewayd",
  "import-eden",
  "replica",
  "rustix",
@@ -1488,6 +1491,8 @@ dependencies = [
  "skills",
  "supervisor",
  "testworld",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

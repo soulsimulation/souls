@@ -1,7 +1,8 @@
 //! Agents' sockets (Engine v2 I1, #2683). `gatewayd` is a program of its own that holds every agent's socket, so a
 //! world restarts without closing one: the agent sees a pause, and each intent it sent is answered once, by its
 //! receipt, by `world.restarting`, or, when the world is away past the intent's deadline, by `act.timed-out` or
-//! `intent.expired` (C8, `world_link`).
+//! `intent.expired` (C8, `world_link`). An act the world says is in progress is passed on as such, and waited for to
+//! the world's own deadline (C20).
 //!
 //! - [`socket`]: one WebSocket per agent, through axum's upgrade, one task and one bounded outbound queue each. The
 //!   first frame each way is T10's (`v2/docs/intents.md` rule 12); sign-in follows it, by header or first message.
@@ -90,6 +91,8 @@ pub const OUTBOUND: usize = 64;
 /// The gateway's shared state.
 pub struct Gateway {
     pub tokens: RwLock<Tokens>,
+    /// The tokens file, read again at a sign-in when it changed (C3, #3367); unset, the tokens are as given.
+    pub tokens_file: std::sync::OnceLock<token::Source>,
     /// The world's pinned build hash, sent in the first frame (T10 rule 12).
     pub build: Vec<u8>,
     pub link: world_link::Link,
@@ -156,6 +159,7 @@ impl Gateway {
     ) -> Arc<Gateway> {
         Arc::new(Gateway {
             tokens: RwLock::new(tokens),
+            tokens_file: std::sync::OnceLock::new(),
             build,
             link: world_link::Link::default(),
             views: views::Views::default(),
@@ -232,6 +236,14 @@ impl Gateway {
             {
                 held.mailed.insert(id.clone());
             }
+        }
+    }
+
+    /// A text frame for `key`'s signed-in socket alone, now (G11: the directory's reply to that socket's prayer frame).
+    pub fn post_text(&self, key: &[u8], frame: String) {
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(tx) = hub.grants.get(key).and_then(|h| h.mail.as_ref()) {
+            let _ = tx.try_send(frame);
         }
     }
 

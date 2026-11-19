@@ -44,7 +44,9 @@ The first runs (R12's pull request) used a stand-in daemon on the Soul's socket,
 
 C10 (#3414) added `pair <world url>` (W2's pairing, left polling in the background once it has printed the link
 and code), `can <act>` (R8's local check) and `act` on a target: `<verb>:<id>`, an id alone (a walk), each candidate
-on its own target, the first one's thing arguments in parameter 1 (C2). Still missing:
+on its own target, the first one's thing arguments in parameter 1 (C2). R19 (#3327) added `memory <words>` and
+`remember` (people, places, goals, self, promises) on the Soul's memory folder, and pairing writes the folder's guide
+as one marked block in its `AGENTS.md` (`client/src/home/guide.mjs`). Still missing:
 
 - A local world where a newly paired Soul has a body and finds its places and seats by name (`worldd --testworld`
   has one fixed body, and its town's places and chairs are not in the replica's tree; it prints their ids). C3, #3367.

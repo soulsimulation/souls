@@ -21,6 +21,8 @@
 //                                             --private (remembered for that conversation)
 //   souls.mjs converse list                   the conversations in the copy
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
+//   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
+//   souls.mjs prayers                         this Soul's prayers, each waiting or answered, with the answer
 //   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened (an answer, or words
 //                                             said to or near it: `heard`, also in the next look), or at the timeout
 //   souls.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]
@@ -35,11 +37,17 @@
 //   act ... --for <message id>                the act serves that owner's message; its outcome closes it (R13)
 //   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
 //   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
+//   souls.mjs memory <words...>               every memory line holding every word, `untrusted` when a world wrote it (R19)
+//   souls.mjs remember --person|--place <id> "<note>" | --goal <id> "<note>" | --self "<line>"
+//                    | --person <id> --promise "<what>" [--by me|them] | --kept <promise id> --evidence <id>
+//                                             one record of the Soul's own in its memory (R19); no daemon
 //   souls.mjs schedule add "<when>" <act> [<act>...] | wake "<why>"  [--until <time>] [--missed drop|tell|late <n>m]
 //                                             an entry in memory/schedule.md (R15): <when> is a real time (ISO, or
 //                                             `in 10m`), a world time (`20:00`), or R9's pattern as JSON. The daemon
 //                                             sends it, with no model turn
 //   souls.mjs schedule [list] | schedule remove <id>   the entries and what became of each
+//   souls.mjs upgrade [--rollback]            brings today's client's Souls across, one owner approval each (R18); with
+//                                             --rollback, today's client again
 //   any of them [--soul <id>]                 which Soul, when the home has more than one
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
@@ -51,12 +59,12 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
-import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
+import { consolidateIn, digestOf, rememberIn, searchIn, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'converse', 'lie', 'wait', 'history', 'stats', 'pending', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'converse', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'pending', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
-export const LOCAL = ['digest', 'consolidate', 'schedule', 'help'];
+export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 'remember'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /**
@@ -109,6 +117,7 @@ export function requestOf(argv) {
     return { local: op, soul: opts.soul, sub, args: more, until: opts.until, missed: opts.missed };
   }
   if (op === 'help') return { local: op, soul: opts.soul, topic: rest[0] };
+  if (op === 'memory' || op === 'remember') return { local: op, soul: opts.soul, args: rest };
   if (LOCAL.includes(op)) return { local: op, soul: opts.soul, since: opts.since ?? null, refs: rest.includes('--refs'), force: rest.includes('--force') };
   if (!OPS.includes(op)) return { refused: 'unknown-command', detail: `one of ${OPS.join(', ')}` };
   const req = { op };
@@ -117,7 +126,7 @@ export function requestOf(argv) {
   if (op === 'act' && opts.for !== undefined) req.for = opts.for;
   if (op === 'pending' && rest[0] !== '--check') return { refused: 'pending-check', detail: 'pending --check; a turn reads what waits with wait 0' };
   if (op === 'pair') req.url = rest[0];
-  if (op === 'say') req.words = rest.join(' ');
+  if (op === 'say' || op === 'pray') req.words = rest.join(' ');
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
   if (op === 'converse') {
@@ -139,9 +148,13 @@ export function requestOf(argv) {
 async function local({ local: op, soul: named, since, refs, force, ...asked }, home) {
   if (op === 'schedule') return schedule(home, named, asked);
   if (op === 'help') return help(home, named, asked.topic);
-  const souls = existsSync(join(home, 'souls')) ? readdirSync(join(home, 'souls')).filter((s) => existsSync(join(soulDirOf(home, s), 'memory'))) : [];
+  const kept = existsSync(join(home, 'souls')) ? readdirSync(join(home, 'souls')).filter((s) => existsSync(join(soulDirOf(home, s), 'memory'))) : [];
+  // A newly paired Soul has no memory folder yet, and may still remember.
+  const souls = op === 'remember' ? [...new Set([...kept, ...soulsWithTokens(home)])] : kept;
   const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
   if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a memory'}`), { code: 'which-soul' });
+  if (op === 'memory') return { ok: true, soul, ...searchIn(home, soul, asked.args) };
+  if (op === 'remember') return { ok: true, soul, ...rememberIn(home, soul, asked.args) };
   if (op === 'digest') return { ok: true, soul, ...digestOf(soulDirOf(home, soul), { since, refs }) };
   return { ok: true, soul, ...(await consolidateIn(home, soulDirOf(home, soul), { force })) };
 }
@@ -197,9 +210,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
   const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
   try {
-    if (refused) throw Object.assign(new Error(detail), { code: refused });
+    if (refused && process.argv[2] !== 'upgrade') throw Object.assign(new Error(detail), { code: refused });
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
-    if (asked.local) out(await local(asked, home));
+    if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
+    else if (asked.local) out(await local(asked, home));
     else if (req.op === 'pair') { out(await pairing(home, req.url)); process.exit(0); }
     else {
       const souls = soulsWithTokens(home);

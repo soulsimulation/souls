@@ -12,7 +12,7 @@ Each has one owning program; the list says how each is copied.
 
 | store | owner | path under the data folder | copy | ships |
 |---|---|---|---|---|
-| accounts (W1); the owner's mailbox is a table in it (R13, #2753) | directoryd | `directory/accounts.sqlite` | SQLite's online backup, through the owner (it holds the file exclusively: `Store::backup`) | each 270 s, when changed |
+| accounts (W1); the owner's mailbox (R13, #2753) and the prayers to a world's creator (G11, #3335) are tables in it | directoryd | `directory/accounts.sqlite` | SQLite's online backup, through the owner (it holds the file exclusively: `Store::backup`) | each 270 s, when changed |
 | pairing, with each paired Soul's token hash (W2) | directoryd | `directory/pairing.sqlite` | SQLite's online backup | each 270 s, when changed |
 | the gateway's tokens file (W2) | directoryd | `directory/gateway-tokens` | as it is (written whole, renamed) | each 270 s, when changed |
 | words and uploads: the text store (K16, V1b) | worldd | `worlds/<world>/log.text/` | `text`, then `uploads/`, then `removed`, in that order | each 270 s, when changed |
