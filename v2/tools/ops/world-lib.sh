@@ -2,7 +2,9 @@
 # only a world's name, calls the installed tool and prints the exact undo command. SOULS_OPS_DRY=1 prints each
 # command instead of running it.
 set -euo pipefail
-LIB=/usr/local/lib/souls
+# SOULS_LIB and SOULS_ETC stand in for the install's folders on a scratch machine (release/scratch.sh).
+LIB=${SOULS_LIB:-/usr/local/lib/souls}
+ETC=${SOULS_ETC:-/etc/souls}
 export WORLDS_ROOT=${WORLDS_ROOT:-/var/lib/souls/worlds}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 

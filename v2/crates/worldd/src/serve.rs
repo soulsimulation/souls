@@ -28,8 +28,19 @@
 //! thread. The Souls in `world.json` stand on the open ground at their places on a first start, where the log last had
 //! them after it.
 //!
-//! Not here: shipping and archiving the log (O3's shipper, in #3308, not yet on this base), a G9 fork as a seed (a
-//! fork's checkpoint has no facts file for the walkers' town), joins and leaves (C3), generic acts (C2).
+//! **Off the machine** (O3b, #3458), when `--store <folder>` or `$WORLDD_STORE` names a store (O9's folder store; a
+//! fleet's real store is not wired here): the world is claimed under `--machine <name>` (`$WORLDD_MACHINE`, default
+//! `local`), its build pinned on a first claim. Each record on the disk and each checkpoint is shipped by O3's
+//! shipper under that claim. A restart claims again ([`shipping::take_over`], as the ops tool's restart): the claim
+//! starts at the directory's mark plus one, and the shipper takes the log's records from there, so the history read
+//! from the store has every record once, in order. V3's archiver packs each tick's part (not the recorder's inputs,
+//! numbered from 0 among the parts) under `h/<world name>/<lineage hex>/`, with the T6 header as `header`: the
+//! bundles the page's history plays (`#w=<world name>&l=<lineage hex>&t=<µs>`, its files served under `s/`). The
+//! day's bundle index is written again each time a bundle closes. A restart archives again from record 0: what was
+//! stored is passed over when the same and written over when made from more records ([`Again`]).
+//!
+//! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town), joins and leaves
+//! (C3), generic acts (C2).
 
 // The process reads the wall clock once for the stream's anchor (V1 rule 5); the engine never does.
 #![allow(clippy::disallowed_methods)]
@@ -39,8 +50,11 @@ use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 
+use archive::{Archiver, Shared};
+use directoryd::directory::Directory;
+use directoryd::directory::store::{Object, Store, When};
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource};
 use replica::effects::{Effect, Refusal};
@@ -55,9 +69,11 @@ use sim::links::Doors;
 use sim::log::{FileStore, Log};
 use sim::recorder;
 use sim::walk::town::Town;
+use supervisor::folder::Folder;
 use worldd::answers::{self, Config};
 use worldd::bodies::{Bodies, Placed};
 use worldd::checkers::Rules;
+use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out::{self, Writer};
 use worldd::views::Tier;
 
@@ -363,10 +379,188 @@ fn bodies(
     Ok(b)
 }
 
-/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--rate <num>/<den>]`: runs the
-/// world until killed. A checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB). The clock's rate
-/// is world µs per real µs (default 1/1); a start whose rate differs from the last logged applies a new mapping, and
-/// the mapping in force is on the zone root for every copy (E7b, #3516).
+type Bucket = Shared<Folder>;
+
+/// The archive's store on a restart (O3b): V3's shelf starts from record 0 again and writes its bundles and indexes
+/// as new. A create refused because the key exists is passed when the bytes are the same, and otherwise writes over
+/// them (a day's index, or a window closed at a graceful stop, made again from more records).
+#[derive(Clone)]
+struct Again(Bucket);
+
+impl Store for Again {
+    fn get(&self, key: &str) -> Result<Option<Object>, Refusal> {
+        self.0.get(key)
+    }
+
+    fn put(&self, key: &str, bytes: &[u8], when: When) -> Result<String, Refusal> {
+        match self.0.put(key, bytes, when) {
+            Err(e) if e.name == "precondition-failed" && when == When::Absent => {
+                match self.0.get(key)? {
+                    Some(o) if o.bytes == bytes => Ok(o.etag),
+                    Some(o) => self.0.put(key, bytes, When::Is(&o.etag)),
+                    None => self.0.put(key, bytes, When::Absent),
+                }
+            }
+            r => r,
+        }
+    }
+}
+
+/// Where each record on the disk goes off the machine: the shipper, and the archiver (parts only, numbered among
+/// the parts).
+struct Off {
+    ship: Sender<Item>,
+    archive: Option<Sender<(u64, Vec<u8>)>>,
+    parts: u64,
+}
+
+impl Off {
+    fn take(&mut self, record: u64, bytes: &[u8], input: bool) {
+        let acts = if input {
+            0
+        } else {
+            replica::effects::Part::read(bytes).map_or(0, |p| p.effects.len() as u64)
+        };
+        let _ = self.ship.send(Item {
+            record,
+            bytes: bytes.to_vec(),
+            acts,
+            stakes: false,
+        });
+        if !input && let Some(a) = &self.archive {
+            let _ = a.send((self.parts, bytes.to_vec()));
+            self.parts += 1;
+        }
+    }
+}
+
+/// Reports a helper thread that stopped; the world goes on.
+fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Result<T, Refusal>>) {
+    std::thread::spawn(move || match h.join() {
+        Ok(Err(e)) => eprintln!("worldd: {what} stopped, the world goes on: {}", refusal(e)),
+        Err(_) => eprintln!("worldd: {what} panicked, the world goes on"),
+        Ok(Ok(_)) => {}
+    });
+}
+
+/// V3's archiver on a thread of its own: each part as it comes, and the day's bundle index written again each time a
+/// bundle closes, so a running world's bundles are found before its day ends.
+fn archiving(
+    mut a: Archiver<Again>,
+    rx: Receiver<(u64, Vec<u8>)>,
+) -> std::thread::JoinHandle<Result<(), Refusal>> {
+    std::thread::spawn(move || {
+        let mut indexed = a.shelf.writes.bundles;
+        loop {
+            match rx.recv_timeout(shipping::POLL * 20) {
+                Ok((n, bytes)) => a.push(n, bytes)?,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return a.flush(),
+            }
+            if a.shelf.writes.bundles != indexed {
+                a.shelf.flush()?;
+                indexed = a.shelf.writes.bundles;
+            }
+        }
+    })
+}
+
+/// Claims the world in the store at `root` and starts its shipper and archiver, handed the log's records read at the
+/// start (numbered from `first`) from the claim's start on.
+fn off_machine(
+    root: &Path,
+    machine: &str,
+    built: &Built,
+    name: &str,
+    dir: &Path,
+    first: u64,
+    records: &[Vec<u8>],
+) -> R<Off> {
+    let store: Bucket = Shared(Arc::new(Folder::new(root.to_path_buf())));
+    let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
+    let mut d = Directory::new(store, machine);
+    let (lineage, zone) = (built.root.scope().0, built.header.zone);
+    match d.world(&lineage, zone) {
+        Err(e) if e.name == "record-missing" => {
+            // The build pinned on a first claim: the launcher's hash (`$WORLDD_BUILD`), as a SHA-256 multihash.
+            let pin = std::env::var("WORLDD_BUILD").unwrap_or_else(|_| "unpinned".to_owned());
+            let mut build = vec![0x12, 0x20];
+            build.extend_from_slice(&sha256(pin.as_bytes()));
+            d.set_build(&lineage, zone, &build).map_err(refusal)?;
+        }
+        Err(e) => return Err(refusal(e)),
+        Ok(_) => {}
+    }
+    let end = first + records.len() as u64;
+    let claim = shipping::take_over(&mut d, &lineage, zone, first..end).map_err(refusal)?;
+    let from = claim.takeover.from;
+    println!(
+        "shipping: epoch {} from record {from} of {end}",
+        claim.takeover.epoch
+    );
+    let shipper = Shipper::open(
+        d,
+        claim,
+        lineage,
+        zone,
+        built.header.stored(),
+        from,
+        Wall::start(),
+    )
+    .map_err(refusal)?
+    .checkpoints(&dir.join("checkpoints"), shipping::CHECKPOINT_GAP_US);
+    let (ship, _, h) = shipper.spawn();
+    report("the shipper", h);
+    let kind = built
+        .header
+        .kinds
+        .iter()
+        .find(|k| k.as_str().starts_with("souls:place@"))
+        .cloned();
+    let archive = match kind {
+        Some(kind) => {
+            // A store of its own at the history's folder: the day's index names each bundle by its key, which the
+            // page reads relative to that folder.
+            let at = root.join("h").join(name).join(to_hex(&lineage));
+            let again = Again(Shared(Arc::new(Folder::new(at))));
+            again
+                .put("header", built.header.stored(), When::Absent)
+                .map_err(refusal)?;
+            let a = Archiver::open(again, "", &built.header, zone, kind).map_err(refusal)?;
+            let (tx, rx) = channel();
+            report("the archiver", archiving(a, rx));
+            Some(tx)
+        }
+        None => {
+            eprintln!("worldd: the header names no souls:place root; the history is not archived");
+            None
+        }
+    };
+    let mut off = Off {
+        ship,
+        archive,
+        parts: 0,
+    };
+    for (k, bytes) in records.iter().enumerate() {
+        let record = first + k as u64;
+        let input = recorder::is_input(bytes);
+        if record >= from {
+            off.take(record, bytes, input);
+        } else if !input {
+            // Shipped before; archived again from 0 (the archiver passes over what it holds).
+            if let Some(a) = &off.archive {
+                let _ = a.send((off.parts, bytes.clone()));
+            }
+            off.parts += 1;
+        }
+    }
+    Ok(off)
+}
+
+/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <folder>] [--machine
+/// <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes
+/// of log (default 8 MiB). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
+/// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
         Ok(()) => 0,
@@ -379,8 +573,8 @@ pub fn run(args: &[String]) -> i32 {
 
 fn serve(args: &[String]) -> R<()> {
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
-        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
-         [--rate <num>/<den>]",
+        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <folder>] \
+         [--machine <name>] [--rate <num>/<den>]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -417,6 +611,27 @@ fn serve(args: &[String]) -> R<()> {
     let (log, found) =
         Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
     let store = log.close();
+    let bucket = arg(args, "--store")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("WORLDD_STORE").map(PathBuf::from));
+    let mut off = match bucket {
+        Some(root) => {
+            let machine = arg(args, "--machine")
+                .cloned()
+                .or_else(|| std::env::var("WORLDD_MACHINE").ok())
+                .unwrap_or_else(|| "local".to_owned());
+            Some(off_machine(
+                &root,
+                &machine,
+                &built,
+                &name,
+                &dir,
+                found.first,
+                &found.records,
+            )?)
+        }
+        None => None,
+    };
     let (tx, synced) = channel();
     let mut cfg = Config::new(built.root.scope(), EPOCH);
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
@@ -487,6 +702,9 @@ fn serve(args: &[String]) -> R<()> {
         .name("synced".into())
         .spawn(move || {
             for s in synced {
+                if let Some(o) = &mut off {
+                    o.take(s.record, &s.bytes, s.input);
+                }
                 if !s.input {
                     fed.offer(s.record, s.bytes);
                 }

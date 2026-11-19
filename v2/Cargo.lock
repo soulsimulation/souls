@@ -16,7 +16,6 @@ dependencies = [
  "miniz_oxide",
  "replica",
  "sim",
- "worldd",
 ]
 
 [[package]]
@@ -553,6 +552,7 @@ name = "import-eden"
 version = "0.0.0"
 dependencies = [
  "replica",
+ "sim",
 ]
 
 [[package]]
@@ -689,6 +689,7 @@ dependencies = [
  "directoryd",
  "futures-util",
  "gatewayd",
+ "import-eden",
  "replica",
  "sim",
  "supervisor",
@@ -1462,12 +1463,14 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "worldd"
 version = "0.0.0"
 dependencies = [
+ "archive",
  "directoryd",
  "import-eden",
  "replica",
  "rustix",
  "sim",
  "skills",
+ "supervisor",
  "testworld",
 ]
 
