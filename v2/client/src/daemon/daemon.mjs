@@ -27,6 +27,12 @@
 //   is an event `{"kind":"heard","from":"<body id>","name":..,"words":..,"whisper":bool}`: it wakes a `wait`, is in
 //   the next `look`'s brief (`heard`, quoted as data), and reaches the reflexes as `souls:said` (`toMe` for a
 //   whisper), whose intents are sent once, as `act`'s are. Its own words are not heard back.
+//   and R9b's (#3201): the same subscription, at `sampled`, brings the entries of the bodies near it (R4 rule 2). An
+//   entry that changes the world brings the copy current by hash (R5's compare and descend, `follow` in `status`'s
+//   `follows`), so the copy follows the world between commands; each named event goes to the reflexes (`toMe` when a
+//   field names this Soul's body) and to R14's memory feeder (`../memory/feeder.mjs`), as each heard utterance does.
+//   An event reaches the reflexes once by its entry's sequence and name, however it arrived and across drops; after a
+//   drop the copy is brought current by hash, since the items missed while away are not replayed.
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
@@ -41,12 +47,19 @@
 //     {"op":"history","at":"<place>"} | {"thing":"<id>"} | {"soul":"<id or name>"}, "since"/"until": world µs
 //   and R8's (#2703), checking with R2's form rules on the copy (`../check/`), kind entries from `<home>/kinds/`:
 //     {"op":"can","intent":{"verb":"..","this":"<id>","form":".."}}   yes, no with the reason, or unknown, and `current`
+//       (a move, `<ns>:walk|sit|lie|rise` with `this` and a walk's `point`, is checked with the world's own move
+//       check instead, C14 #3442: `moves.mjs`)
 //     {"op":"can","acts":["sit:<id>"]}  and  {"op":"act","acts":["sit:<id>","sit:<id>"]}   C10's (#3414): the thin
 //       command's words, each candidate on its own target, thing arguments after their act (`actsOf`)
 //     {"op":"act","verbs":[{"verb":"..","this":"<id>","form":".."}, "..."]}   each candidate with a form is checked
 //       again at send time on a copy brought current; a current `no` drops it; none left is `stopped-locally`, with
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
 //       intent's basis is the version the model was last shown, not the send-time version.
+//   and R15's (#2757), the Soul's own schedule (`../schedule/schedule.mjs`): the owner's `memory/schedule.md`, read
+//   again when it changes and checked each second (no long timer: Node turns one over 24.8 days into 1 ms). An entry's
+//   acts are checked (R8) and sent with no model turn; a wake goes through R13's budget. A change entry fires on R9's
+//   events (the `event` op, and what this Soul hears). Each occurrence is marked on disk with its sequence before
+//   it is sent. What was missed while the daemon was off is listed once, in the next answer, as `missed`.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
 //   socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM
@@ -60,7 +73,7 @@
 //
 //   node v2/client/src/daemon/daemon.mjs --home <.souls> --soul <id> --pkg <replica wasm-bindgen pkg>
 
-import { appendFileSync, closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -71,12 +84,15 @@ import { find } from '../find/find.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
 import { ageOf } from './age.mjs';
+import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
+import { feederFor } from '../memory/feeder.mjs';
+import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -145,8 +161,8 @@ const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
 const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
-const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
-const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
+const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, entries: 0, follows: 0, build: null };
+const reflexes = new Table(soul); // R9: onEvent(event, now) per named event, from the stream (R9b)
 const wakes = new Wakes(soul); // R13: its budget's deliveries are kept on disk, so a restart never resets them
 if (state.wake) Object.assign(wakes, { budget: state.wake.budget, delivered: state.wake.delivered });
 const saveWakes = () => { state.wake = { budget: wakes.budget, delivered: wakes.delivered }; save(); };
@@ -174,6 +190,7 @@ const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
 const trace = openTrace(rt.dir);
 const rankedOf = new Map(); // sequence → how many verbs it ranked, until answered
+const movesOf = new Map(); // sequence → its move's form (C14), until answered: a receipt says whether the body sits
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
 let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now();
@@ -195,6 +212,19 @@ function current() {
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
   if (ws && !ws.hearing) { ws.hearing = true; ws.send(wire.wireSubscribe(scope, seat.grant.counter, BigInt(HEARING_BUDGET))); }
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
+  follow();
+}
+
+/**
+ * R9b: the copy brought current by hash once an entry changed the world near it, or after a drop (the items missed
+ * while away are not replayed). One at a time: entries that arrive during a sync ask for one more after it.
+ */
+let followWanted = false;
+function follow() {
+  if (!followWanted || syncing || !ws || !signedIn) return;
+  followWanted = false;
+  counts.follows++;
+  startSync(ws, 'follow');
 }
 
 /** R13: a text frame, the mailbox's: a message for this Soul, noted once. */
@@ -247,8 +277,9 @@ function syncAnswer(sock, n, refused, bytes) {
   const { waiters } = syncing;
   syncing = null;
   for (const w of waiters) w(true);
-  // A refresh (R7) brings the copy current for an answer; the stream's cursor stays the last frame it was given.
-  if (done.kind === 'refresh') return;
+  // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
+  // the last frame it was given.
+  if (done.kind === 'refresh' || done.kind === 'follow') { follow(); return; }
   state.cursor = copyVersion; // the stream carries on from the version the hashes are at
   state.seen = null; // no frame of it applied: the gateway's default
   save();
@@ -290,7 +321,7 @@ function connect() {
         log(`signed in: ${a}`);
         step = 'stream';
         clearTimeout(deadline);
-        if (a === 'stream.resumed' && !copy.empty()) current();
+        if (a === 'stream.resumed' && !copy.empty()) { followWanted = true; current(); }
         else startSync(sock, a === 'stream.cannot-resume' ? 'resync' : 'snapshot');
         return;
       }
@@ -306,6 +337,7 @@ function connect() {
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
         trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
+        if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
           serving.delete(s);
@@ -348,6 +380,8 @@ function connect() {
  * (its say has its receipt). Each wakes a `wait`, joins the next brief, and goes to the reflexes as `souls:said`.
  */
 function onItem(bytes) {
+  const entry = wire.wireEntry(bytes);
+  if (entry) { onEntry(JSON.parse(entry)); return; }
   const line = wire.wireHeard(bytes);
   if (!line) return;
   const [, sequence, at, from, audience, words] = line.split(' ');
@@ -356,9 +390,57 @@ function onItem(bytes) {
   heardSince.push(e);
   if (heardSince.length > HEARD_KEPT) heardSince.shift();
   note(e);
-  for (const { intent } of reflexes.onEvent({ name: 'souls:said', fields: { 1: e.words }, actor: from, toMe: e.whisper, sequence: e.sequence }, Date.now())) {
+  const said = { name: SAID, fields: { 1: e.words }, actor: from, toMe: e.whisper, sequence: e.sequence };
+  scheduleEvent(said); // R15: a schedule entry waiting on it
+  fire(said);
+  if (e.words) {
+    // Memory keeps a line with its speaker's name: as the last answer's copy named it, else the speaker's id.
+    heardWords.set('words', e.words).set('name', shown.get(from)?.name || from);
+    remember([{ sequence: e.sequence, at: e.at, actor: from, events: [{ name: SAID, fields: { 1: 'words', 2: 'name' } }] }]);
+    heardWords.clear();
+  }
+}
+
+// --- What happens near this Soul (R9b, #3201) ----------------------------------------------------------------------
+const SAID = 'souls:said';
+const FIRED_KEYS_KEPT = 4096;
+const firedKeys = new Set(); // `<sequence>/<name>` of the events handed to the reflexes, the oldest let go first
+
+/** One named event to the reflexes, once by its entry and name; the intents they give are sent once, as `act`'s are. */
+function fire(event) {
+  const key = `${event.sequence}/${event.name}`;
+  if (firedKeys.has(key)) return;
+  firedKeys.add(key);
+  if (firedKeys.size > FIRED_KEYS_KEPT) firedKeys.delete(firedKeys.values().next().value);
+  for (const { intent } of reflexes.onEvent(event, Date.now())) {
     sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor });
   }
+}
+
+/** R14's feeder, opened on first use; a memory that cannot be written is logged and never stops the daemon. */
+let feeder = null;
+const heardWords = new Map(); // a heard utterance's words, by the reference the feeder is given
+function remember(entries) {
+  try {
+    feeder ??= feederFor(home, soul, { world: seat.world, textOf: (ref) => heardWords.get(ref) ?? null });
+    feeder.feed(entries);
+  } catch (e) {
+    log(`memory not written: ${String(e.message ?? e).slice(0, 200)}`);
+  }
+}
+
+/**
+ * An entry of a body near this Soul: one that changes the world brings the copy current by hash; its named events go
+ * to the reflexes and to memory. This Soul's own body's id is its Soul's (`soul`) there, so neither takes its own acts
+ * for another's. Utterances arrive addressed, with their words (`onItem`), and are not taken twice.
+ */
+function onEntry(e) {
+  counts.entries++;
+  if (e.changes > 0) { followWanted = true; follow(); }
+  const actor = e.actor === ME ? soul : e.actor;
+  const events = e.events.filter((ev) => ev.name !== SAID);
+  for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
+  if (events.length) remember([{ sequence: e.sequence, at: e.at, actor, events }]);
 }
 
 /** Heard utterances for an answer: the speaker's name from the copy beside its id. */
@@ -411,8 +493,10 @@ const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whi
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
-// the world's key when it is a plain name.
-const NS = /^[A-Za-z0-9_.\-/@]+$/.test(seat.world) && seat.world !== 'souls' ? seat.world : 'world';
+// the world's key when it is a plain name of at most NS_MOST bytes, else `world`: a verb is one text, at most 64 bytes
+// (intent_limits.txt), and a placed world's key is its 67-byte instance name (place-world.sh), which no verb fits.
+const NS_MOST = 32;
+const NS = /^[A-Za-z0-9_.\-/@]+$/.test(seat.world) && seat.world.length <= NS_MOST && seat.world !== 'souls' ? seat.world : 'world';
 const WORDS_MOST = 1000; // characters a say or a whisper carries
 const ID = /^[0-9a-f]{32}-\d+$/;
 
@@ -465,6 +549,7 @@ function sendIntent(ranked, { target, words, args, basis, expiry }) {
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args);
   save();
   const sequence = state.sequence, sent = signedIn;
+  if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
   return { sequence, sent };
 }
@@ -508,6 +593,14 @@ async function answer(req) {
         (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }));
     }
     case 'can': {
+      const intent = Array.isArray(req.acts) ? actsOf(req.acts)[0] : req.intent;
+      if (moveForm(intent?.verb)) {
+        // C14: a move is checked as the world checks it, on the copy and the body's last known posture.
+        const age = await ageAfter();
+        const nodes = stateOf(copy, kindsIn(join(home, 'kinds')), ME).nodes;
+        const v = moveVerdict(wire.move_check, intent, { nodes, seated: state.seated ?? null });
+        return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
+      }
       const c = Array.isArray(req.acts) ? actsOf(req.acts)[0] ?? candidateOf(null) : candidateOf(req.intent);
       const age = await ageAfter();
       const [v] = verdicts([c]);
@@ -556,7 +649,8 @@ async function answer(req) {
       if (!e || typeof e.name !== 'string') return { ok: false, code: 'event-not-an-event', detail: 'an event has a name' };
       const fired = wakes.onEvent(e, Date.now());
       if (fired) for (const w of wakers.splice(0)) w();
-      return { ok: true, fired };
+      const scheduled = scheduleEvent(e);
+      return { ok: true, fired, ...(scheduled.length ? { scheduled } : {}) };
     }
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
@@ -597,6 +691,11 @@ const server = createServer((c) => {
           // R9: the reflexes that fired since the answer before, in this one's `changed`.
           const fired = reflexes.changed();
           if (fired.length) out.changed = { ...(out.changed ?? {}), reflexes: fired };
+          // R15: what the schedule missed while the daemon was off, once, in the next answer.
+          if (state.schedule.missed.length) {
+            out.missed = { note: MISSED_NOTE, entries: state.schedule.missed.splice(0) };
+            save();
+          }
           // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
           const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
           if (op !== 'stats') trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
@@ -606,6 +705,91 @@ const server = createServer((c) => {
   });
   c.on('error', () => {});
 });
+
+// --- The Soul's own schedule (R15, #2757) ------------------------------------------------------------------------
+const SCHEDULE = join(soulDirOf(home, soul), 'memory', 'schedule.md');
+const BEAT_MS = 1000, BEAT_SAVED_MS = 10_000, GAP_MS = 15_000;
+const MISSED_NOTE = 'not sent: their moment passed while this daemon was off or asleep. Tell your owner; send what still matters yourself.';
+state.schedule = { marks: {}, beat: null, missed: [], dropped: 0, ...(state.schedule ?? {}) };
+let entries = [], stamp = null, beatSaved = 0;
+const inFlight = new Set();
+
+/** The file's entries, read again only when it changed; a line that does not parse is logged once and inert. */
+function scheduleNow() {
+  let s = null;
+  try { const st = statSync(SCHEDULE); s = `${st.mtimeMs} ${st.size}`; } catch { /* no file: no entries */ }
+  if (s === stamp) return entries;
+  stamp = s;
+  const read = readSchedule(SCHEDULE);
+  for (const b of read.bad) log(`schedule: line ${b.line} inert (${b.code})`);
+  entries = read.entries;
+  return entries;
+}
+
+/** One entry's moment: a wake joins R13's queue; acts are checked at send (R8) and sent once, marked first. */
+async function fireEntry(e, now, late) {
+  if (inFlight.has(e.key) || state.schedule.marks[e.key]) return;
+  inFlight.add(e.key);
+  try {
+    if (e.wake) {
+      state.schedule.marks[e.key] = { at: now, wake: true };
+      save();
+      wakes.merge([{ rule: e.id, why: e.wake, count: 1, at: now }]);
+      for (const w of wakers.splice(0)) w();
+      return;
+    }
+    const candidates = actsOf(e.acts);
+    let keep = candidates, dropped = [];
+    if (candidates.some((c) => c.form)) {
+      const current = isCurrent(await ageAfter(), CURRENT_MS);
+      ({ keep, dropped } = sift(candidates, current ? verdicts(candidates) : [], current));
+    }
+    if (state.schedule.marks[e.key]) return;
+    if (keep.length === 0) {
+      state.schedule.marks[e.key] = { at: now, stopped: dropped.map((d) => d.reason) };
+      save();
+      log(`schedule: ${e.id} stopped locally`);
+      return;
+    }
+    // Marked with its reserved sequence in the same write that takes it (sendIntent saves before it sends).
+    state.schedule.marks[e.key] = { at: now, sequence: state.sequence + 1, late };
+    const target = keep.map((c) => c.this ?? '').join(' ');
+    const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
+    const { sequence } = sendIntent(keep.map((c) => c.verb), { target, args, basis: state.cursor });
+    trace.write({ k: 'scheduled', id: e.id, seq: sequence, late });
+    log(`schedule: ${e.id} sent as ${sequence} (${late} ms after its moment)`);
+  } catch (err) {
+    state.schedule.marks[e.key] ??= { at: now, failed: err.code ?? 'refused' };
+    save();
+    log(`schedule: ${e.id} not sent (${err.code ?? err.message})`);
+  } finally {
+    inFlight.delete(e.key);
+  }
+}
+
+/** Each second: the beat (a gap is the daemon off or the machine asleep), then the real times that have come. */
+function beat() {
+  const now = Date.now(), s = state.schedule;
+  const off = s.beat !== null && now - s.beat > GAP_MS ? [s.beat, now] : null;
+  if (off) log(`schedule: no beat for ${Math.round((now - s.beat) / 1000)} s`);
+  s.beat = now;
+  const { fire, missed } = due(scheduleNow(), s.marks, now, off);
+  for (const m of missed) {
+    s.marks[m.e.key] = { at: now, missed: true };
+    if (m.told) {
+      s.missed.push({ ...shownEntry(m.e), lateMs: m.late, ...(m.off ? { off: m.off.map((t) => new Date(t).toISOString()) } : {}) });
+    } else s.dropped++;
+  }
+  if (missed.length || now - beatSaved >= BEAT_SAVED_MS) { beatSaved = now; save(); }
+  for (const f of fire) fireEntry(f.e, now, f.late);
+}
+
+/** The change entries an event fires, sent at once. */
+function scheduleEvent(event) {
+  const now = Date.now(), hit = dueOnEvent(scheduleNow(), state.schedule.marks, event, soul, now);
+  for (const e of hit) fireEntry(e, now, 0);
+  return hit.map((e) => e.id);
+}
 
 function stop() {
   stopping = true;
@@ -625,5 +809,7 @@ server.on('error', (e) => {
   process.exit(5);
 });
 rmSync(rt.socket, { force: true });
+beat(); // before the first answer, so it lists what was missed while off
+setInterval(beat, BEAT_MS);
 atSocket(rt.socket, (path) => server.listen(path, () => log(`listening for ${soul}, pid ${process.pid}`)));
 connect();
