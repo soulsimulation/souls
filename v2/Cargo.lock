@@ -347,6 +347,7 @@ dependencies = [
  "getrandom 0.3.4",
  "replica",
  "rustix",
+ "sim",
  "subtle",
  "tokio",
  "tokio-tungstenite",
@@ -552,6 +553,7 @@ name = "import-eden"
 version = "0.0.0"
 dependencies = [
  "replica",
+ "sim",
 ]
 
 [[package]]
@@ -688,6 +690,7 @@ dependencies = [
  "directoryd",
  "futures-util",
  "gatewayd",
+ "import-eden",
  "replica",
  "sim",
  "supervisor",

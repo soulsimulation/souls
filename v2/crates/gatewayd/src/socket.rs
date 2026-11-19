@@ -147,6 +147,7 @@ fn refuse(
         reason: Name::new(reason).unwrap_or_else(|| unreachable!("a fixed name")),
         now: now.clone(),
         changed: Vec::new(),
+        op: None,
     };
     let Some(at) = Cursor::from_value(&now) else {
         return Some(own_answer(answer));
