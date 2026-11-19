@@ -337,10 +337,6 @@ pub fn wire_intent(
     Ok(bytes)
 }
 
-fn id_text(id: Id) -> String {
-    format!("{}-{}", to_hex(&id.scope().0), id.counter())
-}
-
 fn id_of(t: &str) -> Option<Id> {
     let (s, c) = t.split_once('-')?;
     Id::new(Scope(from_hex(s).ok()?.try_into().ok()?), c.parse().ok()?)
