@@ -293,3 +293,104 @@ fn c16_a2_gateway_link_answers_a_30000_record_sync_under_the_default_watchdog() 
     drop(child);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Startup checkpoints and restored hashes must retain every node record for a fresh client, including unchanged
+/// siblings of a subtree replayed from the log after the checkpoint.
+fn startup_checkpoint_sync(restore: bool, replay: bool) {
+    let dir = std::env::temp_dir().join(format!(
+        "worldd-startup-sync-{}-{restore}-{replay}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let storage = Mem::default();
+    let config = || {
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.checkpoints = Some((dir.clone(), u64::MAX));
+        cfg
+    };
+    let build = || toggles::World::build(1, 4, 8);
+    let built = build();
+    let (body, thing) = built.pairs[0];
+    let mut w = answers::start(built.replica, toggles::rules(), storage.clone(), config()).unwrap();
+    if restore {
+        w.stop(); // The checkpoint writer is joined, so the cold-start checkpoint is complete.
+        if replay {
+            let live = answers::start(
+                build().replica,
+                toggles::rules(),
+                storage.clone(),
+                Config::new(LINEAGE, 1),
+            )
+            .unwrap();
+            let (tx, rx) = channel();
+            assert!(live.door().arrive(toggle(body, thing), tx));
+            rx.recv_timeout(Duration::from_secs(30))
+                .expect("the changed subtree commits");
+            live.stop(); // No checkpoint writer here: the change must be replayed on the next start.
+        }
+        w = answers::start(build().replica, toggles::rules(), storage, config()).unwrap();
+        assert!(w.restart.checkpoint.is_some(), "restored a real checkpoint");
+        assert_eq!(
+            w.restart.applied > 0,
+            replay,
+            "only the changed case replays a part"
+        );
+    }
+    let door = w.door();
+    let mut ask = |m: BTreeMap<u64, Value>| {
+        let (tx, rx) = channel();
+        assert!(door.arrive(encode(&Value::Map(m)).unwrap(), tx));
+        map(&rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("a startup sync answer"))
+    };
+    let mut copy = Copy::default();
+    let first = sync_by(&mut ask, &mut copy);
+    assert!(first.held > 8, "fresh sync includes the unchanged children");
+    let again = sync_by(&mut ask, &mut copy);
+    assert_eq!(
+        (again.changed, again.fetched),
+        (0, 0),
+        "the complete copy stays unchanged"
+    );
+    // Compare the fresh copy with a cold, unswitched world's complete copy: a replay changes exactly one lamp,
+    // while every other subtree remains available. No ownership or audience filter changes for this sync.
+    let cold = answers::start(
+        build().replica,
+        toggles::rules(),
+        Mem::default(),
+        Config::new(LINEAGE, 1),
+    )
+    .unwrap();
+    let door = cold.door();
+    let mut ask = |m: BTreeMap<u64, Value>| {
+        let (tx, rx) = channel();
+        assert!(door.arrive(encode(&Value::Map(m)).unwrap(), tx));
+        map(&rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("a comparison sync answer"))
+    };
+    assert_eq!(
+        sync_by(&mut ask, &mut copy).changed,
+        usize::from(replay),
+        "only the replayed lamp differs"
+    );
+    cold.stop();
+    w.stop();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn startup_cold_checkpoint_keeps_initial_sync_records() {
+    startup_checkpoint_sync(false, false);
+}
+
+#[test]
+fn startup_restored_checkpoint_keeps_initial_sync_records() {
+    startup_checkpoint_sync(true, false);
+}
+
+#[test]
+fn startup_restored_replayed_checkpoint_keeps_initial_sync_records() {
+    startup_checkpoint_sync(true, true);
+}

@@ -66,7 +66,8 @@ function read(copy, hash) {
 }
 
 /**
- * The copy's rows by id, walked from its roots (`copy.roots()`): `{ id, name, kind, parent, path, children, text, own }`.
+ * The copy's rows by id, walked from its roots (`copy.roots()`): `{ id, name, kind, parent, path, children, text, soul,
+ * own }`, `soul` on a body that names its Soul.
  * A node is named by its kind's plain name and its counter ("cup 7") unless a text field gives it one; text in its
  * fields is the world's or a Soul's words and is carried as `text`, to be quoted, never followed.
  */
@@ -82,7 +83,9 @@ export function rowsOf(copy) {
     const text = [...fields.values()].filter((v) => typeof v === 'string');
     const name = `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
     const children = (m.get(10) ?? []).map(hex);
-    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), own: d.own });
+    // C30 (#3556): a body born by a join (C3) owns its `souls:body-of` link to its Soul: the row names that Soul.
+    const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
+    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   return rows;

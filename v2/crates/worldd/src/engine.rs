@@ -116,6 +116,31 @@ fn param_name(p: &BTreeMap<u64, Value>, k: u64, what: &'static str) -> R<Name> {
     }
 }
 
+/// A pinned activity kind uses a bounded plain name and binary SHA-256 multihash (C30); short names stay names.
+fn param_kind(p: &BTreeMap<u64, Value>, k: u64, what: &'static str) -> R<Name> {
+    match p.get(&k) {
+        Some(Value::Array(pair)) => match pair.as_slice() {
+            [Value::Text(plain), Value::Bytes(hash)]
+                if !plain.as_str().is_empty()
+                    && plain.as_str().len()
+                        <= replica::intent_decode::LIMITS.text_bytes as usize
+                    && !plain.as_str().contains('@')
+                    && hash.len() == 34
+                    && hash[..2] == [0x12, 0x20] =>
+            {
+                Name::new(&format!(
+                    "{}@{}",
+                    plain.as_str(),
+                    replica::encode::to_hex(hash)
+                ))
+                .ok_or_else(|| refusal(what, "a pinned kind"))
+            }
+            _ => Err(refusal(what, "a plain name and binary SHA-256 multihash")),
+        },
+        _ => param_name(p, k, what),
+    }
+}
+
 /// Where the controller has a body: the node it stands on and its position there.
 fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
     c.body(body)
@@ -161,7 +186,7 @@ impl Engine {
         let e = &mut self.activities;
         match a.verb {
             Verb::Propose => {
-                let kind = param_name(&a.params, 1, "propose-needs-a-kind")?;
+                let kind = param_kind(&a.params, 1, "propose-needs-a-kind")?;
                 e.propose(
                     &mut tree,
                     &mut self.mint,
@@ -171,7 +196,7 @@ impl Engine {
                 )?;
             }
             Verb::Offer => {
-                let kind = param_name(&a.params, 1, "offer-needs-a-kind")?;
+                let kind = param_kind(&a.params, 1, "offer-needs-a-kind")?;
                 let role = param_name(&a.params, 2, "offer-needs-a-role")?;
                 let asked: BTreeSet<Id> = match a.params.get(&3) {
                     Some(Value::Array(v)) => v.iter().filter_map(|x| read_id(x).ok()).collect(),
@@ -371,5 +396,39 @@ impl Engine {
     /// The entries written since the last call, in order, to be numbered and applied.
     pub fn out(&mut self) -> Vec<Effect> {
         std::mem::take(&mut self.out)
+    }
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::*;
+
+    #[test]
+    fn activity_kinds_preserve_the_exact_pin_and_short_names() {
+        let plain = Name::new("souls:conversation").unwrap();
+        let mut hash = vec![0x12, 0x20];
+        hash.extend([7; 32]);
+        let params = |v| BTreeMap::from([(1, v)]);
+        let pair = |h| Value::Array(vec![Value::Text(plain.clone()), Value::Bytes(h)]);
+        assert_eq!(
+            param_kind(&params(pair(hash.clone())), 1, "bad")
+                .unwrap()
+                .as_str(),
+            format!("souls:conversation@{}", replica::encode::to_hex(&hash))
+        );
+        assert_eq!(
+            param_kind(&params(Value::Text(plain.clone())), 1, "bad").unwrap(),
+            plain
+        );
+        for h in [
+            vec![0; 34],
+            hash[..33].to_vec(),
+            [hash.as_slice(), &[0]].concat(),
+        ] {
+            assert_eq!(
+                param_kind(&params(pair(h)), 1, "bad").unwrap_err().name,
+                "bad"
+            );
+        }
     }
 }

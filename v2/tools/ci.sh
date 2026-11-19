@@ -139,7 +139,9 @@ step client-sync node --test client/src/sync/*.test.mjs
 step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/daemon/*.test.mjs'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
 step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
-  node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs'
+  node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs'
+# The creator's command (G7, #2796): a creator's daemon checks batches on its copy with no frame sent, and edits.
+step client-creator bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/creator/*.test.mjs'
 # The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
 step client-stats node --test client/src/stats/*.test.mjs
 # The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).

@@ -62,6 +62,14 @@
 //       check instead, C14 #3442: `moves.mjs`)
 //     {"op":"can","acts":["sit:<id>"]}  and  {"op":"act","acts":["sit:<id>","sit:<id>"]}   C10's (#3414): the thin
 //       command's words, each candidate on its own target, thing arguments after their act (`actsOf`)
+//   and G7's (#2796), for a world's creator (a `creator-` token), the world's kinds text from `<home>/kinds/<world>.kinds`:
+//     {"op":"describe"}                   the copy's nodes (id, kind, parent) and what each kind admits
+//     {"op":"check","ops":[...]}          G1's checks of a batch on the copy as it is: asks the world nothing
+//     {"op":"edit","ops":[...]}           the copy brought current, checked, sent as T10's edit intent (G1b) planned at
+//                                         its version, and its answer awaited: the ids of the names placed, or the
+//                                         refusal and the operation that failed. An op is {op: place, name, kind,
+//                                         in, at: [x, y, z] mm, slot, fields}, {op: move, node, at}, {op: set, node,
+//                                         field, value} or {op: remove, node}; a kind by its plain name
 //     {"op":"act","verbs":[{"verb":"..","this":"<id>","form":".."}, "..."]}   each candidate with a form is checked
 //       again at send time on a copy brought current; a current `no` drops it; none left is `stopped-locally`, with
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
@@ -90,7 +98,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
-import { changedBetween, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
@@ -103,7 +111,7 @@ import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { feederFor } from '../memory/feeder.mjs';
-import { KIND_PLAIN, converseIntents, offerNote } from '../converse/converse.mjs';
+import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
@@ -174,6 +182,9 @@ const events = []; // what happened since the last read
 const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
 const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, entries: 0, follows: 0, build: null };
+// Bounded transport diagnostics: item kinds only, never tokens, words or encoded frames.
+const viewKinds = [];
+let viewGrants = 0;
 const reflexes = new Table(soul); // R9: onEvent(event, now) per named event, from the stream (R9b)
 const wakes = new Wakes(soul); // R13: its budget's deliveries are kept on disk, so a restart never resets them
 if (state.wake) Object.assign(wakes, { budget: state.wake.budget, delivered: state.wake.delivered });
@@ -202,7 +213,9 @@ const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
 const trace = openTrace(rt.dir);
 const rankedOf = new Map(); // sequence → how many verbs it ranked, until answered
+const editsWaiting = new Map(); // G7: an edit's sequence → what its answer is handed to
 const movesOf = new Map(); // sequence → its move's form (C14), until answered: a receipt says whether the body sits
+const joinsOf = new Set(); // own join sequences: only a successful receipt requests a post-birth copy
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
 let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now();
@@ -222,9 +235,19 @@ function current() {
   signedIn = true;
   attempt = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
-  if (ws && !ws.hearing) { ws.hearing = true; ws.send(wire.wireSubscribe(scope, seat.grant.counter, BigInt(HEARING_BUDGET))); }
+  hearing();
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
   follow();
+}
+
+/** Follow this principal's current body; the world alone resolves private audience authority. */
+function hearing() {
+  if (!ws || !signedIn) return;
+  const body = [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id ?? ME;
+  if (ws.hearing === body) return;
+  const [s, n] = body.split('-');
+  ws.send(wire.wireSubscribe(unhex(s), BigInt(n), BigInt(HEARING_BUDGET)));
+  ws.hearing = body;
 }
 
 /**
@@ -330,6 +353,7 @@ function syncAnswer(sock, n, refused, bytes) {
   cutAt = null;
   const { waiters } = syncing;
   syncing = null;
+  hearing();
   for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
@@ -367,7 +391,7 @@ function connect() {
         step = 'outcome';
         return;
       }
-      const [kind, a, b, c, d] = wire.wireFrame(bytes).split(' ');
+      const [kind, a, b, c, d, names = '-', op = '-'] = wire.wireFrame(bytes).split(' ');
       if (kind === 'outcome') {
         if (a === 'token.refused') { log('token.refused'); note({ kind: 'token-refused' }); attempt = 99; sock.close(); return; }
         if (a === 'stream.resumed') counts.resumed++;
@@ -391,6 +415,15 @@ function connect() {
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
         trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
+        if (joinsOf.has(s) && Number(c) !== 3) {
+          joinsOf.delete(s);
+          if (Number(c) === 1) {
+            // An older sync may still hold the pre-birth tree. Keep one follow pending until it finishes, then
+            // read the authoritative body link and renew hearing through the usual sync completion path.
+            followWanted = true;
+            follow();
+          }
+        }
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
@@ -399,7 +432,11 @@ function connect() {
       }
       save();
       // C4: the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason, by name.
-      note({ kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}) });
+      // G7: an edit's receipt carries the ids its names became; its refusal, the operation that failed.
+      const edit = { ...(names !== '-' ? { names: Object.fromEntries(names.split(',').map((p) => p.split('='))) } : {}), ...(op !== '-' ? { op: Number(op) } : {}) };
+      const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...edit };
+      note(answered);
+      if (a !== '-') editsWaiting.get(Number(a))?.(answered);
     } catch (e) {
       log(`frame refused: ${String(e.message ?? e).slice(0, 200)}`);
       if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.close(); }
@@ -434,6 +471,10 @@ function connect() {
  * (its say has its receipt). Each wakes a `wait`, joins the next brief, and goes to the reflexes as `souls:said`.
  */
 function onItem(bytes) {
+  const item = decode(decode(bytes).get(31)), kind = item.get(1);
+  if (kind === 5) viewGrants++;
+  viewKinds.push(kind);
+  if (viewKinds.length > 32) viewKinds.shift();
   const entry = wire.wireEntry(bytes);
   if (entry) { onEntry(JSON.parse(entry)); return; }
   const line = wire.wireHeard(bytes);
@@ -495,7 +536,11 @@ function onEntry(e) {
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
   // E26: an invitation to a conversation, or the answer to this Soul's own, wakes a `wait`.
-  for (const ev of events) { const n = offerNote(ev, ME); if (n) note({ ...n, sequence: e.sequence }); }
+  const offers = events.filter((ev) => OFFER_EVENTS[ev.name]);
+  if (offers.length) {
+    const body = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME)?.id ?? ME;
+    for (const ev of offers) { const n = offerNote(ev, body); if (n) note({ ...n, sequence: e.sequence }); }
+  }
   if (events.length) remember([{ sequence: e.sequence, at: e.at, actor, events }]);
 }
 
@@ -545,8 +590,29 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop', 'pray', 'prayers', 'answer']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer']);
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
+
+// --- G7 (#2796): a creator's edits -------------------------------------------------------------------------------
+const EDIT_WITHIN = 10_000; // an edit's answer is awaited this long; past it, it stays unanswered in `status`
+/** The world's kinds text, which the creator's pairing or setup keeps in the home; empty when there is none. */
+const kindsText = () => { try { return readFileSync(join(home, 'kinds', `${seat.world}.kinds`), 'utf8'); } catch { return ''; } };
+/** The pinned kinds by full name, with what each admits; {} without a kinds text. */
+const pinned = () => { const t = kindsText(); return t.trim() ? JSON.parse(wire.editKinds(t)) : {}; };
+/** A kind's full name from what a creator writes: the full name, `namespace:name`, or the bare name. */
+function fullKind(kinds, k) {
+  const s = String(k ?? '');
+  const hit = Object.keys(kinds).filter((n) => n === s || n.split('@')[0] === s || n.split('@')[0].split(':')[1] === s);
+  if (hit.length === 1) return hit[0];
+  throw Object.assign(new Error(`${s}: ${hit.length ? 'name it with its namespace' : `not pinned; describe lists ${Object.keys(kinds).map((n) => n.split('@')[0]).join(', ')}`}`), { code: 'edit.kind-unknown' });
+}
+/** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
+function batchOf(ops) {
+  if (!Array.isArray(ops) || ops.length === 0) throw Object.assign(new Error('ops: a list of operations'), { code: 'edit.batch' });
+  const kinds = pinned();
+  const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
+  return JSON.stringify(ops.map((o) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}) })));
+}
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
 // the world's key when it is a plain name of at most NS_MOST bytes, else `world`: a verb is one text, at most 64 bytes
@@ -606,6 +672,7 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry }) {
     params ? JSON.stringify(params) : undefined);
   save();
   const sequence = state.sequence, sent = signedIn;
+  if (ranked[0] === 'life:join') joinsOf.add(sequence);
   if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
   return { sequence, sent };
@@ -621,6 +688,7 @@ async function answer(req) {
         ok: true, soul, pid: process.pid, world: seat.world, connected: signedIn, cursor: state.cursor,
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
+        hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since,
       };
     }
@@ -684,7 +752,7 @@ async function answer(req) {
       // Each candidate on its own target (C10), else all on `target`; the first one's thing arguments in parameter 1.
       const target = Array.isArray(req.acts) ? keep.map((c) => c.this ?? '').join(' ') : req.target;
       const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
-      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, basis, expiry: req.expiry });
+      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params: req.params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
@@ -695,6 +763,39 @@ async function answer(req) {
       const basis = shownVersion ?? state.cursor;
       const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
+    }
+    case 'describe': return closing({ ok: true }, (rows) => ({
+      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.text ? { text: r.text } : {}) })),
+      kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n.split('@')[0], { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
+    }));
+    case 'check': {
+      // On the copy as it is: no sync, no frame to the world (A4).
+      const v = JSON.parse(wire.editCheck(copy, batchOf(req.ops), kindsText()));
+      return closing({ ...v, local: true }, null, { now: true });
+    }
+    case 'edit': {
+      if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+      const batch = batchOf(req.ops);
+      const age = await ageAfter();
+      const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
+      if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
+      if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
+      state.sequence++;
+      // Planned at the copy's version: its sequence is the version the world checks the batch's nodes against.
+      const bytes = wire.wireEdit(scope, seat.grant.counter, true, BigInt(state.sequence), unhex(copyVersion), batch);
+      save();
+      const sequence = state.sequence;
+      const got = new Promise((ok) => {
+        const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, EDIT_WITHIN);
+        editsWaiting.set(sequence, (a) => { clearTimeout(t); editsWaiting.delete(sequence); ok(a); });
+      });
+      if (signedIn) send(bytes, sequence, 1); else queued.push({ bytes, sequence, ranked: 1 });
+      const a = await got;
+      if (!a) return closing({ ok: false, code: 'edit.unanswered', sequence, sent: true }, null, { now: true });
+      const out = a.answer === 1
+        ? { ok: true, sequence, names: a.names ?? {} }
+        : { ok: false, sequence, code: a.reason ?? 'edit.refused', ...(a.op !== undefined ? { op: a.op } : {}) };
+      return closing(out);
     }
     case 'pray': case 'answer': {
       const words = String(req.words ?? '').trim(), most = req.op === 'pray' ? PRAYER_MOST : ANSWER_MOST;
@@ -707,6 +808,7 @@ async function answer(req) {
     case 'prayers': {
       const r = await askDirectory('prayers', { all: req.all === true });
       return r.ok === false ? r : { ok: true, ...r, note: PRAYER_NOTE };
+
     }
     case 'converse': return converse(req);
     case 'history': return historyAnswer(req);
@@ -739,7 +841,8 @@ function converse(req) {
         .map((r) => ({ id: r.id, ...(state.conversations[r.id]?.private ? { private: true } : {}) })),
     }));
   }
-  const place = rowsOf(copy).get(ME)?.parent ?? null;
+  // The node this Soul's body stands under: the body is the Soul's own node, or (C3's joins) one linked to it.
+  const place = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
   const intents = converseIntents(req, { ns: NS, place, privateOf: (id) => Boolean(state.conversations[id]?.private) });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   if (req.private && req.conversation) state.conversations[req.conversation] = { private: true };
