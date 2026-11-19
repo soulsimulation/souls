@@ -1,0 +1,25 @@
+[package]
+name = "backup"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Engine v2 O20 (#2812): every store the log does not hold, listed in v2/tools/ops/stores.json, shipped to the bucket sealed and restored from it alone."
+
+[[bin]]
+name = "o20-drill"
+path = "src/drill.rs"
+
+[dependencies]
+replica = { path = "../../../crates/replica" }
+# The bucket (W8's object store: S3 in a fleet, O9's folder store for a drill) and the account store's owner (W1, W2).
+directoryd = { path = "../../../crates/directoryd" }
+supervisor = { path = "../../../crates/supervisor" }
+# The text store (K16): opened after a restore, which finishes every erasure its removal list names.
+sim = { path = "../../../crates/sim" }
+# The gateway's tokens file, read as the gateway reads it (the drill's reconnect).
+gatewayd = { path = "../../../crates/gatewayd" }
+# SQLite's online backup for a store whose owner holds no exclusive lock.
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+# Sealing: AES-256-GCM under a key derived from the recovery passphrase (PBKDF2-HMAC-SHA256).
+ring = "0.17"
+serde_json = "1"

@@ -90,6 +90,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "backup"
+version = "0.0.0"
+dependencies = [
+ "directoryd",
+ "gatewayd",
+ "replica",
+ "ring",
+ "rusqlite",
+ "serde_json",
+ "sim",
+ "supervisor",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -687,6 +701,7 @@ name = "ops"
 version = "0.0.0"
 dependencies = [
  "archive",
+ "backup",
  "directoryd",
  "futures-util",
  "gatewayd",
