@@ -390,12 +390,12 @@ impl Bodies {
             return Ok(Target::new(node, p));
         }
         // The stand point of the free slot the world picks for `body` (C19), else of the thing's seat.
-        let seat = self
+        let place = self
             .slots
             .free(&self.runner.controller, body, node)
             .and_then(|slot| self.slots.place_in(node, slot))
             .or_else(|| self.slots.place(node));
-        if let Some(s) = seat {
+        if let Some(s) = place {
             return s.stand().map(|p| Target::new(s.floor, p));
         }
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
