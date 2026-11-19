@@ -15,6 +15,10 @@ import { pageThings } from '../things/page.ts';
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
 const address = new URLSearchParams(location.search).get('stream');
+// C1 (#3365): `?world=<name>` names a placed world instead: its `views/world.json` (under `?worlds=`, default `./w/`)
+// gives its stream's folder and its history's, both relative to the world's own folder.
+const worldName = new URLSearchParams(location.search).get('world');
+let worldHistory: string | null = null;
 
 // The GL renderer's name, from a throwaway context, picks the tier before the real one is made (antialiasing is fixed
 // at creation).
@@ -63,8 +67,7 @@ addEventListener('resize', resize);
 resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
-if (!address) status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
-else new StreamSource(address).start({
+const play = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
     world.apply(p.nodes, p.removed, p.samples);
@@ -75,6 +78,21 @@ else new StreamSource(address).start({
   },
   error: (m) => (error = m),
 });
+/** A placed world's stream and history folders, from its `world.json`. */
+async function resolveWorld(name: string, root: string, get = fetch): Promise<{ stream: string; history: string }> {
+  const base = new URL(`${root.replace(/\/?$/, '/')}${encodeURIComponent(name)}/`, location.href);
+  const res = await get(new URL('views/world.json', base).href);
+  if (!res.ok) throw new Error(`world ${name}: world.json ${res.status}`);
+  const j = (await res.json()) as { stream?: string; history?: string };
+  if (typeof j.stream !== 'string') throw new Error(`world ${name}: world.json names no stream`);
+  return { stream: new URL(j.stream.replace(/\/?$/, '/'), base).href, history: new URL(j.history ?? 'history/', base).href };
+}
+if (address) play(address);
+else if (worldName) resolveWorld(worldName, new URLSearchParams(location.search).get('worlds') ?? './w/').then(
+  (w) => ((worldHistory = w.history), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, stream: w.stream, history: worldHistory } }), play(w.stream)),
+  (e) => (error = String(e)),
+);
+else status.textContent = 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>';
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
@@ -106,7 +124,7 @@ renderer.setAnimationLoop((now) => {
     }
   }
   renderer.render(scene, cam.camera);
-  if (!address) return;
+  if (!address && !worldName) return;
   status.textContent = t === null || worldNow === null
     ? `waiting for the stream${error ? `\n${error}` : ''}`
     : `behind the world  ${secs(worldNow - t)} s   (${clock.state}, ×${clock.rate.toFixed(3)})\n`
