@@ -479,7 +479,11 @@ fn same_ref(a: Option<&Value>, b: Option<&Value>) -> bool {
 fn keyed(v: Option<&Value>) -> Vec<(String, &Value)> {
     let mut out: Vec<(String, &Value)> = match v {
         Some(Value::Obj(e)) => e.iter().map(|(k, v)| (k.clone(), v)).collect(),
-        Some(Value::Arr(a)) => a.iter().enumerate().map(|(k, v)| (k.to_string(), v)).collect(),
+        Some(Value::Arr(a)) => a
+            .iter()
+            .enumerate()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
         _ => Vec::new(),
     };
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -516,7 +520,10 @@ fn place_of(nodes: Option<&Value>, id: &str) -> Option<String> {
             if includes(n.get("loose"), &x) {
                 return Some((holder.clone(), true));
             }
-            if keyed(n.get("slots")).iter().any(|(_, l)| includes(Some(l), &x)) {
+            if keyed(n.get("slots"))
+                .iter()
+                .any(|(_, l)| includes(Some(l), &x))
+            {
                 return Some((holder.clone(), false));
             }
             if keyed(n.get("hands")).iter().any(|(_, h)| strict_eq(h, &x)) {
@@ -823,7 +830,11 @@ impl<'a> Rules<'a> {
             if let Some(arg) = arg_ref(n.get(k))
                 && has(args, arg).is_none()
             {
-                return Outcome::No(self.bad(i, "argument_missing", vec![("arg".into(), Value::s(arg))]));
+                return Outcome::No(self.bad(
+                    i,
+                    "argument_missing",
+                    vec![("arg".into(), Value::s(arg))],
+                ));
             }
         }
         let field = resolve(n.get("field"), args).unwrap_or_default();
@@ -1051,7 +1062,11 @@ impl<'a> Rules<'a> {
             return Outcome::No(self.bad(i, "malformed_need", vec![]));
         };
         let Some(id) = has(self.args(), arg) else {
-            return Outcome::No(self.bad(i, "argument_missing", vec![("arg".into(), Value::s(arg))]));
+            return Outcome::No(self.bad(
+                i,
+                "argument_missing",
+                vec![("arg".into(), Value::s(arg))],
+            ));
         };
         match id.str() {
             Some(id) if has(self.nodes(), id).is_some() => self.other_field(n, i, id),
@@ -1109,7 +1124,12 @@ impl<'a> Rules<'a> {
             return Outcome::No(self.bad(i, "not_whole_number", at()));
         }
         let v = value.as_ref();
-        let eq = |k| js_eq(flag(Some(def), n.get(k)).as_ref(), flag(Some(def), v).as_ref());
+        let eq = |k| {
+            js_eq(
+                flag(Some(def), n.get(k)).as_ref(),
+                flag(Some(def), v).as_ref(),
+            )
+        };
         let bound = |k, ge: bool| match (int(v), int(n.get(k))) {
             (Some(x), Some(b)) => {
                 if ge {
@@ -1537,7 +1557,11 @@ impl<'a> Rules<'a> {
         };
         let node = has(self.nodes(), &thing);
         let Some(kind) = self.entry_of(node) else {
-            return Outcome::No(self.bad(i, "no_such_kind", vec![("node".into(), Value::s(&thing))]));
+            return Outcome::No(self.bad(
+                i,
+                "no_such_kind",
+                vec![("node".into(), Value::s(&thing))],
+            ));
         };
         let by = n.get("by").and_then(Value::str);
         let Some(by @ ("carry" | "push")) = by else {
@@ -1565,7 +1589,12 @@ impl<'a> Rules<'a> {
         };
         let need = table(if by == "carry" { &CARRIED } else { &PUSHED }, how);
         let Some(need) = need else {
-            return no(self, "moves_by", vec![("how".into(), Value::s(how))], Value::Null);
+            return no(
+                self,
+                "moves_by",
+                vec![("how".into(), Value::s(how))],
+                Value::Null,
+            );
         };
         if by == "push" {
             if need > 1 {
@@ -1581,7 +1610,10 @@ impl<'a> Rules<'a> {
             Ok(h) => h,
             Err(what) => return Outcome::No(self.bad(i, what, vec![])),
         };
-        let free = hands.iter().filter(|(_, v)| matches!(v, Value::Null)).count();
+        let free = hands
+            .iter()
+            .filter(|(_, v)| matches!(v, Value::Null))
+            .count();
         if i128::try_from(free).unwrap_or(i128::MAX) >= need {
             return Outcome::Ok;
         }
@@ -1590,7 +1622,12 @@ impl<'a> Rules<'a> {
             ("how".into(), Value::s(how)),
             ("hands".into(), Value::Int(need)),
         ];
-        Outcome::No(self.no("no_free_hand", i, detail, Value::object([("step", Value::s("put"))])))
+        Outcome::No(self.no(
+            "no_free_hand",
+            i,
+            detail,
+            Value::object([("step", Value::s("put"))]),
+        ))
     }
 
     fn link(&mut self, n: &Value, i: i128, this: &Value, entry: &Value, want: bool) -> Outcome {
@@ -1657,7 +1694,8 @@ impl<'a> Rules<'a> {
             return Outcome::No(self.bad(i, "no_such_link", vec![("link".into(), Value::Str(ty))]));
         };
         let most_per = whole(def.get("most_per"));
-        let Some(most_per) = most_per.filter(|_| def.get("per").and_then(Value::str) == Some("parent"))
+        let Some(most_per) =
+            most_per.filter(|_| def.get("per").and_then(Value::str) == Some("parent"))
         else {
             return Outcome::No(self.bad(i, "malformed_need", vec![]));
         };
@@ -1683,9 +1721,7 @@ impl<'a> Rules<'a> {
                 .unwrap_or(&[])
                 .iter()
                 .filter_map(Value::str)
-                .filter(|id| {
-                    has(self.nodes(), id).is_some_and(|c| js_eq(c.get("kind"), kind))
-                })
+                .filter(|id| has(self.nodes(), id).is_some_and(|c| js_eq(c.get("kind"), kind)))
                 .map(str::to_owned)
                 .collect(),
         };
@@ -1812,7 +1848,11 @@ impl<'a> Rules<'a> {
             let def = has(entry.get("state"), &field)
                 .filter(|d| d.get("type").and_then(Value::str) == Some("int"));
             let Some(def) = def else {
-                return Outcome::No(self.bad(i, "no_such_field", vec![("field".into(), f.clone())]));
+                return Outcome::No(self.bad(
+                    i,
+                    "no_such_field",
+                    vec![("field".into(), f.clone())],
+                ));
             };
             if !self.sees(def.get("audience")) {
                 return Outcome::Unknown(self.unknown(i, &this_id, "field", &field, false));
@@ -1891,7 +1931,11 @@ impl<'a> Rules<'a> {
             let def = has(entry.get("state"), &field)
                 .filter(|d| d.get("type").and_then(Value::str) != Some("timed"));
             let Some(def) = def else {
-                return Outcome::No(self.bad(i, "no_such_field", vec![("field".into(), f.clone())]));
+                return Outcome::No(self.bad(
+                    i,
+                    "no_such_field",
+                    vec![("field".into(), f.clone())],
+                ));
             };
             if !self.sees(def.get("audience")) {
                 return Outcome::Unknown(self.unknown(i, &this_id, "field", &field, false));
@@ -1905,7 +1949,10 @@ impl<'a> Rules<'a> {
                 value.cloned().unwrap_or(Value::Null),
             );
             found.push(value.cloned().unwrap_or(Value::Null));
-            if !js_eq(flag(Some(def), value).as_ref(), flag(Some(def), Some(not)).as_ref()) {
+            if !js_eq(
+                flag(Some(def), value).as_ref(),
+                flag(Some(def), Some(not)).as_ref(),
+            ) {
                 differs = true;
             }
         }
@@ -1923,8 +1970,14 @@ impl<'a> Rules<'a> {
                 e.get("change").and_then(Value::str) == Some("set")
                     && in_slice(fields, &Value::s(field))
                     && e.get("by").is_none()
-                    && !matches!(e.get("to"), Some(Value::Null | Value::Arr(_) | Value::Obj(_)))
-                    && !js_eq(flag(def, e.get("to")).as_ref(), flag(def, Some(not)).as_ref())
+                    && !matches!(
+                        e.get("to"),
+                        Some(Value::Null | Value::Arr(_) | Value::Obj(_))
+                    )
+                    && !js_eq(
+                        flag(def, e.get("to")).as_ref(),
+                        flag(def, Some(not)).as_ref(),
+                    )
             },
             |_| true,
         );
