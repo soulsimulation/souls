@@ -430,6 +430,14 @@ fn serve(args: &[String]) -> R<()> {
     )
     .map_err(|e| format!("the text store: {}", refusal(e)))?;
     cfg.text = Some(Arc::new(text));
+    // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
+    // restore reads them back (O20b, #3523); with no bucket set it says so once and ships nothing.
+    let lineage = to_hex(&built.root.scope().0);
+    let stores = directoryd::backup::owned_by("worldd", &[&lineage]).map_err(refusal)?;
+    let strip = format!("worlds/{lineage}/");
+    let backup = directoryd::backup::run("worldd", dir.clone(), stores, Default::default(), &strip)
+        .map_err(|e| format!("refusing to start: {}", refusal(e)))?;
+    println!("{backup}");
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.root.scope()));
