@@ -70,11 +70,16 @@ chrome.on('exit', (how) => settle(`error the browser exited (${how}) before a re
 const timer = setTimeout(() => settle('error no result in 90 s'), 90_000);
 const got = await result;
 clearTimeout(timer);
+const exited = new Promise((resolve) => (chrome.exitCode !== null || chrome.signalCode !== null ? resolve() : chrome.once('exit', resolve)));
 try {
   process.kill(process.platform === 'win32' ? chrome.pid : -chrome.pid);
 } catch {}
+await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
 server.close();
-rmSync(profile, { recursive: true, force: true, maxRetries: 3 });
+// The browser's helpers can still write to the profile a moment after it exits: a temp folder left behind is no failure.
+try {
+  rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+} catch {}
 
 const rows = got.trim().split('\n').map((l) => l.split(' '));
 const yes = rows.filter((w) => w[0] === '20000' && w[2] === '1').length;
