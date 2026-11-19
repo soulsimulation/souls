@@ -43,6 +43,7 @@ export function openSessions({ gatewayOf, root, pkg, maxBytes = 2 * 1024 ** 3, i
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const sessions = new Map(); // key → session, or the promise of one opening
   const refused = new Map(); // key → until when it is refused
+  let opened = 0;
   const used = () => [...sessions.values()].reduce((n, s) => n + (s.rss ?? 0), 0);
 
   const keyOf = (slug, token) => createHash('sha256').update(`${slug}\n${token}`).digest('hex');
@@ -56,8 +57,8 @@ export function openSessions({ gatewayOf, root, pkg, maxBytes = 2 * 1024 ** 3, i
       log(`refused: sessions-full (${open.length} open, ${Math.round(used() / 1e6)} MB)`);
       throw new SessionRefused('sessions-full', 503, 'this service holds as many sessions as its memory allows; try again later');
     }
-    const id = key.slice(0, 16), dir = join(root, id), soul = `s_${id}`;
-    rmSync(dir, { recursive: true, force: true });
+    // A folder of its own each time: a session being closed removes its folder a moment later.
+    const id = key.slice(0, 16), dir = join(root, `${id}-${++opened}`), soul = `s_${id}`;
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(join(dir, 'config.json'), JSON.stringify({ worlds: { [slug]: { gateway } } }));
     const credentials = join(dir, 'credentials.json');

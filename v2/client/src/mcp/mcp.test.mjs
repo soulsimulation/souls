@@ -83,10 +83,11 @@ async function tool(name, args = {}, opts) {
   return JSON.parse(result.content[0].text);
 }
 
-/** The open session's home and Soul: the one folder under the service's root. */
+/** The open session's home and Soul: the newest folder under the service's root (an older one may be closing). */
 function session() {
-  const [id] = readdirSync(root).filter((f) => /^[0-9a-f]{16}$/.test(f));
-  return { home: join(root, id), soul: `s_${id}`, rt: runtimeOf(join(root, id), `s_${id}`) };
+  const [name] = readdirSync(root).filter((f) => /^[0-9a-f]{16}-\d+$/.test(f)).sort((x, y) => y.split('-')[1] - x.split('-')[1]);
+  const soul = `s_${name.split('-')[0]}`;
+  return { home: join(root, name), soul, rt: runtimeOf(join(root, name), soul) };
 }
 
 /** The thin command against the same session's daemon, as a harness runs it. */
@@ -207,7 +208,7 @@ test('A4: an act retried with the same request id acts once', async () => {
   assert.equal(after.sent, before.sent + 1, 'one intent sent');
   assert.equal(after.sequence, before.sequence + 1);
   const other = await tool('eden_act', { verbs: ['eden:sit'] }, { id: 'act-retry-2' });
-  assert.equal(other.sequence, first.sequence + 1, 'a new id is a new act');
+  assert.equal(other.sequence, first.sequence + 1, `a new id is a new act: ${JSON.stringify(other)}`);
 });
 
 test('A3: 401 without a token or with one the world refuses, 405 for a GET, 413 over 64 KB, no-store on all', async () => {
