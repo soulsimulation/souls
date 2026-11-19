@@ -7,7 +7,8 @@
 // - **One per Soul.** `runtime/daemon.lock` is created exclusively; a second start while the first lives is refused
 //   as `daemon-already-running`, naming the Soul and the pid.
 // - **Commands on a Unix socket** (`runtime/daemon.sock`), one JSON line each way. No TCP port.
-//     {"op":"status"}            where it is: connected, cursor, intents sent and answered, memory
+//     {"op":"status"}            where it is: connected, cursor, intents sent and answered, memory, and the world's
+//                                clock from its copy (E7b, #3516, `../clock/clock.mjs`): `clock` and `worldUs`, now
 //     {"op":"act","verb":"...","target":"<scope hex>-<counter>"}  builds the next intent (the target optional) and
 //                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
@@ -77,6 +78,7 @@ import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
+import { clockOf, worldNow } from '../clock/clock.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -475,7 +477,9 @@ async function answer(req) {
   switch (req.op) {
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
+      const clock = clockOf(copy);
       return {
+        clock, worldUs: worldNow(clock),
         ok: true, soul, pid: process.pid, world: seat.world, connected: signedIn, cursor: state.cursor,
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),

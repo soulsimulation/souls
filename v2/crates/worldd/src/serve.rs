@@ -363,8 +363,10 @@ fn bodies(
     Ok(b)
 }
 
-/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>]`: runs the world until killed. A
-/// checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB).
+/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--rate <num>/<den>]`: runs the
+/// world until killed. A checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB). The clock's rate
+/// is world µs per real µs (default 1/1); a start whose rate differs from the last logged applies a new mapping, and
+/// the mapping in force is on the zone root for every copy (E7b, #3516).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
         Ok(()) => 0,
@@ -377,7 +379,8 @@ pub fn run(args: &[String]) -> i32 {
 
 fn serve(args: &[String]) -> R<()> {
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
-        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>]",
+        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
+         [--rate <num>/<den>]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -421,6 +424,13 @@ fn serve(args: &[String]) -> R<()> {
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
+    cfg.rate = Some(match arg(args, "--rate") {
+        Some(r) => r
+            .split_once('/')
+            .and_then(|(n, d)| Some((n.trim().parse().ok()?, d.trim().parse().ok()?)))
+            .ok_or("--rate <num>/<den>")?,
+        None => (1, 1),
+    });
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.root.scope()));

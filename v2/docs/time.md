@@ -25,7 +25,9 @@ natively, and the `time-goldens` step of `v2/tools/ci.sh` for the WASM build. Th
    as a fraction. A rate of zero or below would stop or reverse world time, and is refused as
    `mapping-rate-not-positive`, whether built in code or read from a log. A new mapping's world anchor must be the
    world time the mapping before gives at its real anchor (`mapping-not-continuous`): world time never jumps. A
-   reading before the first mapping's real anchor is refused as `before-world-start`, as a tick or beat query is.
+   reading before the first mapping's real anchor is refused as `before-world-start`, as a tick or beat query is. The mapping in force is
+   also three fields on the zone's root (world anchor, real anchor, `[num, den]`; `replica::time::F_CLOCK_*`), written
+   with the effect in one part whenever a mapping applies (E7b), so every copy computes world now from its own records.
 4. **Every line is computed from its anchor: multiply, then divide, through 128 bits.** The count reached at a time
    (tick n, beat k, a world time from a real one) rounds down. The time a count is reached (a tick's start, a beat's
    time) is the first whole microsecond at or after it: it rounds up. Never add a rounded period: at 130 a minute a

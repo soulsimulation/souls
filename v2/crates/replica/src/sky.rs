@@ -32,6 +32,7 @@ pub const F_LIGHT_TABLE: u64 = 63;
 pub const F_SEED: u64 = 64;
 /// A creator's weather holds until this world time (G5); the table resumes there.
 pub const F_WEATHER_UNTIL: u64 = 65;
+// 66 to 68 on the root are the clock's mapping (`crate::time::F_CLOCK_WORLD`, E7b).
 
 /// The light now, and the world time it next changes.
 pub const F_LIGHT: u64 = 70;
