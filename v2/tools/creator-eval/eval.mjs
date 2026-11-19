@@ -11,15 +11,16 @@
 // appears in the transcript, the command's output or the daemon's files.
 //
 //   SEAT_CONFIG_DIR=<signed-in Claude config dir> node v2/tools/creator-eval/eval.mjs --facts <eden facts.json>
-//     --out <dir> [--runs 2] [--model sonnet] [--max-turns 40] [--pair-only]
+//     --out <dir> [--runs 2] [--model sonnet] [--max-turns 40] [--pair-only | --external-driver]
 //   Run after `cargo build -p gatewayd -p worldd -p directoryd --locked` and replica's wasm-bindgen package in
 //   v2/target/wasm-load/pkg. The facts file is `node v2/tools/import-eden/export/export.ts`'s. `--pair-only` stops
 //   each run after the pairing (no agent, no model). Prints one JSON line per run, then the summary; `<dir>/run-<n>/`
-//   keeps the transcript.
+//   keeps the transcript. `--external-driver` writes private `ready.json` paths for a native worker, then waits up
+//   to twenty minutes for its `transcript.jsonl` and `complete` marker before the same grading and cleanup.
 
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -108,6 +109,26 @@ function agent(at, { model, maxTurns }) {
   });
 }
 
+/** A native worker uses the same prepared home and leaves its transcript before the completion marker. No tokens
+ * enter the manifest. Its paths are private run output; the normal before/after grading and token audit still run.
+ * The transcript uses the same assistant tool_use, user tool_result and final result records as the default driver.
+ */
+export async function externalAgent(at, dir, run, { within = 20 * 60_000, poll = 200 } = {}) {
+  const manifest = resolve(dir, 'ready.json'), transcript = resolve(dir, 'transcript.jsonl'), complete = resolve(dir, 'complete');
+  writeFileSync(manifest, JSON.stringify({ run, folder: at, home: join(at, '.souls'), command: 'node souls-god.mjs',
+    skill: join(at, 'creator.md'), task: TASK, environment: { SOULS_HOME: join(at, '.souls'), SOULS_REPLICA_PKG: PKG },
+    transcript, complete, withinMs: within }, null, 2) + '\n', { mode: 0o600 });
+  console.log(JSON.stringify({ step: 'external-driver-ready', run, manifest }));
+  const until = Date.now() + within;
+  while (!existsSync(complete)) {
+    if (Date.now() >= until) throw new Error('external creator driver timed out before completion');
+    await sleep(poll);
+  }
+  const text = readFileSync(transcript, 'utf8');
+  if (!text.trim()) throw new Error('external creator driver left an empty transcript');
+  return text;
+}
+
 /** The numbers: turns, tokens, commands and refusals, from the transcript. */
 export function measure(transcript) {
   const lines = transcript.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
@@ -145,7 +166,8 @@ function built(home, before) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const pairOnly = args.includes('--pair-only');
-  if (!pairOnly && !process.env.SEAT_CONFIG_DIR) { console.error('set SEAT_CONFIG_DIR to a signed-in Claude config directory'); process.exit(2); }
+  const externalDriver = args.includes('--external-driver');
+  if (!pairOnly && !externalDriver && !process.env.SEAT_CONFIG_DIR) { console.error('set SEAT_CONFIG_DIR to a signed-in Claude config directory'); process.exit(2); }
   const facts = resolve(opt('--facts', '.local/import-eden/eden-2026.facts.json'));
   const out = resolve(opt('--out', '.local/creator-eval'));
   const runs = Number(opt('--runs', 2)), model = opt('--model', 'sonnet'), maxTurns = Number(opt('--max-turns', 40));
@@ -183,14 +205,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         all.push(row);
         continue;
       }
-      const transcript = await agent(f.at, { model, maxTurns });
+      const transcript = externalDriver ? await externalAgent(f.at, dir, n) : await agent(f.at, { model, maxTurns });
       writeFileSync(join(dir, 'transcript.jsonl'), transcript);
       const after = await built(f.home, before.ids);
       const runtime = join(f.home, 'souls', id, 'runtime');
       const files = readdirSync(runtime).filter((x) => statSync(join(runtime, x)).isFile()).map((x) => readFileSync(join(runtime, x), 'utf8'));
       const secret = JSON.parse(readFileSync(join(f.home, 'credentials.json'), 'utf8')).souls[id].local.token.split('.')[1];
       const leaked = [transcript, after.text, ...files].some((t) => t.includes(secret));
-      const row = { run: n, model, pairing, ...measure(transcript), added: after.added, rooms: after.rooms, tokenFound: leaked };
+      const row = { run: n, model: externalDriver ? 'native-codex' : model, pairing, ...measure(transcript),
+        ...(externalDriver ? { cost: null, tokens: null } : {}), added: after.added, rooms: after.rooms, tokenFound: leaked };
       writeFileSync(join(dir, 'result.json'), JSON.stringify(row, null, 2) + '\n');
       console.log(JSON.stringify(row));
       all.push(row);
