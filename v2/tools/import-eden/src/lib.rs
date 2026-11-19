@@ -1209,9 +1209,10 @@ pub struct BodySlot {
     pub stand: Vec3,
 }
 
-/// Every thing of `tree` whose kind's entry (`entries`, `(kind, souls-entry/1 entry)` as `worldd seed` reads them)
-/// has a slot that admits a body, with the first such slot ([`BodySlot`]), in id order; and the count of every such slot
-/// on those things. A slot with no stand point, or a point not in whole millimetres, is left out.
+/// Every slot that admits a body ([`BodySlot`]) on the things of `tree` whose kind's entry (`entries`, `(kind,
+/// souls-entry/1 entry)` as `worldd seed` reads them) declares one, by thing id and slot (C19, #3457: a sofa's three,
+/// a bed's two); and the count of every such slot on those things. A slot with no stand point, or a point not in whole
+/// millimetres, is left out.
 pub fn body_slots(
     tree: &Tree,
     entries: &[(String, replica::rules::json::Value)],
@@ -1254,15 +1255,14 @@ pub fn body_slots(
             continue;
         };
         all += found.len();
-        let (slot, lie, at, stand) = found[0];
-        out.push(BodySlot {
+        out.extend(found.iter().map(|&(slot, lie, at, stand)| BodySlot {
             thing: n.id(),
             slot,
             lie,
             at,
             stand,
-        });
+        }));
     }
-    out.sort_by_key(|s| s.thing);
+    out.sort_by_key(|s| (s.thing, s.slot));
     (out, all)
 }

@@ -9,7 +9,11 @@
 //!
 //! - **Checked at commit.** A move's checks are its own: the controller's claims (T9 rule 4), the reach (B2), the seat
 //!   free and in reach (B3), a route (N7). They are made on the clock thread when the move starts, as B3 reserves a
-//!   seat: one tick's sits are taken together, in B3's stable order. A move refused there ends by that name.
+//!   seat: one tick's sits are taken one by one, in B3's stable order. A move refused there ends by that name.
+//! - **A thing with several seats** (C19, #3457). A sit names a thing; the world picks its free slot whose stand point
+//!   is nearest the body (`Slots::free`, ties by slot), so three Souls share a sofa, each in its own slot, and a fourth
+//!   is refused `place-taken`. A walk to a thing with no point goes to that slot's stand point. A restart hands each
+//!   seated body back into the slot its logged pose names.
 //! - **Ends by name.** A walk ends when its skill does: done, or failed by name. A sit or a rise ends when its move
 //!   does: `done`, or cancelled by name (`claim-taken`, `out-of-reach`). A new move on a body whose walk is still
 //!   going ends that walk `claim-taken`.
@@ -62,7 +66,7 @@ pub enum Ask {
         node: Id,
         point: Option<Vec3>,
     },
-    /// Sit on the seat of `thing`.
+    /// Sit on a free seat of `thing`, the world's pick.
     Sit {
         thing: Id,
     },
@@ -280,7 +284,8 @@ impl Bodies {
     }
 
     /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back
-    /// into it from where it was added, at body time `at`, and its seat is held again. A seat gone or taken leaves it
+    /// into that slot (its pose's frame names the thing and the slot, C19) from where it was added, at body time `at`,
+    /// and its seat is held again. A seat gone or taken leaves it
     /// standing, named in the result.
     pub fn seat_placed(&mut self, placed: &Placed, at: Micros) -> Vec<(Id, Refusal)> {
         let mut out = Vec::new();
@@ -288,11 +293,10 @@ impl Bodies {
             if pose.support != Support::Slot || self.runner.controller.body(body).is_none() {
                 continue;
             }
-            let thing = pose.frame.node;
             let r = self.slots.restore(
                 &mut self.runner.controller,
                 body,
-                thing,
+                (pose.frame.node, pose.frame.slot),
                 stance.unwrap_or(Stance::Sit),
                 at,
             );
@@ -358,14 +362,15 @@ impl Bodies {
         self.runner.now = now;
     }
 
-    fn geo(&self, bodies: &[Id], places: &[Id]) -> Geo {
+    /// The geometry for `bodies` and `places`, each place of a different thing (one body's seat, C19).
+    fn geo(&self, bodies: &[Id], places: &[&PlaceAt]) -> Geo {
         let c = &self.runner.controller;
         let points = bodies
             .iter()
             .filter_map(|&b| {
                 let p = c.body(b)?.pose;
-                let at = match (p.support, self.slots.held_by(b)) {
-                    (Support::Slot, Some(t)) => self.slots.place(t)?.stand().ok()?,
+                let at = match (p.support, self.slots.held_place(b)) {
+                    (Support::Slot, Some(s)) => s.stand().ok()?,
                     _ => p.position,
                 };
                 Some((b, at))
@@ -373,10 +378,7 @@ impl Bodies {
             .collect();
         let places = places
             .iter()
-            .filter_map(|&t| {
-                let s = self.slots.place(t)?;
-                Some((t, [s.point, s.stand().ok()?]))
-            })
+            .filter_map(|s| Some((s.thing, [s.point, s.stand().ok()?])))
             .collect();
         Geo(points, places)
     }
@@ -404,7 +406,13 @@ impl Bodies {
                 Ask::Walk { node, point } => {
                     let goal = match point {
                         Some(p) => Ok(Target::new(node, p)),
-                        None => match self.slots.place(node).map(|s| (s.floor, s.stand())) {
+                        None => match self
+                            .slots
+                            .free(&self.runner.controller, a.body, node)
+                            .and_then(|slot| self.slots.place_in(node, slot))
+                            .or_else(|| self.slots.place(node))
+                            .map(|s| (s.floor, s.stand()))
+                        {
                             Some((floor, Ok(p))) => Ok(Target::new(floor, p)),
                             Some((_, Err(r))) => Err(r),
                             None => Err(refusal("move.no-point", node)),
@@ -424,8 +432,8 @@ impl Bodies {
                 }
                 Ask::Rise => {
                     self.replace(a.body);
-                    let thing = self.slots.held_by(a.body);
-                    let geo = self.geo(&[a.body], &thing.into_iter().collect::<Vec<_>>());
+                    let held: Vec<&PlaceAt> = self.slots.held_place(a.body).into_iter().collect();
+                    let geo = self.geo(&[a.body], &held);
                     let r = self.slots.rise(
                         &mut self.runner.controller,
                         &mut self.due,
@@ -440,34 +448,37 @@ impl Bodies {
                 }
             }
         }
-        if !sits.is_empty() {
-            let bodies: Vec<Id> = sits.iter().map(|s| s.1).collect();
-            let things: Vec<Id> = sits.iter().map(|s| s.2).collect();
-            let geo = self.geo(&bodies, &things);
-            let requests: Vec<Request> = sits
-                .iter()
-                .map(|&(_, body, thing)| Request {
-                    body,
-                    thing,
-                    mv: &self.sit,
-                    stance: Stance::Sit,
-                })
+        // Taken one by one in B3's stable order (body, then thing), each into the free slot the world picks for it
+        // (C19), its reach measured to that slot's stand point.
+        sits.sort_by_key(|s| (s.1, s.2));
+        for (id, body, thing) in sits {
+            let slot = self.slots.free(&self.runner.controller, body, thing);
+            let place: Vec<&PlaceAt> = slot
+                .and_then(|s| self.slots.place_in(thing, s))
+                .into_iter()
                 .collect();
-            let done = self.slots.commit(
-                &mut self.runner.controller,
-                &mut self.due,
-                &mut self.mint,
-                &mut self.moves,
-                &geo,
-                &requests,
-                now,
-            );
-            // Taken in B3's stable order, and each matched back to its intent by its body.
-            for (body, r) in done {
-                if let Some(&(id, ..)) = sits.iter().find(|s| s.1 == body) {
-                    out.push((id, self.started(id, body, r)));
-                }
-            }
+            let geo = self.geo(&[body], &place);
+            let request = Request {
+                body,
+                thing,
+                slot,
+                mv: &self.sit,
+                stance: Stance::Sit,
+            };
+            let r = self
+                .slots
+                .commit(
+                    &mut self.runner.controller,
+                    &mut self.due,
+                    &mut self.mint,
+                    &mut self.moves,
+                    &geo,
+                    &[request],
+                    now,
+                )
+                .pop()
+                .map_or_else(|| Err(refusal("place-unknown", thing)), |(_, r)| r);
+            out.push((id, self.started(id, body, r)));
         }
         out
     }
@@ -487,10 +498,8 @@ impl Bodies {
             // host and the controller.
             let at = self.runner.now;
             while let Some(t) = self.due.fire(at + 1) {
-                let geo = self.geo(
-                    &[t.node],
-                    &self.slots.held_by(t.node).into_iter().collect::<Vec<_>>(),
-                );
+                let held: Vec<&PlaceAt> = self.slots.held_place(t.node).into_iter().collect();
+                let geo = self.geo(&[t.node], &held);
                 let fired = self.slots.fire(
                     &mut self.runner.controller,
                     &mut self.due,

@@ -178,6 +178,7 @@ fn a_retirement_mid_sit_leaves_no_slot_link_or_timer() {
             &[Request {
                 body,
                 thing: w.thing,
+                slot: None,
                 mv: &sit,
                 stance: Stance::Sit,
             }],
@@ -239,6 +240,7 @@ fn a_retirement_mid_sit_leaves_no_slot_link_or_timer() {
             &[Request {
                 body: other,
                 thing: w.thing,
+                slot: None,
                 mv: &sit,
                 stance: Stance::Sit,
             }],

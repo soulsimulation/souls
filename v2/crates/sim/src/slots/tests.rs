@@ -188,6 +188,7 @@ impl World {
             .map(|&i| Request {
                 body: self.bodies[i],
                 thing: self.chair,
+                slot: None,
                 mv: m,
                 stance: Stance::Sit,
             })
@@ -417,4 +418,114 @@ fn the_nearest_clear_spot_is_clear_and_nearest() {
         clear_spot(floor, [FLOOR + 1_000_000, 0], &[], 1, 50_000, 500_000).is_none(),
         "off the floor"
     );
+}
+
+/// Reach that every point is within: the test of which slot is taken, not of reach.
+struct Near;
+
+impl Reach for Near {
+    fn distance(&self, _: Id, _: &Effector, _: Option<&Name>, _: Id, _: &Name) -> Option<i64> {
+        Some(0)
+    }
+}
+
+/// C19 (#3457) A2: a thing with three seats (the chair's slot 1 in the middle, slots 2 and 3 600 mm either side) and
+/// four bodies asking for it in one tick, naming only the thing. Whatever the order they come in, each of the first
+/// three in the stable order takes the free slot whose stand point is nearest it, and the fourth is refused
+/// `place-taken`, naming the three holders. Each sits in its own slot.
+#[test]
+fn c19_three_bodies_share_a_thing_each_in_its_own_slot() {
+    let sit = mv("souls:sit");
+    for reversed in [false, true] {
+        let mut w = world(chair());
+        for (slot, x) in [(2, -600_000), (3, 600_000)] {
+            let mut place = chair();
+            place.slot = slot;
+            w.slots
+                .add(PlaceAt {
+                    thing: w.chair,
+                    point: Vec3::new(x, place.height, 0),
+                    place,
+                    facing: Quat::IDENTITY,
+                    floor: fixture(1),
+                })
+                .expect("a place");
+        }
+        // Bodies at x -100 and 100 mm (the world's), then 600 and -600 mm, 300 mm in front: minted in that order.
+        for x in [600_000, -600_000] {
+            let id = w.mint.mint().expect("id");
+            let frame = Frame {
+                node: fixture(1),
+                slot: None,
+            };
+            let placed = w.floors[&fixture(1)]
+                .place(id, frame, Vec3::new(x, 0, 300_000), Quat::IDENTITY)
+                .expect("placed");
+            w.c.add(family(), placed).expect("added");
+            w.bodies.push(id);
+        }
+        let mut reqs: Vec<Request> = w
+            .bodies
+            .iter()
+            .map(|&body| Request {
+                body,
+                thing: w.chair,
+                slot: None,
+                mv: &sit,
+                stance: Stance::Sit,
+            })
+            .collect();
+        if reversed {
+            reqs.reverse();
+        }
+        let out = w.slots.commit(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &Near,
+            &reqs,
+            0,
+        );
+        let b = w.bodies.clone();
+        assert_eq!(
+            out.iter().map(|o| o.0).collect::<Vec<_>>(),
+            b,
+            "the stable order"
+        );
+        let r = out[3].1.as_ref().expect_err("the fourth is refused");
+        assert_eq!(r.name, "place-taken");
+        for &h in &b[..3] {
+            assert!(r.detail.contains(&show(h)), "names every holder: {r}");
+        }
+        while let Some(t) = w.due.fire(i64::MAX) {
+            w.slots
+                .fire(
+                    &mut w.c,
+                    &mut w.due,
+                    &mut w.mint,
+                    &mut w.moves,
+                    &Near,
+                    &w.floors,
+                    &t,
+                )
+                .expect("a move's timer");
+        }
+        // -100 mm takes the middle; 100 mm the nearest free, slot 3 (500 mm off); 600 mm the last, slot 2.
+        for (&body, slot) in b.iter().zip([1, 3, 2]) {
+            let p = w.c.body(body).expect("a body").pose;
+            assert_eq!(p.support, Support::Slot);
+            assert_eq!(
+                p.frame,
+                Frame {
+                    node: w.chair,
+                    slot: Some(slot)
+                },
+                "reversed {reversed}"
+            );
+            assert_eq!(w.slots.holder_in(w.chair, slot), Some(body));
+        }
+        assert_eq!(w.slots.holders(w.chair), vec![b[0], b[2], b[1]]);
+        assert_eq!(w.slots.held_by(b[3]), None);
+    }
 }

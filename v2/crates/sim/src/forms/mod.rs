@@ -146,20 +146,17 @@ impl<R: Reach> Reach for SeatReach<'_, R> {
     }
 }
 
-/// [`SeatReach`] for `body` and the seat of `thing` in `slots`, over `inner`.
+/// [`SeatReach`] for `body` and the seat `place` of `slots`, over `inner`.
 fn seat_reach<'b, R: Reach>(
     inner: &'b R,
     c: &Controller,
     slots: &Slots,
     body: Id,
-    thing: Id,
+    place: Option<&PlaceAt>,
 ) -> SeatReach<'b, R> {
     let at = |p: &PlaceAt| p.stand().ok();
     let from = c.body(body).map_or(Vec3::ZERO, |b| {
-        match (
-            b.pose.support,
-            slots.held_by(body).and_then(|t| slots.place(t)),
-        ) {
+        match (b.pose.support, slots.held_place(body)) {
             (replica::pose::Support::Slot, Some(p)) => at(p).unwrap_or(b.pose.position),
             _ => b.pose.position,
         }
@@ -168,7 +165,7 @@ fn seat_reach<'b, R: Reach>(
         inner,
         body,
         from,
-        place: slots.place(thing).and_then(|p| Some((thing, at(p)?))),
+        place: place.and_then(|p| Some((p.thing, at(p)?))),
     }
 }
 
@@ -837,13 +834,15 @@ impl Forms {
                 else {
                     return self.wake(w, run, Woke::Moved(name("place-unknown")), now);
                 };
-                if places.slots.place(node).map(|p| p.place.slot) != Some(slot) {
+                let place = places.slots.place_in(node, slot);
+                if place.is_none() {
                     return self.wake(w, run, Woke::Moved(name("place-unknown")), now);
                 }
-                let geo = seat_reach(w.reach, w.controller, places.slots, body, node);
+                let geo = seat_reach(w.reach, w.controller, places.slots, body, place);
                 let request = Request {
                     body,
                     thing: node,
+                    slot: Some(slot),
                     mv: found,
                     stance: if lie {
                         crate::controller::Stance::Lie
@@ -975,8 +974,13 @@ impl Forms {
         // A seat's move fires through the places (C17): its contact hands the body into the slot, a rise's out.
         let fired = match w.places.as_mut() {
             Some(s) if s.slots.held_by(t.node).is_some() => {
-                let thing = s.slots.held_by(t.node).unwrap_or(t.node);
-                let geo = seat_reach(w.reach, w.controller, s.slots, t.node, thing);
+                let geo = seat_reach(
+                    w.reach,
+                    w.controller,
+                    s.slots,
+                    t.node,
+                    s.slots.held_place(t.node),
+                );
                 s.slots
                     .fire(w.controller, w.due, w.mint, w.moves, &geo, s.floors, t)
                     .map(|(f, _)| f)
