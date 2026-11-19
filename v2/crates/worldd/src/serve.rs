@@ -9,6 +9,7 @@
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
 //!   live world). The world as built is read from it at each start: its header and the walkers' town.
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
+//!   An entry whose `roles` name two or more roles is also an activity kind (C30, [`activity_kinds`]).
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
 //! - `log`: K4's log. Its first record is the import's part, every node and link the loader committed, so the log
 //!   holds the world from empty and a stream written from it draws the whole world.
@@ -49,11 +50,18 @@
 //! day's bundle index is written again each time a bundle closes. A restart archives again from record 0: what was
 //! stored is passed over when the same and written over when made from more records ([`Again`]).
 //!
+//! **Activities** (C30, #3556): the engine's acts (C2) run with the conversation's kind (E26,
+//! `replica/fixtures/activities/conversation.diag`) and an activity kind for each entry whose `roles` name two or
+//! more roles, `<entry kind>_activity`; each is pinned in the header and the open ground takes it as a child, so an
+//! offer or a proposal on the ground (where bodies are born) makes its node there. A start prints `activities: <plain
+//! names>`.
+//!
 //! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town).
 
 // The process reads the wall clock once for the stream's anchor (V1 rule 5); the engine never does.
 #![allow(clippy::disallowed_methods)]
 
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -64,16 +72,17 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use archive::{Archiver, Shared};
 use directoryd::directory::Directory;
 use directoryd::directory::store::{Object, Store, When};
+use replica::activity::{ActivityKind, Role};
 use replica::apply::Replica;
-use replica::bodies::{Class, Family, Resource};
-use replica::effects::{Effect, Refusal};
-use replica::encode::{Name, Value, encode, from_hex, to_hex};
+use replica::bodies::{Class, Family, Resource, Want};
+use replica::effects::{Effect, Refusal, fixture_bytes};
+use replica::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use replica::ids::{Id, Scope, sha256};
 use replica::pose::{Frame, Vec3};
 use replica::rules::json::{self, Value as Json};
 use replica::stream;
 use replica::views::{Key, Level, Redactions};
-use replica::world_model::{Audience, parse_kinds, plain};
+use replica::world_model::{Audience, Kind, parse_kinds, plain};
 use sim::links::Doors;
 use sim::log::{FileStore, Log};
 use sim::recorder;
@@ -152,11 +161,92 @@ struct Built {
     rules: replica::tree::Rules,
     /// A Soul's body kind, its full name (C3).
     body_kind: String,
+    /// The activity kinds the engine runs (C30): the conversation's, then the entries'.
+    activities: Vec<ActivityKind>,
 }
 
-/// Loads a facts file (N1's or X6's) as the world as built.
-fn build(facts: &str) -> R<Built> {
+/// The conversation's kind (E26, #3329), as its fixture writes it.
+fn conversation() -> R<ActivityKind> {
+    let bytes = fixture_bytes(include_str!(
+        "../../replica/fixtures/activities/conversation.diag"
+    ))
+    .map_err(refusal)?;
+    let v = decode(&bytes).map_err(|e| format!("the conversation's kind: {e:?}"))?;
+    ActivityKind::from_value(&v.value).map_err(refusal)
+}
+
+/// The activity kinds a world's entries declare (C30, #3556): one for each entry whose `roles` (SA-G1a) name two or
+/// more roles (B5 refuses a kind of one), `<entry kind>_activity`, pinned by the hash of its entry's roles. A role
+/// is `<namespace>:<role>`, standing at its entry's first slot (`souls:here` when it has none) and claiming one hand,
+/// so a member walks, sits and talks while it plays; an offer lapses after a minute and a leave takes at most 0.4 s,
+/// as a conversation's. The `now` line (SA-G1b) is not a role.
+pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
+    let mut by_kind = BTreeMap::new();
+    for (kind, entry) in entries {
+        let Some(roles) = entry.get("roles").and_then(Json::obj) else {
+            continue;
+        };
+        let roles: Vec<_> = roles
+            .iter()
+            .filter(|(n, v)| n != "now" && v.obj().is_some())
+            .collect();
+        if roles.len() < 2 {
+            continue;
+        }
+        let ns = kind.split_once(':').map_or("world", |(n, _)| n);
+        let mut out = Vec::new();
+        for (role, v) in &roles {
+            let slot = v
+                .get("places")
+                .and_then(|p| p.get("slots"))
+                .and_then(Json::arr)
+                .and_then(|s| s.first())
+                .and_then(Json::str);
+            let place = slot.map_or("souls:here".to_owned(), |s| format!("{ns}:{s}"));
+            out.push(Role {
+                name: Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?,
+                place: Name::new(&place).ok_or("a role's place")?,
+                claims: vec![Want::One(Class::Manipulator)],
+            });
+        }
+        let pin = to_hex(&sha256(
+            format!(
+                "souls/activity/{kind}/{}",
+                Json::Obj(roles.into_iter().cloned().collect()).to_json()
+            )
+            .as_bytes(),
+        ));
+        let name = Name::new(&format!("{kind}_activity@1220{pin}")).ok_or("an activity's name")?;
+        by_kind.insert(
+            kind.clone(),
+            ActivityKind {
+                name,
+                revision: 1,
+                roles: out,
+                proposal_lasts: 60_000_000,
+                leave_within: 400_000,
+            },
+        );
+    }
+    Ok(by_kind.into_values().collect())
+}
+
+/// Loads a facts file (N1's or X6's) as the world as built, with the activity kinds of `entries` (C30).
+fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     let mut im = import_eden::load(facts)?;
+    let mut activities = vec![conversation()?];
+    activities.extend(activity_kinds(entries)?);
+    for a in &activities {
+        im.rules.kinds.insert(
+            a.name.as_str().to_owned(),
+            Kind {
+                owner: "activity".into(),
+                children: Default::default(),
+                slots: Default::default(),
+                hands: None,
+            },
+        );
+    }
     // R1's replica starts a zone's root as the header's `souls:place` kind (as stream-check's Eden): one here,
     // admitting what the loader's world admits, so the log replays onto an empty replica.
     im.rules.kinds.extend(
@@ -175,6 +265,9 @@ fn build(facts: &str) -> R<Built> {
     for (name, kind) in im.rules.kinds.iter_mut() {
         if plain(name) == import_eden::GROUND {
             kind.children.insert("body".into());
+            for a in &activities {
+                kind.children.insert(plain(a.name.as_str()).to_owned());
+            }
         }
     }
     let (root, ground) = match (im.nodes.get("world"), im.nodes.get("ground")) {
@@ -205,6 +298,7 @@ fn build(facts: &str) -> R<Built> {
         root,
         rules,
         body_kind,
+        activities,
     })
 }
 
@@ -300,12 +394,14 @@ fn seed_in(args: &[String]) -> R<String> {
         None => (0.0, 0.0),
     };
     let text = std::fs::read_to_string(facts).map_err(io(Path::new(facts)))?;
-    let built = build(&text)?;
+    let mut found = Vec::new();
+    if let Some(e) = arg(args, "--entries") {
+        entries(Path::new(e), &mut found)?;
+    }
+    let built = build(&text, &found)?;
     std::fs::create_dir_all(dir.join("entries")).map_err(io(&dir))?;
     std::fs::write(dir.join("facts.json"), &text).map_err(io(&dir))?;
-    if let Some(e) = arg(args, "--entries") {
-        let mut found = Vec::new();
-        entries(Path::new(e), &mut found)?;
+    if arg(args, "--entries").is_some() {
         for (kind, v) in &found {
             let p = dir
                 .join("entries")
@@ -625,12 +721,15 @@ fn serve(args: &[String]) -> R<()> {
     }
     let souls = souls(&meta)?;
     let facts = dir.join("facts.json");
-    let built = build(&std::fs::read_to_string(&facts).map_err(io(&facts))?)?;
-    let name = instance(built.root);
     let mut kinds = Vec::new();
     if dir.join("entries").is_dir() {
         entries(&dir.join("entries"), &mut kinds)?;
     }
+    let built = build(
+        &std::fs::read_to_string(&facts).map_err(io(&facts))?,
+        &kinds,
+    )?;
+    let name = instance(built.root);
     let moves = match std::fs::read_to_string(dir.join("moves.json")) {
         Ok(t) => json::parse(&t)?,
         Err(_) => Json::Obj(Vec::new()),
@@ -640,6 +739,12 @@ fn serve(args: &[String]) -> R<()> {
         kinds.len(),
         souls.len()
     );
+    let names: Vec<&str> = built
+        .activities
+        .iter()
+        .map(|a| plain(a.name.as_str()))
+        .collect();
+    println!("activities: {}", names.join(", "));
     let rules = Rules {
         kinds: Json::Obj(kinds),
         moves,
@@ -698,8 +803,8 @@ fn serve(args: &[String]) -> R<()> {
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.root.scope()));
-    // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
-    cfg.engine = Some((built.rules.clone(), Vec::new()));
+    // The engine's own acts (C2) and the activities they run (C30).
+    cfg.engine = Some((built.rules.clone(), built.activities.clone()));
     let (town, ground) = (built.town, built.ground);
     // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
     let int = |v: &Json| match v {

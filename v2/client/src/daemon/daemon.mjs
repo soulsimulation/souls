@@ -636,7 +636,7 @@ async function answer(req) {
       // Each candidate on its own target (C10), else all on `target`; the first one's thing arguments in parameter 1.
       const target = Array.isArray(req.acts) ? keep.map((c) => c.this ?? '').join(' ') : req.target;
       const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
-      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, basis, expiry: req.expiry });
+      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params: req.params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
@@ -679,7 +679,8 @@ function converse(req) {
         .map((r) => ({ id: r.id, ...(state.conversations[r.id]?.private ? { private: true } : {}) })),
     }));
   }
-  const place = rowsOf(copy).get(ME)?.parent ?? null;
+  // The node this Soul's body stands under: the body is the Soul's own node, or (C3's joins) one linked to it.
+  const place = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
   const intents = converseIntents(req, { ns: NS, place, privateOf: (id) => Boolean(state.conversations[id]?.private) });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   if (req.private && req.conversation) state.conversations[req.conversation] = { private: true };
