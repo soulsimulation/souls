@@ -48,6 +48,13 @@
 //! retires the body by K10's path: its seat freed, its timers and run ended, its link ended and its node removed.
 //! After a restart a Soul's body is found again by its `souls:body-of` link.
 //!
+//! **The directory's word** (W11b, #3511; [`crate::directory`]): [`Event::Directory`] hands the world the directory's
+//! Souls file. At the next tick, after its births, each Soul it names that has a body here is brought in line with it
+//! by an intent of its own: a retired Soul's [`LEAVE`], a Soul whose saved words differ from its body's a
+//! [`DESCRIBE`]. They go the way any intent goes, under a key of their own ([`notice_key`]) so they never take a
+//! sequence of the Soul's agent, and are answered on the event's reply. A retired Soul is never born again: its intent
+//! is refused `soul-retired`.
+//!
 //! **Sync by hash** (R5b, #3164): a frame with key 20 is R5's sync request (`replica::sync::wire`), not an intent.
 //! The [`Door`] hands it to the sync thread (`crate::syncs`, C16 #3450), never to the clock thread: it answers from
 //! its own sealed copy of the zone, which takes each tick's parts from the answers thread once they are on the disk,
@@ -106,6 +113,7 @@ use crate::acts::{self, Acts};
 use crate::bodies::{self, Ask, Asked, Bodies, Cut, Placed};
 use crate::buildsafe;
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
+use crate::directory::Directory;
 use crate::engine::{self, Engine};
 use crate::loose::Ends;
 use crate::measures::{self, Measures, Stamps};
@@ -213,6 +221,8 @@ pub enum Event {
     /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick with the Souls' bodies
     /// read from that copy (G1c), or its refusal.
     Edited(Box<(Id, Result<Checked, Refused>)>),
+    /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
+    Directory(Box<(Directory, Reply)>),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
     Stall(Duration),
     Stop,
@@ -463,6 +473,16 @@ pub struct Join {
 pub const JOIN: &str = "life:join";
 /// A Soul's leave (C3): its body retired.
 pub const LEAVE: &str = "life:leave";
+/// A Soul's saved words given to its body (W11b): a describe (V1b), its name parameter 1, its description 2.
+pub const DESCRIBE: &str = "life:describe";
+
+/// The key the directory's intents for `soul` are numbered under (W11b): not its agent's, so they never take one of
+/// its sequences.
+pub fn notice_key(soul: Id) -> Vec<u8> {
+    let mut k = b"directory:".to_vec();
+    k.extend(encode(&soul.to_value()).unwrap_or_default());
+    k
+}
 /// The link from a body to its Soul (K10).
 const BODY_OF: &str = "souls:body-of";
 
@@ -746,6 +766,10 @@ struct Clock {
     tick_us: Micros,
     /// Joins and leaves (C3), when the world births its Souls' bodies.
     life: Option<Lives>,
+    /// The directory's word (W11b): its file as last read and where its answers go, and the Souls to bring in line
+    /// with it at the next tick.
+    directory: Option<(Directory, Reply)>,
+    told: BTreeSet<Id>,
     /// Loose things' ends (F10b, #3476), and the ends of owner's links the tick's acts ended.
     loose: Ends,
     unlinked: Vec<Id>,
@@ -1117,6 +1141,18 @@ impl Clock {
     }
 
     fn arrival(&mut self, bytes: &[u8], reply: Reply, stamps: Stamps, now: Micros) {
+        self.arrival_as(bytes, None, reply, stamps, now);
+    }
+
+    /// An intent's arrival, numbered under `key` when given (the directory's, W11b), else its actor's.
+    fn arrival_as(
+        &mut self,
+        bytes: &[u8],
+        key: Option<Vec<u8>>,
+        reply: Reply,
+        stamps: Stamps,
+        now: Micros,
+    ) {
         let intent = match Intent::read(bytes) {
             Ok(i) => i,
             Err(r) => {
@@ -1127,7 +1163,9 @@ impl Clock {
                 return;
             }
         };
-        let Some(key) = actor_key(bytes) else { return };
+        let Some(key) = key.or_else(|| actor_key(bytes)) else {
+            return;
+        };
         let (actor, sequence) = (intent.actor, intent.sequence);
         // Sent again while still open (a gateway's resend after a reconnect): answered once, to both.
         if let Some(id) = self.in_flight.get(&(key.clone(), sequence)) {
@@ -1148,6 +1186,15 @@ impl Clock {
         if let Some(soul) = self.unborn(&intent) {
             if intent.verb.as_str() == LEAVE {
                 let a = self.refusal(actor, sequence, "soul-not-embodied");
+                return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+            }
+            // A Soul its owner retired is never born again (W11b).
+            if self
+                .directory
+                .as_ref()
+                .is_some_and(|(d, _)| d.retired.contains(&soul))
+            {
+                let a = self.refusal(actor, sequence, "soul-retired");
                 return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
             }
             if let Some(l) = self.life.as_mut() {
@@ -1452,6 +1499,94 @@ impl Clock {
         }
     }
 
+    /// The directory's word, at a tick's start after its births (W11b): each Soul told of since the last tick that has
+    /// a body here is retired when the directory retired it, or given its saved words when its body's differ, by an
+    /// intent of its own taken as any intent is, under [`notice_key`]. A Soul with no body here is left alone.
+    fn notices(&mut self, now: Micros) {
+        let told = std::mem::take(&mut self.told);
+        let Some((d, reply)) = self.directory.as_ref().map(|(d, r)| (d.clone(), r.clone())) else {
+            return;
+        };
+        if self.life.is_none() {
+            return;
+        }
+        for soul in told {
+            let (verb, parameters) = if d.retired.contains(&soul) {
+                (LEAVE, BTreeMap::new())
+            } else if let Some(w) = d.words.get(&soul) {
+                let said = |n: &Option<Vec<u8>>| {
+                    n.as_ref().map(|b| {
+                        Value::Map(BTreeMap::from([(words::WORDS, Value::Bytes(b.clone()))]))
+                    })
+                };
+                let p: BTreeMap<u64, Value> = [(1, said(&w.name)), (2, said(&w.description))]
+                    .into_iter()
+                    .filter_map(|(k, v)| Some((k, v?)))
+                    .collect();
+                (DESCRIBE, p)
+            } else {
+                continue;
+            };
+            let Some(verb) = Name::new(verb) else {
+                continue;
+            };
+            let mut intent = Intent {
+                actor: Actor::Soul(soul),
+                verb,
+                target: None,
+                parameters,
+                sequence: 0,
+                basis: self.version(),
+                expiry: now.saturating_add(self.deadline),
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: None,
+                body: None,
+            };
+            // Only a Soul with a body here (its link after a restart included); the directory never births one.
+            if self.unborn(&intent).is_some() {
+                continue;
+            }
+            if intent.verb.as_str() == DESCRIBE {
+                let body = self.life.as_ref().and_then(|l| l.life.body_of(soul));
+                if intent.parameters.is_empty()
+                    || body.is_some_and(|b| self.says(b, &d.words[&soul]))
+                {
+                    continue;
+                }
+            }
+            let key = notice_key(soul);
+            intent.sequence = self
+                .sequences
+                .kept()
+                .find(|(k, _, _)| *k == key.as_slice())
+                .map_or(1, |(_, last, _)| last + 1);
+            let Ok(bytes) = encode(&intent.to_value()) else {
+                continue;
+            };
+            self.arrival_as(&bytes, Some(key), reply.clone(), Stamps::default(), now);
+        }
+    }
+
+    /// Whether `body`'s public name and description already read as the saved words `w` (a word not saved agrees).
+    fn says(&self, body: Id, w: &crate::directory::Words) -> bool {
+        let tree = self.replica.tree();
+        let Some(n) = tree.handle(body).and_then(|h| tree.node(h)) else {
+            return false;
+        };
+        let reads = |field: u64, want: &Option<Vec<u8>>| {
+            let Some(want) = want else { return true };
+            let r = match n.fields().get(&field) {
+                Some(Value::Map(m)) => m.get(&replica::audience::REFERENCE),
+                _ => None,
+            };
+            r.and_then(|r| replica::effects::read_id(r).ok())
+                .and_then(|r| self.text.read(r, &[]).ok())
+                .is_some_and(|got| &got == want)
+        };
+        reads(words::NAME, &w.name) && reads(words::DESCRIPTION, &w.description)
+    }
+
     /// This tick's births (C3, K10): each body born, its node and link written, a join among its Soul's waiting
     /// intents answered with that entry, and its other intents taken now.
     fn births(&mut self, now: Micros) {
@@ -1488,6 +1623,7 @@ impl Clock {
                     later.push((bytes, reply, stamps));
                 }
             }
+            self.told.insert(x.soul);
             self.born(x, join, now);
             for (bytes, reply, stamps) in later {
                 self.arrival(&bytes, reply, stamps, now);
@@ -2296,6 +2432,7 @@ impl Clock {
         // 0. This tick's births (C3) and the intents that waited for them; then what arrived since the last tick, and
         // what a script set for this one, is taken now.
         self.births(now);
+        self.notices(now);
         for (bytes, reply, stamps) in std::mem::take(&mut self.pending) {
             self.arrival(&bytes, reply, stamps, now);
         }
@@ -3044,6 +3181,8 @@ pub fn start<S: Storage + 'static>(
         tick_us,
         text,
         life,
+        directory: None,
+        told: BTreeSet::new(),
         loose,
         unlinked: Vec::new(),
     };
@@ -3131,6 +3270,11 @@ pub fn start<S: Storage + 'static>(
                     Event::Edited(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.edited.push(*k);
+                    }
+                    Event::Directory(d) => {
+                        let (d, reply) = *d;
+                        c.told.extend(d.souls());
+                        c.directory = Some((d, reply));
                     }
                     Event::Stall(d) => thread::sleep(d),
                     Event::RunTo { done, .. } => return Some(done),
