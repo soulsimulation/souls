@@ -17,6 +17,7 @@ import { pageThings } from '../things/page.ts';
 import { HistoryPage, readMoment } from '../history/page.ts';
 import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
+import { mountOwnerBox } from '../owner/box.ts';
 import { arrive } from '../worlds/arrive.ts';
 import { WorldSky } from '../sky/sky.ts';
 import { tickWater } from '../water/water.ts';
@@ -142,6 +143,9 @@ else if (address) {
     near = new SocketSource({ url: gateway, token: g.token, expires: g.expires, follow, renew: () => exchange(directory, session) });
     near.start({ pointer: () => {}, part: (p) => world.apply([], [], p.samples), error: (m) => (error = m) });
     (globalThis as any).v2.near = near;
+    // W10: the owner writes to the followed Soul's agent from its page.
+    const own = g.owned.find((o) => o.follow === follow);
+    if (own) (globalThis as any).v2.box = mountOwnerBox(near, own.grant, () => `To ${souls.copy.souls.get(follow)?.name ?? 'your Soul'}'s agent`);
   }).catch((e) => (error = e instanceof Error ? e.message : 'no view'));
 }
 else if (worldName) resolveWorld(worldName, new URLSearchParams(location.search).get('worlds') ?? './w/').then(
