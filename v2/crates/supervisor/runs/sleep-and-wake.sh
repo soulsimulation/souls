@@ -47,15 +47,16 @@ arm() {
   mkdir -p "$STATE" && echo "$1 $2" > "$STATE/armed"
 }
 
-# Waits until every world committed its due change, then prints: commits, the longest lag, how many within 1 s.
+# Waits until every world committed its due change, then prints: commits, the longest lag, how many within 1 s. The
+# bar is every commit within 1 s (A2), or with a second argument `fired`, every alarm fired, late or not (A3).
 report() {
-  local label=$1 limit=$(( $(cut -d' ' -f1 "$STATE/armed") + N * $(cut -d' ' -f2 "$STATE/armed") + 60000000 ))
+  local label=$1 bar=${2:-lag} limit=$(( $(cut -d' ' -f1 "$STATE/armed") + N * $(cut -d' ' -f2 "$STATE/armed") + 60000000 ))
   while [ "$(cat "$O1_ROOT"/worlds/*/commits 2> /dev/null | grep -c .)" -lt "$N" ] && [ "$(now_us)" -lt "$limit" ]; do
     sleep 1
   done
-  cat "$O1_ROOT"/worlds/*/commits | awk -v label="$label" -v n="$N" '
+  cat "$O1_ROOT"/worlds/*/commits | awk -v label="$label" -v n="$N" -v bar="$bar" '
     {lag = ($2 - $1) / 1e6; if (lag > max) max = lag; if (lag <= 1) ok++; c++}
-    END {printf "| %s | %d of %d | %.3f | %d |\n", label, c, n, max, ok; exit !(c == n && ok == n)}'
+    END {printf "| %s | %d of %d | %.3f | %d |\n", label, c, n, max, ok; exit !(c == n && (bar == "fired" || ok == n))}'
 }
 
 case "${1:-}" in
@@ -88,7 +89,7 @@ case "${1:-}" in
         sleep 1
         echo "daemon killed; restarted: $(systemctl is-active souls-alarms.service)"
       fi
-      report "$1 $rep" || exit 1
+      if [ "$1" = kill ]; then report "kill $rep" fired || exit 1; else report "burst $rep" || exit 1; fi
     done
     ;;
   intent)
@@ -118,7 +119,7 @@ case "${1:-}" in
     echo "armed: 100 asleep, due 180 s on; reboot the machine now, then run: $0 check"
     ;;
   check)
-    report "after reboot"
+    report "after reboot" fired
     ;;
   *)
     echo "usage: $0 quiet|burst|kill|intent|arm|check" >&2
