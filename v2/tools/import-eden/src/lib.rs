@@ -88,6 +88,9 @@ pub struct Import {
     pub by_ref: BTreeMap<String, i64>,
     /// Things the import could not place as the facts say, each with its reason.
     pub notes: Vec<String>,
+    /// Things today's facts put in a slot another thing already holds: each stays a plain child of the same parent
+    /// at its own place, out of the slot (one occupant per slot), with what holds the slot.
+    pub left_out: Vec<String>,
     /// Today's def ref to its form: point, path or area.
     pub forms: BTreeMap<String, String>,
     /// Every entry the import committed, in order: what a stream of the world starts from (V5, #2714).
@@ -165,6 +168,7 @@ struct Build {
     specs: Vec<Spec>,
     texts: BTreeMap<[u8; 32], String>,
     notes: Vec<String>,
+    left_out: Vec<String>,
 }
 
 impl Build {
@@ -322,6 +326,7 @@ pub fn load(text: &str) -> R<Import> {
         specs: Vec::new(),
         texts: BTreeMap::new(),
         notes: Vec::new(),
+        left_out: Vec::new(),
     };
     let root = b.node("world")?;
     let ground = b.add("ground", root, None, &full[GROUND], [0; 4], terrain(&f)?)?;
@@ -383,6 +388,7 @@ pub fn load(text: &str) -> R<Import> {
             slot_at.insert((s(t, "id")?, int(sl, "n")?), [n(0)?, n(1)?, n(2)?]);
         }
     }
+    let mut held: HashMap<(Id, u64), &str> = HashMap::new();
     for t in things {
         let id = s(t, "id")?;
         let r = s(t, "ref")?;
@@ -398,7 +404,23 @@ pub fn load(text: &str) -> R<Import> {
                     Some(sl) if sl.get("room").is_some() => {
                         (b.node(&format!("{p}/{}", s(sl, "room")?))?, None)
                     }
-                    Some(sl) if sl.get("n").is_some() => (pid, Some(int(sl, "n")? as u64)),
+                    Some(sl) if sl.get("n").is_some() => {
+                        // One occupant per slot (K11's `slot-over-full`): today a slot may hold several things, so
+                        // the first keeps it and each later one stays a plain child at its own place, reported.
+                        let n = int(sl, "n")? as u64;
+                        match held.get(&(pid, n)) {
+                            Some(first) => {
+                                b.left_out.push(format!(
+                                    "{id} ({r}): slot {n} of {p} already holds {first}; left out of the slot, a plain child at its own place"
+                                ));
+                                (pid, None)
+                            }
+                            None => {
+                                held.insert((pid, n), id);
+                                (pid, Some(n))
+                            }
+                        }
+                    }
                     Some(sl) => {
                         b.notes.push(format!(
                             "{id}: slot {:?} of {p} is not in its bake; placed as a plain child",
@@ -786,6 +808,7 @@ pub fn load(text: &str) -> R<Import> {
         bake,
         by_ref,
         notes: b.notes,
+        left_out: b.left_out,
         forms,
         effects,
     })
