@@ -15,6 +15,8 @@
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
 //   souls.mjs whisper <body id> "<words>"     says them to that one body alone
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
+//   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
+//   souls.mjs prayers                         this Soul's prayers, each waiting or answered, with the answer
 //   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened (an answer, or words
 //                                             said to or near it: `heard`, also in the next look), or at the timeout
 //   souls.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]
@@ -44,7 +46,7 @@ import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
 import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'history', 'stats', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = ['digest', 'consolidate', 'schedule'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -104,7 +106,7 @@ export function requestOf(argv) {
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
   if (op === 'act' || op === 'can') req.acts = rest;
   if (op === 'pair') req.url = rest[0];
-  if (op === 'say') req.words = rest.join(' ');
+  if (op === 'say' || op === 'pray') req.words = rest.join(' ');
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
