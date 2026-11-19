@@ -87,6 +87,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     reason: Name::new("act.refused").unwrap(),
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
+                    op: None,
                 }
             } else if i.sequence >= 100 {
                 sequence += 1;
@@ -96,6 +97,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     reason: Name::new("eden:out-of-reach").unwrap(),
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
+                    op: None,
                 }
             } else {
                 sequence += 1;
@@ -104,6 +106,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     sequence: i.sequence,
                     intent: Id::new(LINEAGE, sequence).unwrap(),
                     entries: vec![sequence],
+                    names: BTreeMap::new(),
                 }
             };
             let frame = encode(&Value::Map(
