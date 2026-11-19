@@ -17,3 +17,18 @@ test('step 1 copies the skill where the harness reads skills, or reads ./SKILL.m
   assert.match(step1, /Put a copy of SKILL\.md where your harness reads skills/);
   assert.match(step1, /if that folder is not writable \(a read-only sandbox\), skip the copy and read `\.\/SKILL\.md`/);
 });
+
+// #3376: a new Soul arrives whole: a character's own name and, at once, a look; its picture follows the look.
+test('#3376 the create step names the Soul as a character and gives it a look before anything else', () => {
+  const step2 = guide.slice(guide.indexOf('2. **Name.**'), guide.indexOf('3. **Create')).replace(/\s+/g, ' ');
+  assert.match(step2, /a name of its own, a character's name such as "Mira Vale"/);
+  assert.match(step2, /never this device's name, your human's name or anything personal/);
+  const step3 = guide.slice(guide.indexOf('3. **Create'), guide.indexOf('4. **Start listening')).replace(/\s+/g, ' ');
+  assert.match(step3, /The moment the Soul exists, before it does anything else, give it a look that suits its name/);
+  assert.match(step3, /body look --set key=value …` \(or `--random`\)/);
+  assert.match(step3, /picture is drawn from its look/);
+  const cli = readFileSync(new URL('./soul/eden.mjs', import.meta.url), 'utf8');
+  const said = (re) => cli.split('\n').filter((l) => re.test(l));
+  assert.equal(said(/^A new Soul gets a character's name of its own \(never the device's, the owner's or anything personal\), then at once a look .*body look --set .*--random.*picture comes from the look/).length, 1, 'one guide line');
+  assert.equal(said(/^\s+`\(create: a character's own name, never the device's, the owner's or anything personal; then at once body look --set .*--random: the picture comes from the look\)`,$/).length, 1, 'one help row');
+});
