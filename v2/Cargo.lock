@@ -19,6 +19,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "assets"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "miniz_oxide",
+ "replica",
+ "sim",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -217,6 +227,18 @@ dependencies = [
  "serde_json",
  "sim",
  "ureq",
+]
+
+[[package]]
+name = "driver"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "gatewayd",
+ "libc",
+ "replica",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -519,10 +541,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "import-world"
+version = "0.0.0"
+dependencies = [
+ "import-eden",
+ "replica",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
+
+[[package]]
+name = "keys"
+version = "0.0.0"
+dependencies = [
+ "gatewayd",
+ "replica",
+ "sim",
+ "tungstenite",
+ "worldd",
+]
 
 [[package]]
 name = "libc"

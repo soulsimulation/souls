@@ -21,6 +21,10 @@
 //!   client's next cursor. A refusal the gateway gives itself (`world.restarting`, `intent-not-granted`) is a frame
 //!   of the stream too, at the newest version the world sent, and kept for a resume; before the world has sent any
 //!   version, and for bytes that are not an intent, it is `{2: answer}`, with no version and not kept.
+//! - both ways, after sign-in, R5's sync by hash (R5b, #3164; `replica::sync::wire`): a frame with key 20 is a sync
+//!   request, not an intent. The gateway passes it to the world with the asking actor (key 23) under a number of its
+//!   own, and the world's answer back to that socket alone, under the client's number; it is not kept for a resume.
+//!   A client told `stream.cannot-resume` compares and descends this way, then carries on with the stream.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -147,6 +151,15 @@ impl Gateway {
             && held.session.as_ref().is_some_and(|(s, _)| *s == session)
         {
             held.session = None;
+        }
+    }
+
+    /// A frame for the socket signed in for `key` alone, not kept for a resume (a sync answer). Dropped if none is
+    /// signed in, or its queue is full; the client asks again.
+    pub fn reply(&self, key: &[u8], frame: Vec<u8>) {
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, tx)) = hub.grants.get(key).and_then(|h| h.session.as_ref()) {
+            let _ = tx.try_send(frame);
         }
     }
 
