@@ -253,7 +253,13 @@ impl Bench {
         intent: Intent,
     ) -> Result<Asked, replica::effects::Refusal> {
         let steps = bind(entry, form).expect("binds");
-        let effects = bind_effects(entry, form).unwrap_or_default();
+        // A `set ... by` (C22) needs the thing's kind and amount fields, which the bench's things (outside the tree)
+        // do not have: left out, as before C22 bound it.
+        let effects: Vec<_> = bind_effects(entry, form)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| !matches!(e, skills::form_runner::Effect::Add { .. }))
+            .collect();
         self.look();
         let now = self.now;
         let (mut w, forms) = self.world();
@@ -453,7 +459,13 @@ fn intent(body: Id, n: u64) -> Intent {
 fn effecting() -> (json::Value, String) {
     entries()
         .into_iter()
-        .find(|(e, f)| bind_effects(e, f).is_ok_and(|x| !x.is_empty()))
+        .find(|(e, f)| {
+            bind_effects(e, f).is_ok_and(|x| {
+                !x.is_empty()
+                    && x.iter()
+                        .all(|e| matches!(e, skills::form_runner::Effect::Set { .. }))
+            })
+        })
         .expect("a kind whose effects bind")
 }
 
