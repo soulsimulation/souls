@@ -270,8 +270,13 @@ impl Stage {
             .filter(|e| e.envelope.cause == Cause::Intent(id))
             .flat_map(|e| e.events.iter().flatten())
             .filter(|v| v.name.as_str() == "souls:form-ended")
+            // The runner names its endings under its namespace (`souls:done`, `souls:<refusal>`); the gate compares
+            // the bare names its cases use.
             .map(|v| match v.fields.get(&3) {
-                Some(Cbor::Text(n)) => n.as_str().to_owned(),
+                Some(Cbor::Text(n)) => {
+                    let n = n.as_str();
+                    n.strip_prefix("souls:").unwrap_or(n).to_owned()
+                }
                 _ => "(unnamed)".into(),
             })
             .next()
