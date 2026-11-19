@@ -4,7 +4,8 @@
 //! `listening <addr:port>` once it accepts sockets. The tokens file holds `<grant> <sha-256 hex> [<account>]` lines,
 //! never a token. View subscriptions go to the world's view tier at `--views` (default: the world's socket path with
 //! `.views`). With `--receipts <dir>` (the world's `<worlds root>/worlds/<world>/receipts`), each answered intent
-//! is a line in `<dir>/<UTC day>.jsonl` (see `receipts.rs`).
+//! is a line in `<dir>/<UTC day>.jsonl` (see `receipts.rs`). With `--mailbox <directory addr:port> --mailbox-key
+//! <file>`, the owner's messages reach their Souls' sockets (R13, `mailbox.rs`).
 //!
 //! On SIGTERM or SIGINT it stops accepting, closes every signed-in socket with 1012 and exits within [`DRAIN`]
 //! (O16, #2809; `v2/docs/runbook/gateway-upgrade.md`).
@@ -14,7 +15,7 @@ use std::time::Duration;
 
 use gatewayd::receipts::Receipts;
 use gatewayd::token::Tokens;
-use gatewayd::{Gateway, socket, stderr_log, world_link};
+use gatewayd::{Gateway, mailbox, socket, stderr_log, world_link};
 use replica::encode::from_hex;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -51,7 +52,7 @@ async fn main() {
         arg("--build"),
     ) else {
         eprintln!(
-            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>]"
+            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>] [--mailbox <addr:port> --mailbox-key <file>]"
         );
         std::process::exit(2);
     };
@@ -64,6 +65,15 @@ async fn main() {
     };
     let receipts = arg("--receipts").map_or_else(Receipts::off, |d| Receipts::to_dir(d.into()));
     let gw = Gateway::with_receipts(tokens, build, stderr_log(), receipts);
+    if let (Some(addr), Some(key)) = (arg("--mailbox"), arg("--mailbox-key")) {
+        let Ok(key) = std::fs::read_to_string(&key) else {
+            eprintln!("gatewayd: the mailbox key could not be read");
+            std::process::exit(2);
+        };
+        let key = key.trim().to_owned();
+        let _ = gw.mailbox.set(mailbox::Mailbox { addr, key });
+        tokio::spawn(mailbox::run(gw.clone()));
+    }
     let views = arg("--views").map_or_else(
         || PathBuf::from(&world).with_extension("views"),
         PathBuf::from,
