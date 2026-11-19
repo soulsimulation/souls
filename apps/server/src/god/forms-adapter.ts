@@ -317,7 +317,8 @@ export function createFormsAdapter(h: FormsHost) {
         steps.push({ verb: 'mars:put_item', params: { item: c.node, surfaceSlot: free.id } });
         continue;
       }
-      if (s.step === 'walk_to') { const p = points[String((s as { point?: string } & typeof s).point)]; if (!p) return { code: 'form.no-point', reason: `${nameOf(id)} has no point ${(s as { point?: string } & typeof s).point}.` }; const w = toWorld(wp, p.at_mm); walk([w[0], w[2]], toWorld(wp, [0, 0, 0])); continue; }
+      // a walk to a point, or to an area by its centre (a tree's shade, a stair's top, inside a greenhouse)
+      if (s.step === 'walk_to') { const name = String((s as { point?: string } & typeof s).point), p = points[name] ?? (t.entry as { areas?: Record<string, { at_mm: number[] }> }).areas?.[name]; if (!p) return { code: 'form.no-point', reason: `${nameOf(id)} has no point ${(s as { point?: string } & typeof s).point}.` }; const w = toWorld(wp, p.at_mm); walk([w[0], w[2]], toWorld(wp, [0, 0, 0])); continue; }
       const toward = argName((s as { toward?: unknown }).toward);
       if (s.step === 'move' && s.at === undefined && toward) {
         // a move toward an argument with no point (hold under a tap): walk to clear ground by it and stand there a moment
