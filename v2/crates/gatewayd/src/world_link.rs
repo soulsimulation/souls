@@ -13,7 +13,7 @@
 //! asking actor; its answer goes back to that actor's socket under the client's number. One asked while the world is
 //! away, or not yet answered when the link drops, is answered at once with [`RESTARTING`]: the client asks again.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -32,8 +32,10 @@ use crate::times;
 /// The answer to an intent sent while the world restarts.
 pub const RESTARTING: &str = "world.restarting";
 
-/// The longest frame read from the world.
-const FRAME_MOST: usize = 1 << 20;
+/// The longest frame read from the world. A sync answer carries whole records, and one record can be large: Eden's open
+/// ground holds every terrain tile's heights and classes, 5.4 MB, and a room's record lists each child's hash (36 bytes
+/// each). At 1 MiB neither could be sent, and the link was dropped at every try (#3424).
+pub const FRAME_MOST: usize = 16 << 20;
 
 /// How long the gateway waits between attempts to reach the world.
 const RETRY: Duration = Duration::from_millis(20);
@@ -60,12 +62,12 @@ struct State {
     /// Unanswered intents in the order they were first sent: (actor's bytes, sequence, the intent's bytes, when it
     /// was received and handed to the link: O4's gateway in).
     pending: BTreeMap<u64, Pending>,
-    index: HashMap<(Vec<u8>, u64), u64>,
+    index: BTreeMap<(Vec<u8>, u64), u64>,
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
     /// The newest version the world sent: the "version now" of a refusal the gateway gives itself.
     now: Option<Value>,
     /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes and the client's number.
-    syncs: HashMap<u64, (Vec<u8>, Value)>,
+    syncs: BTreeMap<u64, (Vec<u8>, Value)>,
 }
 
 impl Link {
@@ -177,7 +179,7 @@ impl Link {
     fn disconnected(&self) -> Vec<(Vec<u8>, Value)> {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.out = None;
-        s.syncs.drain().map(|(_, v)| v).collect()
+        std::mem::take(&mut s.syncs).into_values().collect()
     }
 }
 

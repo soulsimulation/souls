@@ -1,0 +1,111 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:hand_spindle (from #1836). Six portions of fibre (fibre) and the yarn spun from them (yarn), conserved: spinning moves a chosen count of portions from fibre to yarn and records its twist (soft, firm or hard, the original's 1, 2 and 3); unspinning moves them back. Four seconds with both hands empty. Refused with the original's words: a hand holding something ('Put down held objects before spinning or recovering fibre.'), more asked than there is fibre ('Not enough loose fibre remains on this spindle; unspin a retained winding first.') and nothing spun, or more asked than there is yarn ('This spindle has no yarn winding to recover; spin some supplied fibre first.'). The spindle is taken with a free hand.",
+  "cases": [
+    {
+      "name": "hand_spindle_take_every_need_met",
+      "act": {"this":"s1","form":"take"},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hand_spindle_take_hands_full",
+      "act": {"this":"s1","form":"take"},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":"x1","right":"x2"}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "spindle_spin_soft_every_need_met",
+      "act": {"this":"s1","form":"spin_soft","args":{"amount":2}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "spindle_spin_soft_holding_something",
+      "act": {"this":"s1","form":"spin_soft","args":{"amount":1}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "spindle_spin_soft_not_enough_fibre",
+      "act": {"this":"s1","form":"spin_soft","args":{"amount":2}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle","fields":{"fibre":1,"yarn":5}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"s1","field":"fibre","has":1,"amount":2},"fix":null,"says":"not_enough_fibre"}
+    },
+    {
+      "name": "spindle_spin_firm_every_need_met",
+      "act": {"this":"s1","form":"spin_firm","args":{"amount":2}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "spindle_spin_firm_holding_something",
+      "act": {"this":"s1","form":"spin_firm","args":{"amount":1}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "spindle_spin_firm_not_enough_fibre",
+      "act": {"this":"s1","form":"spin_firm","args":{"amount":2}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle","fields":{"fibre":1,"yarn":5}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"s1","field":"fibre","has":1,"amount":2},"fix":null,"says":"not_enough_fibre"}
+    },
+    {
+      "name": "spindle_spin_hard_every_need_met",
+      "act": {"this":"s1","form":"spin_hard","args":{"amount":2}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "spindle_spin_hard_holding_something",
+      "act": {"this":"s1","form":"spin_hard","args":{"amount":1}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "spindle_spin_hard_not_enough_fibre",
+      "act": {"this":"s1","form":"spin_hard","args":{"amount":2}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle","fields":{"fibre":1,"yarn":5}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"s1","field":"fibre","has":1,"amount":2},"fix":null,"says":"not_enough_fibre"}
+    },
+    {
+      "name": "spindle_unspin_every_need_met",
+      "act": {"this":"s1","form":"unspin","args":{"amount":2}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle","fields":{"fibre":4,"yarn":2}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "spindle_unspin_nothing_spun",
+      "act": {"this":"s1","form":"unspin","args":{"amount":1}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"yarn","found":0,"wanted":{"at_least":1}},"fix":{"form":"spin_firm"},"says":"no_winding"}
+    },
+    {
+      "name": "spindle_unspin_more_than_spun",
+      "act": {"this":"s1","form":"unspin","args":{"amount":3}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle","fields":{"fibre":4,"yarn":2}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"s1","field":"yarn","has":2,"amount":3},"fix":null,"says":"no_winding"}
+    },
+    {
+      "name": "spindle_unspin_holding_something",
+      "act": {"this":"s1","form":"unspin","args":{"amount":1}},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:hand_spindle","fields":{"fibre":4,"yarn":2}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":2,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    }
+  ]
+}

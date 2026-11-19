@@ -10,7 +10,8 @@
 //!
 //! Not here: a world's tree (who may reads none, so only a form anyone may do is let through), a geometry beyond open
 //! ground (every point is reached in a straight line and every thing is within reach of a move, as in F3's stop
-//! table), the gateway (F7), and the moves' library beyond the engine's fixtures. No kind, form or move is named.
+//! table), and the gateway (F7). The moves are content's, every `content/moves` entry loaded at world start by hash
+//! (F13, #3383). No kind, form or move is named.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
@@ -32,7 +33,7 @@ use sim::controller::Controller;
 use sim::forms::{Asked, Forms, Intent, World};
 use sim::host::Geometry;
 use sim::mover::Surface;
-use sim::moves::{Moves, Reach, load};
+use sim::moves::{Moves, Reach, library};
 use sim::timers::DueList;
 use skills::form_runner::Limits;
 
@@ -139,8 +140,11 @@ impl Stage {
         let mut mint = Minter::new(Scope([0xe2; 16]));
         let body = mint.mint().expect("an id");
         place(&mut c, &g, body, humanoid(), 0, 0).expect("placed");
-        let dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../v2/crates/replica/fixtures/moves");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/moves");
+        let (library, refused) = library(&dir).expect("content/moves");
+        for r in refused {
+            eprintln!("a move refused: {r}");
+        }
         let mut s = Stage {
             kinds: J::Obj(Vec::new()),
             tree: Tree::load(&draft).expect("loads").0,
@@ -149,7 +153,7 @@ impl Stage {
             due: DueList::new(),
             mint,
             moves: Moves::new(),
-            library: load(&dir).expect("the fixture moves"),
+            library: library.current(),
             snap: Snap::default(),
             forms: Forms::new(),
             now: 0,
@@ -266,8 +270,13 @@ impl Stage {
             .filter(|e| e.envelope.cause == Cause::Intent(id))
             .flat_map(|e| e.events.iter().flatten())
             .filter(|v| v.name.as_str() == "souls:form-ended")
+            // The runner names its endings under its namespace (`souls:done`, `souls:<refusal>`); the gate compares
+            // the bare names its cases use.
             .map(|v| match v.fields.get(&3) {
-                Some(Cbor::Text(n)) => n.as_str().to_owned(),
+                Some(Cbor::Text(n)) => {
+                    let n = n.as_str();
+                    n.strip_prefix("souls:").unwrap_or(n).to_owned()
+                }
                 _ => "(unnamed)".into(),
             })
             .next()

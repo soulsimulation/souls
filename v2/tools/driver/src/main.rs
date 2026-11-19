@@ -12,6 +12,9 @@
 //! and `byTenth`, the same numbers per tenth of the agents by intended acts, busiest first
 //! (tools/playtest/eval/load.mjs's words).
 
+// The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; the driver's maps are lookups.
+#![allow(clippy::disallowed_types)]
+
 use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};

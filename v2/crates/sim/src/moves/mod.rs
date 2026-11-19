@@ -17,13 +17,13 @@
 //!
 //! Not here: contact with a body (B6), seats (B3), holding (B4, `crate::slots`), the beat (B8), a move waiting for its resource.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use replica::effects::{Refusal, fixture_bytes};
 use replica::encode::{Name, decode};
 use replica::ids::{Id, Minter};
-use replica::moves::{Effector, Ended, Move, MoveRecord};
+use replica::moves::{Effector, Ended, Library, Move, MoveRecord};
 use replica::time::Micros;
 
 use crate::controller::{Controller, Driver, Part};
@@ -96,7 +96,7 @@ struct Live {
 #[derive(Default)]
 pub struct Moves {
     live: BTreeMap<Instance, Live>,
-    by_timer: HashMap<Id, Instance>,
+    by_timer: BTreeMap<Id, Instance>,
     last: Instance,
 }
 
@@ -118,6 +118,41 @@ pub fn load(dir: &Path) -> Result<Vec<Move>, String> {
             Move::from_value(&v).map_err(|r| at(r.to_string()))
         })
         .collect()
+}
+
+/// Reads every `souls-move/1` entry (`.json`) in `dir`, in file order, into a library by hash (F13, #3383): at world
+/// start the engine's moves are content's (`content/moves`). A bad entry is refused, named with its file, and the rest
+/// load.
+pub fn library(dir: &Path) -> Result<(Library, Vec<String>), String> {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .map_err(|e| format!("{}: {e}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    let texts = files
+        .iter()
+        .map(|f| {
+            let text = std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()))?;
+            let label = f
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            Ok((label, text))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let sources: Vec<(&str, &str)> = texts
+        .iter()
+        .map(|(l, t)| (l.as_str(), t.as_str()))
+        .collect();
+    let mut lib = Library::new();
+    let refused = lib
+        .load(&sources)
+        .into_iter()
+        .map(|(l, r)| format!("{l}: {r}"))
+        .collect();
+    Ok((lib, refused))
 }
 
 fn timer_name() -> Name {

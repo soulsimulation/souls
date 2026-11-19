@@ -3,7 +3,7 @@ name = "gatewayd"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Agents' sockets (Engine v2, #2635): held apart from the world, so a world restarts without closing one (I1, #2683)."
+description = "Agents' sockets (Engine v2, #2635): held apart from the world, so a world restarts without closing one (I1, #2683), and the gate a moving world's intents pass through (O9, #2828)."
 
 [dependencies]
 replica = { path = "../replica" }
@@ -18,3 +18,5 @@ rustix = { version = "1", default-features = false, features = ["time", "std"] }
 [dev-dependencies]
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+# The world's view tier, served on its local socket, for the view subscription tests (#3292).
+worldd = { path = "../worldd" }

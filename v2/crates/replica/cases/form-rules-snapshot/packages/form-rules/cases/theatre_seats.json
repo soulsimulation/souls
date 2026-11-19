@@ -1,0 +1,41 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:theatre_seats: the placed theatre seats, two rows of three; a Soul sits in a free seat.",
+  "cases": [
+    {
+      "name": "theatre_seats_sit_free",
+      "act": { "this": "t1", "form": "sit", "args": { "seat": "front_1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:theatre_seats", "slots": { "front_1": [], "front_2": [], "front_3": [], "back_1": [], "back_2": [], "back_3": [] } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "theatre_seats_sit_taken",
+      "act": { "this": "t1", "form": "sit", "args": { "seat": "front_1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:theatre_seats",
+            "slots": { "front_1": ["o0"], "front_2": ["o1"], "front_3": ["o2"], "back_1": ["o3"], "back_2": ["o4"], "back_3": ["o5"] }
+          },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "detail": { "node": "t1", "slot": "front_1" },
+        "fix": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:tree: going to the shade changes nothing in the tree; the walk is the body's.",
+  "cases": [
+    {
+      "name": "tree_go_to_shade_changes_nothing",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "t1"] },
+          "t1": { "kind": "eden:tree" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "go_to_shade" },
+          "receipt": "rt1",
+          "expect": { "verdict": "yes", "changes": [], "events": [] }
+        }
+      ]
+    }
+  ]
+}

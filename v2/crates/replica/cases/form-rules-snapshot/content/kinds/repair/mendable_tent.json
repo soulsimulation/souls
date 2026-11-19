@@ -1,0 +1,55 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:mendable_tent",
+  "owner": "thing",
+  "state": {
+    "condition": { "n": 1, "type": "enum", "values": ["whole", "torn"], "default": "whole", "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "work": { "role": "stand", "at_mm": [0, 0, 1900], "yaw_mdeg": 180000 },
+    "tear": { "role": "contact", "at_mm": [0, 750, 1120] }
+  },
+  "geometry": { "bounds_mm": [1981, 1330, 2500] },
+  "forms": {
+    "mend": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "condition", "is": "torn" },
+        { "need": "hand", "holds": "eden:sewing_awl" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "work" },
+        { "step": "move", "move": "pump", "at": "tear" },
+        { "step": "move", "move": "pump", "at": "tear" },
+        { "step": "move", "move": "pump", "at": "tear" },
+        { "step": "move", "move": "pump", "at": "tear" },
+        { "step": "move", "move": "pump", "at": "tear" },
+        { "step": "move", "move": "pump", "at": "tear" }
+      ],
+      "effects": [{ "change": "set", "field": "condition", "to": "whole", "event": "mended" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:mendable_tent",
+    "table": [
+      { "part": "fill", "field": "condition", "do": "show", "at": { "whole": 1, "torn": 0 } },
+      { "part": "flip", "field": "condition", "do": "show", "at": { "whole": 0, "torn": 1 } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,20,0],"size":[1900,40,2300],"round":0,"tint":"floor"},{"kind":"box","at":[0,60,-200],"size":[1200,50,1800],"round":0,"tint":"mat"},{"kind":"rbox","at":[-500,620,0],"size":[60,1420,2400],"tint":"canvas","round":30,"roll":-41253},{"kind":"rbox","at":[500,620,0],"size":[60,1420,2400],"tint":"canvas","round":30,"roll":41253},{"kind":"box","at":[0,620,-1200],"size":[1950,1200,40],"round":0,"tint":"canvas2"},{"kind":"cyl","at":[0,1300,0],"r":30,"h":2500,"segments":5,"tint":"pole","pitch":90000},{"kind":"box","at":[0,550,1120],"size":[1000,1050,30],"round":0,"tint":"flap","role":"fill"},{"kind":"box","at":[0,313,1120],"size":[1000,575,30],"round":0,"tint":"flap","role":"flip"},{"kind":"box","at":[0,988,1120],"size":[1000,175,30],"round":0,"tint":"flap","role":"flip"},{"kind":"box","at":[-330,750,1120],"size":[340,300,30],"round":0,"tint":"flap","role":"flip"},{"kind":"box","at":[330,750,1120],"size":[340,300,30],"round":0,"tint":"flap","role":"flip"},{"kind":"cyl","at":[500,560,1240],"r":20,"h":1120,"segments":5,"tint":"pole"},{"kind":"cyl","at":[470,850,1210],"r":12,"h":70,"segments":5,"tint":"valve","roll":90000}],"palette":{"canvas":"#d06a3a","canvas2":"#b85a30","flap":"#e08a50","floor":"#4a4f42","mat":"#3f6b8a","pole":"#5a5f62","valve":"#e8dcc0"},"tags":["shelter","camping","tent"]}
+  },
+  "text": {
+    "card": "A two-person tent; torn canvas is mended with a sewing awl in hand.",
+    "camp": "camp",
+    "mend": "mend",
+    "repair": "repair",
+    "sew": "sew",
+    "howto_mend": "Holding a sewing awl, mend the torn flap: six passes of the point at the tear. The tear stays open until you finish, and the awl stays in your hand."
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["mend", "repair", "sew"] },
+  "howtos": {
+    "mend": { "text": "howto_mend", "steps": [{ "form": "mend" }] }
+  }
+}

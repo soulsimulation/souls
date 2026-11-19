@@ -1,0 +1,237 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:amphitheatre_steps",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "lower_1_front": { "role": "stand", "at_mm": [-857, 0, 2080] },
+    "lower_2_front": { "role": "stand", "at_mm": [-437, 0, 2208] },
+    "lower_3_front": { "role": "stand", "at_mm": [0, 0, 2250] },
+    "lower_4_front": { "role": "stand", "at_mm": [437, 0, 2208] },
+    "lower_5_front": { "role": "stand", "at_mm": [858, 0, 2080] },
+    "upper_1_front": { "role": "stand", "at_mm": [-1089, 0, 2525] },
+    "upper_2_front": { "role": "stand", "at_mm": [-665, 0, 2668] },
+    "upper_3_front": { "role": "stand", "at_mm": [-223, 0, 2741] },
+    "upper_4_front": { "role": "stand", "at_mm": [223, 0, 2741] },
+    "upper_5_front": { "role": "stand", "at_mm": [665, 0, 2668] },
+    "upper_6_front": { "role": "stand", "at_mm": [1089, 0, 2525] }
+  },
+  "slots": {
+    "lower_1": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [-1029, 320, 2496],
+      "stand": "lower_1_front",
+      "row": "lower",
+      "place": 1,
+      "end": "first"
+    },
+    "lower_2": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [-524, 320, 2649],
+      "stand": "lower_2_front",
+      "row": "lower",
+      "place": 2
+    },
+    "lower_3": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [0, 320, 2700],
+      "stand": "lower_3_front",
+      "row": "lower",
+      "place": 3
+    },
+    "lower_4": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [524, 320, 2649],
+      "stand": "lower_4_front",
+      "row": "lower",
+      "place": 4
+    },
+    "lower_5": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [1029, 320, 2496],
+      "stand": "lower_5_front",
+      "row": "lower",
+      "place": 5,
+      "end": "last"
+    },
+    "upper_1": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [-1267, 480, 2938],
+      "stand": "upper_1_front",
+      "row": "upper",
+      "place": 1,
+      "end": "first"
+    },
+    "upper_2": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [-774, 480, 3105],
+      "stand": "upper_2_front",
+      "row": "upper",
+      "place": 2
+    },
+    "upper_3": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [-260, 480, 3189],
+      "stand": "upper_3_front",
+      "row": "upper",
+      "place": 3
+    },
+    "upper_4": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [260, 480, 3189],
+      "stand": "upper_4_front",
+      "row": "upper",
+      "place": 4
+    },
+    "upper_5": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [774, 480, 3105],
+      "stand": "upper_5_front",
+      "row": "upper",
+      "place": 5
+    },
+    "upper_6": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [1267, 480, 2938],
+      "stand": "upper_6_front",
+      "row": "upper",
+      "place": 6,
+      "end": "last"
+    }
+  },
+  "geometry": { "bounds_mm": [7000, 500, 7000] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:amphitheatre_steps",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [-1431, 160, 2290],
+          "size": [861, 320, 500],
+          "yaw": -32000,
+          "color": "#c9bfae",
+          "collide": true
+        },
+        {
+          "kind": "box",
+          "at": [-744, 160, 2595],
+          "size": [861, 320, 500],
+          "yaw": -16003,
+          "color": "#c9bfae",
+          "collide": true
+        },
+        {
+          "kind": "box",
+          "at": [0, 160, 2700],
+          "size": [861, 320, 500],
+          "yaw": 0,
+          "color": "#c9bfae",
+          "collide": true
+        },
+        {
+          "kind": "box",
+          "at": [744, 160, 2595],
+          "size": [861, 320, 500],
+          "yaw": 16003,
+          "color": "#c9bfae",
+          "collide": true
+        },
+        {
+          "kind": "box",
+          "at": [1431, 160, 2290],
+          "size": [861, 320, 500],
+          "yaw": 32000,
+          "color": "#c9bfae",
+          "collide": true
+        },
+        {
+          "kind": "box",
+          "at": [-1696, 240, 2714],
+          "size": [1000, 480, 500],
+          "yaw": -32000,
+          "color": "#bdb2a0",
+          "collide": true
+        },
+        {
+          "kind": "box",
+          "at": [-882, 240, 3076],
+          "size": [1000, 480, 500],
+          "yaw": -16003,
+          "color": "#bdb2a0",
+          "collide": true
+        },
+        {
+          "kind": "box",
+          "at": [0, 240, 3200],
+          "size": [1000, 480, 500],
+          "yaw": 0,
+          "color": "#bdb2a0",
+          "collide": true
+        },
+        {
+          "kind": "box",
+          "at": [882, 240, 3076],
+          "size": [1000, 480, 500],
+          "yaw": 16003,
+          "color": "#bdb2a0",
+          "collide": true
+        },
+        {
+          "kind": "box",
+          "at": [1696, 240, 2714],
+          "size": [1000, 480, 500],
+          "yaw": 32000,
+          "color": "#bdb2a0",
+          "collide": true
+        }
+      ],
+      "palette": {},
+      "tags": ["eden", "amphitheatre", "seating", "stone"]
+    }
+  },
+  "text": {
+    "card": "Two curved rows of stone steps facing the stage, eleven places to sit.",
+    "seat": "seat",
+    "steps": "steps"
+  },
+  "card": { "text": "card", "category": "seat", "synonyms": ["steps"] }
+}

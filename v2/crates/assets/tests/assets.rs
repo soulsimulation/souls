@@ -18,7 +18,7 @@ use replica::encode::{Name, Value, encode};
 use replica::ids::{Hash, Id, KindSource, Minter, Purpose, Scope, name_kinds};
 use replica::pose::{Quat, Support, Vec3};
 use replica::world_model::{Audience, Kind};
-use sim::edit::commit;
+use sim::edit::{commit, plan};
 use sim::log::{Log, Mem, Storage, recover};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -636,8 +636,10 @@ fn a4_upload_then_place_through_g1s_gate() {
         ops: vec![place(&kind, root, receipt.reference)],
     };
     placeable(&edit, &s).expect("an allowed upload is placeable");
-    let checked = check_edit(edit, &live.frozen(), &world).expect("checked");
-    let c = commit(&mut live, &mut minter, &checked, 1_000).expect("committed");
+    let copy = live.frozen();
+    let checked = check_edit(edit, &copy, &world).expect("checked");
+    let planned = plan(checked, &copy, None).expect("planned");
+    let c = commit(&mut live, &mut minter, &planned, &[], 1_000).expect("committed");
     let thing = c.names[&0];
     log.append(c.part.stored().to_vec()).expect("appended");
     client
