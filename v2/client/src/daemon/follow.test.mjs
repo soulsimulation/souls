@@ -45,10 +45,27 @@ const token = (k) => `soul-${body(k)}.${randomBytes(32).toString('hex')}`;
 const tokens = [0, 1, 2].map(token); // A is body 0, B body 1, C body 2
 const env = { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG };
 let relay, roots, gateway, rt;
+const children = [];
 
-function run(bin, args, ready) {
+/** Keep only bounded child diagnostics; redact the fixture's paths and addresses before reporting them. */
+function tracked(bin, args) {
   const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   procs.push(p);
+  const state = { name: bin === WORLDD ? 'worldd' : 'gatewayd', exit: null, stdout: '', stderr: '' };
+  children.push(state);
+  for (const stream of ['stdout', 'stderr']) p[stream].on('data', (d) => { state[stream] = (state[stream] + d).slice(-2048); });
+  p.on('exit', (code, signal) => { state.exit = { code, signal }; });
+  return p;
+}
+
+function diagnostic(answer) {
+  let text = JSON.stringify({ answer, children });
+  for (const [path, name] of [[dir, '<fixture>'], [WORLDD, 'worldd'], [GATEWAYD, 'gatewayd'], [v2, '<checkout>']]) text = text.replaceAll(path, name);
+  return text.replaceAll(/(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|\[::1\]):\d+/g, '<test-address>');
+}
+
+function run(bin, args, ready) {
+  const p = tracked(bin, args);
   return new Promise((ok, fail) => {
     let out = '';
     p.stdout.on('data', (d) => { out += d; const m = ready.exec(out); if (m) ok(m); });
@@ -62,7 +79,7 @@ async function waitFor(f, ms = 10_000) {
   for (;;) {
     const v = await f();
     if (v) return v;
-    if (Date.now() > until) throw new Error(`timed out\n${readFileSync(rt.log, 'utf8').split('\n').slice(-20).join('\n')}`);
+    if (Date.now() > until) throw new Error(`timed out\n${readFileSync(rt.log, 'utf8').split('\n').slice(-20).join('\n')}\n${diagnostic()}`);
     await sleep(10);
   }
 }
@@ -136,7 +153,7 @@ before(async () => {
   const world = join(dir, 'w.sock'), list = join(dir, 'tokens.txt');
   roots = join(dir, 'roots.txt');
   writeFileSync(list, tokens.map((t) => `${t.split('.')[0]} ${createHash('sha256').update(t).digest('hex')}\n`).join(''));
-  procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--roots', roots, '--rooms', '1', '--bodies', '3', '--items', '0', '--no-measures'], { stdio: 'ignore' }));
+  tracked(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--roots', roots, '--rooms', '1', '--bodies', '3', '--items', '0', '--no-measures']);
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
   const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', list, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   gateway = `ws://${addr}/v2/ws`;
@@ -168,7 +185,7 @@ test('R9b A1: B applies the entries of the Souls near it; its copy is the world 
     // A and C each give their body a new name in turn: an entry of a body near B, which changes the world.
     const who = acts % 2 === 0 ? A : C, was = placeHash();
     const a = await who.act('local:describe', `name ${acts}`);
-    assert.equal(a.answer, 1, `a describe is a receipt: ${JSON.stringify(a)}`);
+    assert.equal(a.answer, 1, `a describe is a receipt: ${diagnostic(a)}`);
     acts++;
     // B's copy is current with no command asking for it: `status` reads it as it is.
     const t = performance.now();
@@ -190,7 +207,8 @@ test('R9b A2: a reflex fires on another Soul\'s event in the item that brings it
   const { answered } = await status();
   firings.length = events.length = 0;
   // A says a line: B's reflex fires on it, with no model turn, and sends its intent.
-  assert.equal((await A.act('local:say', 'good morning')).answer, 1);
+  const said = await A.act('local:say', 'good morning');
+  assert.equal(said.answer, 1, diagnostic(said));
   const got = await waitFor(async () => { const s = await status(); return s.answered > answered && s; });
   await ask({ op: 'read' });
   const heard = events.filter((e) => e.kind === 'heard');
@@ -219,8 +237,10 @@ test('R9b A3: losing and regaining the stream resumes by hash and fires no refle
   relay.cut();
   await waitFor(async () => !(await status()).connected);
   const was = placeHash();
-  assert.equal((await A.act('local:describe', 'renamed while away')).answer, 1);
-  assert.equal((await C.act('local:say', 'said while away')).answer, 1);
+  const renamed = await A.act('local:describe', 'renamed while away');
+  assert.equal(renamed.answer, 1, diagnostic(renamed));
+  const said = await C.act('local:say', 'said while away');
+  assert.equal(said.answer, 1, diagnostic(said));
   await waitFor(() => placeHash() !== was);
   relay.refuse = false;
   const s = await waitFor(async () => { const x = await status(); return x.resumed > s0.resumed && x.connected && x; });
@@ -229,7 +249,8 @@ test('R9b A3: losing and regaining the stream resumes by hash and fires no refle
   await waitFor(current);
   assert.ok((await status()).follows > s0.follows);
   // The line said while away is not replayed; the next one fires the rule once, and nothing fires twice.
-  assert.equal((await A.act('local:say', 'welcome back')).answer, 1);
+  const back = await A.act('local:say', 'welcome back');
+  assert.equal(back.answer, 1, diagnostic(back));
   await waitFor(async () => { await status(); return firings.length > 0; });
   await sleep(1000);
   const list = await ask({ op: 'reflex' });

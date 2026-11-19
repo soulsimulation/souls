@@ -189,7 +189,7 @@ pub fn read(intent: &Intent, id: Id, now: Micros) -> R<Order> {
         );
     }
     let body = match (intent.actor, intent.body) {
-        (Actor::Soul(s), _) => s,
+        (Actor::Soul(s), b) => b.unwrap_or(s),
         (Actor::Creator(_), Some(b)) => b,
         _ => return refuse("order-without-body", verb.to_owned()),
     };
@@ -466,7 +466,11 @@ impl Orders {
                 expires: until,
             }
             .event();
-            ev.fields.insert(6, order.source.to_value());
+            let mut source = order.source.clone();
+            if matches!(source.actor, Actor::Soul(_)) {
+                source.body = None;
+            }
+            ev.fields.insert(6, source.to_value());
             self.entry(&order, now, ev);
         }
         // The claim cancelled any order this body held before (B2): it ends now, displaced.
@@ -775,7 +779,7 @@ impl Orders {
             let Some(intent) = sources.get(&o.intent) else {
                 continue;
             };
-            let order = match read(intent, o.intent, now) {
+            let mut order = match read(intent, o.intent, now) {
                 Ok(order) => order,
                 Err(r) => {
                     let gone = Order {
@@ -796,6 +800,7 @@ impl Orders {
                     continue;
                 }
             };
+            order.body = o.body; // The trusted logged body, not a client-selected wire field.
             let started = self
                 .check(c, w, &order)
                 .and_then(|()| self.begin(c, w, order.clone(), now, false));

@@ -852,3 +852,57 @@ fn orders_are_handed_back_from_the_log_after_a_restart() {
     assert_eq!(w.orders.spot(q), before, "the queue keeps its spot");
     w.tick();
 }
+
+#[test]
+fn served_soul_body_is_resolved_internally_and_restored_without_a_wire_body_field() {
+    let mut w = world();
+    let body = w.body(0, -5_000);
+    let soul = Id::new(Scope([0x11; 16]), 99).unwrap();
+    let mut i = w.intent(soul, "souls:hold", None, Vec::new(), 600_000_000);
+    i.body = Some(body); // Only the authenticated world's resolver supplies this internal field.
+    assert!(
+        Intent::read(&encode(&i.to_value()).unwrap()).is_err(),
+        "client-selected Soul body refused on wire"
+    );
+    let id = w.accept(&i).expect("resolved body accepted");
+    assert_eq!(w.orders.open(body).unwrap().actor, Actor::Soul(soul));
+    let ev = event(&w.orders.log[0]);
+    let source = Intent::read(&encode(&ev.fields[&6]).unwrap()).expect("canonical source intent");
+    assert_eq!(source.body, None, "no Soul-selected body on the wire");
+    assert_eq!(source.actor, Actor::Soul(soul));
+    let hd = header(w.floor);
+    let bytes = encode(&Value::Map(
+        [
+            (1, Value::Bytes(hd.hash().to_bytes())),
+            (
+                2,
+                Value::Array(w.orders.log.iter().map(Effect::to_value).collect()),
+            ),
+        ]
+        .into(),
+    ))
+    .unwrap();
+    let parts = vec![Part::read(&bytes).unwrap()];
+    for d in
+        w.c.claims(body)
+            .unwrap()
+            .running()
+            .keys()
+            .copied()
+            .collect::<Vec<_>>()
+    {
+        w.c.release(body, d).unwrap();
+    }
+    w.orders = Orders::new();
+    let wh = W {
+        floor: w.floor,
+        slots: &w.slots,
+        gone: false,
+    };
+    let back = w
+        .orders
+        .resume(&mut w.c, &wh, &parts, 1)
+        .expect("restore trusted body");
+    assert_eq!(back, vec![id]);
+    assert_eq!(w.orders.open(body).unwrap().actor, Actor::Soul(soul));
+}

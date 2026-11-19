@@ -110,14 +110,25 @@ fn in_chair(b: &Bodies) -> bool {
     p.support == Support::Slot && p.frame.node == chair()
 }
 
-fn rise(b: &mut Bodies, n: u64) -> Result<(), Refusal> {
+/// Asks a rise at `now`. A rise waits for its reach from the planner (K18b) and comes back from a later call, so the
+/// world is stepped a tick at a time until it does; `now` is left at the tick it started.
+fn rise(b: &mut Bodies, n: u64, now: &mut i64) -> Result<(), Refusal> {
     let asked = Asked {
         body: body(),
         actor: Actor::Soul(body()),
         ask: Ask::Rise,
         fallbacks: Vec::new(),
     };
-    b.start(vec![(id(100 + n), asked)]).remove(0).1
+    let mut got = b.start(vec![(id(100 + n), asked)]);
+    for _ in 0..100 {
+        if !got.is_empty() {
+            break;
+        }
+        *now += TICK;
+        b.step(*now);
+        got = b.start(Vec::new());
+    }
+    got.remove(0).1
 }
 
 #[test]
@@ -139,12 +150,13 @@ fn a_checkpoint_taken_while_a_soul_rises_keeps_it_in_its_seat() {
         ),
     )]);
     let mut b = world(&seated, 0).expect("the world");
-    b.step(4 * TICK);
+    let mut now = 4 * TICK;
+    b.step(now);
     assert!(in_chair(&b), "seated before the rise");
 
     // The rise starts; a tick later the body is still in the slot, no longer counted seated.
-    rise(&mut b, 1).expect("the rise starts");
-    let now = 5 * TICK;
+    rise(&mut b, 1, &mut now).expect("the rise starts");
+    now += TICK;
     b.step(now);
     assert!(in_chair(&b), "still in the slot, rising");
     assert!(b.slots.seated().is_empty(), "a rising body is not seated");
@@ -164,7 +176,8 @@ fn a_checkpoint_taken_while_a_soul_rises_keeps_it_in_its_seat() {
     let mut r = world(&placed, now).expect("the restarted world");
     assert!(in_chair(&r), "the restart finds the body in the chair");
     assert_eq!(r.slots.held_by(body()), Some(chair()), "its seat held");
-    rise(&mut r, 2).expect("a rise asked again starts");
+    let mut later = now;
+    rise(&mut r, 2, &mut later).expect("a rise asked again starts");
     let ended = r.step(now + 100 * TICK);
     assert_eq!(ended, vec![(id(102), Ok(()))], "the rise lands");
     let stood = r.runner.controller.body(body()).expect("the body").pose;

@@ -9,7 +9,7 @@ sends to these programs once the owner places its site file. Routing between the
 | What | Where | Owner, mode |
 |---|---|---|
 | The unprivileged user and group | `souls`, no shell, no home of its own | system user |
-| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`) | `/usr/local/lib/souls/` | root, 755 |
+| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6) | `/usr/local/lib/souls/` | root, 755 |
 | The viewers' origin (`origin.mjs`, `cache.mjs`) and the page's files (V5) | `/usr/local/lib/souls/origin/`, `/usr/local/lib/souls/web/` | root, 644 |
 | Data: worlds, the directory's store, the view tier's stream files | `/var/lib/souls/{worlds,directory,views}` | souls, 750 |
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
@@ -71,6 +71,52 @@ bash <bundle>/install.sh plan --from <bundle>
 bash <bundle>/install.sh apply --from <bundle>
 bash <bundle>/install.sh uninstall
 ```
+
+## Installed migration commands
+
+The workflow builds both migration executables from the same checked-out head and locked release build as the
+serving programs. They are ordinary files in the recorded `/usr/local/lib/souls` tree, root-owned at mode 755;
+installing them does not run an import or start a service. The production machine needs no Rust toolchain.
+
+X11 reads a backup set and writes only a **fresh import output**, separate from the running installation's stores.
+Choose an output path that does not exist; do not point it at a serving account store or directory:
+
+```sh
+set -e
+test ! -e <fresh-import-dir>
+/usr/local/lib/souls/import-accounts <backup-set> --out <fresh-import-dir> --json
+```
+
+Add `--world <file.db>` for an original world's backup kept outside the set, as described in
+`v2/tools/import-accounts/README.md`. Both registries and all world backups open read-only and immutable.
+
+X6 has two steps: export one backup with Node, then validate the facts with the installed Rust executable. From
+a checkout of the same source head with its Node dependencies installed (Node 22.18 or later), create a fresh
+facts directory and run the existing exporter's permission grants explicitly:
+
+```sh
+set -e
+mkdir -m 700 <fresh-facts-dir>
+node --permission \
+  --allow-fs-read=packages/ \
+  --allow-fs-read=node_modules/ \
+  --allow-fs-read=v2/tools/import-eden/export/ \
+  --allow-fs-read=v2/tools/import-world/export/ \
+  --allow-fs-read=worlds/core-assets/ \
+  --allow-fs-read=<map.json> \
+  --allow-fs-read=<backup.db> \
+  --allow-fs-write=<fresh-facts-dir>/ \
+  v2/tools/import-eden/export/export.ts \
+  --backup <backup.db> --map <map.json> --out <fresh-facts-dir>/world.facts.json
+/usr/local/lib/souls/import-world <fresh-facts-dir>/world.facts.json --json
+```
+
+Use the same explicit backup, map and output paths in the grants and exporter arguments. These are the grants
+from `exportArgv` in `v2/tools/import-world/import-world.ts`: read access only to the exporter, content dependencies,
+asset index, map and selected backup, and write access only to the fresh facts directory. No network, child-process
+or worker permission is granted. SQLite opens the backup read-only and immutable. Repeat these two steps for each
+backup (the validator also accepts several facts files). The convenience `import-world.ts` wrapper invokes
+`cargo run`; use the installed validator above on production.
 
 ## After the install: the owner's steps
 

@@ -17,6 +17,10 @@
 //!   a seal walks down from the tops into marked nodes only. The tops, loose links, timers and flights are listed
 //!   again at each seal: a scan without hashing, small beside hashing every node.
 //! - **Timers are the smallest seam** while K9 builds the due list: written whole, per audience, at each seal.
+//! - **The state hash each tick** (K20, #3395; [`Tree::state_hashes`]) is the same audiences' hashes, worked out the
+//!   same way under a mark of its own: a change clears both marks, the state hash sets only its own and keeps no
+//!   record, so it never takes a record from the next checkpoint; a seal sets both. A tree no part has touched since
+//!   the last gives the same hashes without a scan. [`Tree::state_hashes_whole`] hashes every node, for checks.
 
 use super::{Away, Life, LinkRec, Moved, NONE, NodeRec, Place, R, Tree, Where, refuse, show};
 use crate::effects::{TimerState, read_id};
@@ -40,6 +44,16 @@ impl Sealed {
     pub fn hashes(&self) -> BTreeMap<Audience, Hash> {
         self.audiences.iter().map(|(a, h, _)| (*a, *h)).collect()
     }
+}
+
+/// A scan of the tree without hashing ([`Tree::scan`]): every audience, each one's tops by slot in id order, and its
+/// loose links, timers and flights.
+struct Scan {
+    all: BTreeSet<Audience>,
+    tops: BTreeMap<Audience, Vec<u32>>,
+    loose: BTreeMap<Audience, BTreeMap<Id, Value>>,
+    timers: BTreeMap<Audience, Vec<Value>>,
+    flights: BTreeMap<Audience, Vec<Value>>,
 }
 
 fn purpose(a: Audience) -> Purpose {
@@ -135,48 +149,91 @@ impl Tree {
         (rec.parent != NONE).then(|| self.nodes[rec.parent as usize].id)
     }
 
+    /// A node's record and its hash, given its children's hashes (those that share its audience, in id order).
+    fn node_record(&self, slot: u32, children: Vec<Value>) -> R<(Hash, Vec<u8>)> {
+        let rec = &self.nodes[slot as usize];
+        let Value::Map(mut m) = self.record(rec, self.parent_id(rec)) else {
+            unreachable!("a record is a map")
+        };
+        m.insert(10, Value::Array(children));
+        let bytes = bytes_of(&Value::Map(m))?;
+        Ok((Hash::of(purpose(rec.audience), &bytes), bytes))
+    }
+
+    /// The children of a node that share its audience, in id order: those its hash covers.
+    fn covered(&self, slot: u32) -> Vec<u32> {
+        let a = self.nodes[slot as usize].audience;
+        self.nodes[slot as usize]
+            .children
+            .iter()
+            .map(|h| h.slot)
+            .filter(|c| self.nodes[*c as usize].audience == a)
+            .collect()
+    }
+
     /// The node's hash, worked out again (with its marked children first) if it is marked.
     fn seal_node(&mut self, slot: u32, out: &mut Vec<(Hash, Vec<u8>)>) -> R<Hash> {
         if let Some(h) = self.nodes[slot as usize].hash {
             return Ok(h);
         }
-        let a = self.nodes[slot as usize].audience;
-        let children: Vec<u32> = self.nodes[slot as usize]
-            .children
-            .iter()
-            .map(|h| h.slot)
-            .filter(|c| self.nodes[*c as usize].audience == a)
-            .collect();
-        let mut hashes = Vec::with_capacity(children.len());
-        for c in children {
+        let mut hashes = Vec::new();
+        for c in self.covered(slot) {
             hashes.push(self.seal_node(c, out)?.to_value());
         }
-        let rec = &self.nodes[slot as usize];
-        let Value::Map(mut m) = self.record(rec, self.parent_id(rec)) else {
-            unreachable!("a record is a map")
-        };
-        m.insert(10, Value::Array(hashes));
-        let bytes = bytes_of(&Value::Map(m))?;
-        let h = Hash::of(purpose(a), &bytes);
-        self.nodes[slot as usize].hash = Some(h);
+        let (h, bytes) = self.node_record(slot, hashes)?;
+        let rec = &mut self.nodes[slot as usize];
+        (rec.hash, rec.state) = (Some(h), Some(h));
         out.push((h, bytes));
         Ok(h)
     }
 
-    /// Hashes every marked node and lists each audience's record: on the clock thread, between ticks.
-    pub fn seal(&mut self) -> R<Sealed> {
-        let mut tops: BTreeMap<Audience, BTreeMap<Id, u32>> = BTreeMap::new();
-        tops.entry(Audience::Everyone).or_default();
+    /// The node's hash for the state hash: as `seal_node`, by its own mark, keeping no record.
+    fn state_node(&mut self, slot: u32) -> R<Hash> {
+        if let Some(h) = self.nodes[slot as usize].state {
+            return Ok(h);
+        }
+        let mut hashes = Vec::new();
+        for c in self.covered(slot) {
+            hashes.push(self.state_node(c)?.to_value());
+        }
+        let (h, _) = self.node_record(slot, hashes)?;
+        self.nodes[slot as usize].state = Some(h);
+        self.rehashed += 1;
+        Ok(h)
+    }
+
+    /// Nodes [`Tree::state_hashes`] has hashed again since the tree was built: a measure of its work.
+    pub fn rehashed(&self) -> u64 {
+        self.rehashed
+    }
+
+    /// The node's hash worked out whole, reading and writing no mark.
+    fn whole_node(&self, slot: u32) -> R<Hash> {
+        let mut hashes = Vec::new();
+        for c in self.covered(slot) {
+            hashes.push(self.whole_node(c)?.to_value());
+        }
+        Ok(self.node_record(slot, hashes)?.0)
+    }
+
+    /// Each audience's tops (by slot, in id order), loose links, timers and flights: a scan without hashing.
+    fn scan(&self) -> Scan {
+        let mut ids: BTreeMap<Audience, BTreeMap<Id, u32>> = BTreeMap::new();
+        ids.entry(Audience::Everyone).or_default();
         for (slot, rec) in self.nodes.iter().enumerate() {
             if rec.life != Life::Live {
                 continue;
             }
             if rec.parent == NONE || self.nodes[rec.parent as usize].audience != rec.audience {
-                tops.entry(rec.audience)
+                ids.entry(rec.audience)
                     .or_default()
                     .insert(rec.id, slot as u32);
             }
         }
+        let tops: BTreeMap<Audience, Vec<u32>> = ids
+            .into_iter()
+            .map(|(a, by)| (a, by.into_values().collect()))
+            .collect();
         let mut loose: BTreeMap<Audience, BTreeMap<Id, Value>> = BTreeMap::new();
         for (id, l) in &self.links {
             let owner = self
@@ -211,27 +268,37 @@ impl Tree {
                 .or_default()
                 .push(pair(*id, self.flight_value(f)));
         }
-        let mut nodes = Vec::new();
-        let mut audiences = Vec::new();
-        let all: BTreeSet<Audience> = tops
+        let all = tops
             .keys()
             .chain(loose.keys())
             .chain(timers.keys())
             .chain(flights.keys())
             .copied()
             .collect();
-        for a in all {
-            let mut hashes = Vec::new();
-            for slot in tops.get(&a).into_iter().flat_map(|t| t.values()) {
-                hashes.push(self.seal_node(*slot, &mut nodes)?.to_value());
-            }
+        Scan {
+            all,
+            tops,
+            loose,
+            timers,
+            flights,
+        }
+    }
+
+    /// Each audience's record and state hash, the public one first, from a scan and each audience's tops' hashes.
+    fn audiences(
+        &self,
+        mut scan: Scan,
+        mut tops: BTreeMap<Audience, Vec<Value>>,
+    ) -> R<Vec<(Audience, Hash, Vec<u8>)>> {
+        let mut audiences = Vec::new();
+        for a in std::mem::take(&mut scan.all) {
             let mut m = BTreeMap::from([
                 (1, audience_value(a)),
-                (2, Value::Array(hashes)),
+                (2, Value::Array(tops.remove(&a).unwrap_or_default())),
                 (
                     3,
                     Value::Array(
-                        loose
+                        scan.loose
                             .remove(&a)
                             .unwrap_or_default()
                             .into_iter()
@@ -239,8 +306,8 @@ impl Tree {
                             .collect(),
                     ),
                 ),
-                (4, Value::Array(timers.remove(&a).unwrap_or_default())),
-                (5, Value::Array(flights.remove(&a).unwrap_or_default())),
+                (4, Value::Array(scan.timers.remove(&a).unwrap_or_default())),
+                (5, Value::Array(scan.flights.remove(&a).unwrap_or_default())),
             ]);
             if a == Audience::Everyone {
                 m.insert(6, Value::Uint(self.next));
@@ -256,7 +323,76 @@ impl Tree {
             let bytes = bytes_of(&Value::Map(m))?;
             audiences.push((a, Hash::of(purpose(a), &bytes), bytes));
         }
+        Ok(audiences)
+    }
+
+    /// Hashes every marked node and lists each audience's record: on the clock thread, between ticks.
+    pub fn seal(&mut self) -> R<Sealed> {
+        let scan = self.scan();
+        let mut nodes = Vec::new();
+        let mut tops = BTreeMap::new();
+        for (a, slots) in &scan.tops {
+            let mut hashes = Vec::with_capacity(slots.len());
+            for slot in slots {
+                hashes.push(self.seal_node(*slot, &mut nodes)?.to_value());
+            }
+            tops.insert(*a, hashes);
+        }
+        let audiences = self.audiences(scan, tops)?;
+        let hashes = audiences.iter().map(|(a, h, _)| (*a, *h)).collect();
+        self.kept = Some((self.changes, hashes));
         Ok(Sealed { nodes, audiences })
+    }
+
+    /// Each audience's state hash, the public one first: the hashes [`Tree::seal`] gives, worked out again only for
+    /// the nodes changed since the last time and their ancestors (K20, #3395), plus a scan of the tops, loose links,
+    /// timers and flights. A tree no part has touched since gives the same hashes unhashed. It writes no record and
+    /// leaves the next seal's work as it was.
+    pub fn state_hashes(&mut self) -> R<Vec<(Audience, Hash)>> {
+        if let Some((at, h)) = &self.kept
+            && *at == self.changes
+        {
+            return Ok(h.clone());
+        }
+        let scan = self.scan();
+        let mut tops = BTreeMap::new();
+        for (a, slots) in &scan.tops {
+            let mut hashes = Vec::with_capacity(slots.len());
+            for slot in slots {
+                hashes.push(self.state_node(*slot)?.to_value());
+            }
+            tops.insert(*a, hashes);
+        }
+        let hashes: Vec<(Audience, Hash)> = self
+            .audiences(scan, tops)?
+            .into_iter()
+            .map(|(a, h, _)| (a, h))
+            .collect();
+        self.kept = Some((self.changes, hashes.clone()));
+        Ok(hashes)
+    }
+
+    /// [`Tree::state_hashes`] worked out whole: every node hashed, no mark read or written. For tests and checks.
+    pub fn state_hashes_whole(&self) -> R<Vec<(Audience, Hash)>> {
+        let scan = self.scan();
+        let mut tops = BTreeMap::new();
+        for (a, slots) in &scan.tops {
+            let mut hashes = Vec::with_capacity(slots.len());
+            for slot in slots {
+                hashes.push(self.whole_node(*slot)?.to_value());
+            }
+            tops.insert(*a, hashes);
+        }
+        Ok(self
+            .audiences(scan, tops)?
+            .into_iter()
+            .map(|(a, h, _)| (a, h))
+            .collect())
+    }
+
+    /// No change waits for a seal: the root holds its sealed hash, so every node does (a change marks its ancestors).
+    pub fn sealed(&self) -> bool {
+        self.nodes[self.root as usize].hash.is_some()
     }
 
     /// `{1: root, 2: lineage, 3: zone, 4: pose, 5: [node record, ...], 6: [[id, link], ...]}`, nodes and links in
@@ -444,6 +580,7 @@ impl Tree {
         t.undo.clear();
         for (slot, h) in hashes {
             t.nodes[slot as usize].hash = Some(h);
+            t.nodes[slot as usize].state = Some(h);
         }
         Ok(t)
     }
@@ -533,6 +670,7 @@ impl Tree {
                     support: crate::pose::Support::None,
                 })),
                 hash: None,
+                state: None,
             });
             // A flight's root stays out of the children of the node it left.
             let flight_root =

@@ -56,6 +56,8 @@ function page(): void {
       s.className = 'muted';
       s.textContent = `${w.label} · ${w.template} · ${w.awake ? 'awake' : 'asleep'}${w.closed ? ' · closed to visitors' : ''}`;
       li.append(a, s);
+      // G10 (#2800): the creator's picture, from a shot; the directory checked it (G6) and serves it in the row.
+      if (w.picture) li.prepend(Object.assign(document.createElement('img'), { src: w.picture, alt: `${w.name}, as its creator shot it`, width: 192, style: 'display:block;border-radius:4px;margin-bottom:4px' }));
       return li;
     }) : [Object.assign(document.createElement('li'), { className: 'muted', textContent: 'no worlds yet' })]));
     template.replaceChildren(...l.templates.map((t) => Object.assign(document.createElement('option'), { value: t, textContent: t })));
