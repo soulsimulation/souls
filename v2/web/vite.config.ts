@@ -8,6 +8,8 @@
 //   /?stream=/s/<lineage>/<zone>/<epoch>/<node>/<level>/<audience>/
 // - `V2_DIRECTORY`, in `vite` and `vite preview`, passes /v1/ to directoryd at that origin (W3's list of worlds, at
 //   /src/worlds/).
+// - `V2_GATEWAY`, in `vite` and `vite preview`, passes /v2/ (the socket and the creator's session exchange) to gatewayd
+//   at that origin (W5's creator's panel, at /src/panel/).
 // - The changelog (O23, #3324): changelog.html is the repo's CHANGELOG.md rendered at build time
 //   (src/changelog/page.ts, carried from apps/web), and changelog.md is its Markdown twin; the origin serves both
 //   (v2/tools/origin/site.mjs). `V2_CHANGELOG_FILE` names another copy: the release builds the page from CHANGELOG.md
@@ -57,17 +59,20 @@ function changelogPage(): Plugin {
   };
 }
 
-const directory = process.env.V2_DIRECTORY ? { '/v1/': process.env.V2_DIRECTORY } : undefined;
+const proxy = {
+  ...(process.env.V2_DIRECTORY ? { '/v1/': process.env.V2_DIRECTORY } : {}),
+  ...(process.env.V2_GATEWAY ? { '/v2/': { target: process.env.V2_GATEWAY, ws: true } } : {}),
+};
 
 export default defineConfig({
   base: './',
   resolve: { alias: { replica: resolve(pkg, 'replica.js') } },
-  server: { fs: { allow: [here, pkg] }, proxy: directory },
-  preview: { proxy: directory },
+  server: { fs: { allow: [here, pkg] }, proxy },
+  preview: { proxy },
   worker: { format: 'es' },
   build: {
     target: 'es2022', outDir: 'dist', assetsInlineLimit: 0, chunkSizeWarningLimit: 1024,
-    rollupOptions: { input: { main: resolve(here, 'index.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), account: resolve(here, 'src/account/index.html'), changelog: resolve(here, 'changelog.html') } },
+    rollupOptions: { input: { main: resolve(here, 'index.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), account: resolve(here, 'src/account/index.html'), changelog: resolve(here, 'changelog.html'), panel: resolve(here, 'src/panel/index.html') } },
   },
   plugins: [streamFiles(), changelogPage()],
 });
