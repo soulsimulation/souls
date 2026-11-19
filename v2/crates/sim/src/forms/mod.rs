@@ -453,6 +453,28 @@ impl Forms {
         Ok(())
     }
 
+    /// The world ends the walk of `body`'s run as `how` (C21, #3484: a walk that stalled, `walk.blocked`): the walk
+    /// stops and its driver is released now, and the run ends by the runner's own rule for a walk's ending, in this
+    /// tick. Whether the body's run had a walk in progress.
+    pub fn stall<G: Geometry, R: Reach>(
+        &mut self,
+        w: &mut World<'_, G, R>,
+        body: Id,
+        how: &str,
+        now: Micros,
+    ) -> bool {
+        let Some(&run) = self.by_body.get(&body) else {
+            return false;
+        };
+        let Some(d) = self.runs.get_mut(&run).and_then(|fr| fr.walk.take()) else {
+            return false;
+        };
+        self.walks.retain(|r| r.body != body);
+        let _ = w.controller.release(body, d);
+        self.wake(w, run, Woke::Walked(Progress::Failed(name(how))), now);
+        true
+    }
+
     /// Node `node` was removed (its removal is logged, with every link that ends in it): a run on it as a body ends
     /// `body-gone`, and a run that reserves it ends `thing-gone`. The removal took the reservation with it, so the
     /// ending entry has no unlink.

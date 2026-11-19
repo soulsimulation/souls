@@ -24,10 +24,16 @@
 //!   `sim::forms::span`): a walk across the town and a long pause are its own time, not the 10 s an act gets at its
 //!   arrival.
 //!
+//! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
+//!   ([`sim::walk::stall::Watch`]): one that gains less than a quarter metre toward its goal over 3 s of world time
+//!   ends `walk.blocked` in that tick, its body's driver released, and the act's ending entry names the nearest thing
+//!   or edge in its way ([`sim::walk::stall::blocker`]).
+//!
 //! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
 //! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use replica::effects::{Actor, Effect, Refusal, fixture_bytes};
@@ -46,6 +52,7 @@ use sim::mover::Body as Moved;
 use sim::moves::{Moves, Reach};
 use sim::timers::DueList;
 use sim::walk::Leg;
+use sim::walk::stall::{Watch, blocker};
 use sim::walk::town::View;
 use skills::form_runner::Limits;
 
@@ -65,6 +72,9 @@ const MOVES: [&str; 5] = [
 /// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
 /// or `deadline-passed` by then.
 pub const WALK_MOST: Micros = 180_000_000;
+
+/// The ending of a form's walk that stopped making progress (C21, #3484).
+pub const BLOCKED: &str = "walk.blocked";
 
 /// The runner's limits for a form's run here: the walk's [`WALK_MOST`], the rest the runner's own. A run's act is
 /// given their sum as its deadline (`sim::forms::span`).
@@ -90,6 +100,9 @@ struct Sight<'a> {
     view: Option<View<'a>>,
     tree: &'a Tree,
     kind: Name,
+    /// Each walker that asked its way this call (C21): the node it stands on, where it stands, the corner it aims at
+    /// and its leg's end, x and z µm.
+    asked: RefCell<BTreeMap<Id, (Id, [i64; 2], [i64; 2], [i64; 2])>>,
 }
 
 impl Sight<'_> {
@@ -125,6 +138,10 @@ impl Geometry for Sight<'_> {
                     None => [to.x, to.z],
                 };
                 let y = if [x, z] == [to.x, to.z] { to.y } else { 0 };
+                let here = [me.pose.position.x, me.pose.position.z];
+                self.asked
+                    .borrow_mut()
+                    .insert(body, (sim::walk::node_of(me), here, [x, z], [to.x, to.z]));
                 Some(Answer::Point(Vec3::new(x, y, z)))
             }
             Ask::Near { .. } => Some(Answer::Near(Vec::new())),
@@ -214,6 +231,10 @@ pub struct Acts {
     own: Controller,
     /// Each run's intent.
     runs: BTreeMap<RunId, Id>,
+    /// The form's walks watched for progress (C21).
+    watch: Watch,
+    /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
+    blocked: BTreeMap<Id, String>,
 }
 
 /// The moves a form's step may name: the fixture moves.
@@ -266,6 +287,8 @@ impl Acts {
             library,
             own: Controller::new(),
             runs: BTreeMap::new(),
+            watch: Watch::new(),
+            blocked: BTreeMap::new(),
         }
     }
 
@@ -302,6 +325,7 @@ impl Acts {
             view,
             tree,
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
+            asked: RefCell::new(BTreeMap::new()),
         };
         let mut w = World {
             tree,
@@ -395,15 +419,27 @@ impl Acts {
         let _ = self.with(tree, bodies, 0, |forms, w| forms.leave(w, body, now));
     }
 
-    /// The forms' part of a tick at world time `now`: their walks, then every timer of theirs due by `now`.
+    /// The forms' part of a tick at world time `now`: their walks, each one that stalled ended [`BLOCKED`] (C21), then
+    /// every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
         let mut bodies = bodies;
+        let mut watch = std::mem::take(&mut self.watch);
+        let mut blocked = Vec::new();
         self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
             forms.tick(w, now);
+            let asked = std::mem::take(&mut *w.geometry.asked.borrow_mut());
+            watch.keep(&asked.keys().copied().collect());
+            for (body, (node, here, aim, to)) in asked {
+                if watch.seen(body, here, aim, to, now) && forms.stall(w, body, BLOCKED, now) {
+                    blocked.push((body, blocker(w.tree, node, here)));
+                }
+            }
             while let Some(t) = w.due.fire(now) {
                 forms.fire(w, &t);
             }
         });
+        self.watch = watch;
+        self.blocked.extend(blocked);
         // The walks' crossings, carried by the town's links as the bodies' own walks are (C17).
         let mut staged = Staged::default();
         staged.crossings.append(&mut self.forms.crossings);
@@ -419,11 +455,16 @@ impl Acts {
         std::mem::take(&mut self.forms.out)
     }
 
-    /// Runs that ended since the last call: each one's intent and its ending's name.
-    pub fn ended(&mut self) -> Vec<(Id, String)> {
+    /// Runs that ended since the last call: each one's intent, its ending's name and, for [`BLOCKED`], what blocked
+    /// its walk.
+    pub fn ended(&mut self) -> Vec<(Id, String, Option<String>)> {
         std::mem::take(&mut self.forms.ended)
             .into_iter()
-            .filter_map(|e| Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned())))
+            .filter_map(|e| {
+                let why = self.blocked.remove(&e.body);
+                let why = why.filter(|_| e.how.as_str() == BLOCKED);
+                Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned(), why))
+            })
             .collect()
     }
 }
