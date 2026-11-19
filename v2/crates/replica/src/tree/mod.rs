@@ -298,6 +298,9 @@ pub struct Tree {
     /// were met. Empty between parts.
     gaps: Vec<(u64, u64)>,
     gaps_met: usize,
+    /// The subtrees a view carried in for the part being applied ([`Tree::apply_view`]), and how many landed.
+    carried: Vec<(u64, Flight)>,
+    carried_met: usize,
     node_reads: Reads,
     link_reads: Reads,
 }
@@ -336,6 +339,8 @@ impl Tree {
             dead: Vec::new(),
             gaps: Vec::new(),
             gaps_met: 0,
+            carried: Vec::new(),
+            carried_met: 0,
             node_reads: Reads(Some(AtomicU64::new(0))),
             link_reads: Reads(Some(AtomicU64::new(0))),
         };
@@ -458,6 +463,8 @@ impl Tree {
             dead: self.dead.clone(),
             gaps: Vec::new(),
             gaps_met: 0,
+            carried: Vec::new(),
+            carried_met: 0,
             node_reads: Reads(None),
             link_reads: Reads(None),
         }
@@ -896,11 +903,29 @@ impl Tree {
     /// hold; the entry after it must come at exactly `first + count`, every gap must be met, and any other jump is still
     /// `sequence-gap`. All of it or none.
     pub fn apply_gaps(&mut self, header: &Header, part: &Part, gaps: &[(u64, u64)]) -> R<()> {
+        self.apply_view(header, part, gaps, &[])
+    }
+
+    /// [`Tree::apply_gaps`], with the subtrees the view carried in (T7 rule 4): each `(sequence, flight)` is put in
+    /// flight just before the arrive of that sequence, which lands it. The arrive must be one with nothing in flight
+    /// here, every subtree must land, and a node of the subtree the view still holds where it was (the view did not
+    /// hold its leave) is taken out first. All of it or none.
+    pub fn apply_view(
+        &mut self,
+        header: &Header,
+        part: &Part,
+        gaps: &[(u64, u64)],
+        carried: &[(u64, Flight)],
+    ) -> R<()> {
         self.gaps = gaps.to_vec();
         self.gaps_met = 0;
+        self.carried = carried.to_vec();
+        self.carried_met = 0;
         let r = self.transact(header, part, None);
         self.gaps.clear();
         self.gaps_met = 0;
+        self.carried.clear();
+        self.carried_met = 0;
         r
     }
 
@@ -943,6 +968,16 @@ impl Tree {
                 format!("{} declared gaps, {} met", self.gaps.len(), self.gaps_met),
             );
         }
+        if result.is_ok() && self.carried_met != self.carried.len() {
+            result = refuse(
+                "carried-unmet",
+                format!(
+                    "{} carried subtrees, {} landed",
+                    self.carried.len(),
+                    self.carried_met
+                ),
+            );
+        }
         if result.is_err() {
             while let Some(u) = self.undo.pop() {
                 u(self);
@@ -978,6 +1013,22 @@ impl Tree {
             );
         }
         self.live(env.node)?;
+        if let Body::Transfer(TransferRec::Arrive { transfer, carried }) = &e.body
+            && let Some((seq, f)) = self.carried.get(self.carried_met)
+            && *seq == env.sequence
+        {
+            // A subtree the view declared carried in (`apply_view`): put in flight, then landed by this arrive.
+            if !carried.is_empty() || self.in_flight.contains_key(transfer) {
+                return refuse(
+                    "carried-unmet",
+                    format!("entry {seq} lands no carried subtree"),
+                );
+            }
+            let f = f.clone();
+            self.carry_in(*transfer, &f)?;
+            self.carried_met += 1;
+            self.log(|t| t.carried_met -= 1);
+        }
         let mut own = Own {
             node: env.node,
             audience: env.audience,
@@ -1141,26 +1192,7 @@ impl Tree {
                 if slot == self.root {
                     return refuse("remove-root", show(*node));
                 }
-                let gone = self.subtree(slot);
-                self.detach(slot);
-                for s in &gone {
-                    let ends: Vec<Id> = self.nodes[*s as usize]
-                        .links
-                        .iter()
-                        .map(|e| e.link)
-                        .collect();
-                    for l in ends {
-                        self.link_take(l);
-                    }
-                    // The subtree's pending timers go with it, in the same commit (K2b, #3132).
-                    let id = self.nodes[*s as usize].id;
-                    for timer in self.timers_of.get(&id).cloned().unwrap_or_default() {
-                        self.timer_drop(timer);
-                    }
-                }
-                for s in gone {
-                    self.kill(s);
-                }
+                self.take_out(slot);
             }
             Change::Reparent { node, from, pose } => {
                 own.check(*node)?;
@@ -1396,6 +1428,179 @@ impl Tree {
             }
         }
         Ok(())
+    }
+
+    /// Puts a subtree a view carried in ([`Tree::apply_view`]) in flight as `transfer`, as its leave would have: its
+    /// nodes flying, parents first, each child in its parent's children, its links out of the index. If the tree
+    /// still holds its root where it was (the view held the entry that made it, not its leave), that subtree is taken
+    /// out first, as a remove takes it.
+    fn carry_in(&mut self, transfer: Id, f: &Flight) -> R<()> {
+        if self.arrived.contains(&transfer) {
+            return refuse("id-duplicate", show(transfer));
+        }
+        if let Ok(slot) = self.live(f.root) {
+            if slot == self.root {
+                return refuse("remove-root", show(f.root));
+            }
+            self.take_out(slot);
+        }
+        let mut below: BTreeMap<Id, Vec<Id>> = BTreeMap::new();
+        for (id, n) in &f.nodes {
+            if let Some(p) = n.parent {
+                below.entry(p).or_default().push(*id);
+            }
+        }
+        let mut order = vec![f.root];
+        let mut i = 0;
+        while let Some(p) = order.get(i).copied() {
+            order.extend(below.get(&p).into_iter().flatten().copied());
+            i += 1;
+        }
+        if order.len() != f.nodes.len() {
+            return refuse(
+                "carried-root",
+                format!("{} has nodes not under it", show(f.root)),
+            );
+        }
+        let mut slots = Vec::with_capacity(order.len());
+        for id in order {
+            self.fresh(id)?;
+            let n = &f.nodes[&id];
+            let frame = Frame {
+                node: n.parent.unwrap_or(id),
+                slot: n.slot,
+            };
+            let pose = match &n.place {
+                Some(Value::Map(m)) => {
+                    let mut m = m.clone();
+                    let mut fr = vec![frame.node.to_value()];
+                    fr.extend(frame.slot.map(Value::Uint));
+                    m.insert(1, Value::Array(fr));
+                    Value::Map(m)
+                }
+                _ => return refuse("not-a-record", format!("{} has no place", show(id))),
+            };
+            let place = Place::of(&crate::effects::read_pose(&pose)?);
+            let moved = match &n.motion {
+                Some(Value::Map(m)) => {
+                    let get = |k: u64| m.get(&k).cloned().unwrap_or(Value::Array(Vec::new()));
+                    let h = Value::Map(BTreeMap::from([
+                        (1, id.to_value()),
+                        (2, get(1)),
+                        (3, get(4)),
+                        (4, get(4)),
+                        (5, pose),
+                        (6, get(2)),
+                        (7, get(3)),
+                    ]));
+                    let h = crate::pose::HandOff::from_value(&h).map_err(|r| Refusal {
+                        name: r.name(),
+                        detail: format!("{}'s motion", show(id)),
+                    })?;
+                    Some(Moved {
+                        at: h.at,
+                        linear: h.linear,
+                        angular: h.angular,
+                        owner: h.to,
+                    })
+                }
+                Some(_) => return refuse("not-a-record", format!("{}'s motion", show(id))),
+                None => None,
+            };
+            let parent = if id == f.root {
+                NONE
+            } else {
+                self.by_id[&frame.node]
+            };
+            let kind = self.intern(&n.kind);
+            let links = self.elsewhere.remove(&id).unwrap_or_default();
+            let slot = self.alloc(NodeRec {
+                generation: 0,
+                life: Life::Flying,
+                id,
+                kind,
+                parent,
+                slot: n.slot,
+                audience: n.audience,
+                depth: 0,
+                children: Vec::new(),
+                links,
+                fields: n.fields.clone(),
+                at: Where::Still(place),
+                // Never sealed (K5): a node put in flight is new to this tree.
+                hash: None,
+            });
+            if !self.nodes[slot as usize].links.is_empty() {
+                self.log(move |t| {
+                    let back = std::mem::take(&mut t.nodes[slot as usize].links);
+                    t.elsewhere.insert(id, back);
+                });
+            }
+            if moved.is_some() {
+                self.set_at(slot, place, moved);
+            }
+            if id != f.root {
+                self.attach(slot);
+            }
+            slots.push(slot);
+        }
+        let mut links = Vec::with_capacity(f.links.len());
+        for (id, l) in &f.links {
+            self.fresh(*id)?;
+            let ty = self.intern(&l.ty);
+            links.push((
+                *id,
+                LinkRec {
+                    ty,
+                    ends: l.ends,
+                    owner: l.owner,
+                    audience: l.audience,
+                },
+            ));
+        }
+        let from = f.nodes[&f.root]
+            .parent
+            .unwrap_or(self.nodes[self.root as usize].id);
+        self.in_flight.insert(
+            transfer,
+            Away {
+                root: slots[0],
+                from,
+                lineage: f.lineage,
+                zone: f.zone,
+                pose: f.pose,
+                nodes: slots,
+                links,
+            },
+        );
+        self.log(move |t| {
+            t.in_flight.remove(&transfer);
+        });
+        Ok(())
+    }
+
+    /// Takes a subtree out, as a remove does: detached, the links at its nodes taken, its nodes killed.
+    fn take_out(&mut self, slot: u32) {
+        let gone = self.subtree(slot);
+        self.detach(slot);
+        for s in &gone {
+            let ends: Vec<Id> = self.nodes[*s as usize]
+                .links
+                .iter()
+                .map(|e| e.link)
+                .collect();
+            for l in ends {
+                self.link_take(l);
+            }
+            // The subtree's pending timers go with it, in the same commit (K2b, #3132).
+            let id = self.nodes[*s as usize].id;
+            for timer in self.timers_of.get(&id).cloned().unwrap_or_default() {
+                self.timer_drop(timer);
+            }
+        }
+        for s in gone {
+            self.kill(s);
+        }
     }
 
     /// Puts a subtree in flight under `parent`: depth checked first (the parent's depth, plus one, plus the
