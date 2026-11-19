@@ -1,0 +1,70 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:rack_bay",
+ "owner": "thing",
+ "slots": {
+  "upright_a": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_upright"
+   ],
+   "most": 1,
+   "at_mm": [0, 0, -1448]
+  },
+  "upright_b": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_upright"
+   ],
+   "most": 1,
+   "at_mm": [0, 0, 1448]
+  },
+  "beam_high_l": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_beam"
+   ],
+   "most": 1,
+   "at_mm": [-572, 863, 0]
+  },
+  "beam_high_r": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_beam"
+   ],
+   "most": 1,
+   "at_mm": [572, 863, 0]
+  },
+  "beam_low_l": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_beam"
+   ],
+   "most": 1,
+   "at_mm": [-572, 254, 0]
+  },
+  "beam_low_r": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_beam"
+   ],
+   "most": 1,
+   "at_mm": [572, 254, 0]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [1219, 2438, 2972]
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "card"
+ },
+ "card": {
+  "text": "card"
+ }
+}
