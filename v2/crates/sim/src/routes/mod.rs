@@ -275,7 +275,7 @@ pub struct Map {
 /// scratch found joins the map's caches by [`Map::keep`]. A cached value is the same however it was found (a piece's
 /// triangles' neighbours; the line between two portals, measured from the lower-numbered one), so which thread found
 /// it first changes no route.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Scratch {
     /// Per portal: (search stamp, cost so far, previous portal, how it was reached).
     seen: Vec<(u32, u32, u32, u32)>,
