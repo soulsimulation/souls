@@ -54,7 +54,8 @@ export const ALLOWED = {
   // without unsafe, one clock for the world and its gateway across their local socket, so an act's stamps form one
   // chain (O4, #2694). skills: the world runs the built-in walk for a move intent; the test world in its tests (I4b,
   // #3156). archive, supervisor: `serve` archives its history (V3's archiver) into O9's folder store (O3b, #3458).
-  worldd: ['replica', 'sim', 'directoryd', 'import-eden', 'rustix', 'skills', 'testworld', 'archive', 'supervisor'],
+  // backup: O20's restore reads a served world's shipped stores back in its tests (O20b, #3523; dev only).
+  worldd: ['replica', 'sim', 'directoryd', 'import-eden', 'rustix', 'skills', 'testworld', 'archive', 'supervisor', 'backup'],
   // Agents' sockets (I1, #2683): WebSocket on tokio through axum, a constant-time compare, the OS random source.
   // worldd and sim: the world's view tier in the view subscription tests (#3292), and a real world behind the gateway
   // for a creator's edits end to end (G1b, #3362; dev only).
