@@ -29,3 +29,6 @@ apps/server/test/fixtures/sample-texture.jpg
 # The released Soul client 2.32.0, gzipped, for the upgrade compatibility test (#1938).
 tools/world-launcher/soul/released/2.32.0/eden.mjs.gz
 tools/world-launcher/soul/released/2.32.0/skill.md.gz
+# Engine v2 F8 (#2823): the chess-move hatch test module, own work, 2,914 bytes, built from
+# v2/crates/sim/tests/hatch/chess-move/ by its build.sh and loaded by hash in the hatch test; approved by the coordinator 19 Nov.
+v2/crates/sim/tests/hatch/chess-move.wasm

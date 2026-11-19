@@ -1,0 +1,253 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:sgraffito_tile (SA-X7, #2902; from #1821): three coats of glaze, up to six windows scratched through a coat; a new coat covers the cuts.",
+  "cases": [
+    {
+      "name": "coat_scratch_recoat_until_the_glaze_is_gone",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "g1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "g1": {
+            "kind": "eden:sgraffito_tile"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "g1",
+            "form": "scratch"
+          },
+          "receipt": "rg0",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "g1",
+            "form": "coat_red"
+          },
+          "receipt": "rg1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "coat",
+                "n": 1,
+                "to": "red"
+              },
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "portions",
+                "n": 2,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "cuts",
+                "n": 3,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:coated",
+                "node": "g1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:portion_used",
+                "node": "g1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:cuts_covered",
+                "node": "g1",
+                "changes": [
+                  2
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "g1",
+            "form": "scratch"
+          },
+          "receipt": "rg2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "cuts",
+                "n": 3,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:scratched",
+                "node": "g1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "g1",
+            "form": "scratch"
+          },
+          "receipt": "rg3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "cuts",
+                "n": 3,
+                "to": 2
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "g1",
+            "form": "coat_blue"
+          },
+          "receipt": "rg4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "coat",
+                "n": 1,
+                "to": "blue"
+              },
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "portions",
+                "n": 2,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "cuts",
+                "n": 3,
+                "to": 0
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "g1",
+            "form": "coat_gold"
+          },
+          "receipt": "rg5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "coat",
+                "n": 1,
+                "to": "gold"
+              },
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "portions",
+                "n": 2,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "cuts",
+                "n": 3,
+                "to": 0
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "g1",
+            "form": "scratch"
+          },
+          "receipt": "rg6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "cuts",
+                "n": 3,
+                "to": 1
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "g1",
+            "form": "coat_red"
+          },
+          "receipt": "rg7",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        }
+      ],
+      "after": {
+        "g1": {
+          "kind": "eden:sgraffito_tile",
+          "fields": {
+            "coat": "gold",
+            "portions": 0,
+            "cuts": 1
+          }
+        }
+      }
+    }
+  ]
+}

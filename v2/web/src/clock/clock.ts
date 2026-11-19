@@ -12,6 +12,13 @@ export const CUT_US = 20_000_000;
 /** The buffer ahead of the clock below which it slows. */
 const LOW_US = PERIOD_US / 2;
 
+/**
+ * The world time the page has caught up to (V5b, #3460): the newest part's end, or a still world's "quiet until" when
+ * that is later, since nothing was written before it. A joiner on a still world starts there and stays live.
+ */
+export const caughtUp = (newestTo: number | null, quietUntil: number | null | undefined): number | null =>
+  quietUntil == null ? newestTo : newestTo === null ? quietUntil : Math.max(newestTo, quietUntil);
+
 export type ClockState = 'starting' | 'playing' | 'catching up' | 'slowed: parts late' | 'holding: no parts' | 'cut';
 
 export class PlaybackClock {
@@ -23,8 +30,8 @@ export class PlaybackClock {
   cutAt = -Infinity;
 
   /**
-   * Advances by `dtMs` of real time. `worldNow` is the world's time now (from the pointer's anchor), `newestTo` the end
-   * of the newest part played. Never passes `newestTo`.
+   * Advances by `dtMs` of real time. `worldNow` is the world's time now (from the pointer's anchor), `newestTo` the time
+   * caught up to ([`caughtUp`]: the newest part played, or a still world's quiet time). Never passes `newestTo`.
    */
   step(dtMs: number, worldNow: number, newestTo: number | null): number | null {
     if (newestTo === null) return this.t;

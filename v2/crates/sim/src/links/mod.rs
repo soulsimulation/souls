@@ -36,14 +36,24 @@
 //!   one end on the floor's patch, the other where its passage meets the ground's squares, walked. It is no link of
 //!   the tree (its id is derived, `ground::scene::step_id`), and an edge with nothing to step down to is no link. A
 //!   step between two of a floor's own surfaces (a bridge's deck) has both ends on the floor's patch, each carried
-//!   onto its piece as a stair's end is, and joins the floor to itself, read alone or with the ground.
+//!   onto its piece as a stair's end is, and joins the floor to itself, read alone or with the ground. An outline
+//!   step that meets no open ground beyond ([`Building::loose`]) but lies over another thing's floor within [`crate::ground::STEP`]
+//!   of it joins the two floors ([`floor_joins`], #3227: the botanic red bridge's east end onto the tea house's
+//!   floor); its far end is the near end carried across the edge onto that floor's patch, and its line is in the
+//!   first building's frame.
+//! - **Ends on the terrain.** An end on the open ground stands at the ground's height there (#3227,
+//!   `ground::scene::Terrain::ground`), as a body on it does (N11a), though N3's pieces of it are a plan at 0.
+//! - **Shores** (N11c, #3218). Where dry ground meets wading ground, a [`Kind::Wade`] (`souls:wade`); where wading
+//!   ground or dry ground meets swimming water, a [`Kind::Swim`] (`souls:swim`). No link of the tree (its id is
+//!   derived, [`shore_id`]): the routes find them along the edges the open ground's pieces share (`crate::routes`).
 //!
-//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
+//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), boarding a moving frame (N12, [`boarding`]), a
 //! locked door (the door's `locked` field is not read yet), the durable log (K4).
 
+pub mod boarding;
 pub mod turns;
 
-use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Xform};
+use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Terrain, Xform};
 use crate::ground::{HUMAN_RADIUS, MARGIN, Meet, Patch, SQUARE, Scene, Turn, cut_floor};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Header, Part, Refusal, Rest,
@@ -78,6 +88,18 @@ pub fn opened_event(kind: &str) -> &'static str {
     }
 }
 
+/// The id of the open ground `ground`'s shore link number `n` (N11c, #3218): derived, as a step's is
+/// (`ground::scene::step_id`), since a shore is no link of the tree.
+pub fn shore_id(ground: Id, n: u64) -> Id {
+    let mut input = b"souls:shore\0".to_vec();
+    input.extend_from_slice(&ground.scope().0);
+    input.extend_from_slice(&ground.counter().to_be_bytes());
+    let h = replica::ids::sha256(&input);
+    let mut scope = [0u8; 16];
+    scope.copy_from_slice(&h[..16]);
+    Id::new(replica::ids::Scope(scope), n).expect("a shore's number is below 2^53")
+}
+
 /// A link's kind: its T2 type, and the move that crosses it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -88,6 +110,13 @@ pub enum Kind {
     /// A low floor's open edge stepped down to the open ground, or a step between two of a floor's surfaces (N3's
     /// steps): no link of the tree, walked.
     Step,
+    /// A shore between dry ground and wading ground (N11c, #3218): no link of the tree ([`shore_id`]), waded.
+    Wade,
+    /// A shore between wading ground, or dry ground, and swimming water (N11c, #3218): no link of the tree, swum.
+    Swim,
+    /// Between the ground at a stop and a moving frame's deck, crossable only while the frame stands at that stop
+    /// ([`boarding`], N12): walked.
+    Boarding,
 }
 
 impl Kind {
@@ -104,16 +133,18 @@ impl Kind {
     /// The move that crosses it (contract T4).
     pub fn move_name(self) -> &'static str {
         match self {
-            Kind::Doorway | Kind::Ramp | Kind::Step => "souls:walk",
+            Kind::Doorway | Kind::Ramp | Kind::Step | Kind::Boarding => "souls:walk",
             Kind::Stairs => "souls:stairs",
             Kind::Ladder => "souls:climb",
+            Kind::Wade => "souls:wade",
+            Kind::Swim => "souls:swim",
         }
     }
 
     /// What its move needs of a body. Opening a shut door needs hands besides.
     pub fn needs(self) -> Abilities {
         Abilities {
-            legs: true,
+            legs: self != Kind::Swim,
             hands: self == Kind::Ladder,
         }
     }
@@ -175,6 +206,94 @@ pub struct Building {
     pub floors: BTreeMap<Id, (i64, Patch)>,
     /// The building's frame on the open ground it was read with (the identity when read alone).
     pub place: Xform,
+    /// Its floors' outline steps that meet no open ground beyond (#3227): another thing's floor may lie there
+    /// ([`floor_joins`]).
+    pub loose: Vec<Loose>,
+}
+
+/// An outline step of a building's floor whose far side meets no open ground: its link, its end on the floor (the
+/// building's frame), the unit off the floor (µm per metre), its width (µm) and the radius it was cut for (mm).
+#[derive(Clone, Copy, Debug)]
+pub struct Loose {
+    pub link: Id,
+    pub end: End,
+    pub across: [i64; 2],
+    pub width: i64,
+    pub radius: i64,
+}
+
+/// Steps between two things' floors (#3227): where an outline step of one building's floor ([`Building::loose`])
+/// lies over a floor of another, within [`crate::ground::STEP`] of it (the botanic red bridge's east end over the tea
+/// house's floor, 82 mm below), the step joins the two floors: a [`Kind::Step`] link owned by the first building,
+/// its far end the near end carried across the edge, by twice the clearance it was cut with, onto the other floor's
+/// patch. Each is returned with the index in `bs` of the building that owns it. A step over open ground, or over
+/// nothing a body can stand on, joins nothing.
+pub fn floor_joins(bs: &[&Building]) -> Vec<(usize, Link)> {
+    let mut out = Vec::new();
+    for (i, b) in bs.iter().enumerate() {
+        for s in &b.loose {
+            let d = 2 * (s.radius + MARGIN + 1) * 1000;
+            let over = |p: Vec3| {
+                Vec3::new(
+                    p.x + s.across[0] * d / 1_000_000,
+                    p.y,
+                    p.z + s.across[1] * d / 1_000_000,
+                )
+            };
+            let (Ok(wa), Ok(wb)) = (b.place.point(over(s.end.a)), b.place.point(over(s.end.b)))
+            else {
+                continue;
+            };
+            let found = bs
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .find_map(|(_, c)| {
+                    let (a, bb) = (back(&c.place, wa).ok()?, back(&c.place, wb).ok()?);
+                    c.floors.iter().find_map(|(&f, (_, patch))| {
+                        // The heights of the floor's pieces within a step of the step's, in that building's frame.
+                        let ys: BTreeSet<i32> = patch
+                            .pieces
+                            .iter()
+                            .filter_map(|pc| pc.vertices.first().map(|v| v[1]))
+                            .filter(|&y| {
+                                (i64::from(y) * 1000 - a.y).abs() <= crate::ground::STEP * 1000
+                            })
+                            .collect();
+                        ys.into_iter().find_map(|y| {
+                            let at = |p: Vec3| Vec3::new(p.x, i64::from(y) * 1000, p.z);
+                            let e = End {
+                                floor: f,
+                                a: at(a),
+                                b: at(bb),
+                            };
+                            on_patch(patch, e.middle(), MEET_ON).then_some((e, c.place))
+                        })
+                    })
+                });
+            if let Some((far, place)) = found {
+                let there = place.point(far.middle()).and_then(|p| back(&b.place, p));
+                let Ok(there) = there else {
+                    continue;
+                };
+                out.push((
+                    i,
+                    Link {
+                        id: s.link,
+                        kind: Kind::Step,
+                        nodes: [s.end.floor, far.floor],
+                        owner: s.end.floor,
+                        width: s.width,
+                        ends: [Some(s.end), Some(far)],
+                        line: vec![s.end.middle(), there],
+                        door: None,
+                        blocked: None,
+                    },
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// A meet of one of the open ground's squares, with that square.
@@ -195,6 +314,20 @@ pub struct Open<'a> {
     /// The doors standing on the open ground, by the doorway each stands in ([`ground_doors`]): a building's outer
     /// door may be a thing of the ground, not of the building.
     pub doors: &'a BTreeMap<Id, Id>,
+    /// The open ground's terrain (N1b), if any: an end on the open ground stands at its height (#3227), as a body
+    /// there does (N11a's mover), though N3's pieces of it are a plan at 0.
+    pub terrain: Option<&'a Terrain>,
+}
+
+/// An end on the open ground lifted onto its terrain `t`: each of its points at the open ground's height there under
+/// something at `y` (µm, the ground's frame; [`Terrain::ground`]).
+fn lift(e: End, t: Option<&Terrain>, y: i64) -> End {
+    let up = |p: Vec3| Vec3::new(p.x, Terrain::ground(t, p.x, p.z, y), p.z);
+    End {
+        a: up(e.a),
+        b: up(e.b),
+        ..e
+    }
 }
 
 /// The doors that stand on the open ground `ground` (its children), by the doorway link each stands in.
@@ -411,6 +544,8 @@ impl Building {
         let mut floors = BTreeMap::new();
         let mut doors: BTreeMap<Id, Id> = BTreeMap::new();
         let mut widths: BTreeMap<Id, i64> = BTreeMap::new();
+        let mut acrosses: BTreeMap<Id, [i64; 2]> = BTreeMap::new();
+        let mut loose = Vec::new();
         let mut all_floors = Vec::new();
         for &c in tree.children(th).ok_or("a node that is gone")? {
             let n = tree.node(c).ok_or("a node that is gone")?;
@@ -424,6 +559,7 @@ impl Building {
                 };
                 for d in &scene.doorways {
                     widths.insert(d.link, d.width);
+                    acrosses.insert(d.link, d.across);
                 }
                 if let Ok(patch) = cut_floor(&scene, radius, Turn::NONE) {
                     floors.insert(n.id(), (level, patch));
@@ -513,7 +649,11 @@ impl Building {
                         .filter_map(|sm| own_part(o.on, sm))
                         .collect();
                     if let Some(e) = joined(&gm.iter().collect::<Vec<_>>(), o.ground) {
-                        ends[k] = Some(e);
+                        // At the height of the open ground beside the floor's end, in the ground's frame.
+                        let y = ends[1 - k]
+                            .and_then(|f| o.place.point(f.middle()).ok())
+                            .map_or(0, |p| p.y);
+                        ends[k] = Some(lift(e, o.terrain, y));
                         width_left = gm.iter().map(|m| m.width_left).fold(width_left, i64::min);
                         through = true;
                     }
@@ -536,6 +676,16 @@ impl Building {
                     && (blocked.is_some()
                         || (!inner && ends[1].is_none_or(|e| Some(e.floor) != ground)))
                 {
+                    // Met on the floor and nothing beyond: another thing's floor may lie there (#3227).
+                    if let (Some(e), None, Some(_), false) = (ends[0], ends[1], ground, inner) {
+                        loose.push(Loose {
+                            link: id,
+                            end: e,
+                            across: acrosses.get(&id).copied().unwrap_or([0, 0]),
+                            width: widths.get(&id).copied().unwrap_or(0),
+                            radius,
+                        });
+                    }
                     continue;
                 }
                 let line = match (blocked, ends) {
@@ -665,6 +815,7 @@ impl Building {
             links,
             floors,
             place: open.map_or(Xform::IDENTITY, |o| o.place),
+            loose,
         })
     }
 
@@ -683,13 +834,14 @@ impl Building {
                 by_link.entry(sm.1.link).or_default().push(sm);
             }
         }
-        let widths: BTreeMap<Id, i64> = if by_link.is_empty() {
+        // Each gate's width, and its height (in the ground's frame: its ends stand on the ground there).
+        let widths: BTreeMap<Id, (i64, i64)> = if by_link.is_empty() {
             BTreeMap::new()
         } else {
             Scene::of(tree, open.ground)?
                 .doorways
                 .iter()
-                .map(|d| (d.link, d.width))
+                .map(|d| (d.link, (d.width, d.y)))
                 .collect()
         };
         let mut links = Vec::new();
@@ -702,7 +854,9 @@ impl Building {
                     .filter(|sm| sm.1.side == s)
                     .filter_map(|sm| own_part(open.on, sm))
                     .collect();
+                let y = widths.get(&id).map_or(0, |w| w.1);
                 joined(&of.iter().collect::<Vec<_>>(), open.ground)
+                    .map(|e| lift(e, open.terrain, y))
             };
             let ends = [side(-1), side(1)];
             let both = |sq: (i32, i32)| {
@@ -732,7 +886,7 @@ impl Building {
                 kind: Kind::of(ty.as_str()).unwrap_or(Kind::Doorway),
                 nodes,
                 owner,
-                width: widths.get(&id).copied().unwrap_or(0),
+                width: widths.get(&id).map_or(0, |w| w.0),
                 ends,
                 line,
                 door: open.doors.get(&id).copied(),
@@ -744,6 +898,7 @@ impl Building {
             links,
             floors: BTreeMap::new(),
             place: Xform::IDENTITY,
+            loose: Vec::new(),
         })
     }
 }

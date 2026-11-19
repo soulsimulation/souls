@@ -92,12 +92,13 @@ impl Gaze {
 }
 
 /// One utterance for a voice to carry: the reference its words are kept under, how long it lasts (from its words,
-/// `replica::speech::length_of`), and whether it replaces the one under way or waits behind it.
+/// `replica::speech::length_of`), whether it replaces the one under way or waits behind it, and its reach (E13).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
     pub words: Id,
     pub length: Micros,
     pub replace: bool,
+    pub reach: replica::speech::Reach,
 }
 
 /// A body's voice: the utterance under way, until when, and those waiting, in order.
@@ -595,6 +596,17 @@ impl Controller {
         Ok(())
     }
 
+    /// Takes `body` out, its claims, input and place among the near with it (a retirement, K10 #2673).
+    pub fn remove(&mut self, body: Id) -> bool {
+        self.woken.remove(&body);
+        self.near.remove_body(body);
+        let was = self
+            .bodies
+            .remove(&body)
+            .or_else(|| self.rested.remove(&body));
+        was.is_some()
+    }
+
     fn slot(&mut self, body: Id) -> R<&mut Slot> {
         if let Some(s) = self.rested.get_mut(&body) {
             self.woken.insert(body);
@@ -722,6 +734,22 @@ impl Controller {
         if across {
             self.near.remove_body(body);
         }
+        Ok(())
+    }
+
+    /// The world's own rule when `body`'s node's ground was rebuilt (G3, #2760): it stands as `placed`, found again on
+    /// the new ground where it stood (`moved` when that is anywhere else: never a move), or, standing on none
+    /// (`None`), stands still until it is walked out.
+    pub fn regrounded(&mut self, body: Id, placed: Option<Moved>) -> R<()> {
+        let s = self.slot(body)?;
+        match placed {
+            Some(m) if m.pose.position != s.moved.pose.position => {
+                return refuse("moved", replica::world_model::show(body));
+            }
+            Some(m) => s.moved = m,
+            None => (s.input.velocity, s.moved.linear) = (Vec3::ZERO, Vec3::ZERO),
+        }
+        s.touched = true;
         Ok(())
     }
 

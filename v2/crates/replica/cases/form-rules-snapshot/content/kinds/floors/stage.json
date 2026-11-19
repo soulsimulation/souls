@@ -1,0 +1,97 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:stage",
+  "owner": "thing",
+  "links": {"on_stage":{"n":1,"from":"soul","most":40,"audience":{"rule":"everyone"}}},
+  "points": {"steps":{"role":"stand","at_mm":[-1600,0,3300]}},
+  "slots": {"floor":{"admits":"body","most":40,"at_mm":[0,940,0]}},
+  "geometry": {"bounds_mm":[8040,4940,5640]},
+  "forms": {
+    "step_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"slot_free","slot":"floor"}],
+      "steps": [{"step":"walk_to","point":"steps"},{"step":"walk_to","point":"floor"}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":"floor","event":"stepped_up"},
+        {"change":"link","link":"on_stage","from":"actor","event":"took_the_stage"}
+      ]
+    },
+    "step_down": {
+      "who": {"link":"on_stage"},
+      "starts": "act",
+      "needs": [],
+      "steps": [{"step":"walk_to","point":"steps"}],
+      "effects": [
+        {"change":"unlink","link":"on_stage","from":"actor","event":"left_the_stage"},
+        {"change":"reparent","what":"actor","into":"here","event":"stepped_down"}
+      ]
+    }
+  },
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:stage",
+    "shape": {
+      "round": 30,
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [0,30,0],
+          "polygon": [[-3970,-2470],[3970,-2470],[3970,2470],[-3970,2470]],
+          "h": 840,
+          "tint": "deck"
+        },
+        {"kind":"box","at":[0,920,0],"size":[7900,40,4900],"round":0,"tint":"boards"},
+        {
+          "kind": "extrude",
+          "at": [-1600,180,2850],
+          "polygon": [[-570,-320],[570,-320],[570,320],[-570,320]],
+          "h": 240,
+          "tint": "step"
+        },
+        {
+          "kind": "extrude",
+          "at": [1600,180,2850],
+          "polygon": [[-570,-320],[570,-320],[570,320],[-570,320]],
+          "h": 240,
+          "tint": "step"
+        },
+        {
+          "kind": "extrude",
+          "at": [-1600,480,2620],
+          "polygon": [[-570,-95],[570,-95],[570,95],[-570,95]],
+          "h": 240,
+          "tint": "step"
+        },
+        {
+          "kind": "extrude",
+          "at": [1600,480,2620],
+          "polygon": [[-570,-95],[570,-95],[570,95],[-570,95]],
+          "h": 240,
+          "tint": "step"
+        },
+        {"kind":"cyl","at":[-3900,2900,-2300],"r":120,"h":4000,"segments":6,"tint":"post"},
+        {"kind":"cyl","at":[3900,2900,-2300],"r":120,"h":4000,"segments":6,"tint":"post"},
+        {"kind":"box","at":[0,4850,-2300],"size":[8000,180,180],"round":0,"tint":"post"},
+        {"kind":"box","at":[0,2900,-2400],"size":[7600,3800,40],"round":0,"tint":"curtain"},
+        {"kind":"sphere","at":[-3000,950,2350],"r":100,"segments":5,"tint":"light","scale":[1000,600,1000],"glow":900},
+        {"kind":"sphere","at":[-1500,950,2350],"r":100,"segments":5,"tint":"light","scale":[1000,600,1000],"glow":900},
+        {"kind":"sphere","at":[0,950,2350],"r":100,"segments":5,"tint":"light","scale":[1000,600,1000],"glow":900},
+        {"kind":"sphere","at":[1500,950,2350],"r":100,"segments":5,"tint":"light","scale":[1000,600,1000],"glow":900},
+        {"kind":"sphere","at":[3000,950,2350],"r":100,"segments":5,"tint":"light","scale":[1000,600,1000],"glow":900}
+      ],
+      "palette": {"deck":"#7d5a3a","boards":"#a47a4c","step":"#8a6a4a","post":"#6e4a30","curtain":"#8b2f2f","light":"#ffe2a8"},
+      "tags": ["civic","stage","venue","music","performance","structure"]
+    }
+  },
+  "text": {
+    "card": "An outdoor timber stage with steps: step up to perform, then step down.",
+    "venue": "venue",
+    "platform": "platform",
+    "performance": "performance",
+    "howto_perform": "Step up onto the stage, then step down."
+  },
+  "card": {"text":"card","category":"venue","synonyms":["platform","performance"]},
+  "howtos": {"perform":{"text":"howto_perform","steps":[{"form":"step_up"},{"form":"step_down"}]}}
+}

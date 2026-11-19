@@ -1,0 +1,308 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "Two votes for soup (from entry 25, #493): Ana votes, her second vote for the same option is refused ('You already voted for Soup.'), Ben votes; the option has two votes. The repeat is now refused by the one-vote-per-poll need (most_per counted per parent; this option stands alone); taking it back is the form take_back (a form only a linked Soul may start is not offered as a fix, as before).",
+ "cases": [
+  {
+   "name": "two_votes_and_a_repeat_refused",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "o1"
+      ]
+     },
+     "o1": {
+      "kind": "eden:poll_option",
+      "fields": {
+       "label": {
+        "text": "w_soup"
+       }
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       206
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "o1",
+      "form": "vote"
+     },
+     "receipt": "rv1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "o1",
+        "link": "vote",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:voted",
+        "node": "o1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "o1",
+      "form": "vote"
+     },
+     "receipt": "rv2",
+     "expect": {
+      "verdict": "no",
+      "reason": "already_linked",
+      "need": 1,
+      "detail": {
+       "link": "vote",
+       "most_per": 1,
+       "on": [
+        "o1"
+       ]
+      },
+      "fix": null,
+      "says": "already_voted"
+     }
+    },
+    {
+     "act": {
+      "this": "o1",
+      "form": "vote"
+     },
+     "actor": "b2",
+     "receipt": "rv3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "o1",
+        "link": "vote",
+        "n": 1,
+        "end": "b2"
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "o1": {
+     "kind": "eden:poll_option",
+     "fields": {
+      "label": {
+       "text": "w_soup"
+      }
+     },
+     "links": {
+      "vote": [
+       "b1",
+       "b2"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "a_vote_moved_by_taking_it_back",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "p1",
+       "b1"
+      ]
+     },
+     "p1": {
+      "kind": "eden:poll_board",
+      "children": [
+       "o1",
+       "o2"
+      ]
+     },
+     "o1": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": []
+      }
+     },
+     "o2": {
+      "kind": "eden:poll_option",
+      "links": {
+       "vote": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       220,
+       50,
+       206
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "o1",
+      "form": "vote"
+     },
+     "receipt": "mv1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "o1",
+        "link": "vote",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:voted",
+        "node": "o1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "o2",
+      "form": "vote"
+     },
+     "receipt": "mv2",
+     "expect": {
+      "verdict": "no",
+      "reason": "already_linked",
+      "need": 1,
+      "detail": {
+       "link": "vote",
+       "most_per": 1,
+       "on": [
+        "o1"
+       ]
+      },
+      "says": "already_voted"
+     }
+    },
+    {
+     "act": {
+      "this": "o1",
+      "form": "take_back"
+     },
+     "receipt": "mv3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "o1",
+        "link": "vote",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:vote_taken_back",
+        "node": "o1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "o2",
+      "form": "vote"
+     },
+     "receipt": "mv4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "o2",
+        "link": "vote",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:voted",
+        "node": "o2",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ]
+  }
+ ]
+}
