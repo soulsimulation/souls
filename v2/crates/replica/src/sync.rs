@@ -27,7 +27,7 @@ use crate::effects::Refusal;
 use crate::encode::{Value, decode, encode};
 use crate::ids::{Hash, Id, Purpose, Version};
 use crate::tree::{Sealed, Tree};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 type R<T> = Result<T, Refusal>;
 
@@ -73,7 +73,7 @@ pub trait Source {
 /// The world's records by hash: every record a seal gave (K5's checkpoint blobs are the same bytes).
 #[derive(Default)]
 pub struct Records {
-    by_hash: HashMap<Vec<u8>, Vec<u8>>,
+    by_hash: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
 impl Records {
@@ -152,7 +152,7 @@ pub struct Descent {
 #[derive(Clone, Default)]
 pub struct Copy {
     roots: BTreeMap<Id, Vec<u8>>,
-    records: HashMap<Vec<u8>, Vec<u8>>,
+    records: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
 /// Checks a record against the hash that named it (rule 3) and gives its children's hashes (field 10).
@@ -324,12 +324,12 @@ impl Copy {
     }
 
     /// The hashes the scope reaches, each record held and checked; refused by name if one is missing.
-    pub fn reach(&self) -> R<HashSet<Vec<u8>>> {
+    pub fn reach(&self) -> R<BTreeSet<Vec<u8>>> {
         self.reach_from(&self.roots)
     }
 
-    fn reach_from(&self, roots: &BTreeMap<Id, Vec<u8>>) -> R<HashSet<Vec<u8>>> {
-        let mut seen = HashSet::new();
+    fn reach_from(&self, roots: &BTreeMap<Id, Vec<u8>>) -> R<BTreeSet<Vec<u8>>> {
+        let mut seen = BTreeSet::new();
         let mut stack: Vec<Vec<u8>> = roots.values().cloned().collect();
         while let Some(h) = stack.pop() {
             if seen.contains(&h) {

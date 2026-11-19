@@ -106,7 +106,7 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
   {disconnected&&!waiting&&<ReconnectBox name={soul.name} link={link!} prompt={prompt} clock={t}/>}
   {!owner&&story&&story.length>0&&<SoulStory story={story}/>}
   <div className="soul-card-thread" data-soul-thread={soul.id}/>
-  {connected&&send&&<SoulMessageBox inbox={inbox} send={send} draftKey={`soul:${worldKey}:${soul.id}`}/>}
+  {connected&&send&&<SoulMessageBox name={soul.name} inbox={inbox} send={send} draftKey={`soul:${worldKey}:${soul.id}`}/>}
   {followShown&&<div className="soul-actions">
    <button className={camera.following?'soul-follow on':'soul-follow'} aria-pressed={camera.following} title={camera.following?'Stop following':'Keep the camera on this Soul'} onClick={camera.following?camera.stop:camera.follow}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6" fill="currentColor"/><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4"/></svg>{camera.following?'Following':'Follow'}</button>
   </div>}

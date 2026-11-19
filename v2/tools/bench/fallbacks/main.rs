@@ -24,7 +24,7 @@
 // A bench times a run by the wall clock (the wall-clock rule, K7, is the engine's).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, RwLock};
@@ -178,7 +178,7 @@ fn hall(place: &Place, rows: std::ops::Range<i64>, points: &[Vec3]) -> Hall {
 }
 
 impl Hall {
-    fn held(&self) -> HashSet<Id> {
+    fn held(&self) -> BTreeSet<Id> {
         self.chairs
             .iter()
             .copied()
@@ -301,7 +301,7 @@ fn crowd(place: &Place, sit: &Move, delay: i64, fallbacks: bool, seed: u64) -> C
     came.sort();
     let any = Wanted::Select(any_chair(Rule::Nearest));
     // The copy at the end of each tick: tick k's is `copies[k + 1]` (`copies[0]`, the hall before any tick).
-    let mut copies: Vec<Arc<HashSet<Id>>> = vec![Arc::new(HashSet::new())];
+    let mut copies: Vec<Arc<BTreeSet<Id>>> = vec![Arc::new(BTreeSet::new())];
     // Sends in world time: (arrives, body, list as written).
     let mut sends: Vec<(i64, Id, Vec<Wanted>)> = Vec::new();
     let mut next = 0;
@@ -384,7 +384,7 @@ fn crowd(place: &Place, sit: &Move, delay: i64, fallbacks: bool, seed: u64) -> C
         k += 1;
     }
     out.taken = h.slots.len();
-    let mut holders = HashSet::new();
+    let mut holders = BTreeSet::new();
     for &ch in &h.chairs {
         if let Some(b) = h.slots.holder(ch)
             && !holders.insert(b)
@@ -427,7 +427,7 @@ fn clock(place: &Place, sit: &Move, even: bool, seed: u64) -> (f64, f64, usize, 
     let copy = Arc::new(RwLock::new(PlacesSeen {
         version: 0,
         places: Arc::clone(&h.rows),
-        held: Arc::new(HashSet::new()),
+        held: Arc::new(BTreeSet::new()),
     }));
     let (jobs, rx): (Sender<Job>, Receiver<Job>) = channel();
     let rx = Arc::new(Mutex::new(rx));

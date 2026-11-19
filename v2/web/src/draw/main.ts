@@ -13,6 +13,7 @@ import { WorldView } from './world.ts';
 import { support } from './support.ts';
 import { pageThings } from '../things/page.ts';
 import { HistoryPage, readMoment } from '../history/page.ts';
+import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
@@ -58,6 +59,10 @@ Object.assign(globalThis, { v2: { renderer, scene, cam, world, things, souls, su
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
 loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 
+// V21: the world heard, from the same parts and history the picture plays.
+const where = (id: string, local?: [number, number, number]) => (world.nodes.has(id) ? (local ? new THREE.Vector3(...local).multiplyScalar(1e-6) : new THREE.Vector3()).applyMatrix4(world.frame(id)).toArray() : null);
+const sound = new WorldSound({ where, kindOf: (id) => world.nodes.get(id)?.kind, heightAt: (x, z) => world.heightAt(x, z) });
+
 let pointer: Pointer | null = null;
 let newestTo: number | null = null;
 let played = 0, hashes = 0, hashesEqual = 0, framed = false;
@@ -76,6 +81,7 @@ const live = (address: string) => new StreamSource(address).start({
   part: (p) => {
     world.apply(p.nodes, p.removed, p.samples);
     things.apply(p.nodes, p.removed);
+    sound.part(p.nodes, p.removed, p.samples, p.happened ?? []);
     souls.apply(p);
     newestTo = p.to;
     played++;
@@ -84,7 +90,7 @@ const live = (address: string) => new StreamSource(address).start({
   error: (m) => (error = m),
 });
 let history = moment && new HistoryPage(moment, cam, {
-  apply: (n, r, s) => (world.apply(n, r, s), things.apply(n, r)), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
+  apply: (n, r, s, h) => (world.apply(n, r, s), things.apply(n, r), sound.part(n, r, s, h ?? [])), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
   frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
 });
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
@@ -123,6 +129,8 @@ renderer.setAnimationLoop((now) => {
     }
   }
   renderer.render(scene, cam.camera);
+  const c = cam.camera, fwd = c.getWorldDirection(new THREE.Vector3());
+  sound.frame(t, { pos: c.position.toArray(), forward: fwd.toArray(), up: c.up.toArray() });
   if (t !== null) souls.draw(t, cam.camera);
   if (history) return void (status.textContent = `${history.status()}\nbodies drawn      ${drawn}   frames a second ${fps.toFixed(0)}`);
   if (!address && !moment) return;

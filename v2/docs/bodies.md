@@ -4,8 +4,8 @@ Engine v2 T9 (#2663), contract T9 in [TRUNK.md](TRUNK.md). It fixes what a body 
 is (a claim on them), the one interface a skill touches the world through, and the code hatch's shape. Code:
 `v2/crates/replica/src/bodies.rs` and `host.rs`; the built-in skills in `v2/crates/skills`. Fixtures:
 `v2/crates/replica/fixtures/bodies/`. Checks: `crates/replica/tests/bodies.rs` and `crates/skills/tests/`. Moving
-the real walk behind the interface and handing intents back after a restart (K13, T9b) and running a hatch (F8) are
-not here. The controller (B1) is summarised under [The controller](#the-controller-b1).
+the real walk behind the interface and handing intents back after a restart (K13, T9b) are not here; running a
+hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](#the-controller-b1).
 
 ## Bodies and skills
 
@@ -158,9 +158,15 @@ sit or a rise past its act's deadline runs to its end, so a seat is never left h
     `hatch-module-not-hash`, `hatch-reads-nothing`, `hatch-steps-out-of-range`. One read is the engine's floor; SA-F9's
     gate asks for two, against hatches that bypass the closed lists. It sits on a form (`forms.<name>.hatch`), inside
     the kind's hash.
-11. **No scripting language is embedded.** F8 will run a hatch in one WASM interpreter inside `replica`, with no
-    imports, so the client and the server give the same answer. That is an interpreter of a pure function, not a
-    language a world is written in.
+11. **No scripting language is embedded.** F8 (#2823) runs a hatch in one WASM interpreter inside `replica`
+    (`wasmi`, `v2/crates/replica/src/hatch`), with no imports, so the world, the daemon and a page give the same
+    verdict at the same counted steps. That is an interpreter of a pure function, not a language a world is written
+    in. A module is refused at load by name: `hatch-module-hash-differs`, `-invalid`, `-float` (any float
+    instruction), `-imports`, `-memory` (over 1 MiB), `-shape`. It exports `memory`, an `i32` global `input` and
+    `run: (i32) -> i64`; the host writes each read at `input` as a count of i64 words and the words (a list or a
+    record flattened in order). Over its budget a call ends `hatch-over-budget`; any other fault `hatch-trapped`, in
+    that call only. The form runner binds and calls it (`bind_hatch`, `run_hatch`); a no refuses the act
+    `hatch-said-no` with its `why`. Answering a field's value is not built yet (`hatch-answer-not-built`).
 
 **Step 0.** A throwaway skill crate depending on `replica` alone, naming `sim::walk::Walker`, does not compile:
 `error[E0433]: failed to resolve: use of unresolved module or unlinked crate 'sim'`. The same crate using only
