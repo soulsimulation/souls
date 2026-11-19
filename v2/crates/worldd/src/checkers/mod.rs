@@ -11,8 +11,9 @@
 //! What the rules get from the copy: the thing as `{kind, fields}`, its fields named by its kind's `state` numbers;
 //! the body as `{effector_mm}`, the body's position less the thing's, both in their parent's frame (the effector is
 //! the body's origin until bodies have hands, T4); the moves' reach from [`Rules::moves`]; and an asker who sees all
-//! (the world). A yes candidate's `set` effects become `Change::Set`; any other effect is not prepared yet, and the
-//! candidate is `no` with `effect_unsupported`.
+//! (the world). A yes candidate's effects are bound by F2's binder, the form runner's own (`skills::form_runner`),
+//! and become its changes; an effect the binder does not bind is refused by the binder's name. In a world with bodies
+//! a form's act goes to the form runner instead (C2, `crate::acts`).
 
 use replica::effects::{Actor, Cause, Change};
 use replica::encode::Value as Cbor;
@@ -24,6 +25,7 @@ use replica::rules::json::Value;
 use replica::world_model::show;
 use sim::commit::{Checked, Checks, Verdict, off_clock};
 use sim::frozen::Publisher;
+use skills::form_runner;
 use std::cell::RefCell;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -173,39 +175,19 @@ fn thing(record: &Cbor, entry: &Value) -> Value {
     ])
 }
 
-/// A rules value as a stored field value: a flag as 0 or 1, a whole number as itself.
-fn stored(v: Option<&Value>) -> Option<Cbor> {
-    match v? {
-        Value::Bool(b) => Some(Cbor::Uint(u64::from(*b))),
-        Value::Int(n) if *n >= 0 => u64::try_from(*n).ok().map(Cbor::Uint),
-        Value::Int(n) => u64::try_from(-1 - *n).ok().map(Cbor::Nint),
-        _ => None,
-    }
-}
-
-/// The changes a yes candidate's form makes, or none if one of its effects is not a `set` this can prepare.
-fn prepare(this: Id, entry: &Value, form: &str) -> Option<Vec<Change>> {
-    let f = entry.get("forms")?.get(form)?;
-    let effects = f.get("effects").and_then(Value::arr).unwrap_or(&[]);
-    effects
-        .iter()
-        .map(|e| {
-            if e.get("change").and_then(Value::str) != Some("set") {
-                return None;
-            }
-            let name = e.get("field").and_then(Value::str)?;
-            let n = match entry.get("state")?.get(name)?.get("n")? {
-                Value::Int(n) => u64::try_from(*n).ok()?,
-                _ => return None,
-            };
-            Some(Change::Set {
-                node: this,
-                field: n,
-                to: stored(e.get("to"))?,
-                by: None,
-            })
+/// The changes a yes candidate's form makes: its effects as F2's binder binds them (`skills::form_runner`), the one
+/// binding the form runner uses, or the binder's refusal by name.
+fn prepare(this: Id, entry: &Value, form: &str) -> Result<Vec<Change>, &'static str> {
+    let effects = form_runner::bind_effects(entry, form).map_err(|r| r.name)?;
+    Ok(effects
+        .into_iter()
+        .map(|e| Change::Set {
+            node: this,
+            field: e.field,
+            to: e.to,
+            by: None,
         })
-        .collect()
+        .collect())
 }
 
 /// Checks one candidate on `copy`.
@@ -250,13 +232,13 @@ fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checke
     let verdict = decide_parts(Some(&rules.kinds), Some(&act), Some(&state), Some(&asker));
     match verdict.get("verdict").and_then(Value::str) {
         Some("yes") => match prepare(c.this, entry, &c.form) {
-            Some(changes) => Checked {
+            Ok(changes) => Checked {
                 verdict: Verdict::Yes,
                 node: c.this,
                 changes,
                 reads: r.reads(),
             },
-            None => no("effect_unsupported", r),
+            Err(reason) => no(reason, r),
         },
         Some("no") => no(
             verdict.get("reason").and_then(Value::str).unwrap_or("no"),

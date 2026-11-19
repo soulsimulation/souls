@@ -343,7 +343,7 @@ impl Stage {
         let endings: Vec<String> = events("souls:form-ended")
             .iter()
             .map(|v| match v.fields.get(&3) {
-                Some(Value::Text(n)) => n.as_str().to_owned(),
+                Some(Value::Bytes(n)) => String::from_utf8_lossy(n).into_owned(),
                 _ => "(unnamed)".into(),
             })
             .collect();
