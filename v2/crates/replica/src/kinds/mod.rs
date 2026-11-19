@@ -25,6 +25,9 @@
 //!
 //! - **7, geometry:** `{1: bounds_mm [width, height, depth], 2: front}`, read by [`place::Geometry`]: a thing's two
 //!   outlines and whether it has a front (E4, #2772).
+//! - **19, loose:** how long a thing of the kind lasts loose, once nobody holds or owns it (F10, #2773): `{2: µs}`, a
+//!   whole number of microseconds above zero, or `{1: 1}` (or `{}`), for ever. No section is for ever too
+//!   ([`KindDef::loose`]).
 //!
 //! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12). An
 //! authored body's resources, declared actions and models are section 13, read by [`body::Decl`] (B13).
@@ -51,6 +54,7 @@ pub const SECTION_POINTS: u64 = 5;
 pub const SECTION_SLOTS: u64 = 6;
 pub const SECTION_FORMS: u64 = 8;
 pub const SECTION_CHILDREN: u64 = 11;
+pub const SECTION_LOOSE: u64 = 19;
 
 /// What a node whose kind is not in the store is shown as.
 pub const UNKNOWN_KIND: &str = "unknown kind";
@@ -284,6 +288,8 @@ pub struct KindDef {
     pub most: BTreeMap<String, u64>,
     /// Section 7, its size and front (E4), for a kind that declares one.
     pub geometry: Option<place::Geometry>,
+    /// Section 19, how long a thing of the kind lasts loose (F10), in µs; `None` is for ever.
+    pub loose: Option<crate::time::Micros>,
 }
 
 impl KindDef {
@@ -380,6 +386,7 @@ impl Kinds {
                             links,
                             most,
                             geometry,
+                            loose,
                         } = d;
                         let def = KindDef {
                             name,
@@ -393,6 +400,7 @@ impl Kinds {
                             links,
                             most,
                             geometry,
+                            loose,
                         };
                         self.by_hash.insert(k.hash, def);
                     }
@@ -560,6 +568,7 @@ struct Sections {
     links: BTreeMap<u64, LinkType>,
     most: BTreeMap<String, u64>,
     geometry: Option<place::Geometry>,
+    loose: Option<crate::time::Micros>,
 }
 
 /// Reads and checks the sections this module knows.
@@ -894,9 +903,36 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         .get(&place::SECTION_GEOMETRY)
         .and_then(|v| place::Geometry::read(v).ok());
 
+    // Section 19 (F10): `{2: µs}` above zero, or `{1: 1}` for ever; anything else is refused by name.
+    let loose = match s.get(&SECTION_LOOSE) {
+        None => None,
+        Some(Value::Map(m)) => match (m.get(&1), m.get(&2).map(int)) {
+            (None, None) if m.is_empty() => None,
+            (Some(Value::Uint(1)), None) if m.len() == 1 => None,
+            (None, Some(Some(us))) if us > 0 && m.len() == 1 => Some(us),
+            _ => {
+                return Err(bad(
+                    "kind-loose",
+                    SECTION_LOOSE,
+                    None,
+                    "{1: 1} for ever, or {2: microseconds above zero}".into(),
+                ));
+            }
+        },
+        Some(_) => {
+            return Err(bad(
+                "kind-loose",
+                SECTION_LOOSE,
+                None,
+                "a map: {1: 1} or {2: microseconds}".into(),
+            ));
+        }
+    };
+
     Ok(Sections {
         body,
         geometry,
+        loose,
         state,
         points,
         forms,
