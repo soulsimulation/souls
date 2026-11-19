@@ -9,7 +9,8 @@ use std::time::Duration;
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::http::HeaderMap;
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 use axum::routing::get;
 use replica::effects::Actor;
@@ -65,14 +66,19 @@ async fn upgrade(
         .iter()
         .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()))
         .map(str::to_owned);
-    ws.read_buffer_size(READ_BUFFER)
+    let mut res = ws
+        .read_buffer_size(READ_BUFFER)
         .write_buffer_size(0)
         .max_write_buffer_size(64 * 1024)
         .max_message_size(MESSAGE_MOST)
         .max_frame_size(MESSAGE_MOST)
         .on_upgrade(move |socket| async move {
             serve(gw, socket, header_token, header_cursor, client).await;
-        })
+        });
+    // The socket carries an owner's private view (V13, #2745): no cache keeps any response of it.
+    res.headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    res
 }
 
 fn control(name: &str) -> Vec<u8> {
