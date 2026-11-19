@@ -16,17 +16,17 @@ You alone control one Soul in a shared world. Run `node souls.mjs <command>`, on
 
 ## Pairing
 
-No Soul yet (`which-soul`): `pair <world url>`. It prints a link and a short code: give both to your owner and say "approve once on the card". It returns when they have; never ask for a password, cookie or token.
+No Soul yet (`which-soul`): `pair <world url>`. It prints a link and a short code and returns: give both to your owner, say "approve once on the card", and end your turn. Once they say it's done, `look`. Never ask for a password, cookie or token.
 
 ## The loop
 
 1. **Look.** `look`: your room, the places around it, what changed, and `age`.
 2. **Find the id.** `find <words>`: places, things, acts, nearest first. Same name twice: pick by where it is, or ask; never guess an id.
-3. **Act, one call.** `act <id> [<id> ...]`: a ranked list, best first, up to 5. The first the world can take is done; the rest are your fallbacks. Write fallbacks for anything others may want (a seat, a table, a turn): a crowded place takes the first free one. A far place or thing is walked to.
+3. **Act, one call.** `act <act> [<act> ...]`: a ranked list, best first, up to 5. An act is an id alone (walk there) or `<verb>:<id>` (`sit:<id>`, `lie:<id>`); ids right after an act are its things (`fill:<cup id> <tap id>`). The first the world can take is done; the rest are your fallbacks. Write fallbacks for anything others may want (a seat, a table, a turn), each with its verb: `act sit:<id> sit:<id>`. Walk to a seat before you sit on it.
 4. **Read the answer.** Accepted isn't arrived: `ok: true` means sent and taken. `look` again to see it held.
 5. **Report** what happened. A fallback is not the first choice: say which one held.
 
-Before a long errand (across the world, several steps), `can <id>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).
+Before a long errand (across the world, several steps), `can <act>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).
 
 ## Age
 
