@@ -480,7 +480,23 @@ fn things_below(
     frame: Handle,
     world_shapes: bool,
     s: &mut Scene,
+    footprints: Option<&mut Vec<Surface>>,
+) -> Result<(), String> {
+    let t = s.terrain.take();
+    let r = things_below_on(tree, top, frame, world_shapes, s, footprints, t.as_ref());
+    s.terrain = t;
+    r
+}
+
+/// [`things_below`] on the terrain `t` (the scene's own is not read).
+fn things_below_on(
+    tree: &Tree,
+    top: Handle,
+    frame: Handle,
+    world_shapes: bool,
+    s: &mut Scene,
     mut footprints: Option<&mut Vec<Surface>>,
+    t: Option<&Terrain>,
 ) -> Result<(), String> {
     let mut stack = vec![top];
     while let Some(h) = stack.pop() {
@@ -492,13 +508,13 @@ fn things_below(
         if k == FLOOR
             && let Some(f) = footprints.as_deref_mut()
         {
-            match cover_of(tree, h, frame, s.terrain.as_ref())? {
+            match cover_of(tree, h, frame, t)? {
                 Some(c) => s.covers.extend(c),
                 None => {
                     let thing = n.parent().and_then(|p| tree.handle(p)).ok_or("a floor")?;
                     let x = xform_to(tree, thing, frame)?;
                     f.extend(surfaces_of(tree, h, &x)?);
-                    let steps = steps_of(tree, h, &x, &x, s.terrain.as_ref())?;
+                    let steps = steps_of(tree, h, &x, &x, t)?;
                     s.doorways.extend(steps);
                 }
             }
@@ -848,6 +864,66 @@ fn inner_steps_of(floor: Id, own: &[Surface]) -> Vec<Doorway> {
 }
 
 impl Scene {
+    /// The part of the open ground's scene (at `ground`, on its terrain `t`) that its child `c` gives: a named place's
+    /// water or outline, or everything standing in the subtree at `c`. [`Scene::of`] is these parts in the children's
+    /// order, then the ground's own doorways ([`Scene::ground_doorways`]); G3b (#3449) reads again only the parts of
+    /// the children a change touches (`crate::ground::open`).
+    pub fn of_child(
+        tree: &Tree,
+        ground: Handle,
+        c: Handle,
+        t: Option<&Terrain>,
+    ) -> Result<Scene, String> {
+        let mut s = Scene {
+            open: true,
+            ..Scene::default()
+        };
+        let n = tree.node(c).ok_or("a node that is gone")?;
+        if plain(n.kind().as_str()) == PLACE {
+            if n.fields()
+                .get(&F_PLACE_OF)
+                .is_some_and(|v| matches!(v, Value::Text(t) if t.as_str() == WATER))
+            {
+                let f = n.fields();
+                s.waters.push(Water {
+                    place: n.id(),
+                    ring: f
+                        .get(&F_OUTLINE)
+                        .map(ring_mm)
+                        .transpose()?
+                        .unwrap_or_default(),
+                    line: f.get(&F_LINE).map(ring_mm).transpose()?.unwrap_or_default(),
+                    width: f.get(&F_LINE_WIDTH).and_then(int).unwrap_or(0) * 1000,
+                    level: f.get(&F_WATER_LEVEL).and_then(int).unwrap_or(0) * 1000,
+                });
+            } else if let Some(r) = n.fields().get(&F_OUTLINE) {
+                s.areas.push(ring_mm(r)?);
+            }
+            return Ok(s);
+        }
+        let mut footprints = Vec::new();
+        things_below_on(tree, c, ground, true, &mut s, Some(&mut footprints), t)?;
+        s.footprints = footprints;
+        Ok(s)
+    }
+
+    /// The open ground's own doorways (its gates' rows), as [`Scene::of`] reads them last.
+    pub fn ground_doorways(tree: &Tree, ground: Handle) -> Result<Vec<Doorway>, String> {
+        let mut s = Scene::default();
+        doorways_at(tree, &[ground], ground, &mut s)?;
+        Ok(s.doorways)
+    }
+
+    /// Appends `part`'s geometry to this scene's, each list after its own (the terrain is kept).
+    pub fn add(&mut self, part: Scene) {
+        self.surfaces.extend(part.surfaces);
+        self.solids.extend(part.solids);
+        self.footprints.extend(part.footprints);
+        self.covers.extend(part.covers);
+        self.doorways.extend(part.doorways);
+        self.waters.extend(part.waters);
+        self.areas.extend(part.areas);
+    }
     /// The ground of node `id`: a floor (its surfaces, everything its building holds, its doorways) or the open ground
     /// (everything on it, the footprints of its buildings, its ground cover, its doorways, its waters). Anything else
     /// has no ground, and nor has a floor that is ground cover on the open ground (`ground-cover`): it is walked as the
@@ -915,34 +991,10 @@ impl Scene {
             GROUND => {
                 s.open = true;
                 s.terrain = Terrain::of(tree, id)?;
-                let mut footprints = Vec::new();
                 for &c in tree.children(h).ok_or("the ground")? {
-                    let n = tree.node(c).ok_or("a node that is gone")?;
-                    if plain(n.kind().as_str()) == PLACE {
-                        if n.fields()
-                            .get(&F_PLACE_OF)
-                            .is_some_and(|v| matches!(v, Value::Text(t) if t.as_str() == WATER))
-                        {
-                            let f = n.fields();
-                            s.waters.push(Water {
-                                place: n.id(),
-                                ring: f
-                                    .get(&F_OUTLINE)
-                                    .map(ring_mm)
-                                    .transpose()?
-                                    .unwrap_or_default(),
-                                line: f.get(&F_LINE).map(ring_mm).transpose()?.unwrap_or_default(),
-                                width: f.get(&F_LINE_WIDTH).and_then(int).unwrap_or(0) * 1000,
-                                level: f.get(&F_WATER_LEVEL).and_then(int).unwrap_or(0) * 1000,
-                            });
-                        } else if let Some(r) = n.fields().get(&F_OUTLINE) {
-                            s.areas.push(ring_mm(r)?);
-                        }
-                        continue;
-                    }
-                    things_below(tree, c, h, true, &mut s, Some(&mut footprints))?;
+                    let part = Scene::of_child(tree, h, c, s.terrain.as_ref())?;
+                    s.add(part);
                 }
-                s.footprints = footprints;
                 doorways_at(tree, &[h], h, &mut s)?;
             }
             k => return Err(format!("{k} has no ground of its own")),
