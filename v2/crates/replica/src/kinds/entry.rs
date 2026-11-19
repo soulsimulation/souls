@@ -3,7 +3,8 @@
 //! K3 reads, and the ones beside them that a part needs to be named by its meaning:
 //!
 //! - **1** kind, **2** owner;
-//! - **3** state, numbered by each field's `n`: `{1: name, 2: type, 3: default, 4: audience rule}` (5: an enum's values);
+//! - **3** state, numbered by each field's `n`: `{1: name, 2: type, 3: default, 4: audience rule}` (5: an enum's values;
+//!   6: a list's most records or a text's most bytes; 7: a list's record fields, `{1: name, 2: type, 5: values}`);
 //! - **4** links, numbered by each type's `n`: `{1: name, 2: from, 3: most, 4: most_per}`;
 //! - **5** points, numbered 1, 2, ... in the file's order: `{1: name, 2: at_mm, 3: role, 4: yaw_mdeg}`, and for a
 //!   `joint` (a connector) `5: connector kind, 6: the kind it mates with`;
@@ -120,11 +121,32 @@ fn name(n: &str) -> Result<String, String> {
 
 fn state_field(n: &str, f: &Value) -> Result<String, String> {
     let rule = f.get("audience").and_then(|a| a.get("rule"));
+    // A text field with no words yet has `null` for its default: no reference, `{}`.
+    let default = match f.get("default") {
+        Some(Value::Null) if f.get("type").and_then(Value::str) == Some("text") => {
+            Some("{}".into())
+        }
+        d => d.map(diag).transpose()?,
+    };
     Ok(map(&[
         (1, Some(name(n)?)),
         (2, f.get("type").map(quoted).transpose()?),
-        (3, f.get("default").map(diag).transpose()?),
+        (3, default),
         (4, rule.map(quoted).transpose()?),
+        (5, f.get("values").map(diag).transpose()?),
+        (6, f.get("most").map(diag).transpose()?),
+        (
+            7,
+            f.get("of").map(|o| in_order(o, record_field)).transpose()?,
+        ),
+    ]))
+}
+
+/// A list record's field: `{1: name, 2: type, 5: values}` (F11, #2774).
+fn record_field(n: &str, f: &Value) -> Result<String, String> {
+    Ok(map(&[
+        (1, Some(name(n)?)),
+        (2, f.get("type").map(quoted).transpose()?),
         (5, f.get("values").map(diag).transpose()?),
     ]))
 }
