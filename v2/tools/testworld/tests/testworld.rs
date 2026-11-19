@@ -285,3 +285,57 @@ fn a4_twelve_doors_shut_and_ten_thousand_things_clear_of_doorways_aisles_and_the
     }
     assert_eq!(boxes, 10_000);
 }
+
+#[test]
+fn b17_a3_the_yard_holds_two_frames_on_the_stand_and_four_beams_and_the_site_is_clear() {
+    let w = generate(1, 0).unwrap();
+    let im = load(&w.text).expect("loads through commit, T2's check");
+    for r in count(&im).0 {
+        assert_eq!(r.tree, r.bake, "{}", r.what);
+    }
+    assert!(im.notes.is_empty(), "{:?}", im.notes);
+
+    // The stand in the yard; a frame in each of its two slots, standing (no turn), at the slot's height.
+    let stand = im.nodes["yard-stand"];
+    assert_eq!(kind(&im, stand), "mars:frame_stand");
+    assert_eq!(
+        rows(node(&im, "yard-stand").fields().get(&F_SLOTS)).len(),
+        2
+    );
+    for (k, key) in ["yard-frame-1", "yard-frame-2"].iter().enumerate() {
+        let f = node(&im, key);
+        assert_eq!(kind(&im, im.nodes[*key]), "mars:rack_upright");
+        assert_eq!((f.parent(), f.slot()), (Some(stand), Some(k as u64 + 1)));
+        let p = world_of(&im, im.nodes[*key]).unwrap();
+        println!("{key}: parent the stand, slot {}, at {p:?}", k + 1);
+        assert_eq!(p.y, STAND_SLOT_Y * 1000);
+    }
+    // Four beams lying loose in the yard: children of the ground, in no slot.
+    let yard = bbox(&rows(node(&im, "yard").fields().get(&F_OUTLINE)));
+    let site = bbox(&rows(node(&im, "site").fields().get(&F_OUTLINE)));
+    for k in 1..=4 {
+        let key = format!("yard-beam-{k}");
+        let b = node(&im, &key);
+        assert_eq!(kind(&im, im.nodes[&key]), "mars:rack_beam");
+        assert_eq!(b.slot(), None);
+        let p = world_of(&im, im.nodes[&key]).unwrap();
+        let (x, z) = (p.x / 1000, p.z / 1000);
+        assert!(
+            x > yard.0 && x < yard.2 && z > yard.1 && z < yard.3,
+            "{key} in the yard"
+        );
+    }
+    // The site, 25 m from the yard, holds nothing: no thing of the world stands inside it.
+    let centre = |b: (i64, i64, i64, i64)| ((b.0 + b.2) / 2, (b.1 + b.3) / 2);
+    let (yc, sc) = (centre(yard), centre(site));
+    println!("yard centre {yc:?}, site centre {sc:?}, site {site:?}");
+    assert_eq!((sc.0 - yc.0, sc.1 - yc.1), (25_000, 0));
+    for (key, id) in &im.nodes {
+        let Some(p) = world_of(&im, *id) else {
+            continue;
+        };
+        let (x, z) = (p.x / 1000, p.z / 1000);
+        let inside = x > site.0 && x < site.2 && z > site.1 && z < site.3;
+        assert!(!inside || key == "site", "{key} stands in the build site");
+    }
+}

@@ -787,7 +787,8 @@ pub struct Effect {
 }
 
 impl Effect {
-    fn read(v: Value) -> R<Effect> {
+    /// One entry from its value (a history bundle's records are entries, V4).
+    pub(crate) fn read(v: Value) -> R<Effect> {
         let mut r = Rec::of(v, "an effect")?;
         let envelope = Envelope {
             sequence: read_uint(&r.take(1, "an effect")?, "a sequence")?,
@@ -1542,6 +1543,7 @@ impl State {
                 self.nodes.retain(|id, _| !gone.contains(id));
                 self.links
                     .retain(|_, l| !gone.contains(&l.ends[0]) && !gone.contains(&l.ends[1]));
+                self.timers.retain(|_, t| !gone.contains(&t.node));
             }
             Change::Reparent { node, from, pose } => {
                 own.check(*node)?;

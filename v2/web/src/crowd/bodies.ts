@@ -23,6 +23,17 @@ export async function loadCrowd(base: string, capacity = 1024): Promise<Crowd> {
   return new Crowd(await Promise.all(BODIES.map(([name, mesh, clips]) => loadModel(name, base + mesh, base + clips, CLIPS))), capacity);
 }
 
+/** The crowd with one body kind someone authored (B13, #2744): `entry` is the importer's `<name>.json` under `base`,
+ *  naming the kind's full model (its own clips) and its simple model (paths from the entry's folder), the simple one
+ *  drawn as the farthest level. */
+export async function loadKind(base: string, entry: string, capacity = 1024): Promise<Crowd> {
+  const r = await fetch(base + entry);
+  if (!r.ok) throw new Error(`${entry}: ${r.status}`);
+  const k = (await r.json()) as { kind: string; full: string; simple: string; clips: string[] };
+  const clips = ['Idle', 'Walk'].filter((c) => k.clips.includes(c)), at = base + entry.slice(0, entry.lastIndexOf('/') + 1);
+  return new Crowd([await loadModel(k.kind, at + k.full, at + k.full, clips, at + k.simple)], capacity);
+}
+
 const hash = (s: string) => {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);

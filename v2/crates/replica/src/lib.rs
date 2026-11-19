@@ -4,16 +4,22 @@
 // No float in a verdict (K14, #2648; v2/tools/arch/README.md): a module of drawing helpers allows it by name.
 #![deny(clippy::float_arithmetic)]
 
+pub mod activity;
 pub mod apply;
 pub mod audience;
 pub mod bodies;
 pub mod directory;
 pub mod durability;
+pub mod edit;
 pub mod effects;
 pub mod encode;
+pub mod facts;
+pub mod group;
 pub mod hash;
+pub mod history;
 pub mod host;
 pub mod ids;
+pub mod index;
 pub mod intent_decode;
 pub mod intents;
 pub mod kinds;
@@ -23,11 +29,15 @@ pub mod query;
 pub mod read;
 pub mod refusals;
 pub mod rules;
+pub mod sky;
 pub mod speech;
 pub mod stream;
+pub mod sync;
 pub mod time;
+pub mod timed;
 pub mod tree;
 pub mod views;
+pub mod walk;
 pub mod who_may;
 // R1's bindings import wasm-bindgen's glue, so the checker (T10, no imports) leaves them out.
 #[cfg(all(target_arch = "wasm32", not(feature = "checker")))]

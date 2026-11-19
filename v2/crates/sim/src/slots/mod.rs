@@ -154,9 +154,9 @@ impl Slots {
     /// holds there. None for a frame with no slot, or an empty one.
     pub fn occupant(&self, tree: &Tree, at: Frame) -> Option<Id> {
         let slot = at.slot?;
-        self.seats
+        self.places
             .get(&at.node)
-            .filter(|s| s.seat.slot == slot)
+            .filter(|s| s.place.slot == slot)
             .and_then(|_| self.holder(at.node))
             .or_else(|| in_slot(tree, at.node, slot))
     }
