@@ -21,6 +21,10 @@ import { arrive } from '../worlds/arrive.ts';
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
 const address = new URLSearchParams(location.search).get('stream');
+// C1 (#3365): `?world=<name>` names a placed world instead: its `views/world.json` (under `?worlds=`, default `./w/`)
+// gives its stream's folder and its history's, both relative to the world's own folder.
+const worldName = new URLSearchParams(location.search).get('world');
+let worldHistory: string | null = null;
 const moment = readMoment(location.hash); // V9: a link to a moment opens history
 const q = new URLSearchParams(location.search), token = new URLSearchParams(location.hash.slice(1)).get('token'); // V13
 if (token) window.history.replaceState(null, '', location.pathname + location.search); // the token leaves the address
@@ -79,7 +83,6 @@ addEventListener('resize', resize);
 resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
-const worldName = new URLSearchParams(location.search).get('world');
 const firstFrame = arrive(worldName, status);
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
@@ -95,13 +98,26 @@ const live = (address: string) => new StreamSource(address).start({
   },
   error: (m) => (error = m),
 });
+/** A placed world's stream and history folders, from its `world.json`. */
+async function resolveWorld(name: string, root: string, get = fetch): Promise<{ stream: string; history: string }> {
+  const base = new URL(`${root.replace(/\/?$/, '/')}${encodeURIComponent(name)}/`, location.href);
+  const res = await get(new URL('views/world.json', base).href);
+  if (!res.ok) throw new Error(`world ${name}: world.json ${res.status}`);
+  const j = (await res.json()) as { stream?: string; history?: string };
+  if (typeof j.stream !== 'string') throw new Error(`world ${name}: world.json names no stream`);
+  return { stream: new URL(j.stream.replace(/\/?$/, '/'), base).href, history: new URL(j.history ?? 'history/', base).href };
+}
 let history = moment && new HistoryPage(moment, cam, {
   apply: (n, r, s, h) => (world.apply(n, r, s), things.apply(n, r), sound.part(n, r, s, h ?? [])), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
   frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
 });
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
-else if (!address) worldName || (status.textContent = 'no stream: open this page with ?stream=<the stream directory>');
-else (live(address), near?.start({ pointer: () => {}, part: (p) => world.apply([], [], p.samples), error: (m) => (error = m) }));
+else if (address) (live(address), near?.start({ pointer: () => {}, part: (p) => world.apply([], [], p.samples), error: (m) => (error = m) }));
+else if (worldName) resolveWorld(worldName, new URLSearchParams(location.search).get('worlds') ?? './w/').then(
+  (w) => ((worldHistory = w.history), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, stream: w.stream, worldHistory } }), live(w.stream)),
+  (e) => (error = String(e)),
+);
+else status.textContent = 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>';
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
@@ -140,7 +156,7 @@ renderer.setAnimationLoop((now) => {
   sound.frame(t, { pos: c.position.toArray(), forward: fwd.toArray(), up: c.up.toArray() });
   if (t !== null) souls.draw(t, cam.camera);
   if (history) return void (status.textContent = `${history.status()}\nbodies drawn      ${drawn}   frames a second ${fps.toFixed(0)}`);
-  if (!address && !moment) return;
+  if (!address && !moment && !worldName) return;
   status.textContent = t === null || worldNow === null
     ? `waiting for the stream${error ? `\n${error}` : ''}`
     : `behind the world  ${secs(worldNow - t)} s   (${ck.state}, ×${ck.rate.toFixed(3)})\n`

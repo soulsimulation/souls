@@ -6,12 +6,13 @@
 //! south room above (r1b), whose only door it is. The square: 60 m round the origin, its 16 m squares' lines at x and
 //! z = 0 and ±16 m.
 
-use super::{Guard, Who, check, guard};
+use super::{Guard, Known, Who, check, check_on, guard, guard_on};
 use crate::ground::exits;
 use crate::ground::scene::{F_SLOTS, F_SOLIDS};
 use crate::ground::{HUMAN_RADIUS, Scene, Turn, cut_floor};
-use crate::links::{Building, F_STAIRS, Kind};
+use crate::links::{Building, Doors, F_STAIRS, Kind};
 use crate::routes::{CLIMB, HANDS};
+use crate::walk::town::Town;
 use replica::edit::{BURIES, CUTS_OFF, IN_USE, Unsafe, Use};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, TransferRec,
@@ -20,7 +21,7 @@ use replica::effects::{
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Hash, Id, Purpose, Scope};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
-use replica::tree::Tree;
+use replica::tree::{Rules, Tree};
 use replica::world_model::Audience;
 use std::collections::BTreeMap;
 
@@ -55,6 +56,7 @@ struct W {
     building: Id,
     next: u64,
     minted: u64,
+    rules: Rules,
 }
 
 fn world() -> W {
@@ -86,6 +88,7 @@ fn world() -> W {
         tree: imp.tree,
         next,
         minted: 5_000,
+        rules: imp.rules,
     }
 }
 
@@ -279,10 +282,24 @@ impl W {
         self.check_part(&self.part(actor, changes), bodies)
     }
 
-    /// The rule on `p`, after checking that each standing Soul of the fixture stands on ground before it.
+    /// The town of the world as it stands, for the guard that cuts only what a change can affect (G2b, #3488).
+    fn town(&self) -> Town {
+        let doors = Doors::new(self.header.clone(), self.rules.clone(), self.next);
+        Town::new(self.tree.frozen(), self.ground, doors).expect("the town")
+    }
+
+    /// The rule on `p`, after checking that each standing Soul of the fixture stands on ground before it; the guard
+    /// on the town (G2b) gives the same verdict as the whole world's.
     fn check_part(&self, p: &Part, bodies: &[Who]) -> (Guard, Vec<Unsafe>) {
         let (g, v) =
             check(&self.tree, &self.header, Some(self.ground), p, bodies).expect("checked");
+        let t = self.town();
+        let (_, on) =
+            check_on(&self.tree, &self.header, p, bodies, &Known::of(&t)).expect("checked");
+        assert_eq!(
+            on, v,
+            "G2b: the guard on the town judges as the whole world's"
+        );
         for w in bodies {
             if w.pose.frame.slot.is_none()
                 && w.crossing.is_none()
@@ -523,6 +540,12 @@ fn a5_the_verdict_is_taken_on_the_commit_tick() {
     };
     let v = g.judge(&[walked]);
     print("A5 judged at commit", &v);
+    let t = w.town();
+    let on = guard_on(&w.tree, &w.header, &p, &Known::of(&t)).expect("checked");
+    assert_eq!(
+        (on.judge(&[soul]), on.judge(&[walked])),
+        (vec![], v.clone())
+    );
     assert_eq!(v.len(), 1);
     assert_eq!((v[0].name, v[0].soul), (CUTS_OFF, soul.soul));
 }

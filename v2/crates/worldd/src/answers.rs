@@ -363,6 +363,17 @@ pub struct Config {
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
     /// (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
+    /// Each log record once it is on the disk, input records included, in order (C1, #3365): `worldd serve`'s own
+    /// view tier and shipper read them here, off the clock thread.
+    pub synced: Option<Sender<Synced>>,
+}
+
+/// A record on the disk ([`Config::synced`]): its number in the log, its bytes, and whether it is the recorder's input
+/// record (K12) rather than a tick's part.
+pub struct Synced {
+    pub record: u64,
+    pub bytes: Vec<u8>,
+    pub input: bool,
 }
 
 /// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
@@ -388,6 +399,7 @@ impl Config {
             roots: None,
             measures: true,
             health: None,
+            synced: None,
             sky: None,
             served: None,
             text: None,
@@ -406,6 +418,8 @@ pub struct World {
     pub measures: Option<Arc<Measures>>,
     /// How this start found the world (K18c).
     pub restart: Restart,
+    /// The log's durable mark: a tier of the caller's own waits on it (C1).
+    pub durable: Durable,
     clock: Option<JoinHandle<()>>,
 }
 
@@ -1570,6 +1584,7 @@ fn answer_loop<S: Storage + 'static>(
     ticks: Receiver<Tick>,
     tier: Option<Arc<Tier>>,
     measures: Option<Arc<Measures>>,
+    synced: Option<Sender<Synced>>,
     served: Option<crate::views::served::Feed>,
     mut follow: Option<Offer>,
 ) {
@@ -1579,6 +1594,7 @@ fn answer_loop<S: Storage + 'static>(
             m.queues[measures::LOG].enter(k, t.handed.unwrap_or_else(measures::steady_us));
         }
         let mut last = None;
+        let mut appended = Vec::new();
         let mut durable_part = None;
         for (k, bytes) in [t.inputs, t.record].into_iter().enumerate() {
             let Some(bytes) = bytes else { continue };
@@ -1586,6 +1602,7 @@ fn answer_loop<S: Storage + 'static>(
             let part = k == 1;
             let copy = (part && tier.is_some()).then(|| bytes.clone());
             let kept = (part && follow.is_some()).then(|| bytes.clone());
+            let sent = synced.as_ref().map(|_| bytes.clone());
             if part && served.is_some() {
                 durable_part = Some(bytes.clone());
             }
@@ -1597,6 +1614,13 @@ fn answer_loop<S: Storage + 'static>(
                     }
                     if let (Some(f), Some(b)) = (follow.as_mut(), kept) {
                         f(n, b);
+                    }
+                    if let Some(b) = sent {
+                        appended.push(Synced {
+                            record: n,
+                            bytes: b,
+                            input: k == 0,
+                        });
                     }
                 }
                 Err(e) => {
@@ -1610,6 +1634,11 @@ fn answer_loop<S: Storage + 'static>(
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
+        }
+        if let Some(tx) = &synced {
+            for s in appended {
+                let _ = tx.send(s);
+            }
         }
         if let (Some(v), Some(r)) = (&served, durable_part) {
             v.record(r);
@@ -1818,13 +1847,25 @@ pub fn start<S: Storage + 'static>(
     };
     let follow = cfg.follow.take().map(|f| f(log.durable_mark()));
     let durable = log.durable_mark();
+    let world_durable = log.durable_mark();
+    let synced = cfg.synced.take();
     let (answers, ticks) = channel();
     let answer_tier = tier.clone();
     let answer_measures = measures.clone();
     let served = cfg.served.take();
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures, served, follow))
+        .spawn(move || {
+            answer_loop(
+                log,
+                ticks,
+                answer_tier,
+                answer_measures,
+                synced,
+                served,
+                follow,
+            )
+        })
         .map_err(io)?;
     let records = found.first + found.records.len() as u64;
     let sky = Heavens::of(&world, cfg.sky.take());
@@ -1909,6 +1950,12 @@ pub fn start<S: Storage + 'static>(
                     Err(e) => eprintln!("worldd: the bodies did not start, moves are refused: {e}"),
                 }
             }
+            // The state this start resumes from, bodies included: after a kill it equals the last logged tick's (C1).
+            eprintln!(
+                "worldd: started at tick {} state {}",
+                c.tick,
+                replica::encode::to_hex(&c.state())
+            );
             // Takes one event; false once the world is to stop.
             let take = |c: &mut Clock, e: Event| -> Option<Sender<Ran>> {
                 match e {
@@ -2022,6 +2069,7 @@ pub fn start<S: Storage + 'static>(
         tier,
         measures,
         restart,
+        durable: world_durable,
         clock: Some(clock),
     })
 }
