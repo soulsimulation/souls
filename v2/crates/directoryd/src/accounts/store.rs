@@ -77,6 +77,10 @@ impl Store {
              CREATE TABLE IF NOT EXISTS mailbox_v1(id TEXT PRIMARY KEY, soul TEXT NOT NULL, text TEXT NOT NULL,
                at INTEGER NOT NULL, state TEXT NOT NULL, outcome TEXT, closed_at INTEGER);
              CREATE INDEX IF NOT EXISTS mailbox_v1_open ON mailbox_v1(state, at);
+             CREATE TABLE IF NOT EXISTS prayers_v1(id TEXT PRIMARY KEY, soul TEXT NOT NULL, scope TEXT NOT NULL,
+               text TEXT NOT NULL, at INTEGER NOT NULL, answer TEXT, answered_at INTEGER, delivered INTEGER NOT NULL);
+             CREATE INDEX IF NOT EXISTS prayers_v1_scope ON prayers_v1(scope, at);
+             CREATE INDEX IF NOT EXISTS prayers_v1_soul ON prayers_v1(soul, at);
              COMMIT;",
         )
         .map_err(owned)?;

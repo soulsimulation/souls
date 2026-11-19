@@ -21,6 +21,13 @@
       ol { margin: 0; padding-left: 18px; }
       li.ok { color: #2f6b3a; }
       li.refused { color: #a33; }
+      #prayers ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+      #prayers li { background: #fffaf0; border: 1px solid #e3d9c2; border-radius: 6px; padding: 8px; }
+      #prayers p { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      #prayers form { display: flex; flex-wrap: wrap; gap: 6px; }
+      #prayers input { flex: 1 1 100%; }
+      #prayers .h { font-weight: 600; }
+      .refused { color: #a33; }
     </style>
   </head>
   <body>
@@ -36,6 +43,7 @@
         <label>Kind <select id="kind"></select></label>
         <button id="place" type="button">Place: click the map</button>
         <div>Drag a thing to move it. Each release sends one edit.</div>
+        <section id="prayers" aria-label="Prayers waiting for an answer"></section>
         <div id="warn"></div>
         <div>Batches, newest first</div>
         <ol id="batches"></ol>

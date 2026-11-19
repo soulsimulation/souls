@@ -29,9 +29,9 @@ step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
-# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md).
+# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md); the site's pages it serves (O23, #3324).
 # The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
-step origin-headers node --test tools/origin/origin.test.mjs
+step origin-headers node --test tools/origin/origin.test.mjs tools/origin/site.test.mjs
 # The install (O17, #2810): nothing it would write, and no unit, user or port it names, is today's system's.
 step install-apart bash tools/ops/install.sh check
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
@@ -136,7 +136,7 @@ step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p re
 # The client's library by build hash (R5, #2699): cached or downloaded, refused by name, run in a worker with a limit.
 step client-sync node --test client/src/sync/*.test.mjs
 # The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4); R5b's resync after a long cut.
-step client-daemon bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/daemon/*.test.mjs'
+step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/daemon/*.test.mjs'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
 step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
   node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs'
@@ -155,10 +155,15 @@ step client-upgrade node --test client/test/compat/*.test.mjs client/src/upgrade
 # Pairing to a served world writes the history it advertises, which `history --at` reads (R16b, #3480).
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
   node --test client/src/pair/*.test.mjs'
+# The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.
+step client-served bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
 # Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.
 step client-wake bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/wake/*.test.mjs'
+# The owner's box (W10, #2802): the page's message reaches the waiting agent, the act's phases and the close come back
+# to the owner's view socket alone, and the words are in no log, stream part or world file.
+step web-owner-box node --test web/src/owner/box.e2e.ts
 # The Soul's own schedule (R15, #2757): sent on time with no model turn, once across a kill, missed while off told.
 step client-schedule bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/schedule/*.test.mjs'
 # The MCP endpoint on v2 (R21, #3334): six tools, each answer the thin command's; 401, 405, 413; the card and page.

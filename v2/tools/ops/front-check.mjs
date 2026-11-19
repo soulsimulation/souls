@@ -15,6 +15,8 @@
 //   robots   robots.txt names the sitemap; the sitemap lists every world of the one list and no other (nor --unlisted)
 //   list     / is the one list; it shows --v2 as the new system's and --today as today's; every row opens on its system
 //   address  a forged X-Forwarded-For is never the address today's launcher keys a request on
+//   site     /changelog, /changelog.md, /v1/feed and /ops answer 200 from the new system (O23, #3324): the changelog
+//            no-cache, the feed today's {items, next}, /ops noindex with its own CSP; each answer's headers are shown
 //   poster   (asked for) --stopped, a page behind a stopped origin, shows "back in a moment" as 503 with Retry-After
 // --map reaches a name at another address (a local stand-in); redirects are still checked against the names.
 // Read-only: GETs and HEADs, plus a POST to an unknown path that each older domain redirects before anything reads it.
@@ -22,7 +24,7 @@
 import { fileURLToPath } from 'node:url';
 import { rows, signInHref } from '../../web/src/home/list.ts';
 
-export const POINTS = ['worlds', 'aliases', 'domains', 'sign-in', 'headers', 'robots', 'list', 'address'];
+export const POINTS = ['worlds', 'aliases', 'domains', 'sign-in', 'headers', 'robots', 'list', 'address', 'site'];
 const UA = 'souls-front-check';
 const FORGED = '203.0.113.77';   // a documentation address (RFC 5737): no visitor has it
 const COUNTER = 'goatcounter.com';
@@ -135,6 +137,17 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
       const r = await get(`${pub}/__sim/whoami`, { headers: { 'x-forwarded-for': FORGED } }), a = r.ok ? (await r.json()).address : (await r.body?.cancel(), null);
       seen.push(`address: with X-Forwarded-For ${FORGED} the launcher keyed ${a}`);
       if (!a || a === FORGED) bad('address', `the launcher keyed ${a ?? 'nothing'} with a forged X-Forwarded-For`);
+    },
+    site: async () => {
+      const shown = ['cache-control', 'content-type', 'x-robots-tag', 'content-security-policy'];
+      for (const [path, accept, want] of [['/changelog', 'text/html', (r, b) => /no-cache/.test(r.headers.get('cache-control') ?? '') && /<html/i.test(b)],
+        ['/changelog.md', 'text/markdown', (r, b) => /no-cache/.test(r.headers.get('cache-control') ?? '') && /^#/m.test(b)],
+        ['/v1/feed', 'application/json', (r, b) => { try { const d = JSON.parse(b); return Array.isArray(d.items) && 'next' in d; } catch { return false; } }],
+        ['/ops', 'text/html', (r) => /noindex/.test(r.headers.get('x-robots-tag') ?? '') && /script-src 'sha256-/.test(r.headers.get('content-security-policy') ?? '')]]) {
+        const r = await get(pub + path, { headers: { accept } }), body = await r.text();
+        seen.push(`site: ${path} -> ${r.status} ${system(r)}; ${shown.map((h) => `${h}: ${(r.headers.get(h) ?? 'none').slice(0, 60)}`).join('; ')}`);
+        if (r.status !== 200 || system(r) !== 'v2' || !want(r, body)) bad('site', `${path} answered ${r.status} from ${system(r)}, want 200 from v2 in today's shape`);
+      }
     },
     poster: async () => {
       if (!stopped) return bad('poster', 'name a page behind a stopped origin with --stopped');
