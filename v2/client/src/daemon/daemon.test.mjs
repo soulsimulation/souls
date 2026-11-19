@@ -333,6 +333,21 @@ test('R8 A3, A4: checked on the copy and at send time; only a current copy refus
   if (process.env.R8_REPORT) console.log(JSON.stringify({ can: marked, stop, two, blind: { ok: blind.ok, checked: blind.checked, gap: blind.gap }, basis: later.basis, at: later.at }));
 });
 
+test('#3346: answers that share a version are counted as seen, so a resume gives none of them twice', async () => {
+  // The lamp on (a new version), then three refusals at that same version; every answer taken.
+  const acts = [];
+  for (let k = 0; k < 4; k++) acts.push((await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP })).sequence);
+  await waitFor(async () => { const s = await status(); return acts.every((q) => !s.unanswered.includes(q)); });
+  const versions = new Set((await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer' && acts.includes(e.sequence)).map((e) => e.version));
+  assert.equal(versions.size, 1, `the four answers at one version: ${[...versions]}`);
+  const { resumed } = await status();
+  relay.cut();
+  await waitFor(async () => { const s = await status(); return s.connected && s.resumed > resumed; });
+  await sleep(300);
+  const again = (await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer' && acts.includes(e.sequence));
+  assert.deepEqual(again, [], 'no answer given twice');
+});
+
 test('A4: the token is in no output, argument, environment variable or file but credentials.json', async () => {
   const { pid } = await status();
   const args = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' }).stdout;

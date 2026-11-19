@@ -29,7 +29,9 @@
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
 //       intent's basis is the version the model was last shown, not the send-time version.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
-//   gateway replays what it kept after it). A socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM build (`wire*`).
+//   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
+//   socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM
+//   build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
 //   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
@@ -190,6 +192,7 @@ function syncAnswer(sock, n, refused, bytes) {
   // A refresh (R7) brings the copy current for an answer; the stream's cursor stays the last frame it was given.
   if (done.kind === 'refresh') return;
   state.cursor = copyVersion; // the stream carries on from the version the hashes are at
+  state.seen = null; // no frame of it applied: the gateway's default
   save();
   syncs.push(done);
   if (syncs.length > SYNCS_KEPT) syncs.shift();
@@ -216,7 +219,7 @@ function connect() {
     try {
       if (step === 'hello') {
         counts.build = wire.wireWorldBuild(bytes);
-        sock.send(wire.wireSignIn(seat.token, state.cursor ? unhex(state.cursor) : new Uint8Array()));
+        sock.send(wire.wireSignIn(seat.token, state.cursor ? unhex(state.cursor) : new Uint8Array(), state.seen ?? undefined));
         step = 'outcome';
         return;
       }
@@ -233,7 +236,9 @@ function connect() {
         return;
       }
       if (kind === 'sync') { syncAnswer(sock, Number(a), b, bytes); return; }
-      if (b !== '-') state.cursor = b;
+      // The frames applied at the cursor's version (#3346): a refusal does not move the version, so on a resume the
+      // gateway replays those at the cursor after the ones counted here, and none twice.
+      if (b !== '-') { state.seen = b === state.cursor ? (state.seen ?? 1) + 1 : 1; state.cursor = b; }
       if (a !== '-') {
         const s = Number(a);
         const k = state.unanswered.indexOf(s);
