@@ -1,0 +1,148 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:rail_wagon (core/rail-wagon@1, 4 placed): six seats; it goes where the locomotive pulls it.",
+ "cases": [
+  {
+   "name": "rail_wagon_two_board",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "b2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:rail_wagon"
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "bench_1"
+      }
+     },
+     "receipt": "rrail_wagon_t0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "bench_1"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "bench_1"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rrail_wagon_t1",
+     "expect": {
+      "verdict": "no",
+      "reason": "slot_taken",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "board",
+      "args": {
+       "seat": "bench_2"
+      }
+     },
+     "actor": "b2",
+     "receipt": "rrail_wagon_t2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "t1",
+         "slot": "bench_2"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:boarded",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:rail_wagon",
+     "slots": {
+      "bench_1": [
+       "b1"
+      ],
+      "bench_2": [
+       "b2"
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

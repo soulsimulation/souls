@@ -18,7 +18,9 @@
 //!    `{1: newest, 2: period µs, 3: header hash, 4: newest's end µs, 5: anchor world µs, 6: anchor wall ms, 7: quiet
 //!    until µs}`, 1 and 4 once a part is written, 7 when quiet.
 //! 4. **Words never travel in parts.** A part is T6 bytes, whose text items are names only (T6 rule 10); free text is
-//!    a reference (T8, `{21: id}`). Words reach an entitled audience by another path (W4), not here.
+//!    a reference (T8, `{21: id}`). A public stream's words travel beside it, one text file per part
+//!    (`worldd::view_out` rule 10); the reader's event query ([`Player::events`]) gives the part's events, whose
+//!    references a page looks up in that file (V1b, #3361).
 //! 5. **The reader** ([`Player`]) applies parts in number order to R1's replica, refuses a part out of order by name,
 //!    and checks each carried hash. It keeps the part's motion samples, every one in entry order ([`Player::samples`]),
 //!    so a page draws a body through each of them, not only through its state after the part (V6, #2715).
@@ -333,6 +335,7 @@ pub struct Player {
     replica: Replica,
     next: u64,
     samples: Vec<HandOff>,
+    events: Vec<Value>,
 }
 
 impl Player {
@@ -342,6 +345,7 @@ impl Player {
             replica: Replica::start(header)?,
             next: 0,
             samples: Vec::new(),
+            events: Vec::new(),
         })
     }
 
@@ -356,6 +360,13 @@ impl Player {
     /// The motion samples of the part played last, every one, in entry order (V6, #2715).
     pub fn samples(&self) -> &[HandOff] {
         &self.samples
+    }
+
+    /// The event query (V1b, #3361): the named events of the part played last, in entry order, each as `{1: name, 2:
+    /// fields, 3: the node of its entry, 4: at µs, 5: the entry's sequence}`. A `souls:said` event's words are a
+    /// reference (`{21: id}`); the part's text file beside it holds the public words (`worldd::view_out`).
+    pub fn events(&self) -> &[Value] {
+        &self.events
     }
 
     /// Plays one part's file bytes: the next number only, whole or not at all.
@@ -385,6 +396,21 @@ impl Player {
             .filter_map(|c| match &c.change {
                 Change::Motion(h) => Some(*h),
                 _ => None,
+            })
+            .collect();
+        self.events = part
+            .effects
+            .iter()
+            .flat_map(|e| {
+                e.events.iter().flatten().map(|ev| {
+                    Value::Map(BTreeMap::from([
+                        (1, Value::Text(ev.name.clone())),
+                        (2, Value::Map(ev.fields.clone())),
+                        (3, e.envelope.node.to_value()),
+                        (4, int(e.envelope.at)),
+                        (5, Value::Uint(e.envelope.sequence)),
+                    ]))
+                })
             })
             .collect();
         let hash = match &sp.hash {

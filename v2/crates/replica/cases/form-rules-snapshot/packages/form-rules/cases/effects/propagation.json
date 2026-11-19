@@ -1,0 +1,188 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Cutting propagation (from #1843): a Soul with empty hands takes a cutting from the donor into the empty pot (one shoot out of the donor and into the pot, 3 to 2 and 0 to 1); a second cutting into the same pot is refused (no room) and nothing moves; the cutting is planted, using the pot's soil and water; planting again is refused; the planted pot is taken into a hand. Shoots are conserved: donor and pot hold three between them.",
+  "cases": [
+    {
+      "name": "take_cutting_plant_then_carry",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "d1",
+              "np1"
+            ]
+          },
+          "d1": {
+            "kind": "eden:cutting_donor"
+          },
+          "np1": {
+            "kind": "eden:nursery_pot"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "d1",
+            "form": "take_cutting",
+            "args": {
+              "pot": "np1"
+            }
+          },
+          "receipt": "rp1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "d1",
+                "field": "shoots",
+                "n": 1,
+                "to": 2,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "np1",
+                "field": "shoots",
+                "n": 1,
+                "to": 1,
+                "by": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:cutting_taken",
+                "node": "d1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "d1",
+            "form": "take_cutting",
+            "args": {
+              "pot": "np1"
+            }
+          },
+          "receipt": "rp2",
+          "expect": {
+            "verdict": "no",
+            "reason": "no_room",
+            "need": 2
+          }
+        },
+        {
+          "act": {
+            "this": "np1",
+            "form": "plant_cutting"
+          },
+          "receipt": "rp3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "np1",
+                "field": "planted",
+                "n": 2,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "np1",
+                "field": "supplies",
+                "n": 3,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:cutting_planted",
+                "node": "np1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:supplies_used",
+                "node": "np1",
+                "changes": [
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "np1",
+            "form": "plant_cutting"
+          },
+          "receipt": "rp4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 2
+          }
+        },
+        {
+          "act": {
+            "this": "np1",
+            "form": "take"
+          },
+          "receipt": "rp5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "np1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "d1": {
+          "kind": "eden:cutting_donor",
+          "fields": {
+            "shoots": 2
+          }
+        },
+        "np1": {
+          "kind": "eden:nursery_pot",
+          "fields": {
+            "shoots": 1,
+            "planted": 1,
+            "supplies": 0
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "np1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}

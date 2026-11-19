@@ -1,0 +1,160 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:workbench. Working, building or mending at it leaves shavings (up to 5); tidying clears them, and a clean bench may be tidied again, as a clean table may be wiped.",
+  "cases": [
+    {
+      "name": "work_at_a_clean_bench",
+      "act": {
+        "this": "t1",
+        "form": "work"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:workbench"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "build_with_shavings_about",
+      "act": {
+        "this": "t1",
+        "form": "build"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:workbench",
+            "fields": {
+              "shavings": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "repair_at_a_full_bench",
+      "act": {
+        "this": "t1",
+        "form": "repair"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:workbench",
+            "fields": {
+              "shavings": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "tidy_shavings",
+      "act": {
+        "this": "t1",
+        "form": "tidy"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:workbench",
+            "fields": {
+              "shavings": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "tidy_a_clean_bench",
+      "act": {
+        "this": "t1",
+        "form": "tidy"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:workbench"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}
