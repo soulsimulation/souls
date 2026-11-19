@@ -65,7 +65,7 @@ struct State {
     /// The newest version the world sent: the "version now" of a refusal the gateway gives itself.
     now: Option<Value>,
     /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes and the client's number.
-    syncs: HashMap<u64, (Vec<u8>, Value)>,
+    syncs: BTreeMap<u64, (Vec<u8>, Value)>,
 }
 
 impl Link {
@@ -177,7 +177,7 @@ impl Link {
     fn disconnected(&self) -> Vec<(Vec<u8>, Value)> {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.out = None;
-        s.syncs.drain().map(|(_, v)| v).collect()
+        std::mem::take(&mut s.syncs).into_values().collect()
     }
 }
 

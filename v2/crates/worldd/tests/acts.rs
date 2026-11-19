@@ -268,7 +268,7 @@ fn create(node: Id, kind: &str, parent: Id, at: Vec3) -> (Id, Change) {
 fn world() -> Replica {
     let g = ground();
     let h = header(g);
-    let mut r = Replica::start(&h.stored()).expect("a replica");
+    let mut r = Replica::start(h.stored()).expect("a replica");
     let off = |p: Vec3, dx: i64| Vec3::new(p.x + dx, 0, p.z);
     let changes = vec![
         create(w1(), WALKER, g, at1()),

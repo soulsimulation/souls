@@ -16,7 +16,7 @@
 use replica::effects::Actor;
 use sim::commit::{Outcome, commit, mark_clock_thread};
 use sim::frozen::Publisher;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -107,7 +107,7 @@ struct Run {
     /// The others' latencies, send to answer.
     others: Vec<Duration>,
     others_slowed: usize,
-    others_refused: HashMap<String, usize>,
+    others_refused: BTreeMap<String, usize>,
     flood_sent: usize,
     flood_checked: usize,
     flood_slowed: usize,
@@ -176,7 +176,7 @@ fn run(w: &mut World, flood: bool) -> Run {
         })
     });
     let expected = n + if flood { f } else { 0 };
-    let mut answered: HashMap<u64, Instant> = HashMap::new();
+    let mut answered: BTreeMap<u64, Instant> = BTreeMap::new();
     let mut r = Run {
         others_min_left: i64::MAX,
         ..Run::default()
@@ -257,7 +257,7 @@ fn runs() {
          others min left | flood sent | flood checked | flood slowed | flood wait (first, max) | flood left | rechecks |"
     );
     println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
-    let mut p99s: HashMap<&str, Vec<f64>> = HashMap::new();
+    let mut p99s: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     for repeat in 1..=REPEATS {
         for (arm, flood) in [("base", false), ("flood", true)] {
             let mut r = run(&mut w, flood);

@@ -12,7 +12,7 @@
 //! and `byTenth`, the same numbers per tenth of the agents by intended acts, busiest first
 //! (tools/playtest/eval/load.mjs's words).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -53,7 +53,7 @@ struct Schedule {
 /// Reads `loads.mjs`'s file: `# <describe line>`, then `<due ms> <agent> <kind> <verb or ->` a line.
 fn parse(text: &str) -> Result<Schedule, String> {
     let mut s = Schedule::default();
-    let (mut kinds, mut verbs) = (HashMap::new(), HashMap::new());
+    let (mut kinds, mut verbs) = (BTreeMap::new(), BTreeMap::new());
     for (n, line) in text.lines().enumerate() {
         if let Some(d) = line.strip_prefix("# ") {
             s.describe = d.to_owned();
@@ -75,7 +75,7 @@ fn parse(text: &str) -> Result<Schedule, String> {
         if s.acts.last().is_some_and(|a: &Act| a.at_ms > at_ms) {
             return Err(format!("line {}: not in time order", n + 1));
         }
-        let index = |m: &mut HashMap<String, usize>, v: &mut Vec<String>, x: &str| {
+        let index = |m: &mut BTreeMap<String, usize>, v: &mut Vec<String>, x: &str| {
             *m.entry(x.to_owned()).or_insert_with(|| {
                 v.push(x.to_owned());
                 v.len() - 1

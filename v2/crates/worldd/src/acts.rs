@@ -323,8 +323,8 @@ impl Acts {
     }
 
     /// The forms' part of a tick at world time `now`: their walks, then every timer of theirs due by `now`.
-    pub fn tick(&mut self, tree: &Tree, mut bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
-        self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
+    pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
+        self.with(tree, bodies, tick, |forms, w| {
             forms.tick(w, now);
             while let Some(t) = w.due.fire(now) {
                 forms.fire(w, &t);
