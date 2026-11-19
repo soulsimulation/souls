@@ -34,7 +34,7 @@ use serde_json::{Value as Json, json};
 use crate::accounts::{principal_text, random};
 use crate::directory::store::{R, Store, When, refuse};
 use crate::directory::{Claim, Directory};
-use crate::worlds::create::{Create, Source, create};
+use crate::worlds::create::{Create, NameRecord, Source, create};
 
 /// The list's one object.
 pub const KEY: &str = "world-list";
@@ -244,6 +244,20 @@ impl<S: Store> Worlds<S> {
         Ok(rows)
     }
 
+    /// Every world's lineage (hex) and creator (a principal's text), unlisted ones too: whom a world's prayers go to
+    /// (G11, #3335).
+    pub fn creators(&self) -> R<Vec<(String, String)>> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let rows = self.rows(&inner)?;
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let lineage = r.get("lineage")?.as_str()?.to_string();
+                Some((lineage, row_creator(r)?.to_string()))
+            })
+            .collect())
+    }
+
     /// The list (rule 1): every world's row, with whether it is awake by this machine's cached directory, and the
     /// templates a world may be made from.
     pub fn list(&self) -> R<Json> {
@@ -410,6 +424,28 @@ impl<S: Store> Worlds<S> {
         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
         Ok(row)
     }
+}
+
+/// The one creator of the world `lineage`/`zone`, as its directory record names it (G1e, #3532): its row in the list
+/// gives its name, and the name record (written once, never replaced) its creator. `None` when the list has no row
+/// for it, or the name record is not this world's.
+pub fn creator_of<S: Store>(store: &S, lineage: &[u8; 16], zone: Id) -> R<Option<Id>> {
+    let (_, rows) = read_rows(store)?;
+    let (l, z) = (to_hex(lineage), principal_text(zone));
+    let Some(name) = rows.iter().find_map(|r| {
+        (r.get("lineage")?.as_str()? == l && r.get("zone")?.as_str()? == z)
+            .then(|| r.get("name")?.as_str())
+            .flatten()
+    }) else {
+        return Ok(None);
+    };
+    Ok(match store.get(&NameRecord::key(name))? {
+        Some(o) => {
+            let rec = NameRecord::read(&o.bytes)?;
+            (rec.lineage == *lineage && rec.zone == zone).then_some(rec.creator)
+        }
+        None => None,
+    })
 }
 
 fn read_rows<S: Store>(store: &S) -> R<(String, Vec<Json>)> {

@@ -415,7 +415,8 @@ export function openSoulMemory(soulDir, { world, url = null, soul = null, name: 
           if (matches.length >= SEARCH_MAX) { more++; continue; }
           // A person's file is titled with a name a world gave them, so its title vouches for nothing.
           const where = file === consolidated ? "MEMORY.md" : relative(root, file), from = where.startsWith("people") ? section ?? "name" : [title, section].filter(Boolean).join(" / ");
-          const mine = OWN_FILES.has(where) || OWN_SECTION.test(section ?? "") || (where === "MEMORY.md" && !/untrusted/i.test(section ?? "")) || (where.startsWith("journal") && OWN_JOURNAL.test(raw) && !/untrusted/i.test(raw));
+          // A place's own line is the world's; the Soul's note under it (`  Judgment: …`, from `remember --place`) is its own.
+          const mine = OWN_FILES.has(where) || OWN_SECTION.test(section ?? "") || (where === "places.md" && /^ {2}Judgment: /.test(raw)) || (where === "MEMORY.md" && !/untrusted/i.test(section ?? "")) || (where.startsWith("journal") && OWN_JOURNAL.test(raw) && !/untrusted/i.test(raw));
           matches.push({ text: line.replace(/^[-> ]+/, ""), file: where, provenance: from, untrusted: !mine });
         }
       }
