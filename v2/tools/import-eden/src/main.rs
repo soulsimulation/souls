@@ -119,6 +119,13 @@ fn main() {
         im.notes.len(),
         im.notes.iter().take(10).collect::<Vec<_>>()
     );
+    println!(
+        "left out of a full slot ({}), each a plain child at its own place:",
+        im.left_out.len()
+    );
+    for l in &im.left_out {
+        println!("  {l}");
+    }
 
     // The ids the issue asks for, and one window.
     let t = &im.tree;
