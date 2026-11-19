@@ -780,6 +780,11 @@ impl Controller {
         self.bodies.values().map(|s| &s.moved)
     }
 
+    /// Every body the controller holds, each once: those it steps and those resting in a slot (seated, lying, rising).
+    pub fn ids(&self) -> impl Iterator<Item = Id> + '_ {
+        self.bodies.keys().chain(self.rested.keys()).copied()
+    }
+
     /// Sets one part of `body`'s input, if `driver` holds its resources (`resource-not-held`, `resource-missing`).
     pub fn set(&mut self, body: Id, driver: Driver, part: Part) -> R<()> {
         let s = self.slot(body)?;
