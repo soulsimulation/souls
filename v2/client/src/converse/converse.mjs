@@ -63,12 +63,13 @@ export function converseIntents(req, { ns, place, privateOf = () => false }) {
  * What an offer's event means for this Soul (`me`, its body's id), as an event for `wait`, or null when it does not
  * concern it. The view tier addresses an offer to the bodies asked and its decline or lapse to the opener alone
  * (`replica::activity::addressed`), so an offer that reaches this Soul and is not its own is an invitation, and a
- * decline or a lapse naming it as the opener is its answer. Field 1 is the conversation, 2 the opener.
+ * decline or a lapse naming it as the opener is its answer. Field 1 is the conversation; an offer's opener is
+ * field 5 (field 2 is its kind), while a decline or lapse names its opener in field 2.
  */
 export function offerNote(ev, me) {
   const what = OFFER_EVENTS[ev.name];
   if (!what) return null;
-  const f = ev.fields ?? {}, mine = f[2] === me;
+  const f = ev.fields ?? {}, opener = f[what === 'invited' ? 5 : 2], mine = opener === me;
   if (what === 'invited' ? mine : !mine) return null;
-  return { kind: 'conversation', what, conversation: f[1], ...(what === 'invited' ? { from: f[2] } : {}) };
+  return { kind: 'conversation', what, conversation: f[1], ...(what === 'invited' ? { from: opener } : {}) };
 }
