@@ -1616,6 +1616,7 @@ impl View<'_> {
             surfaces,
             buildings,
             ground,
+            boxes: OnceCell::new(),
         };
         crate::spots::within(&mut g, Target::new(node, at), reach, from)
     }
