@@ -314,19 +314,20 @@ impl Bodies {
         out
     }
 
-    /// Every body in id order, those the controller steps and those resting in a seat's slot (which it keeps apart),
-    /// each with its stance when in a slot.
+    /// Every body the controller holds, in id order: those it steps and those resting in a seat's slot (which it keeps
+    /// apart), a rising one included, each with its stance when in a slot.
     fn every(&self) -> Placed {
         let c = &self.runner.controller;
-        let mut out: Placed = c.bodies().map(|b| (b.id, (b.pose, None))).collect();
-        for (body, _, stance) in self.slots.seated() {
-            if let Some(b) = c.body(body)
-                && b.pose.support == Support::Slot
-            {
-                out.insert(body, (b.pose, Some(stance)));
-            }
-        }
-        out
+        c.ids()
+            .filter_map(|id| {
+                let b = c.body(id)?;
+                let stance = match b.pose.support {
+                    Support::Slot => self.slots.stance(id),
+                    _ => None,
+                };
+                Some((id, (b.pose, stance)))
+            })
+            .collect()
     }
 
     /// Where each body is now, a seated one with its stance: what a checkpoint carries (K18c, #3176).
