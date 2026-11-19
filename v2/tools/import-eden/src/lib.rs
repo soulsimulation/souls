@@ -15,6 +15,8 @@
 //!   its child: a place is found by its outline.
 //! - the terrain (N1b, #3197) is two fields of the open ground: its tile side and every tile's heights and classes,
 //!   byte for byte as exported (`F_TILE_SIZE`, `F_TILES`). `ground::scene::Terrain` reads them.
+//! - how today's page draws the world's sky (V19c, #3521) is three fields of the world node, from the facts' `sky`:
+//!   the date the sky is drawn on, the palette and the morning mist (`replica::sky::Presentation`).
 //!
 //! Positions are micrometres (the facts are whole millimetres, times 1,000); yaws become orientations only through
 //! `Quat::from_yaw_mdeg`. Human words (names) are stored by reference: the field holds the text's SHA-256, and
@@ -32,6 +34,7 @@ use replica::effects::{
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, sha256};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::sky::{Mist, Presentation};
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, End, parse_kinds, plain};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -787,6 +790,20 @@ pub fn load(text: &str) -> R<Import> {
         };
         effects.push(entry(effects.len() as u64, ends[0], vec![change]));
     }
+    // V19c (#3521): how today's page draws the world's sky, on the world node.
+    let shown = presentation(&f)?.fields();
+    if !shown.is_empty() {
+        let sets = shown
+            .into_iter()
+            .map(|(field, to)| Change::Set {
+                node: root,
+                field,
+                to,
+                by: None,
+            })
+            .collect();
+        effects.push(entry(effects.len() as u64, root, sets));
+    }
     let part_bytes = encode(&Value::Map(BTreeMap::from([
         (1, Value::Bytes(header.hash().to_bytes())),
         (
@@ -828,6 +845,53 @@ pub fn load(text: &str) -> R<Import> {
         ),
         effects,
     })
+}
+
+/// The world's sky as today's page draws it (V19c, #3521), from the facts' optional `sky`: `calendar` "MM-DD" (the
+/// date the sky is drawn on), `palette` (today's name, stored as `souls:<palette>`) and `mist` `[peak minute, half-width
+/// minutes, strength 0 to 100]` (today's morning mist). A world without `sky` gets none of them.
+fn presentation(f: &Json) -> R<Presentation> {
+    let Some(sky) = f.get("sky") else {
+        return Ok(Presentation::default());
+    };
+    let date = match sky.get("calendar").and_then(Json::str) {
+        Some(c) => {
+            let md = c
+                .split_once('-')
+                .and_then(|(m, d)| Some([m.parse().ok()?, d.parse().ok()?]));
+            Some(md.ok_or_else(|| format!("sky calendar {c:?} is not MM-DD"))?)
+        }
+        None => None,
+    };
+    let palette = match sky.get("palette").and_then(Json::str) {
+        Some(p) => {
+            Some(Name::new(&format!("souls:{p}")).ok_or_else(|| format!("sky palette {p:?}"))?)
+        }
+        None => None,
+    };
+    let mist = match sky.get("mist").map(Json::arr) {
+        Some([peak, half, strength]) => {
+            let n = |j: &Json| j.int().ok_or("sky mist: whole numbers");
+            Some(Mist {
+                peak: n(peak)? * 60_000_000,
+                half: n(half)? * 60_000_000,
+                strength: n(strength)?,
+            })
+        }
+        Some(_) => return Err("sky mist: [peak minute, half-width minutes, strength]".into()),
+        None => None,
+    };
+    let p = Presentation {
+        date,
+        palette,
+        mist,
+    };
+    // Every setting given must read back: a malformed one is refused here, not dropped by a copy.
+    let back = Presentation::read(&p.fields().into_iter().collect());
+    if back != p {
+        return Err(format!("sky settings out of range: {p:?}"));
+    }
+    Ok(p)
 }
 
 /// The open ground's fields: its terrain tiles (`F_TILE_SIZE`, `F_TILES`), byte for byte as exported, when the facts
