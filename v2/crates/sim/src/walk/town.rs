@@ -7,9 +7,10 @@
 //!   between a building and the open ground has one end on each).
 //! - **The next corner** (#3167: a fixed cost a tick). Each walker keeps a line of corners toward its leg's end: the
 //!   leg's end when a straight walk on the body's surface reaches it (N6's walk, on a copy of the body), else the
-//!   first line of the route from where it stands (on the open ground, on to the next portal the route crosses). It
-//!   moves on as each corner is reached ([`AT_CORNER`]), and a new line is searched for ([`View::search`], counted in
-//!   [`Spent`]) only for a new leg's end or node, when the walker is pushed more than [`OFF_LINE`] off it, at the end
+//!   first line of the route from where it stands (on the open ground, on to the next portal the route crosses), each
+//!   corner between its ends aimed at [`ROUND`] out from its turn (#3473). It moves on as each corner is reached
+//!   ([`AT_CORNER`]), and a new line is searched for ([`View::search`], counted in [`Spent`]) only for a new leg's
+//!   end or node, when the walker is pushed more than [`OFF_LINE`] off it, at the end
 //!   of a line that stops short of the leg's end, or when a straight walk to the next corner, checked once in
 //!   [`CHECK`] calls, is refused.
 //! - **A crossing.** At the near end: a shut door is asked to open and the opening written at the end of that tick
@@ -957,6 +958,9 @@ pub struct View<'a> {
 
 /// A corner is reached within this, µm.
 pub const AT_CORNER: i64 = 100_000;
+/// A line's corner is aimed at this far out from its turn, µm (#3473): twice [`AT_CORNER`], so the walker, turning
+/// within [`AT_CORNER`] of it for the next corner, is on the outer side of the edge it went round.
+pub const ROUND: i64 = 2 * AT_CORNER;
 /// A walker pushed further than this off the stretch of its line it walks is searched for again, µm.
 pub const OFF_LINE: i64 = 1_000_000;
 /// A straight walk to the next corner is checked once in this many of a walker's corner calls (a second at 20 ticks
@@ -1005,6 +1009,27 @@ enum Why {
     Off,
     End,
     Blocked,
+}
+
+/// A unit length for directions (x and z), in millionths.
+const UNIT: i128 = 1_000_000;
+
+/// The way out from the turn at `c` on the line `a`-`c`-`n` (x and z, [`UNIT`] long): away from the inside of the
+/// turn, where the edge it goes round lies. `None` where the line goes on straight or doubles back.
+fn outward(a: [i64; 2], c: [i64; 2], n: [i64; 2]) -> Option<[i128; 2]> {
+    let unit = |v: [i128; 2]| {
+        let l = (v[0] * v[0] + v[1] * v[1]).isqrt();
+        (l > 0).then(|| [v[0] * UNIT / l, v[1] * UNIT / l])
+    };
+    let i = unit([i128::from(c[0] - a[0]), i128::from(c[1] - a[1])])?;
+    let o = unit([i128::from(n[0] - c[0]), i128::from(n[1] - c[1])])?;
+    let v = [i[0] - o[0], i[1] - o[1]];
+    // Under a thousandth of a radian of turn, or a full turn back: no side to move out to.
+    let (l2, tiny) = (v[0] * v[0] + v[1] * v[1], (UNIT / 1_000).pow(2));
+    if l2 < tiny || l2 > 4 * UNIT * UNIT - tiny {
+        return None;
+    }
+    unit(v)
 }
 
 fn sq(v: i64) -> i128 {
@@ -1425,7 +1450,38 @@ impl View<'_> {
         }
         let mut points = vec![p];
         points.extend(corners.iter().map(|c| [c[0] * 1000, c[1] * 1000]));
+        self.round(node, &mut points);
         Ok(line(points, whole))
+    }
+
+    /// Each corner between a line's first and last point, moved [`ROUND`] out from its turn (or [`AT_CORNER`], where
+    /// that is off the surface), so a walker that reaches it and turns for the next is clear of the edge it went round
+    /// (#3473). Otherwise a square corner (N11a's steep cells, cut whole) stops a walker: it comes within
+    /// [`AT_CORNER`] of the corner, turns for the next, walks into the face beside it, and slides ever less along it.
+    fn round(&self, node: Id, points: &mut [[i64; 2]]) {
+        let Some(s) = self.surfaces.get(&node) else {
+            return;
+        };
+        let line = points.to_vec();
+        for k in 1..line.len().saturating_sub(1) {
+            let Some(u) = outward(line[k - 1], line[k], line[k + 1]) else {
+                continue;
+            };
+            let c = line[k];
+            for r in [ROUND, AT_CORNER] {
+                let o = [
+                    c[0] + (u[0] * i128::from(r) / UNIT) as i64,
+                    c[1] + (u[1] * i128::from(r) / UNIT) as i64,
+                ];
+                let frame = Frame { node, slot: None };
+                if s.place(node, frame, Vec3::new(o[0], 0, o[1]), Quat::IDENTITY)
+                    .is_ok()
+                {
+                    points[k] = o;
+                    break;
+                }
+            }
+        }
     }
 
     /// A link taken in turns as the walk reads it ([`Town::read_link`]).

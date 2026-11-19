@@ -1,5 +1,5 @@
 //! The words path (Engine v2 V1b, #3361): each `aN_` test is one acceptance box. A3 and the page's half of A4 are
-//! `v2/web/src/source/words.test.ts`, against `worldd gateway-link --www`.
+//! `v2/web/src/source/words.test.ts`, against `worldd gateway-link --www`. A turn into an activity is E26a's (#3504).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -14,10 +14,11 @@ use replica::effects::{Actor, Body, Change, Part, Refusal, read_id};
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Id, Minter, Scope, Version};
 use replica::intents::{Intent, Target};
+use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::speech::{SAID, Said};
 use replica::stream::StreamPart;
 use replica::views::{Key, Level, Redactions};
-use replica::world_model::Audience;
+use replica::world_model::{Audience, End, show};
 use sim::log::{Mem, recover};
 use sim::text::{Grade, Store};
 use worldd::answers::{self, Config};
@@ -109,8 +110,14 @@ fn dir(name: &str) -> PathBuf {
 
 /// A toggles world with a text store, followed by the view tier and a public stream writer with its text files.
 fn run(name: &str) -> Run {
+    run_with(name, |_| {})
+}
+
+/// [`run`], the world changed by `prep` before it starts.
+fn run_with(name: &str, prep: impl FnOnce(&mut toggles::World)) -> Run {
     let d = dir(name);
-    let built = toggles::World::build(1, 3, 0);
+    let mut built = toggles::World::build(1, 3, 0);
+    prep(&mut built);
     let pairs = built.pairs.clone();
     let header = built.replica.header().clone();
     let start = built.replica.tree().to_state();
@@ -382,4 +389,130 @@ fn a2_a4_public_words_beside_each_part_and_no_whisper() {
             assert!(!has(p, l), "no words in a part");
         }
     }
+}
+
+/// The ids a running world's text store holds words of, by reading its files: whether `words` is on its disk.
+fn in_store(dir: &Path, words: &str) -> bool {
+    std::fs::read_dir(dir.join("text"))
+        .unwrap()
+        .flatten()
+        .any(|e| has(&std::fs::read(e.path()).unwrap_or_default(), words))
+}
+
+/// E26a (#3504): a `say` into an activity (its target) is written in an entry of the activity's audience, heard by
+/// its members' bodies and its words kept for its members alone (A1); one by a Soul that is not a member is refused
+/// `not-a-member` and writes nothing, in the log or the store (A3); neither is in the public stream a viewer replays
+/// (A2).
+#[test]
+fn e26a_a_turn_into_an_activity_is_its_members_alone() {
+    let act = Id::new(Scope([0x5a; 16]), 1).unwrap();
+    let r = run_with("e26a", |built| {
+        let (b0, b1, lamp) = (built.pairs[0].0, built.pairs[1].0, built.pairs[0].1);
+        let tree = built.replica.tree();
+        let node = |id| tree.node(tree.handle(id).unwrap()).unwrap();
+        // A node standing for an activity (its kind is not read; the lamp's is in the header), and two members.
+        let (kind, room) = (node(lamp).kind().clone(), node(b0).parent().unwrap());
+        let create = Change::Create {
+            node: act,
+            kind,
+            pose: Pose {
+                frame: Frame {
+                    node: room,
+                    slot: None,
+                },
+                position: Vec3::new(0, 0, 0),
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: room,
+                    height: 0,
+                },
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        };
+        let member = |k, body| Change::Link {
+            link: Id::new(Scope([0x5a; 16]), k).unwrap(),
+            ty: n("souls:member"),
+            ends: [body, act],
+            owner: End::Second,
+            audience: Audience::Everyone,
+        };
+        let part = built.part(vec![
+            (room, create),
+            (act, member(2, b0)),
+            (act, member(3, b1)),
+        ]);
+        built.replica.apply(&part).expect("the activity applies");
+    });
+    let (b0, b1, b2) = (r.pairs[0].0, r.pairs[1].0, r.pairs[2].0);
+    let (turn, refused, public) = (
+        "let us keep this between us",
+        "may I listen in",
+        "good morning all",
+    );
+    let w = &r.world;
+    let (k, a) = kind(&send(
+        w,
+        &intent(b0, "eden:say", Some(act), 1, &[(1, words(turn))]),
+    ));
+    assert_eq!(k, 1, "a member's turn: a receipt, not {a}");
+    let (k, a) = kind(&send(
+        w,
+        &intent(b2, "eden:say", Some(act), 1, &[(1, words(refused))]),
+    ));
+    assert_eq!(k, 2, "a non-member's turn is refused: {a}");
+    assert!(a.contains("not-a-member"), "by name: {a}");
+    let (k, a) = kind(&send(
+        w,
+        &intent(b0, "eden:say", None, 2, &[(1, words(public))]),
+    ));
+    assert_eq!(k, 1, "a public say: a receipt, not {a}");
+    let store_dir = std::env::temp_dir().join(format!("worldd-words-{}-e26a", std::process::id()));
+    let mut turn_ref = None;
+    let (log, www) = r.end(|store, said| {
+        println!(
+            "E26a: the log holds {} utterances; the turn's audience {}'s (the activity), heard by {} bodies (both \
+             members); the public say's {:?}",
+            said.len(),
+            show(act),
+            said[0].hearers.len(),
+            said[1].audience
+        );
+        assert_eq!(said.len(), 2, "the turn and the public say: the refused turn wrote nothing");
+        assert_eq!(said[0].audience, Audience::Of(act), "A1: the activity's audience");
+        assert_eq!(said[0].hearers, [b0, b1].into(), "A1: its members' bodies");
+        assert_eq!(said[1].audience, Audience::Everyone);
+        assert_eq!(store.read(said[0].words, &[]).unwrap_err().name, "not-entitled");
+        assert_eq!(store.read(said[0].words, &[b2]).unwrap_err().name, "not-entitled");
+        assert_eq!(store.read(said[0].words, &[act]).unwrap(), turn.as_bytes());
+        turn_ref = Some(said[0].words);
+    });
+    assert!(
+        in_store(&store_dir, turn),
+        "the store holds the member's turn"
+    );
+    assert!(
+        !in_store(&store_dir, refused),
+        "A3: no word of the refused turn is kept"
+    );
+    for l in [turn, refused] {
+        assert!(!has(&log, l), "{l:?} is not in the log");
+    }
+    // The public stream a viewer reads and replays: the public say, never the turn or its reference.
+    let (text, parts, _) = stream_files(&www);
+    let all: Vec<&str> = text.iter().map(|(_, w)| w.as_str()).collect();
+    assert!(all.contains(&public), "{all:?}");
+    assert!(!all.contains(&turn) && !all.contains(&refused), "{all:?}");
+    let tr = encode(&turn_ref.unwrap().to_value()).unwrap();
+    for p in &parts {
+        assert!(
+            !p.windows(tr.len()).any(|x| x == tr),
+            "the turn's reference is in no public part"
+        );
+        assert!(!has(p, turn) && !has(p, refused));
+    }
+    println!(
+        "E26a: the public stream ({} parts) holds {all:?}: neither the turn nor the refused one",
+        parts.len()
+    );
 }

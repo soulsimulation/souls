@@ -46,8 +46,9 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
 4. **Move.** The canary world (input `canary`, default the first by name) by `deploy`: rehearsal, pin, restart, the
    canary watch, a rollback by itself on a fault. Then every other world, one at a time; then the gateway by
    `gateway-upgrade` (never in the same step as a world's deploy: the step lock); then the page (`/usr/local/lib/souls/web`).
-   A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world needs
-   its probe at `/etc/souls/probe/<world>` (T10's bytes of an act a healthy world gives a receipt). Each step is done
+   A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
+   is `/etc/souls/probe/<world>` (T10's bytes of an act a healthy world gives a receipt), which `deploy` makes from
+   the world's folder the first time ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md)). Each step is done
    once per release (`releases/<sha>/moved/`), so a second dispatch of the same commit moves nothing again.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's
@@ -75,12 +76,15 @@ and `SIM_DEPLOY_USER` (variables or secrets), as `install-v2.yml`; the machine i
 
 ## Proving it without a machine
 
-[`scratch.sh`](../tools/ops/release/scratch.sh) makes a throwaway machine in one folder (two worlds started from
-their pins, their gateways, and a `systemctl` that plays systemd's part), and is release.sh's transport for it:
+[`scratch.sh`](../tools/ops/release/scratch.sh) makes a throwaway machine in one folder (two Eden worlds seeded by
+`worldd seed`, placed as `place-world.sh` places them and served by `worldd serve` from their pins, their gateways,
+and a `systemctl` that plays systemd's part), and is release.sh's transport for it:
 
 ```sh
-cd v2 && cargo build --release -p ops -p worldd -p gatewayd -p supervisor
-bash tools/ops/release/scratch.sh up <dir> target/release
+cd v2 && cargo build --release -p worldd -p gatewayd -p supervisor -p directoryd
+cargo build --release -p ops --bin deploy --bin gateway-upgrade
+bash tools/ops/install.sh bundle <install> target/release <page dist>
+bash tools/ops/release/scratch.sh up <dir> <install> <eden facts.json> ../content/kinds
 export RELEASE_SSH="bash tools/ops/release/scratch.sh ssh" RELEASE_TARGET=<dir>
 bash tools/ops/release/release.sh bundle <out> <sha> <version> <bins> <page dist> client
 bash tools/ops/release/release.sh remote stage <out>
@@ -88,14 +92,13 @@ bash tools/ops/release/release.sh remote move <sha>
 bash tools/ops/release/scratch.sh down <dir>
 ```
 
-Its worlds serve I4's world (`worldd gateway-link`) through a build script, as O7's run does, so `<bins>` holds such a
-script as `worldd` (`scratch.sh build <dir> <label>`).
+The facts file is N1's export (`v2/tools/import-eden`). `<bins>` holds `worldd`, `gatewayd`, `deploy` and
+`gateway-upgrade`; `scratch.sh build <dir> <label> [plant|mute]` makes a `worldd` that runs the machine's, or one that
+dies when served (`plant`), or one that never serves (`mute`).
 
 ## Known limits
 
 - The workflows have not been dispatched: a new workflow runs only once it is on main, and the `scratch` and
   `production` environments wait for the owner's checklist. Every step they run was run on a scratch machine.
-- The launcher's own `worldd --dir` serves no probe yet (O7's limit), so a real world's canary fails
-  `rehearsal.no-start` until it does; the release then stops before any pin moves.
 - The client is staged, not served: serving it is R17. Nothing reads `news.jsonl` yet.
 - `install.sh apply` with an older bundle writes its own page over a released one.
