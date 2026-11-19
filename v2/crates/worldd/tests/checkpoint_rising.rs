@@ -168,10 +168,7 @@ fn a_checkpoint_taken_while_a_soul_rises_keeps_it_in_its_seat() {
     assert_eq!(ended, vec![(id(102), Ok(()))], "the rise lands");
     let stood = r.runner.controller.body(body()).expect("the body").pose;
     println!("after the restart and a rise: {stood:?}");
-    assert!(
-        matches!(stood.support, Support::Surface { .. }),
-        "stood up"
-    );
+    assert!(matches!(stood.support, Support::Surface { .. }), "stood up");
     assert!(
         (stood.position.x - seat().x).abs() < 1_000_000,
         "standing beside the chair, not at the start: {:?}",
