@@ -2,8 +2,8 @@
 //!
 //! `gatewayd --listen <addr:port> --world <local socket path> --tokens <file> --build <hex>` prints
 //! `listening <addr:port>` once it accepts sockets. The tokens file holds `<grant> <sha-256 hex> [<account>]` lines,
-//! never a token; it is read again whenever it changes (C3). View subscriptions go to the world's view tier at `--views` (default: the world's socket path with
-//! `.views`). With `--receipts <dir>` (the world's `<worlds root>/worlds/<world>/receipts`), each answered intent
+//! never a token; it is read again whenever it changes (C3). View subscriptions go to the world's view tier at
+//! `--views` (default: the world's socket path with `.views`). With `--receipts <dir>` (the world's `<worlds root>/worlds/<world>/receipts`), each answered intent
 //! is a line in `<dir>/<UTC day>.jsonl` (see `receipts.rs`). With `--view-key <file>` (64 hex digits, the key the
 //! directory signs view tokens with, V13b) a page signs in with a view token for a view socket. With `--mailbox
 //! <directory addr:port> --mailbox-key <file>`, the owner's messages reach their Souls' sockets (R13, `mailbox.rs`).
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use gatewayd::receipts::Receipts;
-use gatewayd::token::{Source, ViewKey};
+use gatewayd::token::{Source, Tokens, ViewKey};
 use gatewayd::{Gateway, mailbox, socket, stderr_log, world_link};
 use replica::encode::from_hex;
 use tokio::signal::unix::{SignalKind, signal};
@@ -57,6 +57,7 @@ async fn main() {
         );
         std::process::exit(2);
     };
+    let tokens_file = tokens.clone();
     // The tokens file is read again when it changes, so a Soul paired while the gateway runs signs in at once (C3).
     let read = Source::open(std::path::Path::new(&tokens));
     let (Ok((source, tokens)), Ok(build)) = (read, from_hex(&build)) else {
@@ -91,6 +92,16 @@ async fn main() {
     );
     tokio::spawn(gatewayd::views::run(gw.clone(), views));
     tokio::spawn(world_link::run(gw.clone(), PathBuf::from(world)));
+    // The tokens file is read again every 2 s, so a pairing or a revoke (W9, #2827) holds within seconds.
+    let reread = gw.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if let Ok(Ok(t)) = std::fs::read_to_string(&tokens_file).map(|t| Tokens::read(&t)) {
+                *reread.tokens.write().unwrap_or_else(|e| e.into_inner()) = t;
+            }
+        }
+    });
     let listener = match tokio::net::TcpListener::bind(&listen).await {
         Ok(l) => l,
         Err(e) => {

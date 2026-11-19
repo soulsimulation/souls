@@ -296,3 +296,46 @@ fn g7_a_creator_pairs_with_a_creator_scope_token() {
     a.soul = Some("soul-0123456789abcdef0123456789abcdef-0".into());
     assert_eq!(p.ask(&a, T0), Err("not-a-creator"));
 }
+
+#[test]
+fn w9_a1_the_account_lists_its_souls_and_devices_and_revokes_one() {
+    let (p, tokens) = store();
+    let Poll::Token { token, grant } = pair(&p, "acct_owner", "studio laptop", None, false, T0)
+    else {
+        panic!("a token")
+    };
+    let Poll::Token { grant: other, .. } = pair(&p, "acct_owner", "phone", None, false, T0) else {
+        panic!("a token")
+    };
+    let mut want = vec![
+        (grant.clone(), Some("studio laptop".to_string())),
+        (other.clone(), Some("phone".to_string())),
+    ];
+    want.sort();
+    assert_eq!(p.souls("acct_owner").expect("souls"), want);
+    assert_eq!(p.souls("acct_other").expect("souls"), vec![]);
+    // Another account may not revoke it.
+    assert_eq!(p.revoke("acct_other", &grant), Err("not-yours"));
+    let hash = to_hex(&sha256(token.as_bytes()));
+    assert!(std::fs::read_to_string(&tokens).unwrap().contains(&hash));
+    p.revoke("acct_owner", &grant).expect("revoked");
+    // Its hash leaves the gateway's tokens file (the gateway then refuses its next intent: gatewayd's a3 test), and
+    // no device holds it.
+    let file = std::fs::read_to_string(&tokens).unwrap();
+    assert!(!file.contains(&hash), "{file}");
+    assert!(file.contains(&other), "the other Soul keeps its token");
+    let souls = p.souls("acct_owner").expect("souls");
+    assert!(souls.contains(&(grant.clone(), None)), "{souls:?}");
+    // A revoke takes the Soul to no other device; a new pairing of it is not refused as connected.
+    assert!(matches!(
+        pair(
+            &p,
+            "acct_owner",
+            "new laptop",
+            Some(&grant),
+            false,
+            T0 + 100
+        ),
+        Poll::Token { .. }
+    ));
+}
