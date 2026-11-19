@@ -226,7 +226,7 @@ pub struct Rebuilt {
     /// The nodes whose ground the part changes.
     pub touched: BTreeSet<Id>,
     pub versions: Versions,
-    fresh: Fresh,
+    pub fresh: Fresh,
     /// Why the whole ground was built for a change on the open ground, when it was (G3b).
     pub why: Option<&'static str>,
 }
@@ -257,9 +257,10 @@ impl Rebuilt {
 
 /// A square of the open ground cut again: where it is, its dry pieces and, per piece and triangle, whether it lies
 /// on the terrain.
-type Square = ((i32, i32), Vec<Piece>, Vec<Vec<bool>>);
+pub type Square = ((i32, i32), Vec<Piece>, Vec<Vec<bool>>);
 
-enum Fresh {
+/// The ground a rebuild built: the whole, or what it cut again (read by G2's guard, G2b #3488).
+pub enum Fresh {
     Whole(Box<Assembled>),
     /// The open ground's squares cut again (G3b, #3449): each with its dry pieces and, per piece and triangle,
     /// whether it lies on the terrain; and the basis as they leave it.
@@ -270,7 +271,7 @@ enum Fresh {
 
 /// The route map, each node's surface, the buildings, the basis for a rebuild, and each square's pieces of the open
 /// ground's surface.
-type Assembled = (
+pub type Assembled = (
     Map,
     BTreeMap<Id, Surface>,
     Vec<Building>,

@@ -1,7 +1,7 @@
 //! `supervisor`: what `worldd@<world>.service` runs around a world (Engine v2 O1, #2730).
 //!
 //! ```text
-//! supervisor launch <world>     the unit's ExecStart: record the start, read the pin, run builds/<hash>/worldd
+//! supervisor launch <world>     the unit's ExecStart: record the start, read the pin, run builds/<hash>/worldd serve
 //! supervisor ready <world>      the unit's ExecStartPost (after worldd said READY=1): record that it serves
 //! supervisor exited <world>     the unit's ExecStopPost: record how it ended, from $SERVICE_RESULT and $EXIT_*
 //! supervisor health [<world>]   print the health record (every world's, without a name)
@@ -53,7 +53,8 @@ fn world_arg(args: &[String]) -> Result<World, String> {
     World::parse(args.get(2).ok_or("no world named")?)
 }
 
-/// Records the start, reads the pin and replaces this process with the build's `worldd`. Returns only on failure.
+/// Records the start, reads the pin and replaces this process with the build's `worldd serve --dir worlds/<world>` (C1,
+/// #3365: the world from its folder, behind the gateway). Returns only on failure.
 fn launch(root: &Path, world: &World) -> i32 {
     let name = world.name();
     if let Err(e) = health::record(root, &name, now_ms(), Event::Start) {
@@ -83,6 +84,7 @@ fn launch(root: &Path, world: &World) -> i32 {
     println!("launch: world {name} build {hex} (pin from the {from:?})");
     let state = root.join("worlds").join(&name);
     let err = Command::new(&path)
+        .arg("serve")
         .arg("--dir")
         .arg(&state)
         .env("WORLDD_BUILD", &hex)
