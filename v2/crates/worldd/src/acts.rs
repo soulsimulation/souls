@@ -20,6 +20,10 @@
 //!   up the tree onto the floor a body stands on ([`View::on_floor`], [`View::plan`]); its crossings are carried by
 //!   the town's links after the forms' tick (`sim::host::carry`), and the walk sees itself carried ([`F_CROSSING`]).
 //!
+//! - **Deadlines** (C20, #3469). A form's act is due when its run's steps are, from the run's start ([`limits`],
+//!   `sim::forms::span`): a walk across the town and a long pause are its own time, not the 10 s an act gets at its
+//!   arrival.
+//!
 //! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
 //! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
@@ -56,6 +60,20 @@ const MOVES: [&str; 5] = [
     include_str!("../../replica/fixtures/moves/rise.diag"),
     include_str!("../../replica/fixtures/moves/sit.diag"),
 ];
+
+/// The longest a form's walk may take, µs (C20, #3469): about 250 m at a body's free speed (1.4 m/s), most of the way
+/// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
+/// or `deadline-passed` by then.
+pub const WALK_MOST: Micros = 180_000_000;
+
+/// The runner's limits for a form's run here: the walk's [`WALK_MOST`], the rest the runner's own. A run's act is
+/// given their sum as its deadline (`sim::forms::span`).
+pub fn limits() -> Limits {
+    Limits {
+        walk: WALK_MOST,
+        ..Limits::default()
+    }
+}
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
@@ -346,7 +364,7 @@ impl Acts {
                         &entry,
                         form,
                         intent,
-                        Limits::default(),
+                        limits(),
                         now,
                     );
                 }
@@ -355,16 +373,7 @@ impl Acts {
                 let effects =
                     skills::form_runner::bind_effects_in(&entry, form, &args.things, &args.slots)?;
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
-                forms.start(
-                    w,
-                    body,
-                    *node,
-                    intent,
-                    steps,
-                    effects,
-                    Limits::default(),
-                    now,
-                )
+                forms.start(w, body, *node, intent, steps, effects, limits(), now)
             });
             match r {
                 Ok(a) => {

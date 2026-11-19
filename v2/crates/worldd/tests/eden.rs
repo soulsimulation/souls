@@ -63,15 +63,24 @@ impl Client {
             .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
             .unwrap();
         self.0.write_all(&bytes).unwrap();
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
-        let Value::Map(m) = decode(&frame).unwrap().value else {
-            panic!("a frame")
-        };
-        let Some(Value::Map(a)) = m.get(&2) else {
-            panic!("an answer")
+        // A progress answer (C20, kind 3 with the µs left) comes before the act's own answer: printed, and read past.
+        let a = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            let Value::Map(mut m) = decode(&frame).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Map(a)) = m.remove(&2) else {
+                panic!("an answer")
+            };
+            match (a.get(&3), a.get(&answers::LEFT)) {
+                (Some(Value::Uint(3)), Some(Value::Uint(left))) => {
+                    println!("{verb}: in progress, {:.1} s left", *left as f64 / 1e6);
+                }
+                _ => break a,
+            }
         };
         match (a.get(&3), a.get(&5), a.get(&4)) {
             (Some(Value::Uint(1)), Some(Value::Array(e)), _) => Ok(e
@@ -124,20 +133,24 @@ fn serve_lines(
     lineage: Scope,
 ) -> (Served, Client, PathBuf, Vec<String>) {
     let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    serve_entries(facts, &format!("{root}/content/kinds"), at, tag, lineage)
+}
+
+/// [`serve_lines`], with the entries in folder `entries`.
+fn serve_entries(
+    facts: &str,
+    entries: &str,
+    at: &str,
+    tag: &str,
+    lineage: Scope,
+) -> (Served, Client, PathBuf, Vec<String>) {
     let dir = std::env::temp_dir().join(format!("eden-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let worldd = env!("CARGO_BIN_EXE_worldd");
     let seeded = Command::new(worldd)
         .args(["seed", "--facts", facts, "--dir"])
         .arg(&dir)
-        .args([
-            "--entries",
-            &format!("{root}/content/kinds"),
-            "--souls",
-            "0",
-            "--at",
-            at,
-        ])
+        .args(["--entries", entries, "--souls", "0", "--at", at])
         .output()
         .unwrap();
     println!("seed: {}", String::from_utf8_lossy(&seeded.stdout).trim());
@@ -166,6 +179,31 @@ fn serve_lines(
     println!("join: {joined:?}");
     joined.expect("born by the entry");
     (served, soul, dir, lines)
+}
+
+/// Where the bodies stood at each tick record that moved one, from the world's log: `(tick, node, x m, z m)`.
+fn track(dir: &Path) -> Vec<(u64, Id, f64, f64)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        let Ok(Value::Map(m)) = decode(&r).map(|d| d.value) else {
+            continue;
+        };
+        let tick = match m.get(&answers::TICK) {
+            Some(Value::Uint(t)) => *t,
+            _ => 0,
+        };
+        if let Some(Value::Array(rows)) = m.get(&answers::BODIES) {
+            for (_, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                let (x, z) = (pose.position.x as f64 / 1e6, pose.position.z as f64 / 1e6);
+                out.push((tick, pose.frame.node, x, z));
+            }
+        }
+    }
+    out
 }
 
 /// Each frame `bike` was moved to, in order (B4's transfers' leaves), from the world's log.
@@ -489,12 +527,128 @@ fn c17_a3_a_soul_walks_into_the_library_and_uses_a_thing_there_by_its_own_entry(
     // The library's west rug (today's e_7cefb7c4, at (71.5, -6.3) m); the library's door at (74.0, -2.91) m.
     let rug = im.nodes["e_7cefb7c4"];
     let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "c17a3", im.nodes["world"].scope());
-    // `unroll`, within a form act's 10 s (`roll_up`'s 5 s pause after the 5.5 s walk in runs past it).
+    // `unroll`, a walk in and a 3 s pause (C20 gives `roll_up`'s 5 s pause after the walk its own time too).
     let unrolled = soul.act("eden:unroll", Some(rug), BTreeMap::new());
     println!("from outside, unroll the library's west rug: {unrolled:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
     unrolled.expect("walked indoors and used the rug through its own entry");
+}
+
+/// The entries a receipt names, from the world's log: each one's world time, its events' names, and an
+/// `act-deadline` entry's deadline (field 5).
+fn receipt_entries(dir: &Path, entries: &[u64]) -> Vec<(i64, Vec<String>, Option<u64>)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = Vec::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            if !entries.contains(&e.envelope.sequence) {
+                continue;
+            }
+            let events = e.events.unwrap_or_default();
+            let due = events.iter().find_map(|v| match v.fields.get(&5) {
+                Some(Value::Uint(d)) if v.name.as_str() == answers::ACT_DEADLINE => Some(*d),
+                _ => None,
+            });
+            let names = events.iter().map(|v| v.name.as_str().to_owned()).collect();
+            out.push((e.envelope.at, names, due));
+        }
+    }
+    out
+}
+
+/// C20 (#3469) A3: a Soul born outside the library walks across the town, 39 m as the crow flies, to the toy blocks
+/// (today's e_1b5f1fe9, at (47.3, 26.9) m) and builds with them by their own entry, `build` (its walk to `by`, a press
+/// on the top, then a pause of `pause` µs, from the entries in `entries`): the act ends `done`, after it was answered in progress at its
+/// start, and its receipt names its deadline (its start plus its steps' span), which covers the walk and the pause.
+/// The walk's time, the whole act's and the deadline's, each from the act's start.
+fn walk_across_and_build(entries: &str, pause: i64, tag: &str) -> (i64, i64, i64) {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let blocks = im.nodes["e_1b5f1fe9"];
+    let (served, mut soul, dir, _) =
+        serve_entries(&facts, entries, "74.0,-1.0", tag, im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let built = soul.act("eden:build", Some(blocks), BTreeMap::new());
+    println!("from outside the library, build with the toy blocks: {built:?}");
+    let walked = track(&dir);
+    if let (Some(a), Some(b)) = (walked.first(), walked.last()) {
+        println!("the body from {:?} to {:?}", (a.2, a.3), (b.2, b.3));
+    }
+    let entries = receipt_entries(&dir, built.as_deref().unwrap_or(&[]));
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    built.expect("walked across and built, done");
+    for (at, names, due) in &entries {
+        println!("  {at} µs: {names:?} {due:?}");
+    }
+    let named = |n: &str| entries.iter().find(|e| e.1.iter().any(|x| x == n));
+    let (start, _, due) = named(answers::ACT_DEADLINE).expect("the deadline in the receipt");
+    let due = i64::try_from(due.expect("its deadline")).unwrap();
+    let (end, _, _) = named(answers::FORM_ENDED).expect("the ending's entry");
+    let (all, left) = (end - start, due - start);
+    let walk = all - pause;
+    println!(
+        "walked {:.1} s, then the {:.0} s pause: done after {:.1} s; its deadline {:.1} s after its start",
+        walk as f64 / 1e6,
+        pause as f64 / 1e6,
+        all as f64 / 1e6,
+        left as f64 / 1e6
+    );
+    assert!(*end < due, "within its deadline");
+    (walk, all, left)
+}
+
+/// C20 (#3469) A3, the walk: across the town (over 20 s), then the toy blocks' own 20 s form, by Eden's entries as
+/// they are. Past an act's 10 s at its arrival, it ends `done`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c20_a3_a_soul_walks_across_the_town_and_uses_a_thing_by_its_form() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let (walk, all, _) =
+        walk_across_and_build(&format!("{root}/content/kinds"), 20_000_000, "c20w");
+    assert!(walk > 20_000_000, "a walk over 20 s");
+    assert!(all > 40_000_000);
+}
+
+/// Copies folder `from` into `to`, file by file.
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap() {
+        let p = e.unwrap().path();
+        let t = to.join(p.file_name().unwrap());
+        if p.is_dir() {
+            copy_dir(&p, &t);
+        } else {
+            std::fs::copy(&p, &t).unwrap();
+        }
+    }
+}
+
+/// C20 (#3469) A3, a 60 s form: the same walk, then the toy blocks' form with its pause made 60 s, a long read's length
+/// (Eden's own 60 s forms, the arcade cabinet's `play` and the desk's `write`, end `out-of-reach` and `move-unknown`
+/// before their pause on v2 today). It ends `done`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c20_a3_a_60_s_form_ends_done() {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let entries = std::env::temp_dir().join(format!("eden-c20-kinds-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&entries);
+    copy_dir(Path::new(&format!("{root}/content/kinds")), &entries);
+    let blocks = entries.join("play/toy_blocks.json");
+    let text = std::fs::read_to_string(&blocks).unwrap();
+    let long = text.replace(r#""us": 20000000"#, r#""us": 60000000"#);
+    assert_ne!(text, long, "the blocks' 20 s pause");
+    std::fs::write(&blocks, long).unwrap();
+    let (walk, all, left) = walk_across_and_build(entries.to_str().unwrap(), 60_000_000, "c20l");
+    let _ = std::fs::remove_dir_all(&entries);
+    assert!(walk > 20_000_000, "a walk over 20 s");
+    assert!(all > 80_000_000 && left > all);
 }
 
 /// Every `souls-entry/1` file under `dir`, `(kind, entry)`, as `worldd seed` reads them.

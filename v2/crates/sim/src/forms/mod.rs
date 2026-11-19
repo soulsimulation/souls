@@ -61,6 +61,11 @@
 //!   crossings are kept for the caller to carry ([`Forms::crossings`], `crate::host::carry`), so a form walks
 //!   indoors across doors and stairs.
 //!
+//! - **A run's deadline** (C20, #3469). A run's longest time is its steps' own ([`span`]): each walk's, move's or
+//!   sit's deadline as the runner sets it, each pause's length, and room for the tick that wakes each. A run is due
+//!   by its start plus that ([`Forms::due`]), so the act it carries out is given the time its walk and its own
+//!   duration take, from when it starts.
+//!
 //! Not here: accepting the intent (I4),
 //! queueing for a reserved thing (B7), things for several users, a thing made or set down where there is no slot (E4).
 
@@ -271,6 +276,8 @@ struct FormRun {
     mv: Option<Instance>,
     /// The thing it reserves and the link's id, while the link stands.
     held: Option<(Id, Id)>,
+    /// When the run is due to have ended, world time: its start plus its steps' [`span`] (C20).
+    due: Micros,
 }
 
 /// A run as its entries name it: started, and (once it ends) ended.
@@ -337,6 +344,12 @@ impl Forms {
     /// Walks in progress, stepped each tick by [`Forms::tick`].
     pub fn walking(&self) -> usize {
         self.walks.len()
+    }
+
+    /// When run `run` is due to have ended, world time (C20): its start plus its steps' [`span`]. `None` once it
+    /// ended.
+    pub fn due(&self, run: RunId) -> Option<Micros> {
+        self.runs.get(&run).map(|r| r.due)
     }
 
     /// The keys of a log, read back after a restart at `now`: every entry, in order, as [`Forms::logged`] reads it. No
@@ -619,6 +632,7 @@ impl Forms {
         if link.is_some() {
             self.reserved.insert(node, run);
         }
+        let due = now.saturating_add(span(&steps, &limits));
         self.runs.insert(
             run,
             FormRun {
@@ -630,6 +644,7 @@ impl Forms {
                 walk: None,
                 mv: None,
                 held: link.map(|l| (node, l)),
+                due,
             },
         );
         self.by_body.insert(body, run);
@@ -1015,6 +1030,26 @@ impl Forms {
         self.wake(w, run, Woke::Timer(t.id), t.due);
         true
     }
+}
+
+/// The longest a run of `steps` takes under `limits`, µs (C20, #3469): each step's own deadline as the runner sets it
+/// (a walk's [`Limits::walk`], a move's or a sit's [`Limits::step_move`]), each pause's length, and two ticks for each
+/// step and the run's end, for the wakes that end them. A run the runner leaves running ends by its own name before
+/// then (`deadline-passed`, or its walk's or move's ending).
+pub fn span(steps: &[Step], limits: &Limits) -> Micros {
+    let wakes = i64::try_from(steps.len())
+        .unwrap_or(i64::MAX)
+        .saturating_add(1)
+        .saturating_mul(limits.tick.saturating_mul(2));
+    steps
+        .iter()
+        .map(|s| match s {
+            Step::WalkTo { .. } => limits.walk,
+            Step::Move { .. } | Step::Sit { .. } => limits.step_move,
+            Step::Wait(us) => *us,
+            Step::Hand => 0,
+        })
+        .fold(wakes, i64::saturating_add)
 }
 
 /// The type of a body's link to its Soul (contract T2).

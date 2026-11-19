@@ -543,6 +543,8 @@ struct Open {
     sequence: u64,
     body: Id,
     expiry: Micros,
+    /// Its deadline, world time: set at its arrival, and for a form's act at its run's start (C20).
+    due: Micros,
     intent: Value,
     waiters: Vec<Reply>,
     stamps: Stamps,
@@ -585,6 +587,8 @@ struct Clock {
     unsealed: bool,
     checked: Vec<(Act, Checks)>,
     replies: Vec<Out>,
+    /// Progress answers (C20): sent after the tick's sync with its answers, as they are, never kept or logged.
+    progress: Vec<(Vec<Reply>, Vec<u8>)>,
     rows: Vec<Value>,
     effects: Vec<Effect>,
     parts: Vec<Arc<Part>>,
@@ -659,6 +663,36 @@ pub const FORM_ENDED: &str = "souls:act-ended";
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
 pub const MOVE_STARTED: &str = "souls:move-started";
 pub const MOVE_ENDED: &str = "souls:move-ended";
+
+/// The event of the entry a form's act writes when its run starts (C20, #3469): field 1 the body, 5 the act's
+/// deadline, world time µs (its start plus its steps' span, `sim::forms::span`). Its cause is the intent, so the
+/// act's receipt names it.
+pub const ACT_DEADLINE: &str = "souls:act-deadline";
+
+/// The answer's field of a progress answer that holds how long the act has left, µs ([`progress`]).
+pub const LEFT: u64 = 5;
+
+/// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
+/// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
+/// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, when a
+/// form's run gives its act a later deadline than the one set at its arrival.
+pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
+    let mut answer = match (Answer::Accepted {
+        actor,
+        sequence,
+        intent,
+    })
+    .to_value()
+    {
+        Value::Map(m) => m,
+        _ => BTreeMap::new(),
+    };
+    answer.insert(LEFT, Value::Uint(u64::try_from(left).unwrap_or(0)));
+    encode(&Value::Map(
+        [(1, version.clone()), (2, Value::Map(answer))].into(),
+    ))
+    .unwrap_or_default()
+}
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| Name::new("act.refused").expect("a name"))
@@ -1009,11 +1043,8 @@ impl Clock {
             verb: intent.verb.clone(),
             words: None,
         });
-        self.deadlines.open(
-            body,
-            id,
-            intent.expiry.min(now.saturating_add(self.deadline)),
-        );
+        let due = intent.expiry.min(now.saturating_add(self.deadline));
+        self.deadlines.open(body, id, due);
         self.in_flight.insert((key.clone(), sequence), id);
         self.open.insert(
             id,
@@ -1023,6 +1054,7 @@ impl Clock {
                 sequence,
                 body,
                 expiry: intent.expiry,
+                due,
                 intent: value,
                 waiters: vec![reply],
                 stamps,
@@ -1377,10 +1409,25 @@ impl Clock {
     /// an event's text is a namespaced name), 3: [x, y, z] µm,
     /// 4: the node of its frame}`, where the body stands or sits. Its cause is the intent, so the receipt finds it.
     fn note(&mut self, id: Id, event: &str, how: Option<&str>, at: Micros) {
+        self.note_with(id, event, how, None, at);
+    }
+
+    /// [`Clock::note`], with field 5 the act's deadline, world time µs, when given (C20).
+    fn note_with(
+        &mut self,
+        id: Id,
+        event: &str,
+        how: Option<&str>,
+        due: Option<Micros>,
+        at: Micros,
+    ) {
         let Some(o) = self.open.get(&id) else { return };
         let mut fields = BTreeMap::from([(1, o.body.to_value())]);
         if let Some(h) = how {
             fields.insert(2, Value::Bytes(h.as_bytes().to_vec()));
+        }
+        if let Some(d) = due.and_then(|d| u64::try_from(d).ok()) {
+            fields.insert(5, Value::Uint(d));
         }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
@@ -1495,6 +1542,7 @@ impl Clock {
             );
             match r {
                 Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), now),
+                Ok(sim::forms::Asked::Started(run)) => self.form_started(id, run, now),
                 Ok(_) => {}
                 Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
             }
@@ -1561,6 +1609,36 @@ impl Clock {
         }
         for (id, how) in self.forms.ended() {
             self.form_ended(id, how, now);
+        }
+    }
+
+    /// A form's run started (C20, #3469): its act's deadline becomes the run's own, its start plus its steps' span
+    /// (`sim::forms::span`: its walk, its moves and its pauses), written as an [`ACT_DEADLINE`] entry its receipt
+    /// names. When that is later than the deadline set at its arrival, the act is answered in progress
+    /// ([`progress`]), so the gateway waits for it rather than answering `act.timed-out` itself.
+    fn form_started(&mut self, id: Id, run: sim::forms::RunId, now: Micros) {
+        let Some(due) = self.forms.forms.due(run) else {
+            return;
+        };
+        let Some(o) = self.open.get_mut(&id) else {
+            return;
+        };
+        let (body, was) = (o.body, o.due);
+        o.due = due;
+        self.deadlines.close(body, id);
+        self.deadlines.open(body, id, due);
+        self.note_with(id, ACT_DEADLINE, None, Some(due), now);
+        if due > was
+            && let Some(o) = self.open.get(&id)
+        {
+            let frame = progress(
+                &self.version(),
+                o.actor,
+                o.sequence,
+                id,
+                due.saturating_sub(now),
+            );
+            self.progress.push((o.waiters.clone(), frame));
         }
     }
 
@@ -1788,14 +1866,15 @@ impl Clock {
         let bytes = inputs.as_ref().map_or(0, Vec::len) + record.as_ref().map_or(0, Vec::len);
         let written = u64::from(inputs.is_some()) + u64::from(record.is_some());
         let handed = mark();
-        if written > 0 || !replies.is_empty() {
+        let progress = std::mem::take(&mut self.progress);
+        if written > 0 || !replies.is_empty() || !progress.is_empty() {
             let _ = self.answers.send(Tick {
                 inputs,
                 record,
                 replies,
                 started: at[0],
                 handed,
-                bare: Vec::new(),
+                bare: progress,
             });
         }
         self.records += written;
@@ -2217,6 +2296,7 @@ pub fn start<S: Storage + 'static>(
         unsealed: true,
         checked: Vec::new(),
         replies: Vec::new(),
+        progress: Vec::new(),
         rows: Vec::new(),
         effects: Vec::new(),
         parts: Vec::new(),

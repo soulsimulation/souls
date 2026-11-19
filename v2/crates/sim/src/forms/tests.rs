@@ -391,6 +391,50 @@ fn a3_every_run_reaches_a_named_end() {
     assert_eq!(r.name, "form-running");
 }
 
+/// C20 (#3469): a run is due by its start plus its steps' span, its walk, its move and its pause each by its own
+/// deadline as the runner sets it; a run whose walk alone is past an act's 10 s ends `done` before that.
+#[test]
+fn c20_a_run_is_due_by_its_walk_and_its_own_steps_from_its_start() {
+    let (entry, form) = entries().remove(0);
+    let limits = Limits {
+        walk: 120_000_000,
+        ..Limits::default()
+    };
+    let steps = bind(&entry, &form).expect("binds");
+    let span = super::span(&steps, &limits);
+    // A walk, a press and a 2 s pause, and two ticks for each step and the end.
+    assert_eq!(
+        span,
+        limits.walk + limits.step_move + 2_000_000 + 4 * 2 * limits.tick
+    );
+    let mut b = Bench::new();
+    b.now = 5_000_000;
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 30_000_000), Vec3::ZERO);
+    let start = b.now;
+    let run = match b
+        .ask(body, node, &entry, &form, limits, intent(body, 0))
+        .expect("started")
+    {
+        Asked::Started(run) => run,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(b.forms.due(run), Some(start + span), "from its start");
+    b.run(start + span);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    println!(
+        "a 30 m walk, a press and a pause: {} after {} µs, due after {span} µs",
+        e.how.as_str(),
+        e.at - start
+    );
+    assert_eq!(e.how.as_str(), "done");
+    assert!(e.at - start > 10_000_000, "past an act's 10 s");
+    assert!(e.at < start + span, "before its due");
+    assert_eq!(b.forms.due(run), None, "ended");
+    b.clean();
+}
+
 // --- F2: the effect, once (#2767) ---------------------------------------------------------------------------------
 
 /// The `n`th intent of `body`, expiring at ten minutes, its digest its number.

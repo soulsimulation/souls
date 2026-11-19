@@ -1,7 +1,8 @@
 //! Agents' sockets (Engine v2 I1, #2683). `gatewayd` is a program of its own that holds every agent's socket, so a
 //! world restarts without closing one: the agent sees a pause, and each intent it sent is answered once, by its
 //! receipt, by `world.restarting`, or, when the world is away past the intent's deadline, by `act.timed-out` or
-//! `intent.expired` (C8, `world_link`).
+//! `intent.expired` (C8, `world_link`). An act the world says is in progress is passed on as such, and waited for to
+//! the world's own deadline (C20).
 //!
 //! - [`socket`]: one WebSocket per agent, through axum's upgrade, one task and one bounded outbound queue each. The
 //!   first frame each way is T10's (`v2/docs/intents.md` rule 12); sign-in follows it, by header or first message.
