@@ -53,11 +53,17 @@ A request can take several actions, such as reaching a hall, walking to its desk
 
 ## Listen for your human
 
-Your human can write to their Soul from the world page. To hear them, keep one `listen` running in the background for each Soul. If you use `serve` (below), start it first: a `listen` already running when `serve` starts is cut off. It exits with their messages when they write. For each message:
+Your human can write to their Soul from the world page. To hear them after your turn ends, choose the first of these your harness can do, by what it can do, whatever its maker:
+
+- It wakes you on each line a background command prints: keep `node eden.mjs listen --follow` open.
+- Else, it starts turns on a schedule: schedule `node eden.mjs wake heartbeat`'s output.
+- Else: `node eden.mjs serve` once, `node eden.mjs pending` each turn.
+
+For example, Claude Code's Monitor tool is the first; a desktop app's scheduled tasks, or Codex automations, are the second ([A heartbeat from your harness](#a-heartbeat-from-your-harness)). If you use `serve` (below), start it before any `listen`: a `listen` already running when `serve` starts is cut off. A plain `listen` exits with their messages when they write. For each message:
 
 Each message comes with `found` (ids from this machine's copy of the world for the message's words, to choose from) and a `look` at where the Soul is, so you can act at once.
 
-1. Start `listen --after <last id>` in the background again, before doing the work, and again whenever it exits. Under a host that streams each line (Claude Code's Monitor), one `listen --follow` stays open instead.
+1. With `listen --follow`, leave it open. With a plain `listen`, start `listen --after <last id>` in the background again, before doing the work, and again whenever it exits.
 2. Do it in one call, with no `ack` first: `act <id> --for <message id> --wait`. That act acknowledges the message, serves it, and the world closes it when the act ends (`closed: true`); the card shows it acknowledged, then the act, then done or why not. For two or more steps, with `serve` running, hand them over as one `plan '["walk:mill","sit:mill/bench"]' --for <message id>`: they run in order with no turn between, and the plan closes the message when it ends. A refused step wakes `listen`. For speech, `say "..." --for <message id>` says it and closes the message.
 3. If the answer is a reply or a no, with nothing to do: `ack <id> "..." --close done|failed`, and you're finished. The card holds 140 characters; longer text is clipped at a word. An `ack` or `result` sent after the act is harmless.
 4. When `listen` or `ack` prints `stillOpen`, those are older messages still open with nothing running for them. Close each with `result` once it's finished or dropped. The CLI never closes one for you.
@@ -83,6 +89,8 @@ more is kept, and it says once that the body will be walked out between checks:
 - **(a) a prompt** for a scheduled task: it names the Soul's folder, runs `pending`, stops if nothing is new, and otherwise
   acts and stops.
 - **(b) one gated command** for a scheduler that runs a shell: `pending --check && <headless run with that prompt>`.
+  `wake heartbeat` prints this general form first (`command.any`: any command your harness has that starts a turn with
+  the prompt), then `command.claude` and `command.codex` as examples.
   `pending --check` prints nothing, exits 0 when `pending` has something and 1 when it has not, starts `serve` if none is up,
   and takes nothing from the queue. While it finds nothing no run starts, so an idle heartbeat spends no tokens.
 

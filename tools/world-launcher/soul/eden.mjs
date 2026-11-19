@@ -8010,15 +8010,21 @@ independent people: near is not consent.`;
 export const guideHomeHead = (principals, gods = []) => soulHome.guideHomeHead(principals, gods, CLI);
 /** The guide a chat in this folder reads first (#3312): only what every chat needs. How to act, look, talk, remember and sit
  *  is in the skill and in `help`, read when needed. */
+/** #3379: how an agent keeps hearing its owner after its turn ends, chosen by what its harness can do, never by its vendor.
+ *  instructions.md step 4 carries the same words (soul-hear-ladder.test.mjs). */
+export const hearLadder = (cli) => `- It wakes you on each line a background command prints: keep \`${cli} listen --follow\` open.
+- Else, it starts turns on a schedule: schedule \`${cli} wake heartbeat\`'s output.
+- Else: \`${cli} serve\` once, \`${cli} pending\` each turn.`;
 export const guideText = (head) => `${head}
 
-**Start of every chat here:** \`${CLI} status\`, then keep \`${CLI} listen --follow\` running in the
-background (no background process: \`${CLI} serve\` once, \`${CLI} pending\` each turn). Answer each message in
-one call, no ack first: \`${CLI} act <id> --for <message id> --wait\`.
+**Start of every chat here:** \`${CLI} status\`. To hear your owner after a turn, the first that fits:
+${hearLadder(CLI)}
 
-A new Soul gets a character's name of its own (never the device's, the owner's or anything personal), then at once a look that suits it: \`${CLI} body look --set …\` or \`--random\`; its picture comes from the look.
+Answer each in one call, no ack first: \`${CLI} act <id> --for <message id> --wait\`.
 
-How to act, look, talk, use memory, sit, handle refusals: the \`souls\` skill, then \`${CLI} help\`.
+A new Soul: a character's own name (never the device's, the owner's or anything personal), then at once a look to suit it, \`${CLI} body look --set …\` or \`--random\`; the picture follows the look.
+
+All else: the \`souls\` skill, then \`${CLI} help\`.
 ${REPORTS ? `\nIf something didn't do what you expected: \`${CLI} note "<expected>" "<observed>"\` (optional; the client records the rest).\n` : ""}`;
 function writeGuide(name) {
   if (HOME && SEAT?.id) HOME.named(SEAT.id, name);
@@ -9157,8 +9163,9 @@ function heartbeat(argv) {
   const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
   save({ heartbeat: { every, at: now() } });
   return {
-    heartbeat: { every, folder, prompt, command: { claude: `${check} && claude -p ${shq(prompt)} --allowedTools 'Bash(node:*)'`, codex: `${check} && codex exec --skip-git-repo-check ${shq(prompt)}` } },
-    note: `(a) Schedule the prompt every ${every} minutes as a scheduled task in your harness that starts in ${folder} on this machine. (b) Where the scheduler runs a shell, schedule the command instead: it starts no run, and spends no tokens, while pending --check finds nothing. docs: /docs/run-a-soul`,
+    // #3379: the general form first (any harness); the claude and codex lines are labelled examples of it
+    heartbeat: { every, folder, prompt, command: { any: `${check} && <your harness's command that starts a turn with this prompt> ${shq(prompt)}`, claude: `${check} && claude -p ${shq(prompt)} --allowedTools 'Bash(node:*)'`, codex: `${check} && codex exec --skip-git-repo-check ${shq(prompt)}` } },
+    note: `Any command your harness has that starts a turn with this prompt, every ${every} minutes, in ${folder} on this machine. (a) As a scheduled task: schedule the prompt. (b) Where the scheduler runs a shell: schedule command.any with your harness's command in it; it starts no run, and spends no tokens, while pending --check finds nothing. command.claude and command.codex are examples for Claude Code and Codex. docs: /docs/run-a-soul`,
     ...(every >= 60 ? { silence: `The world takes the body after an hour of silence: every ${every} minutes is long enough for it to walk the Soul out of town and put it to sleep until the next act.` } : {}),
     ...(every > ACT_SECONDS_MAX / 60 ? { gap: `${every} minutes is longer than one activity (at most ${ACT_SECONDS_MAX} s): help living has the Soul chain activities, or repeat one, to cover the gap.` } : {}),
   };

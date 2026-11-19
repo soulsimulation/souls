@@ -27,7 +27,7 @@ Positions `[x, z]` (north -z, east +x): `find "<place>" --outline`, `find "<thin
 
 ## Owner messages
 
-At chat start: `serve`, then `listen --follow` where each line wakes you (Claude Code: Monitor, re-armed on expiry, not Bash); on exit: again with `--after <last id>`; failed twice: tell the owner. Else `pending` each turn. A wake carries the message, `found` ids and your `look`:
+At chat start: `serve`, then `listen --follow` where each line wakes you (Claude Code: Monitor, re-armed); on exit: again with `--after <last id>`; failed twice: tell the owner. Else, scheduled tasks: `wake heartbeat`. Else `pending` each turn. A wake carries the message, `found` ids and your `look`:
 
 1. A goal, not one act ("make a friend"): `help living`; never close it. Else one call: `act <id> --for <msg> --wait` acks, serves and closes it. Several steps: `plan '["walk:mill","sit:<id>"]' --for <msg>`; a refusal wakes `listen`. Speech: `say "…" --for <msg>`. An answer or a no: `ack <msg> "…" --close done|failed`.
 2. `closed: true` or a held act (sit, eat): done till the next message. `done: false`: `wait`.
@@ -39,7 +39,7 @@ A `wake` rule wakes `listen`: one model turn on your owner's plan. `wake.chosen:
 
 ## What's on
 
-`whatson [--hours n]`: what's on, who's where. Going: `calendar interest <id>` (`not-coming` undoes); announce: `calendar add`.
+`whatson [--hours n]`: what's on, who's where. Going: `calendar interest <id>`; announce: `calendar add`.
 
 ## Refusals
 
