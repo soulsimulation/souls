@@ -17,7 +17,8 @@ use replica::bodies::{Class, Family, Resource};
 use replica::effects::{Actor, Cause, Header, Part, fixture_bytes, read_id, schema_hash};
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Purpose, Scope, Version};
-use replica::intents::{Intent, Target};
+use replica::intents::{Fallback, Intent, Target};
+use replica::move_check::move_check;
 use replica::moves::Place;
 use replica::pose::{Frame, Quat, Vec3};
 use replica::select::{Spot, resolve};
@@ -151,8 +152,20 @@ impl Client {
     }
 
     fn send_to(&mut self, sequence: u64, verb: &str, target: Option<Target>) {
+        self.send_as(body_id(), sequence, verb, target, &[]);
+    }
+
+    /// An intent by Soul `actor`, with ranked fallbacks of `verb` on each of `fallbacks` (C14).
+    fn send_as(
+        &mut self,
+        actor: Id,
+        sequence: u64,
+        verb: &str,
+        target: Option<Target>,
+        fallbacks: &[Id],
+    ) {
         let i = Intent {
-            actor: Actor::Soul(body_id()),
+            actor: Actor::Soul(actor),
             verb: name(verb),
             target,
             parameters: BTreeMap::new(),
@@ -166,7 +179,15 @@ impl Client {
             .to_value(),
             expiry: answers::now() + 60_000_000,
             resources: Vec::new(),
-            fallbacks: Vec::new(),
+            fallbacks: fallbacks
+                .iter()
+                .map(|&t| Fallback {
+                    verb: name(verb),
+                    target: Some(Target::Node(t)),
+                    parameters: BTreeMap::new(),
+                    resources: Vec::new(),
+                })
+                .collect(),
             replaces: None,
             body: None,
         };
@@ -534,4 +555,202 @@ fn c4_a2_a_lie_on_a_bed_gets_receipts_like_a_sit() {
         "standing on the bed's stand point: {:?}",
         r.4
     );
+}
+
+fn soul(counter: u64) -> Id {
+    Id::new(Scope([7; 16]), counter).unwrap()
+}
+
+/// C14: N2's test world with its Soul (A, west of the square) and three chairs (`worldd::testbodies`), and three more
+/// Souls: E beside the chair at the square's west edge, C west of the west chair, D in the square.
+fn c14_bodies() -> Result<Bodies, replica::effects::Refusal> {
+    let mut b = worldd::testbodies::bodies()?;
+    let ground = b.pose(worldd::testbodies::body()).unwrap().0;
+    for (who, x, z) in [
+        (9_010, -26_000_000, 22_500_000),
+        (9_011, -40_000_000, 34_000_000),
+        (9_012, 5_000_000, 5_000_000),
+    ] {
+        let at = b.town.surfaces[&ground].place(
+            soul(who),
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            Vec3::new(x, 0, z),
+            Quat::IDENTITY,
+        )?;
+        b.add_body(humanoid(), at)?;
+    }
+    Ok(b)
+}
+
+/// The move a started entry says its intent took (C14): its rank and its target.
+fn took(log: &[u8], intent: Id) -> (u64, Option<Id>) {
+    for r in recover(log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+    {
+        for e in Part::read(&r).unwrap().effects {
+            if e.envelope.cause != Cause::Intent(intent) {
+                continue;
+            }
+            for ev in e.events.iter().flatten() {
+                if ev.name.as_str() == MOVE_STARTED {
+                    let Some(Value::Uint(rank)) = ev.fields.get(&5) else {
+                        panic!("a rank")
+                    };
+                    return (*rank, ev.fields.get(&6).map(|t| read_id(t).unwrap()));
+                }
+            }
+        }
+    }
+    panic!("no move started")
+}
+
+type Answered = Result<(Id, Vec<u64>), String>;
+
+/// C14 A1-A3: a walk to the square gets a receipt, ending on a standing spot in it; a sit whose first seat is taken
+/// takes its second, named in its started entry, and a list with none free is refused by name; and each local verdict
+/// a client gets from `replica::move_check` (on its copy, and what its own receipts say of its posture) is the
+/// world's answer.
+#[test]
+fn c14_a_walk_to_a_place_ranked_fallbacks_and_the_local_check() {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let im = import_eden::load(&w.text).expect("the test world loads");
+    let square = im.nodes["square"];
+    // The client's copy, built by the tree's own apply, as a client's is: it holds the square, not the chairs.
+    let root = im.tree.node(im.tree.root()).unwrap();
+    let mut copy = Tree::start(root.id(), root.kind().clone());
+    copy.apply(
+        &Header::read(&im.log.0).unwrap(),
+        &Part::read(&im.log.1).unwrap(),
+    )
+    .unwrap();
+    let chairs: Vec<Id> = worldd::testbodies::chairs().iter().map(|c| c.1).collect();
+    let (west, edge, middle_chair) = (chairs[0], chairs[1], chairs[2]);
+    let (a, e, c, d) = (body_id(), soul(9_010), soul(9_011), soul(9_012));
+
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| c14_bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let path = std::env::temp_dir().join(format!("c14-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    accepted.recv().unwrap();
+    let mut cl = Client(stream);
+    let mut seq: BTreeMap<Id, u64> = BTreeMap::new();
+    let mut go = |who: Id, verb: &str, t: Option<Id>, fb: &[Id]| {
+        let s = seq.entry(who).or_default();
+        *s += 1;
+        cl.send_as(who, *s, verb, t.map(Target::Node), fb);
+        cl.answer()
+    };
+    // A3: the client's verdict, from its copy (`has`) and its own receipts (`seated`), against the world's answer.
+    let hex = |i: Id| format!("{}-{}", replica::encode::to_hex(&i.scope().0), i.counter());
+    let local = |verb: &str, t: Option<Id>, seated: bool| {
+        let this = t.map_or(String::new(), |t| format!(r#","this":"{}""#, hex(t)));
+        let has = t.is_some_and(|t| copy.handle(t).is_some());
+        move_check(&format!(
+            r#"{{"verb":"{verb}"{this},"has":{has},"seated":{seated}}}"#
+        ))
+    };
+    let mut agreed = Vec::new();
+    let mut agree = |what: &str, verdict: String, world: &Answered| {
+        let want = match world {
+            Ok(_) => r#"{"verdict":"yes"}"#.to_owned(),
+            Err(r) => format!(r#"{{"verdict":"no","reason":"{r}"}}"#),
+        };
+        assert_eq!(verdict, want, "{what}: the local verdict is the world's");
+        agreed.push(format!("{what}: {verdict}"));
+    };
+
+    let r = go(a, "eden:walk", None, &[]);
+    agree("walk, no target", local("eden:walk", None, false), &r);
+    let r = go(a, "eden:rise", None, &[]);
+    agree("rise, standing", local("eden:rise", None, false), &r);
+    // A1: a walk to the square, a place with no seat and no point.
+    let r = go(d, "eden:walk", Some(square), &[]);
+    agree(
+        "walk to the square",
+        local("eden:walk", Some(square), false),
+        &r,
+    );
+    let walk = r.expect("the walk to the square gets a receipt");
+    // A2: A takes the west chair; E, beside the edge chair, sits with the west chair first and the edge chair second.
+    go(a, "eden:walk", Some(west), &[]).expect("A walks to the west chair");
+    go(a, "eden:sit", Some(west), &[]).expect("A sits in the west chair");
+    go(e, "eden:walk", Some(edge), &[]).expect("E walks to the edge chair");
+    let sat = go(e, "eden:sit", Some(west), &[edge]).expect("E takes its second seat");
+    let none = go(c, "eden:sit", Some(west), &[edge]);
+    assert_eq!(
+        none,
+        Err("place-taken".into()),
+        "none free: refused by name"
+    );
+    // A3 again, A seated.
+    let r = go(a, "eden:walk", Some(square), &[]);
+    agree("walk, seated", local("eden:walk", Some(square), true), &r);
+    let r = go(a, "eden:sit", Some(middle_chair), &[]);
+    agree(
+        "sit, seated",
+        local("eden:sit", Some(middle_chair), true),
+        &r,
+    );
+    let r = go(a, "eden:rise", None, &[]);
+    agree("rise, seated", local("eden:rise", None, true), &r);
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let log = logged(&bytes);
+    let end = log[&walk.0].last().cloned().unwrap();
+    println!(
+        "walk to the square: receipt {:?}, ended {:?} on {} at {:?} um",
+        walk.1,
+        end.2,
+        replica::world_model::show(end.3),
+        end.4
+    );
+    assert_eq!(end.2.as_deref(), Some("done"));
+    assert!(
+        end.4[0].abs() <= 30_000_000 && end.4[2].abs() <= 30_000_000,
+        "standing in the square: {:?}",
+        end.4
+    );
+    assert_eq!(took(&bytes, walk.0), (0, Some(square)));
+    assert_eq!(
+        took(&bytes, sat.0),
+        (1, Some(edge)),
+        "the sit names its second candidate"
+    );
+    assert_eq!(
+        log[&sat.0].last().unwrap().3,
+        edge,
+        "E sits in the edge chair"
+    );
+    for l in agreed {
+        println!("local = world: {l}");
+    }
 }

@@ -3,8 +3,31 @@
 Engine v2 O3 (#2732), contract T11 ([durability.md](../durability.md) rules 1, 2, 8 and 9). Every sealed piece of a
 world's log reaches the bucket within seconds, and the world knows exactly how far. Code:
 `v2/crates/worldd/src/shipping.rs` (the shipper, its marks and gauges, and a rebuild's fetch); the drill and the count
-are `v2/tools/archive/src/drill.rs`; the ten-kill test is `v2/tools/ops/o3-kill.sh`. Not here: an unreachable bucket
+are `v2/tools/ops/src/drill.rs`; the ten-kill test is `v2/tools/ops/o3-kill.sh`. Not here: an unreachable bucket
 (O10), the operator's restore command, the epoch raise and the restore gate (O12).
+
+**A real world** (O3b, #3458): `worldd serve --dir <world> --store <store> [--machine <name>]` (or `$WORLDD_STORE`,
+`$WORLDD_MACHINE`) claims its world in the store and ships each record and checkpoint under that claim; each
+start claims again (`shipping::take_over`, as `ops world --restart`) and ships from the mark plus one, so the history
+read from record 0 holds every record once, in order (`crates/worldd/tests/serve.rs`, three SIGKILLs). It also
+archives its history (V3) under `h/<world>/<lineage>/`, which the page's history plays
+(`v2/tools/ops/o3b-history.mjs`). Without a store it ships nothing, as before.
+
+**The store's configuration** (O3c, #3529). One setting form for history, checkpoints, directory claims and O20b's
+backups (`SOULS_BACKUP_URL`): the offsite bucket, keys from the environment and never in the URL, never printed.
+
+```sh
+# In the environment of directoryd, the supervisor and each worldd@ unit (worldd@ reads /etc/souls/directory.env)
+DIRECTORY_STORE_URL=s3:https://<host>/<bucket>/<prefix>   # worldd serve uses it when --store and WORLDD_STORE are unset
+AWS_ACCESS_KEY_ID=<key id>
+AWS_SECRET_ACCESS_KEY=<secret>
+AWS_DEFAULT_REGION=auto                                   # R2's; omit for the default
+```
+
+`--store`, `$WORLDD_STORE` and `ops world <role> <dir> <store> ...` (the restore, `--restore`) take the same form, or
+`folder:<path>` (or a bare path) for O9's folder store on one machine, kept for tests. A start prints only
+`store: the offsite bucket` or `store: a folder standing in for the offsite bucket`. Tests run against
+`directoryd::directory::stand_in`, a local S3 stand-in in the test process; never production's bucket.
 
 ## What it does
 
@@ -20,9 +43,15 @@ are `v2/tools/archive/src/drill.rs`; the ten-kill test is `v2/tools/ops/o3-kill.
   header bytes, 3: first record, 4: [record, ...]}`, then its CRC-32C, little-endian. A retry that finds its own bytes
   under the name goes on; other bytes there stop the ship (`part-exists`).
 - **Two marks.** `landed`: records in the bucket, moved on the provider's success. `recorded`: the directory record's
-  mark (`world/<lineage>/<zone>`, field 6), moved by W8's `Directory::ship` only when a landed record holds an act
-  that cannot be undone. Such an act is acknowledged only below `recorded`. Moving the record at every piece would
-  double the uploads (518,400 a month, $2.33), so it moves only when something waits on it.
+  mark (`world/<lineage>/<zone>`, field 6), moved by W8's `Directory::ship` when a landed record holds an act that
+  cannot be undone, and each time the checkpoint pointer moves (O3b, #3458), to the last record landed. Such an act
+  is acknowledged only below `recorded`. Moving the record at every piece would double the uploads (518,400 a month,
+  $2.33), so it moves only when something waits on it or a checkpoint ships (at most one each ten minutes). Since it
+  follows the pointer, a takeover (`from` = mark + 1) never starts before the pointer, and a reader from record 0
+  reads the lost writer's pieces up to it.
+- **A takeover that landed nothing** (a restore or a restart that died after its claim and before its first upload)
+  cuts nothing: a reader at its `from` finds no piece of it there and reads the claim before it
+  (`shipping::piece_at`), so the next takeover keeps the records past the mark.
 - **Checkpoints:** K5 writes each checkpoint as one file, so it ships as one object, at
   `ckpt/<lineage>/<zone>/<epoch>/<token>/<record>`: the newest whose records are all landed, at most one each ten
   minutes, then the pointer `ckpt/<lineage>/<zone>/newest`, `{1: format, 2: checkpoint key, 3: its record, 4: the
@@ -34,7 +63,7 @@ are `v2/tools/archive/src/drill.rs`; the ten-kill test is `v2/tools/ops/o3-kill.
 
 ## What it costs
 
-R2 charges $4.50 a million writes. `cargo run -p archive --release -- ship-count <dir>` (from `v2/`) runs V3's busy
+R2 charges $4.50 a million writes. `cargo run -p ops --release -- ship-count <dir>` (from `v2/`) runs V3's busy
 hour (100 of 1,000 bodies stepping each 50 ms tick) on a fake clock through the shipper, V3's archiver and K5's
 checkpoints (each 8 MiB of log) into the in-memory store, and scales the hour by 720:
 
@@ -72,7 +101,7 @@ when the acts rebuilt equal the receipts below the rebuilt record (acknowledged 
 mark), the acts lost were all acknowledged within 10 s of the kill, and no act that cannot be undone was
 acknowledged at or past the directory's mark or is missing from the rebuild.
 
-A still world: `archive ship <dir> <receipts> still 660` prints the uploads from one minute in (the build shipped) to
+A still world: `ops ship <dir> <receipts> still 660` prints the uploads from one minute in (the build shipped) to
 the end.
 
 A scratch bucket instead of moto: the same commands with its endpoint, region and a scratch key. Never production's

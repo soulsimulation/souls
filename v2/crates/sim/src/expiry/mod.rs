@@ -93,6 +93,26 @@ impl Loose {
         Loose::default()
     }
 
+    /// The pending ends a tree holds, after a restart (from a checkpoint and the log after it): each [`ENDS`] timer
+    /// goes back on `due` and is fired as before. Nothing is recomputed: a thing's end is the timer its set-down wrote.
+    pub fn rebuild(tree: &Tree, due: &mut DueList) -> Result<Loose, Refusal> {
+        let mut l = Loose::new();
+        for (id, t) in tree.timers() {
+            if t.name.as_str() != ENDS {
+                continue;
+            }
+            due.set(Timer {
+                node: t.node,
+                id: *id,
+                due: t.due,
+                name: t.name.clone(),
+            })?;
+            l.pending.insert(t.node, (t.due, *id));
+            l.by_timer.insert(*id, t.node);
+        }
+        Ok(l)
+    }
+
     /// Things with an end pending.
     pub fn len(&self) -> usize {
         self.pending.len()
@@ -124,10 +144,24 @@ impl Loose {
         node: Id,
         now: Micros,
     ) -> Result<Option<TimerRec>, Refusal> {
+        self.changed_by(due, mint, tree, &|k| lifetime(kinds, k), node, now)
+    }
+
+    /// [`Loose::changed`], each kind's lifetime given by `life` (its full name in, µs out; `None` for ever): a world
+    /// that reads lifetimes from its entries by plain name (`worldd`'s) rather than from loaded [`Kinds`].
+    pub fn changed_by(
+        &mut self,
+        due: &mut DueList,
+        mint: &mut Minter,
+        tree: &Tree,
+        life: &dyn Fn(&str) -> Option<Micros>,
+        node: Id,
+        now: Micros,
+    ) -> Result<Option<TimerRec>, Refusal> {
         let Some(n) = tree.handle(node).and_then(|h| tree.node(h)) else {
             return Ok(self.cancel(due, node));
         };
-        let life = lifetime(kinds, n.kind().as_str());
+        let life = life(n.kind().as_str());
         let Some(life) = life.filter(|_| !kept(tree, node)) else {
             self.waiting.remove(&node);
             return Ok(self.cancel(due, node));
