@@ -34,6 +34,11 @@
 //!   its move like a `move` step, and its contact is the instant of B4's transfer of the thing into a free hand or into
 //!   a slot of the node ([`Effect::Take`], [`Effect::Put`]). The world works each out against the tree (`sim::forms`).
 //!
+//! - **Links** (F15, #3385). A `link` effect is a K5 link of the kind's link type from the actor (its Soul when the
+//!   kind's link is `from: soul`, else its body) to the node, seen by everyone ([`Effect::Link`]); an `unlink` takes down the node's own
+//!   links of that type, the actor's or every one ([`Effect::Unlink`]). They land at the effect's instant with the
+//!   form's other effects, all or none.
+//!
 //! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
 
 use std::collections::BTreeMap;
@@ -192,6 +197,12 @@ pub enum Effect {
     Take { what: Of },
     /// A `put` step's transfer (B4's, at its contact): `what`, held by the body, into slot `slot` of the node.
     Put { what: Of, slot: u64 },
+    /// A link of type `ty` (the tree's, `replica::audience::link_type`) from the actor to the node, owned by the node
+    /// and seen by everyone (F15): its end the actor's Soul when `soul`, else its body.
+    Link { ty: Name, soul: bool },
+    /// The node's own links of type `ty` taken down (F15): the actor's (its Soul's when `soul`, else its body's), or
+    /// every one when `all`.
+    Unlink { ty: Name, soul: bool, all: bool },
 }
 
 /// A thing an effect names: the node the form is done at, or a thing argument, bound to its id.
@@ -265,8 +276,9 @@ fn slot_n(entry: &Value, slot: &str) -> Result<u64, Refusal> {
 
 /// Binds form `form`'s effects, all or none, with its thing arguments `args` (name to id): first each `take` or `put`
 /// step's transfer, in step order, then the form's `effects`: `set ... to` on the node, `transfer`, `create` into the
-/// actor's hand or a slot (`into`: `"actor_hand"` or a slot's name) and `remove`. Refused: `effect-not-built` for any
-/// other change (a `create` `here` is E4's), `field-unknown`, `slot-unknown`, `arg-missing`, `effect-malformed` for a
+/// actor's hand or a slot (`into`: `"actor_hand"` or a slot's name), `remove`, and `link` and `unlink` (`from`:
+/// `"actor"`, or `"all"` to unlink) of a link the kind declares. Refused: `effect-not-built` for any other change (a
+/// `create` `here` is E4's, a link not seen by everyone T8's), `field-unknown`, `slot-unknown`, `link-unknown`, `arg-missing`, `effect-malformed` for a
 /// value that is not a whole number or a flag (a flag is 0 or 1), or an amount that is not a whole number above zero
 /// or `"room"`.
 pub fn bind_effects_with(
@@ -339,10 +351,43 @@ pub fn bind_effects_with(
             ("remove", _) => Effect::Remove {
                 what: of(e.get("what"), args)?,
             },
+            ("link" | "unlink", _) => link(entry, change, e)?,
             (other, _) => return refuse("effect-not-built", other),
         });
     }
     Ok(out)
+}
+
+/// A `link` or `unlink` effect `e` of the kind `entry` (F15): its link `link` read from the kind's `links`.
+fn link(entry: &Value, change: &str, e: &Value) -> Result<Effect, Refusal> {
+    let t = text(e.get("link"), "link.link")?;
+    let Some(def) = entry.get("links").and_then(|l| l.get(t)) else {
+        return refuse("link-unknown", t);
+    };
+    let kind = text(entry.get("kind"), "kind")?;
+    let ty = a_name(&replica::audience::link_type(kind, t))?;
+    let soul = def.get("from").and_then(Value::str) == Some("soul");
+    let rule = def
+        .get("audience")
+        .and_then(|a| a.get("rule"))
+        .and_then(Value::str)
+        .unwrap_or_default();
+    match (change, e.get("from").and_then(Value::str)) {
+        // A link seen by its owner or its members needs that audience's node, which T8 writes.
+        ("link", Some("actor")) if rule != "everyone" => {
+            refuse("effect-not-built", format!("a {t} link seen by {rule}"))
+        }
+        ("link", Some("actor")) => Ok(Effect::Link { ty, soul }),
+        ("unlink", Some(from @ ("actor" | "all"))) => Ok(Effect::Unlink {
+            ty,
+            soul,
+            all: from == "all",
+        }),
+        _ => refuse(
+            "effect-malformed",
+            "link.from: \"actor\", or \"all\" to unlink",
+        ),
+    }
 }
 
 /// The deadlines of the steps that wait on the world, µs from the step's start. A pause's deadline is its own end.

@@ -63,10 +63,17 @@
 //!   stages it committed and holds nothing, and the next run, by anyone, starts at the stage the thing's own field
 //!   names ([`Forms::start_stages`]).
 //!
+//! - **Links** (F15, #3385, `links`). A `link` effect writes a K5 link of the kind's type from the actor (its Soul or
+//!   its body, as the kind's link is from) to the thing, owned by the thing and seen by everyone; an `unlink` takes
+//!   down the thing's own links of that type, the actor's or every one (`not-linked` with none). Written with the
+//!   form's other effects at their instant, all or none: a run that fails before it, or whose other effect is
+//!   refused, links nothing.
+//!
 //! Not here: a walk across a link (the walk's crossings are not carried here yet), accepting the intent (I4),
 //! queueing for a reserved thing (B7), things for several users, a thing made or set down where there is no slot (E4).
 
 pub mod amounts;
+mod links;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -837,6 +844,10 @@ impl Forms {
                 limits: &self.limits,
                 header: self.header.as_ref(),
                 body: fr.body,
+                soul: match fr.intent.actor {
+                    Actor::Soul(s) => s,
+                    _ => fr.body,
+                },
                 hands: &hands,
                 node: fr.node,
                 reserved: &reserved,
@@ -1331,6 +1342,8 @@ pub fn holders<'a>(
 
 #[cfg(test)]
 mod amounts_tests;
+#[cfg(test)]
+mod links_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
