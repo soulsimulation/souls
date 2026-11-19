@@ -15,22 +15,32 @@
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
 //   souls.mjs whisper <body id> "<words>"     says them to that one body alone
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
-//   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened, or at the timeout
+//   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened (an answer, or words
+//                                             said to or near it: `heard`, also in the next look), or at the timeout
+//   souls.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]
+//                                             what happened, from the public history and this Soul's memory: a day by
+//                                             default, at most seven, five lines, the rest counted (R16); --as <id>
+//                                             names which Soul asks, when the home has more than one
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop                            ends the daemon
+//   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
+//   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
 //   any of them [--soul <id>]                 which Soul, when the home has more than one
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
+import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'stats', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'history', 'stats', 'stop'];
+/** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
+export const LOCAL = ['digest', 'consolidate'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /**
@@ -69,11 +79,15 @@ async function pairing(home, url, { within = 15_000 } = {}) {
 /** The daemon request the arguments make, or a refusal by name. */
 export function requestOf(argv) {
   const args = [...argv], opts = {};
-  for (const name of ['--soul', '--limit']) {
+  // history's --soul is its question; --as is the Soul asking.
+  const asking = args.includes('history');
+  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as']) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
   }
+  if (asking) [opts.of, opts.soul] = [opts.soul, opts.as];
   const [op = 'status', ...rest] = args;
+  if (LOCAL.includes(op)) return { local: op, soul: opts.soul, since: opts.since ?? null, refs: rest.includes('--refs'), force: rest.includes('--force') };
   if (!OPS.includes(op)) return { refused: 'unknown-command', detail: `one of ${OPS.join(', ')}` };
   const req = { op };
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
@@ -83,21 +97,36 @@ export function requestOf(argv) {
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
+  if (op === 'history') {
+    for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;
+  }
   return { req, soul: opts.soul };
+}
+
+/** A local command: the Soul named, else the home's only Soul with a memory folder. */
+async function local({ local: op, soul: named, since, refs, force }, home) {
+  const souls = existsSync(join(home, 'souls')) ? readdirSync(join(home, 'souls')).filter((s) => existsSync(join(soulDirOf(home, s), 'memory'))) : [];
+  const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
+  if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a memory'}`), { code: 'which-soul' });
+  if (op === 'digest') return { ok: true, soul, ...digestOf(soulDirOf(home, soul), { since, refs }) };
+  return { ok: true, soul, ...(await consolidateIn(home, soulDirOf(home, soul), { force })) };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
-  const { req, soul: named, refused, detail } = requestOf(process.argv.slice(2));
+  const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
   try {
     if (refused) throw Object.assign(new Error(detail), { code: refused });
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
-    if (req.op === 'pair') { out(await pairing(home, req.url)); process.exit(0); }
-    const souls = soulsWithTokens(home);
-    const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
-    if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
-    const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;
-    out(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
+    if (asked.local) out(await local(asked, home));
+    else if (req.op === 'pair') { out(await pairing(home, req.url)); process.exit(0); }
+    else {
+      const souls = soulsWithTokens(home);
+      const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
+      if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
+      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;
+      out(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
+    }
   } catch (e) {
     out({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) });
     process.exitCode = 1;

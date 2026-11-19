@@ -578,7 +578,9 @@ fn world(work: &Path, seconds: u64, arm: &str, facts: Option<&Path>) {
     let writer = Writer::create(&www, &w.header, &key, (0, wall_ms)).expect("a writer");
     println!("stream {}", stream::dir(&w.header, &key));
     let stop = Arc::new(AtomicBool::new(false));
-    let following = follow(writer, sub, stop.clone());
+    let following = follow(writer, sub, stop.clone(), move || {
+        i64::try_from(start.elapsed().as_micros()).unwrap_or(i64::MAX)
+    });
     let mut said = Vec::new();
     let ticks = (seconds * 1_000_000 / TICK_US as u64) as usize;
     for n in 0..ticks {

@@ -4,7 +4,9 @@
 //! - in the library (`answers::start`, the path `worldd gateway-link` and `worldd serve` share), no tick ends more
 //!   than 50 ms after it was due while a sync runs, in a release build (A2), read off K7's heartbeat; a debug build is
 //!   held to K7's default watchdog (500 ms with no tick), past which the process is ended;
-//! - through `worldd gateway-link`'s socket with the default watchdog, the process is still running after it.
+//! - through `worldd gateway-link`'s socket with the default watchdog, the process is still running after it. A debug
+//!   build widens the watchdog (`--watchdog-ms`): its start, which hashes the whole tree for C1's start state on the
+//!   clock thread, takes past 500 ms at this size before the first tick, with or without a sync.
 //!
 //! `C16_REPORT=1` prints the numbers, for the PR.
 
@@ -128,7 +130,10 @@ fn c16_a2_a_30000_record_sync_never_delays_a_tick() {
         Config::new(LINEAGE, 1),
     )
     .expect("the world starts");
-    // Past the start's catch-up: the ticks measured are the sync's.
+    // Past the start (its state hash reads the whole tree) and its catch-up: the ticks measured are the sync's.
+    while w.beat.read().0 < 0 {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     std::thread::sleep(Duration::from_millis(300));
     let door = w.door();
     let mut ask = |m: BTreeMap<u64, Value>| {
@@ -219,6 +224,16 @@ fn frame(s: &mut UnixStream, m: BTreeMap<u64, Value>) -> BTreeMap<u64, Value> {
     map(&out)
 }
 
+/// The watchdog the gateway-link test runs under: K7's default in a release build; in a debug build, room for the
+/// start's whole-tree state hash (C1), which runs before the first tick.
+fn watchdog_ms() -> i64 {
+    if cfg!(debug_assertions) {
+        10 * WATCHDOG_MS
+    } else {
+        WATCHDOG_MS
+    }
+}
+
 struct Killed(Child);
 
 impl Drop for Killed {
@@ -247,6 +262,7 @@ fn c16_a2_gateway_link_answers_a_30000_record_sync_under_the_default_watchdog() 
             &ITEMS.to_string(),
         ])
         .arg("--no-measures")
+        .args(["--watchdog-ms", &watchdog_ms().to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -263,7 +279,7 @@ fn c16_a2_gateway_link_answers_a_30000_record_sync_under_the_default_watchdog() 
     let synced = sync_by(&mut |m| frame(&mut s, m), &mut copy);
     assert!(synced.held > ITEMS, "held {} records", synced.held);
     // Two of K7's limits more: a tick the sync held would have ended the process by now.
-    std::thread::sleep(Duration::from_millis(2 * WATCHDOG_MS as u64));
+    std::thread::sleep(Duration::from_millis(2 * watchdog_ms() as u64));
     let status = child.0.try_wait().unwrap();
     assert!(status.is_none(), "worldd ended: {status:?}");
     if std::env::var_os("C16_REPORT").is_some() {
