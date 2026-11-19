@@ -205,6 +205,20 @@ impl<S: Store> Worlds<S> {
         Ok(rows)
     }
 
+    /// Every world's lineage (hex) and creator (a principal's text), unlisted ones too: whom a world's prayers go to
+    /// (G11, #3335).
+    pub fn creators(&self) -> R<Vec<(String, String)>> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let rows = self.rows(&inner)?;
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let lineage = r.get("lineage")?.as_str()?.to_string();
+                Some((lineage, row_creator(r)?.to_string()))
+            })
+            .collect())
+    }
+
     /// The list (rule 1): every world's row, with whether it is awake by this machine's cached directory, and the
     /// templates a world may be made from.
     pub fn list(&self) -> R<Json> {
