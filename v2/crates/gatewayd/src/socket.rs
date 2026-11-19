@@ -1,7 +1,8 @@
 //! One agent's socket (Engine v2 I1, #2683): WebSocket through axum's upgrade, one task and one bounded outbound
 //! queue per socket. The order on a socket: T10's first frame each way (`v2/docs/intents.md` rule 12), then sign-in
 //! (by the `authorization: Bearer` header, or the client's first message after its first frame, since a browser
-//! cannot set headers), then the sign-in's outcome and any frames resumed, then intents in and the stream out.
+//! cannot set headers), then the sign-in's outcome and any frames resumed, then intents in and the stream out. A page
+//! signed in with a view token (V13b) gets a view socket instead ([`serve_view`]).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,11 +23,31 @@ use crate::Gateway;
 use crate::receipts::{Outcome, Who};
 use crate::resume::Cursor;
 use crate::times;
-use crate::token::{self, Grant, Token};
+use crate::token::{self, Grant, Token, View, ViewToken};
 use crate::views;
 use crate::world_link::{FRAME_MOST, RESTARTING, Sent, sync_refused};
 use replica::sync::wire;
 use std::collections::BTreeMap;
+
+/// A view socket's outcomes (V13b): signed in, renewed on the same socket, or expired unrenewed and closed.
+pub const VIEW_STARTED: &str = "view.started";
+pub const VIEW_RENEWED: &str = "view.renewed";
+pub const VIEW_EXPIRED: &str = "view.expired";
+/// A view socket was sent something other than a subscribe or a renewal: it watches and never acts.
+pub const VIEW_ONLY: &str = "view.only";
+
+/// A presented sign-in: an agent's token, or a page's view token (V13b, #3407).
+enum Presented {
+    Agent(Option<Token>),
+    View(ViewToken),
+}
+
+fn presented(text: &str) -> Presented {
+    match ViewToken::parse(text) {
+        Some(v) => Presented::View(v),
+        None => Presented::Agent(Token::parse(text)),
+    }
+}
 
 /// Where agents connect.
 pub const PATH: &str = "/v2/ws";
@@ -61,7 +82,7 @@ async fn upgrade(
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .map(Token::parse);
+        .map(presented);
     let header_cursor = headers
         .get("souls-cursor")
         .and_then(|v| v.to_str().ok())
@@ -170,12 +191,12 @@ async fn send(socket: &mut WebSocket, frame: Vec<u8>) -> bool {
 type ResumeFrom = (Option<Value>, Option<usize>);
 
 /// The sign-in message: `{1: token, 2: cursor, 3: seen}`.
-fn read_sign_in(bytes: &[u8]) -> (Option<Token>, ResumeFrom) {
+fn read_sign_in(bytes: &[u8]) -> (Option<Presented>, ResumeFrom) {
     let Ok(Value::Map(m)) = decode(bytes).map(|d| d.value) else {
         return (None, (None, None));
     };
     let token = match m.get(&1) {
-        Some(Value::Text(t)) => Token::parse(t.as_str()),
+        Some(Value::Text(t)) => Some(presented(t.as_str())),
         _ => None,
     };
     let seen = match m.get(&3) {
@@ -188,7 +209,7 @@ fn read_sign_in(bytes: &[u8]) -> (Option<Token>, ResumeFrom) {
 async fn serve(
     gw: Arc<Gateway>,
     mut socket: WebSocket,
-    header_token: Option<Option<Token>>,
+    header_token: Option<Presented>,
     header_from: ResumeFrom,
     client: Option<String>,
 ) {
@@ -208,15 +229,20 @@ async fn serve(
 
     // 2. Sign-in, after the first frame, never in it.
     let (token, (cursor, seen)) = match header_token {
-        Some(t) => (t, header_from),
+        Some(t) => (Some(t), header_from),
         None => match tokio::time::timeout(SIGN_IN_WITHIN, next_binary(&mut socket)).await {
             Ok(Some(bytes)) => read_sign_in(&bytes),
             _ => return,
         },
     };
-    let signed = token.and_then(|t| {
+    let token = match token {
+        Some(Presented::View(v)) => return serve_view(gw, socket, v).await,
+        Some(Presented::Agent(t)) => t,
+        None => None,
+    };
+    let signed = token.as_ref().and_then(|t| {
         let tokens = gw.tokens.read().unwrap_or_else(|e| e.into_inner());
-        let grant = tokens.check(&t)?;
+        let grant = tokens.check(t)?;
         Some((grant, tokens.account(grant).map(str::to_owned)))
     });
     let Some((grant, account)) = signed else {
@@ -268,6 +294,11 @@ async fn serve(
                     view = Some(gw.views.subscribe(request, &views::audiences(grant)));
                     continue;
                 }
+                // A token revoked since sign-in (W9, #2827): its next intent is refused by name, and the socket ends.
+                if token.as_ref().and_then(|t| gw.tokens.read().unwrap_or_else(|e| e.into_inner()).check(t)).is_none() {
+                    let _ = send(&mut socket, control(token::REFUSED)).await;
+                    break;
+                }
                 if let Some(answer) = take_intent(&gw, actor, grant, bytes, received) {
                     gw.receipts.write(&who, Outcome::Refusal);
                     ok = send(&mut socket, answer).await;
@@ -297,6 +328,88 @@ async fn serve(
         gw.views.end(n);
     }
     gw.detach(grant, attached.session);
+}
+
+/// A page's view socket (V13b, #3407), signed in with a view token: it subscribes to views for the token's grants (its
+/// audiences are theirs, as an agent's are its actor's) and does nothing else: no intent, no stream, no place in the
+/// hub, so an owner watching never lets their agent's socket go. Before the token expires the page signs in again on
+/// the same socket (`{1: view token}`, answered `{4: "view.renewed"}`) and the subscription carries on with no gap;
+/// unrenewed, the socket is told `{4: "view.expired"}` and closed.
+async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToken) {
+    let check = |t: &ViewToken| {
+        gw.view_key
+            .get()
+            .and_then(|k| t.check(k, crate::unix_now()))
+    };
+    let Some(mut view) = check(&presented) else {
+        (gw.log)("a view sign-in was refused");
+        let _ = send(&mut socket, control(token::REFUSED)).await;
+        return;
+    };
+    drop(presented);
+    let audiences = |v: &View| -> Vec<replica::ids::Id> {
+        v.grants.iter().flat_map(|g| views::audiences(*g)).collect()
+    };
+    let mut ok = send(&mut socket, control(VIEW_STARTED)).await;
+    let mut asked: Option<Value> = None;
+    let mut sub: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
+    while ok {
+        let left = Duration::from_millis((view.expires * 1000).saturating_sub(crate::unix_ms()));
+        tokio::select! {
+            incoming = socket.recv() => {
+                let bytes = match incoming {
+                    Some(Ok(Message::Binary(b))) => b.to_vec(),
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                    _ => break,
+                };
+                if let Some(request) = views::request(&bytes) {
+                    if let Some((n, _)) = sub.take() {
+                        gw.views.end(n);
+                    }
+                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&view)));
+                    asked = Some(request);
+                    continue;
+                }
+                let fresh = match read_sign_in(&bytes).0 {
+                    Some(Presented::View(t)) => check(&t).ok_or(token::REFUSED),
+                    _ => Err(VIEW_ONLY),
+                };
+                let fresh = match fresh {
+                    Ok(f) => f,
+                    // A failed renewal keeps the token it has, until it expires.
+                    Err(name) => {
+                        ok = send(&mut socket, control(name)).await;
+                        continue;
+                    }
+                };
+                // What it may watch changed (a Soul given away): the subscription is made again for the new grants.
+                if audiences(&fresh) != audiences(&view)
+                    && let (Some(request), Some((n, _))) = (&asked, sub.take())
+                {
+                    gw.views.end(n);
+                    sub = Some(gw.views.subscribe(request.clone(), &audiences(&fresh)));
+                }
+                view = fresh;
+                ok = send(&mut socket, control(VIEW_RENEWED)).await;
+            }
+            _ = tokio::time::sleep(left) => {
+                let _ = send(&mut socket, control(VIEW_EXPIRED)).await;
+                break;
+            }
+            item = async {
+                match sub.as_mut() {
+                    Some((_, items)) => items.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => match item {
+                Some(frame) => ok = send(&mut socket, frame).await,
+                None => break,
+            },
+        }
+    }
+    if let Some((n, _)) = sub {
+        gw.views.end(n);
+    }
 }
 
 /// Returns once the gateway is stopping (at once if it already is).

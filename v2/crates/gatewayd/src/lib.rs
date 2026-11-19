@@ -17,6 +17,9 @@
 //!
 //! Frames after the first, as CBOR in T0's profile (`v2/docs/encoding.md`):
 //!
+//! - a page's view socket (V13b, #3407): signed in with a view token the directory minted from a web session
+//!   ([`token::ViewToken`]), it subscribes to views for the token's grants and nothing else, and renews the token on
+//!   the same socket (`socket::serve_view`).
 //! - client → gateway, sign-in (unless the `authorization: Bearer <token>` header gave it): `{1: token, 2: cursor,
 //!   3: seen}`, 2 left out for a fresh stream; `seen` (default 1) is how many frames the client applied at its
 //!   cursor's version, since a refusal does not move the version (the `souls-cursor` and `souls-seen` headers give
@@ -65,6 +68,19 @@ pub fn stderr_log() -> Log {
     Arc::new(|line| eprintln!("gatewayd: {line}"))
 }
 
+/// The wall clock in ms since 1970: a view token's expiry is a wall-clock time the directory set, not world time.
+#[allow(clippy::disallowed_methods)]
+pub fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+/// [`unix_ms`] in whole seconds.
+pub fn unix_now() -> u64 {
+    unix_ms() / 1000
+}
+
 /// Frames queued to one socket before it counts as too slow and is closed (it may resume from its cursor).
 pub const OUTBOUND: usize = 64;
 
@@ -79,6 +95,8 @@ pub struct Gateway {
     pub log: Log,
     /// The receipts file's writer (`--receipts`), or off.
     pub receipts: Receipts,
+    /// The key view tokens are checked with (`--view-key`, V13b); unset, a view token is refused.
+    pub view_key: std::sync::OnceLock<token::ViewKey>,
     /// The directory's mailbox (`--mailbox`), set once at start; off if unset.
     pub mailbox: std::sync::OnceLock<mailbox::Mailbox>,
     /// Set once when the gateway stops: every signed-in socket closes with [`RESTART`].
@@ -138,6 +156,7 @@ impl Gateway {
             views: views::Views::default(),
             log,
             receipts,
+            view_key: std::sync::OnceLock::new(),
             mailbox: std::sync::OnceLock::new(),
             closing: tokio::sync::watch::channel(false).0,
             hub: Mutex::new(Hub::default()),

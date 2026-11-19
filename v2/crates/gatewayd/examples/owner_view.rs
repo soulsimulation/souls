@@ -9,7 +9,8 @@
 //! audience (private to another owner: it must never reach soul 1's page).
 //!
 //! Each tick's record is handed to the tier at wall time `anchor + at` (its commit). The first stdout line is JSON:
-//! `{"url", "token1", "token2", "follow", "anchorWallMs", "soul1", "soul2"}`; the tokens are this run's own, minted here.
+//! `{"url", "token1", "token2", "follow", "anchorWallMs", "soul1", "soul2", "grant1"}`; the tokens are this run's own,
+//! minted here. With `--view-key <file>` it also takes view tokens the directory signs with that key (V13b).
 //!
 //! `cargo run --release -p gatewayd --example owner_view -- --bodies 30 --seconds 610 --dir <scratch dir>`
 
@@ -19,7 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use gatewayd::receipts::Receipts;
-use gatewayd::token::{Grant, Token, Tokens};
+use gatewayd::token::{Grant, Token, Tokens, ViewKey};
 use gatewayd::{Gateway, Log, socket, views};
 use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Rest};
 use replica::encode::{Name, Value, encode, to_hex};
@@ -172,6 +173,12 @@ async fn main() {
     }
     let log: Log = Arc::new(|line: &str| eprintln!("gatewayd: {line}"));
     let gw = Gateway::with_receipts(tokens, BUILD.to_vec(), log, Receipts::off());
+    // V13b's end-to-end run: view tokens the directory signs with this key are taken too.
+    if let Some(key) = arg("--view-key").and_then(|p| std::fs::read_to_string(p).ok()) {
+        let _ = gw
+            .view_key
+            .set(ViewKey::read(&key).expect("--view-key: 64 hex digits"));
+    }
     tokio::spawn(views::run(gw.clone(), path));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}{}", listener.local_addr().unwrap(), socket::PATH);
@@ -194,12 +201,13 @@ async fn main() {
     let start = Instant::now();
     feed.record(w.record(&created));
     println!(
-        r#"{{"url":"{url}","token1":"{}","token2":"{}","follow":"{}","anchorWallMs":{anchor},"soul1":"{}","soul2":"{}"}}"#,
+        r#"{{"url":"{url}","token1":"{}","token2":"{}","follow":"{}","anchorWallMs":{anchor},"soul1":"{}","soul2":"{}","grant1":"{}"}}"#,
         issued[0].reveal(),
         issued[1].reveal(),
         page_key(body(0)),
         page_key(soul_id(1)),
         page_key(soul_id(2)),
+        issued[0].grant().to_text(),
     );
     let ticks = seconds * 1_000_000 / TICK_US;
     for tick in 1..=ticks {
