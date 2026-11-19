@@ -696,8 +696,9 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
         cfg.bodies = Some(Box::new(move |p: &Placed| bodies_ticked(p, false, tick_us)));
         cfg
     };
-    // The live run: whether a batch comes back late depends on the machine, so it runs again (up to five times) until
-    // one does.
+    // The live run. Whether a batch comes back late depends on the machine, so the clock is held once before the walks
+    // start (O4's stuck-thread event): it then catches up in ticks run back to back, the walks' first route searches
+    // among them, and takes what is back with no wait. It still runs again (up to five times) until a batch is late.
     let live = || {
         let store = Mem::with(Vec::new());
         let mut cfg = config(BTreeMap::new());
@@ -717,6 +718,12 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
                 Some(Vec3::new(-44_000_000, 0, 38_000_000)),
             ),
         );
+        while w.beat.read().0 < 5 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        w.events
+            .send(Event::Stall(Duration::from_millis(400)))
+            .unwrap();
         let walked = answer(&to_chair);
         let strolled = answer(&stroll);
         let (reply, sit) = channel();
