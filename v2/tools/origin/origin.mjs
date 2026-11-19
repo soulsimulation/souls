@@ -8,6 +8,9 @@
 // - every 404, a temporary file (`*.tmp`) and any URL with a query string: `no-store`.
 //
 // Each 200 carries a strong ETag, the SHA-256 of the bytes, which the reader tool checks.
+//
+// The site's own pages (/changelog, /changelog.md, /v1/feed, /ops; O23, #3324) are answered first, by site.mjs, from
+// the page's files and the release's news (SOULS_WEB, SOULS_DATA); every other path is a stream file as above.
 // Usage: node origin.mjs <dir> [port] [host]. Prints `origin <port>`; on SIGTERM or SIGINT prints `stats {json}`
 // (requests by kind, requests per part path, processor seconds) and exits.
 import { createHash } from 'node:crypto';
@@ -15,6 +18,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { siteRoutes } from './site.mjs';
 
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
 export const POINTER = 'public, max-age=1, no-transform';
@@ -28,9 +32,9 @@ export function kindOf(path) {
   return 'immutable';
 }
 
-/** An origin over `dir`. `stats` counts what it served. */
-export function createOrigin(dir) {
-  const root = resolve(dir);
+/** An origin over `dir`, with the site's pages from `site` ({web, data}; site.mjs). `stats` counts what it served. */
+export function createOrigin(dir, site = {}) {
+  const root = resolve(dir), pages = siteRoutes(site);
   const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
   const etags = new Map();
   const server = createServer(async (req, res) => {
@@ -38,6 +42,11 @@ export function createOrigin(dir) {
       stats.miss++;
       res.writeHead(404, { 'cache-control': MISS, 'content-length': 0 }).end();
     };
+    try {
+      if (pages.handle(req, res)) return;
+    } catch {
+      return miss();
+    }
     if (req.method !== 'GET' && req.method !== 'HEAD') return miss();
     if (req.url.includes('?')) return miss();
     let rel;
