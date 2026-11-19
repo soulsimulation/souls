@@ -8,13 +8,18 @@
 //! lie (C4, #3368); a rise is B3's rise. Each steps the one controller
 //! (B1). Nothing here sets a pose or a position.
 //!
-//! - **Checked at commit.** A move's checks are its own: the controller's claims (T9 rule 4), the reach (B2), the seat
-//!   free and in reach (B3), a route (N7). They are made on the clock thread when the move starts, as B3 reserves a
-//!   seat: one tick's sits are taken one by one, in B3's stable order. A move refused there ends by that name.
+//! - **Checked off the clock, committed on it** (K18b, #3175). A move's checks are its own: the controller's claims
+//!   (T9 rule 4), the reach (B2), the seat free and in reach (B3), a route (N7). The route searches and the reach
+//!   distances run on the world's planner thread (`sim::planner`), from the bodies as a tick left them, and come
+//!   back for the next tick: a walk gets its place and legs a tick after it starts; a sit or a rise is committed at
+//!   the first tick after its reach is back, a tick later than asked. The clock commits: the claims, and the seat
+//!   held or free and the distance against the move's reach, as B3 reserves a seat: one tick's sits are taken
+//!   together, in B3's stable order. A move refused there ends by that name.
 //! - **A thing with several seats** (C19, #3457). A sit names a thing; the world picks its free slot whose stand point
 //!   is nearest the body (`Slots::free`, ties by slot), so three Souls share a sofa, each in its own slot, and a fourth
 //!   is refused `place-taken`. A walk to a thing with no point goes to that slot's stand point. A restart hands each
 //!   seated body back into the slot its logged pose names.
+
 //! - **Ends by name.** A walk ends when its skill does: done, or failed by name. A sit or a rise ends when its move
 //!   does: `done`, or cancelled by name (`claim-taken`, `out-of-reach`). A new move on a body whose walk is still
 //!   going ends that walk `claim-taken`.
@@ -34,6 +39,7 @@
 //! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use replica::bodies::Family;
 use replica::effects::{Actor, Refusal, fixture_bytes};
@@ -51,9 +57,11 @@ use sim::commit::bind::{Bound, Slot, bind};
 use sim::commit::spot;
 use sim::controller::Stance;
 use sim::host::Runner;
+use sim::host::{Planned, ReachKey, ReachQuestion, Wants};
 use sim::life::{Born, Life, Retired, Standing};
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
+use sim::planner::{Planner, Thread};
 use sim::slots::{PlaceAt, Request, Slots};
 use sim::speech::{self, Hearing};
 use sim::spots::Target;
@@ -120,30 +128,40 @@ enum Live {
     Place(Instance),
 }
 
-/// Each body's point (its feet, or its seat's stand point while it is in one) and each seat's seat and stand point,
-/// µm. A seat is taken from its stand point and left there (B3): its contacts (`souls:slot` for a sit or a lie,
-/// `souls:stand` for a rise) are reached at the stand point, across x and z, so the seat's own offset from it (the
-/// kind's model geometry, SEATDEF) is never counted against the body's reach (C17, #3453).
-struct Geo(BTreeMap<Id, Vec3>, BTreeMap<Id, [Vec3; 2]>);
+/// Only the exact slot and pending move's planner answer may supply a reach check.
+struct Reached<'a> {
+    cache: &'a BTreeMap<ReachKey, [i64; 2]>,
+    order: Option<Id>,
+    slot: Option<u64>,
+}
 
-impl Reach for Geo {
+impl Reach for Reached<'_> {
     fn distance(
         &self,
         body: Id,
-        _: &Effector,
-        _: Option<&Name>,
+        _effector: &Effector,
+        _part: Option<&Name>,
         target: Id,
         point: &Name,
     ) -> Option<i64> {
-        let a = self.0.get(&body)?;
-        let [_, stand] = self.1.get(&target)?;
-        let b = match point.as_str() {
-            "souls:slot" | "souls:stand" => stand,
-            _ => return None,
-        };
-        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-        i64::try_from((d(a.x, b.x) + d(a.z, b.z)).isqrt()).ok()
+        let [place, stand] = self.cache.get(&(body, target, self.slot?, self.order?))?;
+        match point.as_str() {
+            "souls:slot" => Some(*place),
+            "souls:stand" => Some(*stand),
+            _ => None,
+        }
     }
+}
+
+/// A sit or a rise asked, waiting for its reach from the planner: its intent, its body, the place (none for a rise
+/// from no place).
+#[derive(Clone, Copy, Debug)]
+struct Waiting {
+    id: Id,
+    body: Id,
+    place: Option<Id>,
+    /// A sit's or a lie's stance; `None` for a rise.
+    stance: Option<Stance>,
 }
 
 /// The world's bodies: a town, the runner of skills over it with the one controller, and the moves and seats.
@@ -165,6 +183,22 @@ pub struct Bodies {
     took: BTreeMap<Id, (usize, Option<Id>)>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
+    /// The planner thread: route searches and reach distances, off the clock (K18b, #3175).
+    planner: Thread,
+    /// How long a tick waits for each of the planner's batches: `None` as long as it takes (lockstep, the default),
+    /// else a bound (a free-running clock never stops for the planner; a late batch is read at a later tick).
+    pub wait: Option<Duration>,
+    /// A replay's record of the planner (K18b): at these body times, take only this many batches (each other body
+    /// tick takes every batch out, waiting as long as it takes). Read from the recorder's `Planned` inputs.
+    pub schedule: BTreeMap<Micros, u64>,
+    /// Where a free-running clock took fewer batches than were out, for the recorder: body time and batches taken.
+    late: Vec<(Micros, u64)>,
+    /// The planner's answers for the next tick.
+    planned: Planned,
+    /// The reach distances last found, by body and seat.
+    reached: BTreeMap<ReachKey, [i64; 2]>,
+    /// Sits and rises waiting for their reach, in the order asked.
+    waiting: Vec<Waiting>,
     /// Every body's interest set (B11, R4), kept as the bodies move.
     hearing: Hearing,
     /// The utterances started since the world last took them, each with its speaker, its record (hearers resolved
@@ -220,7 +254,28 @@ fn load(text: &str) -> R<Move> {
 impl Bodies {
     /// No bodies yet, over `town`, stepped in ticks of `tick` µs.
     pub fn new(town: Town, tick: Micros) -> R<Bodies> {
+        let copy = town.copy().map_err(|e| Refusal {
+            name: "planner-town",
+            detail: e,
+        })?;
+        Bodies::with_planner(town, copy, tick)
+    }
+
+    /// No bodies yet, over `town`, with `copy` (built by [`Town::copy`]) the planner's town (K18b): a world builds the
+    /// copy with its town, before its clock and watchdog start, as a large town takes a while to build.
+    pub fn with_planner(town: Town, copy: Town, tick: Micros) -> R<Bodies> {
+        let planner = Thread::spawn(Planner::new(copy)).map_err(|e| Refusal {
+            name: "planner-thread",
+            detail: e.to_string(),
+        })?;
         Ok(Bodies {
+            planner,
+            wait: None,
+            schedule: BTreeMap::new(),
+            late: Vec::new(),
+            planned: Planned::default(),
+            reached: BTreeMap::new(),
+            waiting: Vec::new(),
             runner: Runner::new(tick),
             town,
             slots: Slots::new(),
@@ -352,29 +407,92 @@ impl Bodies {
         self.runner.now = now;
     }
 
-    /// The geometry for `bodies` and `places`, each place of a different thing (one body's seat, C19).
-    fn geo(&self, bodies: &[Id], places: &[&PlaceAt]) -> Geo {
+    /// Ask each candidate slot with its own identity. Both contacts use the stand point across x/z (C17/C19),
+    /// never seat height or another slot's geometry. Availability remains authoritative at commit.
+    fn reach_of(&self, pairs: Vec<(Id, Id, Id)>) -> Vec<ReachQuestion> {
         let c = &self.runner.controller;
-        let points = bodies
-            .iter()
-            .filter_map(|&b| {
-                let p = c.body(b)?.pose;
-                let at = match (p.support, self.slots.held_place(b)) {
-                    (Support::Slot, Some(s)) => s.stand().ok()?,
-                    _ => p.position,
-                };
-                Some((b, at))
-            })
-            .collect();
-        let places = places
-            .iter()
-            .filter_map(|s| Some((s.thing, [s.point, s.stand().ok()?])))
-            .collect();
-        Geo(points, places)
+        let mut questions = Vec::new();
+        for (body, thing, order) in pairs {
+            let Some(p) = c.body(body).map(|b| b.pose) else {
+                continue;
+            };
+            let at = match (p.support, self.slots.held_place(body)) {
+                (Support::Slot, Some(s)) => match s.stand() {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                },
+                _ => p.position,
+            };
+            for s in self.slots.places_of(thing) {
+                let Ok(stand) = s.stand() else { continue };
+                let stand = Vec3::new(stand.x, 0, stand.z);
+                questions.push(ReachQuestion {
+                    body,
+                    at: Vec3::new(at.x, 0, at.z),
+                    thing,
+                    slot: s.place.slot,
+                    order,
+                    points: [stand, stand],
+                });
+            }
+        }
+        questions
     }
 
-    /// A walk still going for an earlier intent gives way to a new move: it ends `claim-taken`.
+    /// Route searches the planner ran so far, off the clock (K18b).
+    pub fn searched(&self) -> u64 {
+        self.planner.searched
+    }
+
+    /// Body times and batch counts where a free-running clock took fewer of the planner's batches than were out, since
+    /// the last call: the recorder's `Planned` inputs (K18b).
+    pub fn late(&mut self) -> Vec<(Micros, u64)> {
+        std::mem::take(&mut self.late)
+    }
+
+    /// The planner's answers taken for the next tick: those [`Bodies::schedule`] names for this body tick, else every
+    /// batch out, waiting at most [`Bodies::wait`] for each; a shortfall is kept for the recorder.
+    fn take(&mut self) {
+        let at = self.runner.now;
+        let mut p = match self.schedule.remove(&at) {
+            Some(n) => self
+                .planner
+                .take_n(usize::try_from(n).unwrap_or(usize::MAX)),
+            None => {
+                let out = self.planner.pending();
+                let p = self.planner.take(self.wait);
+                let left = self.planner.pending();
+                if left > 0 {
+                    self.late.push((at, (out - left) as u64));
+                }
+                p
+            }
+        };
+        // A replaced move's in-flight answer cannot be used by a newer order on the same body/fixture/slot.
+        p.reach.retain(|(body, thing, slot, order), _| {
+            self.waiting
+                .iter()
+                .any(|w| w.body == *body && w.place == Some(*thing) && w.id == *order)
+                || (self
+                    .live
+                    .get(body)
+                    .is_some_and(|(id, l)| id == order && matches!(l, Live::Place(_)))
+                    && self
+                        .slots
+                        .held_place(*body)
+                        .is_some_and(|p| p.thing == *thing && p.place.slot == *slot))
+        });
+        self.reached.extend(p.reach.iter().map(|(k, v)| (*k, *v)));
+        self.planned.merge(p);
+    }
+
+    /// A walk still going, or a sit or a rise still waiting for its reach, for an earlier intent gives way to a new
+    /// move: it ends `claim-taken`.
     fn replace(&mut self, body: Id) {
+        if let Some(k) = self.waiting.iter().position(|w| w.body == body) {
+            let w = self.waiting.remove(k);
+            self.ended.push((w.id, Err("claim-taken".into())));
+        }
         if let Some(&(old, Live::Walk)) = self.live.get(&body) {
             self.runner.end_order(body);
             self.live.remove(&body);
@@ -470,11 +588,11 @@ impl Bodies {
 
     /// Starts one tick's moves, each for its intent, at body time: refused ones come back with their reason by name.
     /// A ranked list is bound first, the move taken is checked as a client checks it (`replica::move_check`), then
-    /// started.
+    /// started (C14). A walk starts now (its place and legs come from the planner); a sit or a rise waits for its
+    /// reach, and comes back from the first call after the planner found it (K18b).
     pub fn start(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
-        let now = self.runner.now;
         let mut out = Vec::new();
-        let mut sits = Vec::new();
+        let mut asked = Vec::new();
         for (id, a) in asks {
             if self.runner.controller.body(a.body).is_none() {
                 out.push((id, Err(refusal("body-unknown", a.body))));
@@ -505,40 +623,104 @@ impl Bodies {
                 }
                 Ask::Sit { thing } => {
                     self.replace(a.body);
-                    sits.push((id, a.body, thing, Stance::Sit));
+                    asked.push(Waiting {
+                        id,
+                        body: a.body,
+                        place: Some(thing),
+                        stance: Some(Stance::Sit),
+                    });
                 }
                 Ask::Lie { thing } => {
                     self.replace(a.body);
-                    sits.push((id, a.body, thing, Stance::Lie));
+                    asked.push(Waiting {
+                        id,
+                        body: a.body,
+                        place: Some(thing),
+                        stance: Some(Stance::Lie),
+                    });
                 }
                 Ask::Rise => {
                     self.replace(a.body);
-                    let held: Vec<&PlaceAt> = self.slots.held_place(a.body).into_iter().collect();
-                    let geo = self.geo(&[a.body], &held);
-                    let r = self.slots.rise(
-                        &mut self.runner.controller,
-                        &mut self.due,
-                        &mut self.mint,
-                        &mut self.moves,
-                        &geo,
-                        a.body,
-                        &self.rise,
-                        now,
-                    );
-                    out.push((id, self.started(id, a.body, r)));
+                    let place = self.slots.held_by(a.body);
+                    asked.push(Waiting {
+                        id,
+                        body: a.body,
+                        place,
+                        stance: None,
+                    });
                 }
             }
         }
-        // Taken one by one in B3's stable order (body, then thing), each into the free slot the world picks for it
-        // (C19), its reach measured to that slot's stand point.
+        // The asks waiting from earlier ticks whose reach is back are committed; the new asks' reach goes to the
+        // planner, for a later tick.
+        out.extend(self.commit_waiting());
+        let pairs: Vec<(Id, Id, Id)> = asked
+            .iter()
+            .filter_map(|w| Some((w.body, w.place?, w.id)))
+            .collect();
+        self.reached
+            .retain(|(body, _, _, _), _| !asked.iter().any(|w| w.body == *body));
+        if !pairs.is_empty() {
+            let reach = self.reach_of(pairs);
+            self.planner.send(Wants {
+                reach,
+                ..Wants::default()
+            });
+        }
+        self.waiting.extend(asked);
+        out
+    }
+
+    /// Commits the sits and rises whose reach the planner has found since they were asked: the rises in the order
+    /// asked, then the sits together in B3's stable order.
+    fn commit_waiting(&mut self) -> Vec<(Id, R<()>)> {
+        let now = self.runner.now;
+        let mut out = Vec::new();
+        let (ready, still): (Vec<Waiting>, Vec<Waiting>) = std::mem::take(&mut self.waiting)
+            .into_iter()
+            // Ready: its reach is back, or there is none to ask (no such seat or body: B3 refuses it by name).
+            .partition(|w| {
+                w.place.is_none_or(|t| {
+                    self.slots
+                        .places_of(t)
+                        .filter(|p| p.stand().is_ok())
+                        .all(|p| self.reached.contains_key(&(w.body, t, p.place.slot, w.id)))
+                        || self.reach_of(vec![(w.body, t, w.id)]).is_empty()
+                })
+            });
+        self.waiting = still;
+        let mut sits = Vec::new();
+        for w in ready {
+            if let (Some(stance), Some(thing)) = (w.stance, w.place) {
+                sits.push((w.id, w.body, thing, stance));
+                continue;
+            }
+            let reach = Reached {
+                cache: &self.reached,
+                order: Some(w.id),
+                slot: self.slots.held_place(w.body).map(|p| p.place.slot),
+            };
+            let r = self.slots.rise(
+                &mut self.runner.controller,
+                &mut self.due,
+                &mut self.mint,
+                &mut self.moves,
+                &reach,
+                w.body,
+                &self.rise,
+                now,
+            );
+            out.push((w.id, self.started(w.id, w.body, r)));
+        }
+        // Preserve C19's stable request order and nearest currently free slot; each distance is keyed to that slot.
         sits.sort_by_key(|s| (s.1, s.2));
         for (id, body, thing, stance) in sits {
             let slot = self.slots.free(&self.runner.controller, body, thing);
-            let place: Vec<&PlaceAt> = slot
-                .and_then(|s| self.slots.place_in(thing, s))
-                .into_iter()
-                .collect();
-            let geo = self.geo(&[body], &place);
+            let reach = Reached {
+                cache: &self.reached,
+                order: Some(id),
+                slot,
+            };
             let request = Request {
                 body,
                 thing,
@@ -557,7 +739,7 @@ impl Bodies {
                     &mut self.due,
                     &mut self.mint,
                     &mut self.moves,
-                    &geo,
+                    &reach,
                     &[request],
                     now,
                 )
@@ -579,18 +761,23 @@ impl Bodies {
     pub fn step(&mut self, now: Micros) -> Vec<(Id, Result<(), String>)> {
         let mut out = std::mem::take(&mut self.ended);
         while self.runner.now + self.runner.tick <= now {
+            // The planner's answers to the last tick's wants (K18b): this tick reads them.
+            self.take();
             // The tick's order (K18, #3160): due timers first, at the tick's start, then the skills through the
             // host and the controller.
             let at = self.runner.now;
             while let Some(t) = self.due.fire(at + 1) {
-                let held: Vec<&PlaceAt> = self.slots.held_place(t.node).into_iter().collect();
-                let geo = self.geo(&[t.node], &held);
+                let reach = Reached {
+                    cache: &self.reached,
+                    order: self.live.get(&t.node).map(|(id, _)| *id),
+                    slot: self.slots.held_place(t.node).map(|p| p.place.slot),
+                };
                 let fired = self.slots.fire(
                     &mut self.runner.controller,
                     &mut self.due,
                     &mut self.mint,
                     &mut self.moves,
-                    &geo,
+                    &reach,
                     &self.town.surfaces,
                     &t,
                 );
@@ -613,7 +800,17 @@ impl Bodies {
             }
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
-            let _ = self.runner.tick(&mut self.town);
+            let planned = std::mem::take(&mut self.planned);
+            let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
+            // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
+            let seated: Vec<(Id, Id, Id)> = self
+                .live
+                .iter()
+                .filter(|(_, (_, l))| matches!(l, Live::Place(_)))
+                .filter_map(|(b, (id, _))| Some((*b, self.slots.held_by(*b)?, *id)))
+                .collect();
+            wants.reach = self.reach_of(seated);
+            self.planner.send(wants);
             // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
             // zone, a seated or lying one included (#3393).
             let said = std::mem::take(&mut self.runner.said);
@@ -654,6 +851,7 @@ impl Bodies {
     /// or a rise is short and runs to its end, so a seat is never left half taken ([`Cut::Finishing`]): the world
     /// ends the act when its move ends. `None`: no move is going for it.
     pub fn cancel(&mut self, id: Id) -> Option<Cut> {
+        self.waiting.retain(|w| w.id != id);
         let (&body, &(_, live)) = self.live.iter().find(|(_, (i, _))| *i == id)?;
         if !matches!(live, Live::Walk) {
             return Some(Cut::Finishing);
