@@ -165,6 +165,10 @@ async function quiet() {
 
 test('A2: over 50 scripted calls, each tool\'s answer equals the thin command\'s to the same request at the same version', async () => {
   await tool('eden_look'); // opens the session; the first answer shows everything as new
+  const opened = session();
+  assert.equal(existsSync(join(opened.home, 'credentials.json')), false, 'the live session has removed its token file');
+  const running = await request(opened.rt.socket, { op: 'status' });
+  assert.equal(thin(['status']).pid, running.pid, 'the thin command reuses the live tokenless daemon');
   let rng = 21;
   const next = (n) => { rng = (rng * 1103515245 + 12345) % 2 ** 31; return (rng >>> 12) % n; };
   const counts = {};
@@ -190,8 +194,16 @@ test('A2: over 50 scripted calls, each tool\'s answer equals the thin command\'s
   const stopped = await tool('eden_stop');
   await waitFor(() => readdirSync(root).length === 0, 30_000);
   await tool('eden_status');
+  const closing = session();
   const thinStopped = thin(['stop']);
   assert.deepEqual(steady(thinStopped), steady(stopped));
+  await waitFor(() => request(closing.rt.socket, { op: 'status' }).then(() => false, () => true));
+  // The durable Soul folder alone cannot authorize a replacement after its tokenless daemon stops.
+  const refused = spawnSync(process.execPath, [CLI, 'status', '--soul', closing.soul], {
+    env: { PATH: process.env.PATH, SOULS_HOME: closing.home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8',
+  });
+  assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+  assert.equal(JSON.parse(refused.stdout).code, 'no-such-soul');
   counts.eden_stop = 1;
   assert.equal(Object.values(counts).reduce((a, b) => a + b), CALLS);
   assert.equal(Object.keys(counts).length, TOOLS.length, `every tool compared: ${JSON.stringify(counts)}`);
