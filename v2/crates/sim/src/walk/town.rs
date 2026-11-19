@@ -148,9 +148,9 @@ pub struct Town {
     square_pieces: HashMap<(i32, i32), Vec<u32>>,
     /// The ground each body's last plan crossed, in order: each node with its version then (G3).
     planned: BTreeMap<Id, Vec<(Id, u64)>>,
-    /// The open ground's squares each body's last plan crossed (G3b): a change that cuts squares again leaves the
-    /// walks that cross none of them as they are.
-    planned_squares: BTreeMap<Id, BTreeSet<(i32, i32)>>,
+    /// The open ground's squares each body's last plan crossed, in order (G3b): a change that cuts squares again
+    /// leaves the walks that cross none of them as they are, and ranks the others by how soon they reach one.
+    planned_squares: BTreeMap<Id, Vec<(i32, i32)>>,
     /// The walks planned on ground the last installs changed, not yet planned again: each body with how soon its
     /// route reaches the change (its index in the ground the plan crossed; 0 for the node it stood on).
     pub stale: BTreeMap<Id, usize>,
@@ -680,19 +680,31 @@ impl Town {
         self.link_at = link_index(&self.buildings);
         self.versions = versions;
         let ground = self.ground;
-        let crosses = |who: &Id| match &cut {
-            None => true,
+        // How far along its squares a walk first reaches a square cut again (0: where it starts), if it does.
+        let reaches = |who: &Id| match &cut {
+            None => Some(0),
             Some(cut) => self
                 .planned_squares
                 .get(who)
-                .is_some_and(|s| s.iter().any(|q| cut.contains(q))),
+                .and_then(|s| s.iter().position(|q| cut.contains(q))),
         };
         let changed = |n: &Id| touched.contains(n) && (*n != ground || cut.is_none());
         let mut stale = Vec::new();
         for (&who, planned) in &self.planned {
-            let rank = planned.iter().position(|(n, _)| {
-                changed(n) || (*n == ground && touched.contains(n) && crosses(&who))
-            });
+            let mut rank = None;
+            for (k, (n, _)) in planned.iter().enumerate() {
+                if changed(n) {
+                    rank = Some(k);
+                    break;
+                }
+                if *n == ground
+                    && touched.contains(n)
+                    && let Some(r) = reaches(&who)
+                {
+                    rank = Some(k + r);
+                    break;
+                }
+            }
             if let Some(rank) = rank {
                 stale.push((who, rank));
             }
@@ -701,9 +713,35 @@ impl Town {
             let r = self.stale.entry(who).or_insert(rank);
             *r = (*r).min(rank);
         }
-        let stale = &self.stale;
-        self.lines
-            .retain(|who, l| !(changed(&l.node) || (l.node == ground && stale.contains_key(who))));
+        // A line of corners on the open ground is dropped when it runs within a metre of a square cut again.
+        let sq = crate::ground::SQUARE * 1000;
+        let near: Vec<[i64; 4]> = cut
+            .iter()
+            .flatten()
+            .map(|&(i, j)| {
+                let (x, z) = (i64::from(i) * sq, i64::from(j) * sq);
+                [
+                    x - 1_000_000,
+                    z - 1_000_000,
+                    x + sq + 1_000_000,
+                    z + sq + 1_000_000,
+                ]
+            })
+            .collect();
+        let crosses = |l: &Line| {
+            l.points.windows(2).any(|w| {
+                let b = [
+                    w[0][0].min(w[1][0]),
+                    w[0][1].min(w[1][1]),
+                    w[0][0].max(w[1][0]),
+                    w[0][1].max(w[1][1]),
+                ];
+                near.iter().any(|n| overlap(*n, b))
+            })
+        };
+        self.lines.retain(|_, l| {
+            !(changed(&l.node) || (l.node == ground && touched.contains(&ground) && crosses(l)))
+        });
         Ok(())
     }
 
@@ -1172,13 +1210,16 @@ impl World for Town {
             .ok_or_else(|| refusal("destination-gone", show(node)))?;
         let route = self.map.route(&self.tree, from, to, HANDS)?;
         let mut ground: Vec<(Id, u64)> = Vec::new();
-        let mut squares = BTreeSet::new();
+        let mut squares: Vec<(i32, i32)> = Vec::new();
         for p in route.patches() {
             if ground.last().map(|l| l.0) != Some(p.node) {
                 ground.push((p.node, p.version));
             }
-            if p.node == self.ground {
-                squares.extend(p.square);
+            if p.node == self.ground
+                && let Some(sq) = p.square
+                && squares.last() != Some(&sq)
+            {
+                squares.push(sq);
             }
         }
         self.planned.insert(body.id, ground);
@@ -1390,7 +1431,7 @@ impl Town {
             return Err(refusal("way-empty", "a walk with no point and no goal"));
         }
         let (mut legs, mut at, mut ground) = (Vec::new(), *body, Vec::new());
-        let mut squares = BTreeSet::new();
+        let mut squares = Vec::new();
         for (node, p) in stops {
             legs.extend(self.plan(&at, node, p)?);
             // The ground the whole walk crosses (G3): each route's, in order.

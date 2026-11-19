@@ -109,6 +109,9 @@ fn moved(t: &Town, node: Id) -> Part {
 }
 
 fn pct(v: &mut [u128], p: usize) -> f64 {
+    if v.is_empty() {
+        return 0.0;
+    }
     v.sort_unstable();
     let i = ((v.len() * p).div_ceil(100)).clamp(1, v.len()) - 1;
     v[i] as f64 / 1000.0
@@ -514,9 +517,11 @@ fn eden_no_tick_stalls_while_the_ground_changes() {
     let (mut sent, mut whole, mut busy) = (0usize, 0usize, false);
     let start = Instant::now();
     let mut n = 0u32;
-    while installs.len() < things.len() && n < 20 * 600 {
+    // G3B_QUIET: the same walkers and ticks with no change made, for a baseline.
+    let quiet = std::env::var_os("G3B_QUIET").is_some();
+    while (installs.len() < things.len() && n < 20 * 600) && !(quiet && n >= 160) {
         let t0 = Instant::now();
-        let stale_before = t.stale.len();
+        let (mut inst, mut stale) = (0u128, 0usize);
         if let Ok((r, part, us)) = done.try_recv() {
             let r: Result<sim::walk::town::Rebuilt, String> = r;
             let r = r.expect("the rebuild");
@@ -529,23 +534,25 @@ fn eden_no_tick_stalls_while_the_ground_changes() {
             t.install(r, &part)
                 .unwrap_or_else(|e| panic!("install refused: {}: {}", e.name, e.detail));
             installs.push(t1.elapsed().as_micros());
+            (inst, stale) = (*installs.last().unwrap(), t.stale.len());
             busy = false;
         }
+        let searched = t.spent.get().searches;
         ladder
             .step(&mut c, &mut t)
             .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
         ticks.push(t0.elapsed().as_micros());
         if *ticks.last().unwrap() >= 20_000 {
             println!(
-                "  tick {n}: {:.2} ms, stale before {stale_before}, after {}, lines searched {}",
+                "  tick {n}: {:.2} ms; install {:.2} ms, walks it made stale {stale}; lines searched {}",
                 *ticks.last().unwrap() as f64 / 1000.0,
-                t.stale.len(),
-                t.spent.get().searches
+                inst as f64 / 1000.0,
+                t.spent.get().searches - searched
             );
         }
         n += 1;
         // Between ticks: the next change, from a copy of the tree as it stands (K8's, in the world).
-        if !busy && sent < things.len() {
+        if !busy && sent < things.len() && !quiet {
             let node = things[sent];
             let part = if sent % 2 == 0 {
                 moved(&t, node)
@@ -598,6 +605,9 @@ fn eden_no_tick_stalls_while_the_ground_changes() {
         "/../../../.local/g3b-health.json"
     );
     std::fs::write(out, &health).unwrap();
+    if quiet {
+        return;
+    }
     assert_eq!(installs.len(), things.len(), "A4: every change installed");
     if !cfg!(debug_assertions) {
         assert_eq!(over, 0, "A4: no tick takes 50 ms or more");
