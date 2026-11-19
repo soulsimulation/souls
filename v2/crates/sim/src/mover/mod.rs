@@ -100,57 +100,62 @@ fn cell(v: i128) -> i64 {
     (v as i64).div_euclid(SQUARE * 1000)
 }
 
+/// Piece `q`'s triangles, counter-clockwise, with the triangle across each edge, the piece put in `cells`.
+fn tris_of(pc: &Piece, q: u32, cells: &mut BTreeMap<(i64, i64), Vec<u32>>) -> Vec<Tri> {
+    let um = |k: u32| {
+        let v = pc.vertices[k as usize];
+        [i128::from(v[0]) * 1000, i128::from(v[2]) * 1000]
+    };
+    let mut list = Vec::with_capacity(pc.triangles.len());
+    let mut edges: BTreeMap<(u32, u32), (u32, usize)> = BTreeMap::new();
+    for (t, tri) in pc.triangles.iter().enumerate() {
+        let mut idx = *tri;
+        if orient(um(idx[0]), um(idx[1]), um(idx[2])) < 0 {
+            idx.swap(1, 2);
+        }
+        for k in 0..3 {
+            edges.insert((idx[k], idx[(k + 1) % 3]), (t as u32, k));
+        }
+        list.push(([um(idx[0]), um(idx[1]), um(idx[2])], idx, [NONE; 3]));
+    }
+    for tr in list.iter_mut() {
+        let idx = tr.1;
+        for k in 0..3 {
+            if let Some(&(o, _)) = edges.get(&(idx[(k + 1) % 3], idx[k])) {
+                tr.2[k] = o;
+            } else {
+                let (a, b) = (tr.0[k], tr.0[(k + 1) % 3]);
+                let on = |u: i128, v: i128| u == v && u % (i128::from(SQUARE) * 1000) == 0;
+                if on(a[0], b[0]) || on(a[1], b[1]) {
+                    tr.2[k] = SEAM;
+                }
+            }
+        }
+    }
+    let (mut lo, mut hi) = ([i128::MAX; 2], [i128::MIN; 2]);
+    for (v, ..) in &list {
+        for p in v {
+            lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+            hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+        }
+    }
+    if !list.is_empty() {
+        for i in cell(lo[0])..=cell(hi[0]) {
+            for j in cell(lo[1])..=cell(hi[1]) {
+                cells.entry((i, j)).or_default().push(q);
+            }
+        }
+    }
+    list
+}
+
 impl Surface {
     /// The pieces of node `node` (one floor's patch, or every square of the open ground), in its frame.
     pub fn new(node: Id, pieces: Vec<Piece>) -> Surface {
         let mut tris = Vec::with_capacity(pieces.len());
         let mut cells: BTreeMap<(i64, i64), Vec<u32>> = BTreeMap::new();
         for (q, pc) in pieces.iter().enumerate() {
-            let um = |k: u32| {
-                let v = pc.vertices[k as usize];
-                [i128::from(v[0]) * 1000, i128::from(v[2]) * 1000]
-            };
-            let mut list = Vec::with_capacity(pc.triangles.len());
-            let mut edges: BTreeMap<(u32, u32), (u32, usize)> = BTreeMap::new();
-            for (t, tri) in pc.triangles.iter().enumerate() {
-                let mut idx = *tri;
-                if orient(um(idx[0]), um(idx[1]), um(idx[2])) < 0 {
-                    idx.swap(1, 2);
-                }
-                for k in 0..3 {
-                    edges.insert((idx[k], idx[(k + 1) % 3]), (t as u32, k));
-                }
-                list.push(([um(idx[0]), um(idx[1]), um(idx[2])], idx, [NONE; 3]));
-            }
-            for tr in list.iter_mut() {
-                let idx = tr.1;
-                for k in 0..3 {
-                    if let Some(&(o, _)) = edges.get(&(idx[(k + 1) % 3], idx[k])) {
-                        tr.2[k] = o;
-                    } else {
-                        let (a, b) = (tr.0[k], tr.0[(k + 1) % 3]);
-                        let on = |u: i128, v: i128| u == v && u % (i128::from(SQUARE) * 1000) == 0;
-                        if on(a[0], b[0]) || on(a[1], b[1]) {
-                            tr.2[k] = SEAM;
-                        }
-                    }
-                }
-            }
-            let (mut lo, mut hi) = ([i128::MAX; 2], [i128::MIN; 2]);
-            for (v, ..) in &list {
-                for p in v {
-                    lo = [lo[0].min(p[0]), lo[1].min(p[1])];
-                    hi = [hi[0].max(p[0]), hi[1].max(p[1])];
-                }
-            }
-            if !list.is_empty() {
-                for i in cell(lo[0])..=cell(hi[0]) {
-                    for j in cell(lo[1])..=cell(hi[1]) {
-                        cells.entry((i, j)).or_default().push(q as u32);
-                    }
-                }
-            }
-            tris.push(list);
+            tris.push(tris_of(pc, q as u32, &mut cells));
         }
         Surface {
             node,
@@ -159,6 +164,45 @@ impl Surface {
             cells,
             terrain: None,
         }
+    }
+
+    /// Replaces the pieces `drop` with `add` (G3b, #3449: the open ground's squares cut again after a change): the
+    /// dropped pieces are left empty, so no body stands on them and every other piece keeps its number; the new ones
+    /// follow the last, each with whether each of its triangles lies on the terrain (`on`, when the surface has one).
+    /// Returns the first new piece's number.
+    pub fn replace(&mut self, drop: &[u32], add: Vec<Piece>, on: Vec<Vec<bool>>) -> u32 {
+        for &q in drop {
+            let Some(pc) = self.pieces.get_mut(q as usize) else {
+                continue;
+            };
+            pc.outline.clear();
+            pc.vertices.clear();
+            pc.triangles.clear();
+            self.tris[q as usize].clear();
+            if let Some((_, flags)) = &mut self.terrain
+                && let Some(f) = flags.get_mut(q as usize)
+            {
+                f.clear();
+            }
+        }
+        if !drop.is_empty() {
+            for list in self.cells.values_mut() {
+                list.retain(|q| !drop.contains(q));
+            }
+        }
+        let first = self.pieces.len() as u32;
+        for (k, pc) in add.iter().enumerate() {
+            let t = tris_of(pc, first + k as u32, &mut self.cells);
+            self.tris.push(t);
+        }
+        if let Some((_, flags)) = &mut self.terrain {
+            let mut on = on.into_iter();
+            for pc in &add {
+                flags.push(on.next().unwrap_or_else(|| vec![false; pc.triangles.len()]));
+            }
+        }
+        self.pieces.extend(add);
+        first
     }
 
     /// The same surface on terrain `t` (the open ground's, `crate::ground::OpenGround::terrain`): inside a triangle

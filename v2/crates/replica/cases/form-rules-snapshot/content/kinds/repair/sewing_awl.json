@@ -1,0 +1,22 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sewing_awl",
+  "owner": "thing",
+  "points": {
+    "grip": { "role": "grip", "at_mm": [-37, 35, 0] }
+  },
+  "geometry": { "bounds_mm": [180, 60, 40] },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:sewing_awl",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-37,35,0],"size":[100,45,40],"round":8,"tint":"wood"},{"kind":"cyl","at":[13,35,0],"r":12,"h":12,"segments":6,"roll":90000,"tint":"steel"},{"kind":"cone","at":[53,35,0],"r":6,"h":70,"segments":5,"roll":-90000,"tint":"steel"}],"palette":{"wood":"#9c6338","steel":"#aeb7bf"},"tags":["tool","item","awl"]}
+  },
+  "text": {
+    "card": "A sewing awl, carried in one hand, for mending torn tent canvas.",
+    "tool": "tool",
+    "mend": "mend",
+    "sew": "sew"
+  },
+  "card": { "text": "card", "category": "tool", "synonyms": ["mend", "sew"] }
+}

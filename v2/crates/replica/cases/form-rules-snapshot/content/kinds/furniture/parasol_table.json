@@ -1,0 +1,56 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:parasol_table",
+  "owner": "thing",
+  "state": { "clean": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "points": {
+    "side": { "role": "stand", "at_mm": [0, 0, 1500], "yaw_mdeg": 180000 },
+    "top": { "role": "contact", "at_mm": [0, 740, 0] },
+    "by_seat_1": { "role": "stand", "at_mm": [1200, 0, 0] },
+    "by_seat_2": { "role": "stand", "at_mm": [-606, 0, 1036] },
+    "by_seat_3": { "role": "stand", "at_mm": [-588, 0, -1046] }
+  },
+  "slots": {
+    "seat_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [820, 470, 0], "stand": "by_seat_1" },
+    "seat_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-414, 470, 708], "stand": "by_seat_2" },
+    "seat_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-402, 470, -715], "stand": "by_seat_3" }
+  },
+  "geometry": { "bounds_mm": [2300, 2490, 2300], "front": "none" },
+  "forms": {
+    "wipe": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "walk_to", "point": "side" }, { "step": "move", "move": "slide", "at": "top" }],
+      "effects": [{ "change": "set", "field": "clean", "to": true, "event": "wiped" }]
+    },
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:parasol_table",
+    "shape": {"shapes":[{"kind":"cyl","at":[0,720,0],"r":500,"h":40,"segments":12,"tint":"top"},{"kind":"cyl","at":[0,360,0],"r":40,"h":700,"segments":6,"tint":"metal"},{"kind":"cyl","at":[0,20,0],"r":300,"h":40,"segments":8,"r2":280,"tint":"metal"},{"kind":"cyl","at":[0,1520,0],"r":20,"h":1600,"segments":5,"tint":"pole"},{"kind":"cone","at":[0,2200,0],"r":1150,"h":450,"segments":8,"tint":"canopy"},{"kind":"sphere","at":[0,2450,0],"r":40,"segments":4,"tint":"pole"},{"kind":"extrude","at":[820,445,0],"polygon":[[-165,-165],[165,-165],[165,165],[-165,165]],"h":10,"tint":"chair","yaw":0},{"kind":"extrude","at":[1000,465,0],"polygon":[[-165,-5],[165,-5],[165,5],[-165,5]],"h":350,"tint":"chair","yaw":90000},{"kind":"extrude","at":[-414,445,708],"polygon":[[-165,-165],[165,-165],[165,165],[-165,165]],"h":10,"tint":"chair","yaw":-120321},{"kind":"extrude","at":[-505,465,863],"polygon":[[-165,-5],[165,-5],[165,5],[-165,5]],"h":350,"tint":"chair","yaw":-30321},{"kind":"extrude","at":[-402,445,-715],"polygon":[[-165,-165],[165,-165],[165,165],[-165,165]],"h":10,"tint":"chair","yaw":-240642},{"kind":"extrude","at":[-490,465,-872],"polygon":[[-165,-5],[165,-5],[165,5],[-165,5]],"h":350,"tint":"chair","yaw":-150642},{"kind":"cyl","at":[250,742,200],"r":140,"h":3,"segments":12,"tint":"spill","role":"fill"}],"palette":{"top":"#a47a4c","metal":"#4a4f4d","pole":"#d8d4c8","canopy":"#e4dccb","chair":"#8a6a4a","spill":"#6b4a2e"},"tags":["prop","street","table","surface","garden","cafe","parasol"],"round":15},
+    "table": [{ "part": "fill", "field": "clean", "do": "show", "at": { "true": 0, "false": 1 } }]
+  },
+  "text": {
+    "card": "A garden table under a parasol, with three seats around it.",
+    "table": "table",
+    "parasol": "parasol",
+    "garden_table": "garden table",
+    "wipe": "wipe"
+  },
+  "card": { "text": "card", "category": "table", "synonyms": ["parasol", "garden_table"] }
+}

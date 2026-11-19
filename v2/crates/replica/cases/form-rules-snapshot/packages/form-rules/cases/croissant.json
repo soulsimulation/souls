@@ -1,0 +1,370 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:croissant (core/croissant-pack@1, 1 placed): four bites while held; the last bite finishes it and it is gone.",
+ "cases": [
+  {
+   "name": "croissant_bite_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "bite"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:croissant",
+      "fields": {
+       "bites": 4
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "croissant_bite_not_held",
+   "act": {
+    "this": "t1",
+    "form": "bite"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:croissant",
+      "fields": {
+       "bites": 4
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_held",
+    "need": 0
+   }
+  },
+  {
+   "name": "croissant_bite_bites_unmet",
+   "act": {
+    "this": "t1",
+    "form": "bite"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:croissant",
+      "fields": {
+       "bites": 1
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1
+   }
+  },
+  {
+   "name": "croissant_finish_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "finish"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:croissant",
+      "fields": {
+       "bites": 1
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "croissant_finish_not_held",
+   "act": {
+    "this": "t1",
+    "form": "finish"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:croissant",
+      "fields": {
+       "bites": 1
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_held",
+    "need": 0
+   }
+  },
+  {
+   "name": "croissant_finish_bites_unmet",
+   "act": {
+    "this": "t1",
+    "form": "finish"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:croissant",
+      "fields": {
+       "bites": 2
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1
+   }
+  }
+ ]
+}

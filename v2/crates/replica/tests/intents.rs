@@ -31,6 +31,7 @@ fn a1_golden_envelopes_for_every_kind_of_intent() {
         ("queue", Kind::Order),
         ("cancel", Kind::Cancel),
         ("replace", Kind::Act),
+        ("edit", Kind::Edit),
     ];
     for (name, kind) in want {
         let (bytes, i) = intent(name);
@@ -240,6 +241,68 @@ fn a4_an_order_outside_the_list_and_an_oversized_intent_are_refused_by_name() {
     f.insert(9, Value::Array(a.iter().cycle().take(5).cloned().collect()));
     let r = Intent::read(&encode(&Value::Map(f)).expect("bytes")).map_err(|r| r.name);
     assert_eq!(r, Err("fallbacks-too-many"));
+}
+
+/// G1b (#3362), rule 15: the edit golden reads to its batch of four operations, its basis as the planned version, and
+/// writes back to the same parameters; answers to every other kind keep their bytes (fields 6 and 7 left out).
+#[test]
+fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
+    use replica::edit::Op;
+    use replica::edit::wire::{edit_of, parameters};
+    use replica::effects::Actor;
+    use replica::ids::{Id, Scope};
+    use replica::intents::Answer;
+    let (_, i) = intent("edit");
+    let id = Id::new(Scope([9; 16]), 1).expect("an id");
+    let e = edit_of(&i, id).expect("an edit");
+    let kinds: Vec<&str> = e
+        .ops
+        .iter()
+        .map(|o| match o {
+            Op::Place { .. } => "place",
+            Op::Move { .. } => "move",
+            Op::Set { .. } => "set",
+            Op::Remove { .. } => "remove",
+        })
+        .collect();
+    println!(
+        "edit: actor {:?}, planned {}, ops {kinds:?}",
+        e.actor, e.planned
+    );
+    assert_eq!(kinds, ["place", "move", "set", "remove"]);
+    assert_eq!((e.planned, e.intent), (42, id));
+    assert!(matches!(e.actor, Actor::Creator(_)));
+    assert!(
+        matches!(&e.ops[0], Op::Place { kind, .. } if kind.as_str().starts_with("souls:crate@1220"))
+    );
+    assert_eq!(parameters(&e.ops), i.parameters);
+    // A Soul's edit reads too: the world, not the decoder, refuses it (`edit.not-the-creator`).
+    let mut soul = i.clone();
+    soul.actor = Actor::Soul(Id::new(Scope([0xdd; 16]), 100).expect("an id"));
+    let bytes = encode(&soul.to_value()).expect("bytes");
+    assert_eq!(Intent::read(&bytes).map(|s| s.kind()), Ok(Ok(Kind::Edit)));
+    // A receipt without names and a refusal without an operation are the answers they were.
+    let keys = |a: &Answer| match a.to_value() {
+        Value::Map(m) => m.keys().copied().collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let receipt = Answer::Receipt {
+        actor: e.actor,
+        sequence: 1,
+        intent: id,
+        entries: vec![3],
+        names: Default::default(),
+    };
+    let refused = Answer::Refused {
+        actor: e.actor,
+        sequence: 1,
+        reason: replica::encode::Name::new("act.refused").expect("a name"),
+        now: i.basis.clone(),
+        changed: Vec::new(),
+        op: None,
+    };
+    assert_eq!(keys(&receipt), [1, 2, 3, 4, 5]);
+    assert_eq!(keys(&refused), [1, 2, 3, 4, 5]);
 }
 
 /// The checker artifact itself (rule 13): when CI has built it (`CHECKER_WASM`, the `checker-artifact` step of

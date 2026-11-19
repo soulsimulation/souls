@@ -8,6 +8,7 @@
 //!   with O3's shipping, at R2's price (in memory; `v2/docs/archive.md`).
 //! - `cargo run -p archive --release -- corpus <dir>`: writes entry one of V18's corpus.
 //! - `cargo run -p archive --release -- seek [hours]`: V4's seek table and index sizes (`seek_bench.rs`).
+//! - O3's drill and count (`ship`, `rebuild`, `ship-count`, #2732) are `ops`'s: `v2/tools/ops/src/drill.rs`.
 //! - `cargo run -p archive --release -- pack <work dir> <out dir> [at µs ...]`: a stream-check run's log archived into
 //!   a folder the v2 page serves as history (V9), and each moment's state hash as `seek` gives it.
 //!
@@ -26,9 +27,8 @@ use std::sync::Arc;
 use archive::script::{self, SAID, TICK, World};
 use archive::{
     Archiver, R, Segment, Shared, Writes, fetch, rebuild_bundles, refuse, restore, state_hash,
-    stored_bundles, words_in_bundle, words_in_object,
+    store, stored_bundles, words_in_bundle, words_in_object,
 };
-use directoryd::directory::s3::S3;
 use directoryd::directory::store::{Memory, Store};
 use replica::encode::{encode, to_hex};
 use replica::ids::Id;
@@ -38,22 +38,6 @@ use sim::log::{FileStore, Log};
 const PRICE: f64 = 4.50;
 /// O3's designed shipping for a busy world: one write each ten seconds, a 30-day month.
 const O3_BUSY: u64 = 259_200;
-
-fn store() -> R<S3> {
-    let var = |k: &str| std::env::var(format!("ARCHIVE_STORE_{k}")).unwrap_or_default();
-    if var("ENDPOINT").is_empty() {
-        return refuse("store-settings", "ARCHIVE_STORE_ENDPOINT is not set");
-    }
-    let region = Some(var("REGION")).filter(|r| !r.is_empty());
-    S3::new(
-        &var("ENDPOINT"),
-        &var("BUCKET"),
-        region.as_deref().unwrap_or("auto"),
-        &var("ACCESS_KEY_ID"),
-        &var("SECRET_ACCESS_KEY"),
-        &var("PREFIX"),
-    )
-}
 
 const PREFIX: &str = "worlds/scripted/";
 
@@ -395,7 +379,7 @@ fn main() {
         ),
         _ => refuse(
             "usage",
-            "record <dir> | restore <hash> | count | corpus <dir> | seek [hours]",
+            "record <dir> | restore <hash> | count | corpus <dir> | seek [hours] | pack <work dir> <out dir> [at ...]",
         ),
     };
     if let Err(e) = out {

@@ -1,0 +1,82 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Kindling (from #1621): a Soul with empty hands prepares the block's one log; the log is used (stock 1 to 0) and one bundle is made on the block's out surface in the same batch, with its id from the receipt. The Soul takes the bundle off the surface into a hand. A second prepare is refused: no log left, and nothing is made.",
+  "cases": [
+    {
+      "name": "prepare_take_then_none_left",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "k1"] },
+          "k1": { "kind": "eden:kindling_block" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "k1", "form": "prepare" },
+          "receipt": "rk1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "k1", "field": "stock", "n": 1, "to": 0 },
+              { "change": "create", "node": "rk1.0", "kind": "eden:kindling_bundle", "to": { "node": "k1", "slot": "out" } }
+            ],
+            "events": [
+              { "event": "eden:wood_used", "node": "k1", "changes": [0] },
+              { "event": "eden:prepared", "node": "k1", "changes": [1] }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": { "this": "rk1.0", "form": "take" },
+          "receipt": "rk2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "rk1.0", "to": { "node": "b1", "hand": "left" } }],
+            "events": [{ "event": "eden:taken", "node": "rk1.0", "changes": [0] }]
+          }
+        },
+        {
+          "act": { "this": "k1", "form": "prepare" },
+          "receipt": "rk3",
+          "expect": { "verdict": "no", "reason": "field_differs", "need": 0 }
+        }
+      ],
+      "after": {
+        "k1": { "kind": "eden:kindling_block", "fields": { "stock": 0 }, "slots": { "out": [] } },
+        "rk1.0": { "kind": "eden:kindling_bundle" },
+        "b1": { "hands": { "left": "rk1.0", "right": null } }
+      }
+    },
+    {
+      "name": "take_a_bundle_left_on_the_block",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "k1"] },
+          "k1": { "kind": "eden:kindling_block", "fields": { "stock": 0 }, "slots": { "out": ["kb1"] } },
+          "kb1": { "kind": "eden:kindling_bundle" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "kb1", "form": "take" },
+          "receipt": "rk1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "kb1", "to": { "node": "b1", "hand": "left" } }],
+            "events": [{ "event": "eden:taken", "node": "kb1", "changes": [0] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "k1": { "kind": "eden:kindling_block", "fields": { "stock": 0 }, "slots": { "out": [] } },
+        "b1": { "hands": { "left": "kb1", "right": null } }
+      }
+    }
+  ]
+}

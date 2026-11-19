@@ -1,0 +1,115 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bunk",
+  "owner": "thing",
+  "state": {},
+  "links": { "sleeper": { "n": 1, "from": "body", "most": 2, "audience": { "rule": "everyone" } } },
+  "points": {
+    "side": { "role": "stand", "at_mm": [805, 0, 0], "yaw_mdeg": 270000 },
+    "ladder": { "role": "stand", "at_mm": [805, 0, 600], "yaw_mdeg": 270000 }
+  },
+  "slots": {
+    "lower": { "admits": "body", "posture": "lie", "most": 1, "at_mm": [0, 480, 0], "stand": "side" },
+    "upper": { "admits": "body", "posture": "lie", "most": 1, "at_mm": [0, 1430, 0], "stand": "ladder" }
+  },
+  "geometry": { "bounds_mm": [1010, 1800, 2010] },
+  "forms": {
+    "lie": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "berth": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "berth" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "berth" } }, { "step": "sit", "slot": { "arg": "berth" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "berth" }, "event": "lay_down" },
+        { "change": "link", "link": "sleeper", "from": "actor", "event": "lying_in" }
+      ]
+    },
+    "sleep": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "berth": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "berth" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "berth" } }, { "step": "sit", "slot": { "arg": "berth" } }],
+      "effects": [
+        { "change": "reparent", "what": "actor", "into": { "arg": "berth" }, "event": "fell_asleep" },
+        { "change": "link", "link": "sleeper", "from": "actor", "event": "lying_in" }
+      ]
+    },
+    "get_up": {
+      "who": { "link": "sleeper" },
+      "starts": "act",
+      "needs": [{ "need": "linked", "link": "sleeper" }],
+      "steps": [{ "step": "rise" }],
+      "effects": [
+        { "change": "unlink", "link": "sleeper", "from": "actor", "event": "got_up" },
+        { "change": "reparent", "what": "actor", "into": "here", "event": "stood_by" }
+      ]
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:bunk",
+    "shape": {
+      "shapes": [
+        { "kind": "box", "at": [-470, 900, -970], "size": [70, 1800, 70], "round": 0, "tint": "frame" },
+        { "kind": "box", "at": [470, 900, -970], "size": [70, 1800, 70], "round": 0, "tint": "frame" },
+        { "kind": "box", "at": [-470, 900, 970], "size": [70, 1800, 70], "round": 0, "tint": "frame" },
+        { "kind": "box", "at": [470, 900, 970], "size": [70, 1800, 70], "round": 0, "tint": "frame" },
+        {
+          "kind": "extrude",
+          "at": [0, 280, 0],
+          "polygon": [[-445, -975], [445, -975], [445, 975], [-445, 975]],
+          "h": 40,
+          "tint": "frame"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 345, 0],
+          "polygon": [[-425, -945], [425, -945], [425, 945], [-425, 945]],
+          "h": 110,
+          "tint": "linen"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 1230, 0],
+          "polygon": [[-445, -975], [445, -975], [445, 975], [-445, 975]],
+          "h": 40,
+          "tint": "frame"
+        },
+        {
+          "kind": "extrude",
+          "at": [0, 1295, 0],
+          "polygon": [[-425, -945], [425, -945], [425, 945], [-425, 945]],
+          "h": 110,
+          "tint": "quilt"
+        },
+        { "kind": "box", "at": [0, 1550, 970], "size": [920, 60, 40], "round": 0, "tint": "frame" },
+        { "kind": "box", "at": [0, 1550, -970], "size": [920, 60, 40], "round": 0, "tint": "frame" },
+        { "kind": "box", "at": [470, 500, 600], "size": [40, 35, 500], "round": 0, "tint": "frame" },
+        { "kind": "box", "at": [470, 800, 600], "size": [40, 35, 500], "round": 0, "tint": "frame" },
+        { "kind": "box", "at": [470, 1100, 600], "size": [40, 35, 500], "round": 0, "tint": "frame" }
+      ],
+      "round": 15,
+      "palette": { "frame": "#c49a63", "linen": "#ece3cf", "quilt": "#b0573a" },
+      "tags": ["furniture", "bed", "sleep", "bunk"]
+    }
+  },
+  "text": {
+    "card": "A bunk bed: two berths, one above the other, with a ladder; two Souls move it.",
+    "bed": "bed",
+    "sleep": "sleep"
+  },
+  "card": { "text": "card", "category": "bed", "synonyms": ["sleep"] }
+}

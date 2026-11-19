@@ -1,0 +1,107 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:drum_kit",
+  "owner": "thing",
+  "state": {
+    "music": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
+  },
+  "links": {"player":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
+  "points": {"stool_back":{"role":"stand","at_mm":[0,0,900]}},
+  "slots": {"stool":{"admits":"body","posture":"sit","most":1,"at_mm":[0,270,600],"stand":"stool_back"}},
+  "geometry": {"bounds_mm":[1600,1200,1200]},
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need":"state","field":"music","is":"silent"},
+        {"need":"unlinked","link":"player"},
+        {"need":"slot_free","slot":"stool"}
+      ],
+      "steps": [{"step":"walk_to","point":"stool"},{"step":"sit","slot":"stool"}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":"stool","event":"sat_to_play"},
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"calm","event":"played_calm"}
+      ]
+    },
+    "play_happy": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need":"state","field":"music","is":"silent"},
+        {"need":"unlinked","link":"player"},
+        {"need":"slot_free","slot":"stool"}
+      ],
+      "steps": [{"step":"walk_to","point":"stool"},{"step":"sit","slot":"stool"}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":"stool","event":"sat_to_play"},
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"happy","event":"played_happy"}
+      ]
+    },
+    "play_sad": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need":"state","field":"music","is":"silent"},
+        {"need":"unlinked","link":"player"},
+        {"need":"slot_free","slot":"stool"}
+      ],
+      "steps": [{"step":"walk_to","point":"stool"},{"step":"sit","slot":"stool"}],
+      "effects": [
+        {"change":"reparent","what":"actor","into":"stool","event":"sat_to_play"},
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"sad","event":"played_sad"}
+      ]
+    },
+    "stop": {
+      "who": {"link":"player"},
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","not":"silent"}],
+      "steps": [{"step":"rise"}],
+      "effects": [
+        {"change":"set","field":"music","to":"silent","event":"stopped_playing"},
+        {"change":"unlink","link":"player","from":"actor","event":"stepped_away"},
+        {"change":"reparent","what":"actor","into":"here","event":"rose"}
+      ]
+    }
+  },
+  "motion": {"how":"two_souls"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:drum_kit",
+    "table": [
+      {"do":"sound","sound":"tune","mood":"calm","mode":"loop","field":"music","at":{"calm":700},"reach_mm":30000},
+      {"do":"sound","sound":"tune","mood":"happy","mode":"loop","field":"music","at":{"happy":700},"reach_mm":30000},
+      {"do":"sound","sound":"tune","mood":"sad","mode":"loop","field":"music","at":{"sad":700},"reach_mm":30000}
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"cyl","at":[0,300,0],"r":280,"h":400,"color":"#8a2a2a","collide":false,"pitch":90000},
+        {"kind":"cyl","at":[0,300,-205],"r":240,"h":10,"color":"#efe9dc","collide":false,"pitch":90000},
+        {"kind":"cyl","at":[200,660,-20],"r":120,"h":140,"color":"#8a2a2a","collide":false},
+        {"kind":"cyl","at":[-200,660,-20],"r":120,"h":140,"color":"#8a2a2a","collide":false},
+        {"kind":"cyl","at":[-450,300,-150],"r":12,"h":550,"color":"#222222","collide":false},
+        {"kind":"cyl","at":[-450,600,-150],"r":180,"h":150,"color":"#dddddd","collide":false},
+        {"kind":"cyl","at":[500,500,0],"r":12,"h":1000,"color":"#222222","collide":false},
+        {"kind":"cyl","at":[500,1000,0],"r":220,"h":10,"color":"#c9a227","collide":false},
+        {"kind":"cyl","at":[-600,450,100],"r":12,"h":900,"color":"#222222","collide":false},
+        {"kind":"cyl","at":[-600,900,100],"r":170,"h":10,"color":"#c9a227","collide":false},
+        {"kind":"cyl","at":[0,240,600],"r":170,"h":60,"color":"#2a2a2a","collide":false},
+        {"kind":"cyl","at":[0,110,600],"r":25,"h":220,"color":"#222222","collide":false}
+      ],
+      "tags": ["music","drum-kit"]
+    }
+  },
+  "text": {
+    "card": "A drum kit with a stool: sit behind it and drum a beat, by mood.",
+    "instrument": "instrument",
+    "drums": "drums",
+    "percussion": "percussion",
+    "howto_play": "Play it (play, play_happy or play_sad), then stop."
+  },
+  "card": {"text":"card","category":"instrument","synonyms":["drums","percussion"]},
+  "howtos": {"play":{"text":"howto_play","steps":[{"form":"play"},{"form":"stop"}]}}
+}
