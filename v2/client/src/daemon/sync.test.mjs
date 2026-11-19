@@ -67,7 +67,8 @@ test('C11 A2, A3: a first sync of 30,000 records completes; it emits synced, whi
   writeFileSync(tokens, `soul-${SCOPE}-2 ${createHash('sha256').update(token).digest('hex')}\n`);
   procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1',
     '--rooms', '1', '--bodies', '50', '--items', String(ITEMS),
-    // A debug build answers an Eden-sized sync slowly: K18's watchdog is given room for it.
+    // The sync needs no room (it is answered off the clock thread, C16 #3450), but a debug build's tick that commits
+    // the act below hashes the whole Eden-sized tree (K18's state hash) past K7's 500 ms: the watchdog is given room.
     '--watchdog-ms', '10000'], { stdio: 'ignore' }));
   await waitFor(() => statSync(world).isSocket(), 30_000);
   const g = spawn(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], { stdio: ['ignore', 'pipe', 'pipe'] });
