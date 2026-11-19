@@ -7,3 +7,6 @@ description = "Eden 2026's built content imported into the tree (Engine v2 N1, #
 
 [dependencies]
 replica = { path = "../../crates/replica" }
+
+[dev-dependencies]
+sim = { path = "../../crates/sim" }

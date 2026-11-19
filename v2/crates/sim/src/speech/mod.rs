@@ -17,9 +17,11 @@
 //!
 //! - **A reach from a closed list** (E13, #2784; `replica::speech::Reach`), resolved by [`said_by`] against what
 //!   carries a voice ([`Carriers`]): a whisper is heard by the one named body within the world's whisper radius and
-//!   read by its Soul alone; a raised voice by every body within the loud radius on the speaker's node; a call by the
-//!   members of the activity, wherever they are, if the speaker is one; a device by the bodies near each receiver of
-//!   its link that is on. A call and a device are heard by talk's hearers too. The format of the record is B11's.
+//!   read by its Soul alone; a raised voice by every body within the loud radius on the speaker's node; a turn into
+//!   an activity (a call) by its members alone, wherever they are, in an entry of the activity's audience (E26a,
+//!   #3504: T8's audience id is the activity's, so no public view and no non-member reads it); a device by the bodies
+//!   near each receiver of its link that is on, and by talk's hearers. A turn by a Soul that is not a member is
+//!   refused `not-a-member` ([`refused`]) and writes nothing. The format of the record is B11's.
 //!
 //! Not here: sound through walls, recorded sounds (Soul Actions), charging a speaker by its hearers (I8), who may
 //! speak through a thing (F6), the device link read from the tree, conversations (E26), playing sound (lane V).
@@ -28,11 +30,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::controller::Line;
 use crate::index::Index;
-use replica::effects::{Body, Effect, Envelope, Rest};
+use replica::effects::{Body, Effect, Envelope, Refusal, Rest};
 use replica::ids::Id;
 use replica::speech::{Device, Radii, Reach, Said};
 use replica::time::Micros;
-use replica::world_model::Audience;
+use replica::world_model::{Audience, show};
 
 /// A body enters a Soul's interest set closer than this, µm (talking distance and a step).
 pub const ENTER: i64 = 4_000_000;
@@ -191,12 +193,13 @@ pub fn said_by(
             around(index, speaker, radii.loud),
         ),
         Reach::Members(activity) => {
-            let mut hearers = hearing.holders(index, speaker);
             let members = (carriers.members)(activity);
-            if members.contains(&speaker) {
-                hearers.extend(members);
-            }
-            (LEAVE, Audience::Everyone, hearers)
+            let hearers = if members.contains(&speaker) {
+                members.into_iter().collect()
+            } else {
+                BTreeSet::new()
+            };
+            (LEAVE, Audience::Of(activity), hearers)
         }
         Reach::Through(sender) => {
             let mut hearers = hearing.holders(index, speaker);
@@ -256,8 +259,23 @@ pub fn heard_by(
     hearing.update(index, bodies);
     started
         .iter()
+        .filter(|(speaker, line, _)| refused(carriers, *speaker, line).is_none())
         .map(|(speaker, line, _)| (*speaker, said_by(hearing, index, carriers, *speaker, line)))
         .collect()
+}
+
+/// Why an utterance by `speaker` may not be written, if it may not: a turn into an activity whose members do not
+/// include the speaker is refused `not-a-member` (E26a), and writes nothing.
+pub fn refused(carriers: &Carriers, speaker: Id, line: &Line) -> Option<Refusal> {
+    match line.reach {
+        Reach::Members(activity) if !(carriers.members)(activity).contains(&speaker) => {
+            Some(Refusal {
+                name: "not-a-member",
+                detail: format!("{} in {}", show(speaker), show(activity)),
+            })
+        }
+        _ => None,
+    }
 }
 
 /// The log entry an utterance is written as: its `souls:said` event in an entry of no changes, written by the
