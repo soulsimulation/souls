@@ -316,16 +316,87 @@ fn edit_batch_intent(
 /// Replay the actual served log, including its genesis, with the exact served kind catalog.
 fn served_copy(w: &Seeded) -> (replica::apply::Replica, replica::tree::Rules) {
     let mut rules = replica::tree::Rules::default();
-    for line in std::fs::read_to_string(w.dir.join("world.kinds"))
-        .unwrap()
-        .lines()
-    {
+    let text = std::fs::read_to_string(w.dir.join("world.kinds")).unwrap();
+    for line in text.lines() {
         if line.trim_start().starts_with('#') {
             continue;
         }
         rules
             .kinds
             .extend(replica::world_model::parse_kinds(line).unwrap());
+    }
+    // Mirror the strict creator catalog projection: boot annotations preserve the raw pinned definitions,
+    // while reconstructing the body's admission and the exact runtime activity keys used by serve::build.
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("# souls-boot-body"))
+    {
+        let target = line
+            .strip_prefix("# souls-boot-body ")
+            .filter(|s| !s.is_empty() && s.split_whitespace().count() == 1 && *s == s.trim())
+            .expect("well-formed boot-body admission");
+        rules
+            .kinds
+            .get_mut(target)
+            .filter(|kind| kind.owner == "place")
+            .expect("boot-body target is an existing full place kind")
+            .children
+            .insert("body".into());
+    }
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("# souls-boot-activity"))
+    {
+        let fields: Vec<_> = line
+            .strip_prefix("# souls-boot-activity ")
+            .expect("well-formed boot-activity projection")
+            .split_whitespace()
+            .collect();
+        let [target, activity] = fields.as_slice() else {
+            panic!("well-formed boot-activity projection");
+        };
+        let (base, hash) = activity
+            .split_once('@')
+            .expect("a full runtime activity pin");
+        assert!(
+            !base.is_empty()
+                && Name::new(base).is_some()
+                && hash.len() == 68
+                && hash.starts_with("1220")
+                && hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "a canonical full runtime activity pin"
+        );
+        assert!(
+            rules
+                .kinds
+                .get(*target)
+                .is_some_and(|kind| kind.owner == "place"),
+            "boot-activity target is an existing full place kind"
+        );
+        let runtime = replica::world_model::Kind {
+            owner: "activity".into(),
+            children: Default::default(),
+            slots: Default::default(),
+            hands: None,
+        };
+        assert!(
+            rules
+                .kinds
+                .get(*activity)
+                .is_none_or(|kind| kind == &runtime),
+            "boot-activity does not collide with another kind"
+        );
+        rules.kinds.insert((*activity).to_owned(), runtime);
+        rules
+            .kinds
+            .get_mut(*target)
+            .expect("validated place")
+            .children
+            .insert(base.to_owned());
     }
     let header = import_eden::header(w.root, &rules).unwrap();
     let mut copy = replica::apply::Replica::start(header.stored()).unwrap();
