@@ -41,5 +41,10 @@ a log's only text is `namespace:name`. Kinds are named as the world's Soul Actio
 (C12, `kind_name`): the facts' `core:<name>` and `eden:eden_<name>` load as `eden:<name>`, so each thing finds its
 entry.
 
+Stand points (C13, #3440): `clear_stand_points` moves each entry's stand point that lies within a body's clearance
+(radius 280 mm, the cut's margin 60 and 20 for rounding) of its own kind's solids straight out until a body can stand
+there, and returns one line for each point moved or left; `worldd seed --entries` applies it and prints those lines
+(`stand point: …`), so the world's copy of the entries is moved and `content/kinds` is not.
+
 Tests: `cargo test -p import-eden` runs a small world written in the test. The Eden 2026 test needs the exported file:
 `cargo test -p import-eden --release -- --ignored --nocapture`.

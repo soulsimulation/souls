@@ -1065,3 +1065,132 @@ fn slot_point(fields: &BTreeMap<u64, Value>, n: u64) -> Option<Vec3> {
         _ => None,
     })
 }
+
+/// C13 (#3440): how far a stand point must lie from a solid for a body to stand there, mm: the standard body's radius
+/// (280) and the margin the walked ground is cut with (60), as `sim::ground` cuts it (`HUMAN_RADIUS`, `MARGIN`), and 20
+/// for the cut's rounding. A box is grown by it on every side, corners square.
+pub const STAND_CLEAR: i64 = 360;
+/// A body's height span above its floor, mm (`sim::ground::BODY_LOW`, `BODY_HIGH`): a solid outside it never blocks.
+const BODY_SPAN: (i64, i64) = (220, 1_800);
+/// The farthest a stand point is moved, mm.
+const STAND_MOVE_MOST: i64 = 1_500;
+
+/// The solids (field 12's rows, mm, the thing's frame) of the first thing of each kind, by the kind's plain name.
+fn solids_by_kind(im: &Import) -> BTreeMap<String, Vec<Vec<i64>>> {
+    let num = |v: &Value| match v {
+        Value::Uint(u) => i64::try_from(*u).ok(),
+        Value::Nint(u) => i64::try_from(*u).ok().map(|u| -u - 1),
+        _ => None,
+    };
+    let mut out = BTreeMap::new();
+    for id in im.nodes.values() {
+        let Some(n) = im.tree.handle(*id).and_then(|h| im.tree.node(h)) else {
+            continue;
+        };
+        let kind = plain(n.kind().as_str());
+        if out.contains_key(kind) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = n.fields().get(&F_SOLIDS) {
+            let rows = rows
+                .iter()
+                .filter_map(|r| match r {
+                    Value::Array(r) => r.iter().map(num).collect::<Option<Vec<i64>>>(),
+                    _ => None,
+                })
+                .collect();
+            out.insert(kind.to_owned(), rows);
+        }
+    }
+    out
+}
+
+/// Whether a body stands clear of `solids` at `(x, z)` mm: outside each box that meets its height span, grown by
+/// [`STAND_CLEAR`].
+fn stands_clear(solids: &[Vec<i64>], x: i64, z: i64) -> bool {
+    solids.iter().all(|s| {
+        let [cx, cz, hx, hz, yaw, y0, y1, ..] = s[..] else {
+            return true;
+        };
+        if y1 <= BODY_SPAN.0 || y0 >= BODY_SPAN.1 {
+            return true;
+        }
+        // The point in the box's own axes: turned back by the box's yaw.
+        let Ok(q) = Quat::from_yaw_mdeg(-yaw) else {
+            return true;
+        };
+        let Ok(p) = q.rotate(Vec3::new((x - cx) * 1000, 0, (z - cz) * 1000)) else {
+            return true;
+        };
+        p.x.abs() > (hx + STAND_CLEAR) * 1000 || p.z.abs() > (hz + STAND_CLEAR) * 1000
+    })
+}
+
+fn obj_mut<'a>(
+    v: &'a mut replica::rules::json::Value,
+    key: &str,
+) -> Option<&'a mut replica::rules::json::Value> {
+    match v {
+        replica::rules::json::Value::Obj(o) => o.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v),
+        _ => None,
+    }
+}
+
+/// C13 (#3440): each stand point of `entries` (`(kind, souls-entry/1 entry)`, as `worldd seed` reads them; a point
+/// whose role is `stand`, which a form walks to by name or as a slot's `stand`) that lies within [`STAND_CLEAR`] of
+/// its own kind's solids (those of the kind's first thing in the import) is moved straight out from the thing's
+/// middle, 10 mm at a time and at most [`STAND_MOVE_MOST`], until clear. A body could not stand there: the walk to it
+/// answered `souls:no-way`. Returns the import report's lines, one for each point moved or left where it was.
+pub fn clear_stand_points(
+    im: &Import,
+    entries: &mut [(String, replica::rules::json::Value)],
+) -> Vec<String> {
+    use replica::rules::json::Value as J;
+    let solids = solids_by_kind(im);
+    let mut report = Vec::new();
+    for (kind, entry) in entries.iter_mut() {
+        let Some(solids) = solids.get(kind.as_str()) else {
+            continue;
+        };
+        let Some(J::Obj(points)) = obj_mut(entry, "points") else {
+            continue;
+        };
+        for (name, p) in points.iter_mut() {
+            if p.get("role").and_then(J::str) != Some("stand") {
+                continue;
+            }
+            let Some(J::Arr(at)) = obj_mut(p, "at_mm") else {
+                continue;
+            };
+            let (Some(J::Int(x)), Some(J::Int(z))) = (at.first(), at.get(2)) else {
+                continue;
+            };
+            let (Ok(x), Ok(z)) = (i64::try_from(*x), i64::try_from(*z)) else {
+                continue;
+            };
+            if stands_clear(solids, x, z) {
+                continue;
+            }
+            let len =
+                i64::try_from((i128::from(x).pow(2) + i128::from(z).pow(2)).isqrt()).unwrap_or(0);
+            let to = (1..=STAND_MOVE_MOST / 10)
+                .map(|k| len + k * 10)
+                .filter(|_| len > 0)
+                .map(|l| (x * l / len, z * l / len))
+                .find(|&(x, z)| stands_clear(solids, x, z));
+            match to {
+                Some((nx, nz)) => {
+                    at[0] = J::Int(i128::from(nx));
+                    at[2] = J::Int(i128::from(nz));
+                    report.push(format!(
+                        "{kind} {name}: moved clear of its own solids, [{x}, {z}] -> [{nx}, {nz}] mm"
+                    ));
+                }
+                None => report.push(format!(
+                    "{kind} {name}: left at [{x}, {z}] mm, no clear spot within {STAND_MOVE_MOST} mm straight out"
+                )),
+            }
+        }
+    }
+    report
+}

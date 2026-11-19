@@ -435,8 +435,9 @@ impl Forms {
     }
 
     /// Hands an accepted form, bound into `steps` and `effects`, to a runner on `body` done at `node` for `intent`, and
-    /// wakes it. A resend of an intent whose effects are all in the log gets the first receipt, and one whose run is in
-    /// progress joins it. Refused: `intent-expired` past the intent's expiry, `intent-key-reused` for an intent id
+    /// wakes it; the points it walks to are turned by the node's orientation in the tree ([`form_runner::turn`]). A
+    /// resend of an intent whose effects are all in the log gets the first receipt, and one whose run is in progress
+    /// joins it. Refused: `intent-expired` past the intent's expiry, `intent-key-reused` for an intent id
     /// seen with other contents, `form-running` while the body has another run in progress.
     #[allow(clippy::too_many_arguments)]
     pub fn start<G: Geometry, R: Reach>(
@@ -484,6 +485,13 @@ impl Forms {
                 name: "form-running",
                 detail: replica::world_model::show(body),
             });
+        }
+        // A turned thing's points are walked to turned with it (C13, #3440).
+        let mut steps = steps;
+        if node != body
+            && let Some(p) = w.tree.handle(node).and_then(|h| w.tree.node(h)?.place())
+        {
+            form_runner::turn(&mut steps, p.orientation)?;
         }
         let reserves = node != body && !self.shared.contains(&node);
         if reserves && let Some(holder) = self.holder(node) {

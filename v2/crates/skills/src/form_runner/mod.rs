@@ -39,6 +39,10 @@
 //!   argument; the thing a bare take or put moves is the one its form's `reparent` effect names ([`bind_in`],
 //!   [`bind_effects_in`]).
 //!
+//! - **Turned things** (C13, #3440). A kind's points are in its own axes; the world turns a run's walk points by the
+//!   node's orientation in the tree before the run starts ([`turn`]), so a thing turned 90 degrees is walked to on its
+//!   turned front.
+//!
 //! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
 
 use std::collections::BTreeMap;
@@ -47,7 +51,7 @@ use replica::effects::Refusal;
 use replica::encode::{self, Name};
 use replica::host::{Host, Progress, Skill};
 use replica::ids::Id;
-use replica::pose::Vec3;
+use replica::pose::{Quat, Vec3};
 use replica::rules::json::Value;
 use replica::time::Micros;
 
@@ -242,6 +246,21 @@ pub fn bind_in(
             }
         })
         .collect()
+}
+
+/// Turns the points bound `steps` walk to by `q`, the orientation of the node the form is done at (C13, #3440): an
+/// entry's points are in the kind's own axes, and the runner adds them to the node's position, so a turned thing's
+/// point is walked to on its turned side. `point-unturnable` when a point is too far out to turn.
+pub fn turn(steps: &mut [Step], q: Quat) -> Result<(), Refusal> {
+    for s in steps {
+        if let Step::WalkTo { point, at } = s {
+            *at = q.rotate(*at).map_err(|e| Refusal {
+                name: "point-unturnable",
+                detail: format!("{}: {e:?}", point.as_str()),
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// One effect of a form, bound. The world works each out at the effect's instant, against the tree (`sim::forms`).

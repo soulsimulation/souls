@@ -256,6 +256,10 @@ fn seed_in(args: &[String]) -> R<String> {
     if let Some(e) = arg(args, "--entries") {
         let mut found = Vec::new();
         entries(Path::new(e), &mut found)?;
+        // Stand points a body can stand on: each moved clear of its own kind's solids, named here (C13, #3440).
+        for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
+            println!("stand point: {line}");
+        }
         for (kind, v) in &found {
             let p = dir
                 .join("entries")
