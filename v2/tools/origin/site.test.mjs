@@ -76,7 +76,7 @@ test('served client: world GET/HEAD routes serve the installed bytes and matchin
 test('served client: the install bundle carries a self-contained origin adapter', async () => {
   const bins = join(dir, 'bins'), bundle = join(dir, 'bundle');
   mkdirSync(bins);
-  for (const p of ['supervisor', 'worldd', 'gatewayd', 'directoryd', 'deploy', 'gateway-upgrade']) writeFileSync(join(bins, p), '#!/bin/sh\n');
+  for (const p of ['supervisor', 'worldd', 'gatewayd', 'directoryd', 'deploy', 'gateway-upgrade', 'import-accounts', 'import-world']) writeFileSync(join(bins, p), '#!/bin/sh\n');
   execFileSync('bash', [fileURLToPath(new URL('../ops/install.sh', import.meta.url)), 'bundle', bundle, bins, join(dir, 'web')]);
   const { createOrigin: installed } = await import(pathToFileURL(join(bundle, 'origin', 'origin.mjs')));
   const s = installed(join(dir, 'views'), { client: join(dir, 'client') }).server;
