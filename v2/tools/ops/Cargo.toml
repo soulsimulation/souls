@@ -34,6 +34,11 @@ path = "src/gateway_upgrade.rs"
 name = "o16-run"
 path = "src/gateway_run.rs"
 
+# The scratch machine's probe for O18's release proof (v2/tools/ops/release/scratch.sh).
+[[bin]]
+name = "o18-probe"
+path = "release/probe.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 # K4's log and K5's checkpoints.
