@@ -1,0 +1,940 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:quilling_board (from #1866). Three units of strip in each of red, blue and gold, conserved: rolling moves turns of a colour's strip into its coil (at most three), unrolling moves the whole coil back. Refused as the original refused: more turns than the colour has unwound ('Only N unwound ... strip units are available'), a coil without room for the turns, an unwound coil unrolled ('That coil is already unwound; choose an occupied coil to recover its paper.', fixed by rolling it), something held ('Put down held objects before rolling or unrolling this supported board.').",
+  "cases": [
+    {
+      "name": "roll_red_every_need_met",
+      "act": {
+        "this": "q1",
+        "form": "roll_red",
+        "args": {
+          "turns": 2
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "roll_red_more_turns_than_strip",
+      "act": {
+        "this": "q1",
+        "form": "roll_red",
+        "args": {
+          "turns": 2
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "red_strip": 1,
+              "red_coil": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 0,
+        "detail": {
+          "node": "q1",
+          "field": "red_strip",
+          "has": 1,
+          "amount": 2
+        },
+        "fix": null,
+        "says": "short_red"
+      }
+    },
+    {
+      "name": "roll_red_coil_has_no_room",
+      "act": {
+        "this": "q1",
+        "form": "roll_red",
+        "args": {
+          "turns": 2
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "red_strip": 2,
+              "red_coil": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 1,
+        "detail": {
+          "node": "q1",
+          "field": "red_coil",
+          "room": 1,
+          "amount": 2
+        },
+        "fix": null,
+        "says": "coil_full"
+      }
+    },
+    {
+      "name": "roll_red_holding_something",
+      "act": {
+        "this": "q1",
+        "form": "roll_red",
+        "args": {
+          "turns": 1
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "unroll_red_every_need_met",
+      "act": {
+        "this": "q1",
+        "form": "unroll_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "red_strip": 1,
+              "red_coil": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "unroll_red_already_unwound",
+      "act": {
+        "this": "q1",
+        "form": "unroll_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "red_coil",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": {
+          "form": "roll_red"
+        },
+        "says": "unwound"
+      }
+    },
+    {
+      "name": "unroll_red_holding_something",
+      "act": {
+        "this": "q1",
+        "form": "unroll_red"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "red_strip": 0,
+              "red_coil": 3
+            }
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "roll_blue_every_need_met",
+      "act": {
+        "this": "q1",
+        "form": "roll_blue",
+        "args": {
+          "turns": 2
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "roll_blue_more_turns_than_strip",
+      "act": {
+        "this": "q1",
+        "form": "roll_blue",
+        "args": {
+          "turns": 2
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "blue_strip": 1,
+              "blue_coil": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 0,
+        "detail": {
+          "node": "q1",
+          "field": "blue_strip",
+          "has": 1,
+          "amount": 2
+        },
+        "fix": null,
+        "says": "short_blue"
+      }
+    },
+    {
+      "name": "roll_blue_coil_has_no_room",
+      "act": {
+        "this": "q1",
+        "form": "roll_blue",
+        "args": {
+          "turns": 2
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "blue_strip": 2,
+              "blue_coil": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 1,
+        "detail": {
+          "node": "q1",
+          "field": "blue_coil",
+          "room": 1,
+          "amount": 2
+        },
+        "fix": null,
+        "says": "coil_full"
+      }
+    },
+    {
+      "name": "roll_blue_holding_something",
+      "act": {
+        "this": "q1",
+        "form": "roll_blue",
+        "args": {
+          "turns": 1
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "unroll_blue_every_need_met",
+      "act": {
+        "this": "q1",
+        "form": "unroll_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "blue_strip": 1,
+              "blue_coil": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "unroll_blue_already_unwound",
+      "act": {
+        "this": "q1",
+        "form": "unroll_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "blue_coil",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": {
+          "form": "roll_blue"
+        },
+        "says": "unwound"
+      }
+    },
+    {
+      "name": "unroll_blue_holding_something",
+      "act": {
+        "this": "q1",
+        "form": "unroll_blue"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "blue_strip": 0,
+              "blue_coil": 3
+            }
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "roll_gold_every_need_met",
+      "act": {
+        "this": "q1",
+        "form": "roll_gold",
+        "args": {
+          "turns": 2
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "roll_gold_more_turns_than_strip",
+      "act": {
+        "this": "q1",
+        "form": "roll_gold",
+        "args": {
+          "turns": 2
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "gold_strip": 1,
+              "gold_coil": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 0,
+        "detail": {
+          "node": "q1",
+          "field": "gold_strip",
+          "has": 1,
+          "amount": 2
+        },
+        "fix": null,
+        "says": "short_gold"
+      }
+    },
+    {
+      "name": "roll_gold_coil_has_no_room",
+      "act": {
+        "this": "q1",
+        "form": "roll_gold",
+        "args": {
+          "turns": 2
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "gold_strip": 2,
+              "gold_coil": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 1,
+        "detail": {
+          "node": "q1",
+          "field": "gold_coil",
+          "room": 1,
+          "amount": 2
+        },
+        "fix": null,
+        "says": "coil_full"
+      }
+    },
+    {
+      "name": "roll_gold_holding_something",
+      "act": {
+        "this": "q1",
+        "form": "roll_gold",
+        "args": {
+          "turns": 1
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "unroll_gold_every_need_met",
+      "act": {
+        "this": "q1",
+        "form": "unroll_gold"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "gold_strip": 1,
+              "gold_coil": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "unroll_gold_already_unwound",
+      "act": {
+        "this": "q1",
+        "form": "unroll_gold"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "gold_coil",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": {
+          "form": "roll_gold"
+        },
+        "says": "unwound"
+      }
+    },
+    {
+      "name": "unroll_gold_holding_something",
+      "act": {
+        "this": "q1",
+        "form": "unroll_gold"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board",
+            "fields": {
+              "gold_strip": 0,
+              "gold_coil": 3
+            }
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "quilling_board_take_every_need_met",
+      "act": {
+        "this": "q1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "quilling_board_take_both_hands_full",
+      "act": {
+        "this": "q1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "q1": {
+            "kind": "eden:quilling_board"
+          },
+          "h1": {
+            "kind": "eden:quilling_board"
+          },
+          "h2": {
+            "kind": "eden:quilling_board"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

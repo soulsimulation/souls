@@ -1,0 +1,72 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:stool (SA-X24): sit on its one seat; spin it, and it stops by itself three seconds later.",
+  "cases": [
+    {
+      "name": "stool_two_souls_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:stool" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "seat" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:stool", "slots": { "seat": ["b1"] } } }
+    },
+    {
+      "name": "stool_spin_then_stop",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "t1"] },
+          "t1": { "kind": "eden:stool" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "spin" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "spinning", "n": 1, "to": 1 }],
+            "events": [
+              { "event": "eden:spun", "node": "t1", "changes": [0] },
+              { "event": "eden:slowing", "node": "t1", "changes": [] }
+            ],
+            "timers": [{ "node": "t1", "form": "stop", "after_us": 3000000, "event": 1 }]
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "spin" },
+          "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "field_differs", "need": 0 }
+        },
+        {
+          "act": { "this": "t1", "form": "stop" },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "spinning", "n": 1, "to": 0 }],
+            "events": [{ "event": "eden:stopped", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:stool", "fields": { "spinning": 0 } } }
+    }
+  ]
+}

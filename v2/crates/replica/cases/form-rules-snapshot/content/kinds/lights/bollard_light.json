@@ -1,0 +1,52 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bollard_light",
+  "owner": "thing",
+  "state": {
+    "on": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "switch": { "role": "contact", "at_mm": [0, 300, 105] }
+  },
+  "geometry": { "bounds_mm": [240, 910, 240] },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": false },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [{ "change": "set", "field": "on", "to": true, "event": "switched_on" }]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "on", "is": true },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [{ "change": "set", "field": "on", "to": false, "event": "switched_off" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:bollard_light",
+    "table": [
+      { "part": "light", "field": "on", "do": "glow", "at": { "true": 1000, "false": 0 } },
+      { "part": "light", "field": "on", "do": "tint", "at": { "true": "#ffe9c4", "false": "#6b665e" } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,380,0],"r":100,"h":760,"segments":8,"tint":"post"},{"kind":"cyl","at":[0,800,0],"r":95,"h":80,"segments":8,"tint":"lamp","glow":1000,"role":"light"},{"kind":"cyl","at":[0,880,0],"r":120,"h":60,"segments":8,"tint":"post"},{"kind":"box","at":[0,300,100],"size":[40,60,12],"tint":"plate","role":"knob"}],"palette":{"post":"#3a3c3e","lamp":"#ffe9c4","plate":"#8a8478"},"tags":["utility","lighting","light","object"]}
+  },
+  "text": {
+    "card": "A short path light with a glowing band under its cap; switch it on or off.",
+    "light": "light",
+    "path_light": "path light",
+    "garden_light": "garden light",
+    "bollard_lamp": "bollard lamp"
+  },
+  "card": { "text": "card", "category": "light", "synonyms": ["path_light", "garden_light", "bollard_lamp"] }
+}

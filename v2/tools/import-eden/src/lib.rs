@@ -92,6 +92,8 @@ pub struct Import {
     pub notes: Vec<String>,
     /// Today's def ref to its form: point, path or area.
     pub forms: BTreeMap<String, String>,
+    /// The header and the one part the tree was committed from, as bytes: a client's copy is built from them.
+    pub log: (Vec<u8>, Vec<u8>),
     /// Every entry the import committed, in order: what a stream of the world starts from (V5, #2714).
     pub effects: Vec<Effect>,
 }
@@ -763,17 +765,15 @@ pub fn load(text: &str) -> R<Import> {
         };
         effects.push(entry(effects.len() as u64, ends[0], vec![change]));
     }
-    let part = Part::read(
-        &encode(&Value::Map(BTreeMap::from([
-            (1, Value::Bytes(header.hash().to_bytes())),
-            (
-                2,
-                Value::Array(effects.iter().map(Effect::to_value).collect()),
-            ),
-        ])))
-        .map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| format!("{}: {}", e.name, e.detail))?;
+    let part_bytes = encode(&Value::Map(BTreeMap::from([
+        (1, Value::Bytes(header.hash().to_bytes())),
+        (
+            2,
+            Value::Array(effects.iter().map(Effect::to_value).collect()),
+        ),
+    ])))
+    .map_err(|e| e.to_string())?;
+    let part = Part::read(&part_bytes).map_err(|e| format!("{}: {}", e.name, e.detail))?;
     tree.commit(&header, &part, &rules)
         .map_err(|e| format!("commit refused: {}: {}", e.name, e.detail))?;
 
@@ -799,6 +799,10 @@ pub fn load(text: &str) -> R<Import> {
         by_ref,
         notes: b.notes,
         forms,
+        log: (
+            encode(&header.to_value()).map_err(|e| e.to_string())?,
+            part_bytes,
+        ),
         effects,
     })
 }

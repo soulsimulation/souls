@@ -1,0 +1,67 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:desk. Anyone writes a page at it; the pages are kept on the desk, up to 50.",
+  "cases": [
+    {
+      "name": "write_a_page",
+      "act": {
+        "this": "t1",
+        "form": "write"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "write_with_pages_already",
+      "act": {
+        "this": "t1",
+        "form": "write"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:desk",
+            "fields": {
+              "pages": 49
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}

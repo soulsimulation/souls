@@ -15,6 +15,9 @@ use sim::links::{Building, Kind};
 use sim::routes::{ALL, CLIMB, HANDS, Hop, Map, Route, Spot};
 use std::collections::BTreeMap;
 
+/// Eden's walking body: every ability but wading and swimming (N11c, #3218: [`ALL`] now crosses water too).
+const DRY: sim::routes::Mask = HANDS | CLIMB;
+
 fn testworld() -> Import {
     let w = testworld::generate(1, 0).expect("the test world");
     import_eden::load(&w.text).expect("the test world loads")
@@ -321,7 +324,7 @@ fn a1_ten_thousand_routes_across_eden() {
     }
     println!("  links: {kinds:?}");
     // The places: pieces of the largest part of the map a body with every ability can walk.
-    let parts = pick.parts(ALL);
+    let parts = pick.parts(DRY);
     let mut size: BTreeMap<u32, usize> = BTreeMap::new();
     for &p in &parts {
         *size.entry(p).or_default() += 1;
@@ -433,7 +436,7 @@ fn a1_ten_thousand_routes_across_eden() {
             place(&pick, &others, &mut seed),
         );
         let t = std::time::Instant::now();
-        let e = pick.route(&im.tree, a, b, ALL).expect_err("no route");
+        let e = pick.route(&im.tree, a, b, DRY).expect_err("no route");
         refused_us.push(t.elapsed().as_micros());
         let why = e.detail.split(": ").last().unwrap_or("").to_owned();
         *refused.entry(why).or_default() += 1;
@@ -458,7 +461,7 @@ fn a1_ten_thousand_routes_across_eden() {
             let mut hops = Vec::with_capacity(ROUTES);
             for &(a, b) in &pairs {
                 let t = std::time::Instant::now();
-                let r = map.route(&im.tree, a, b, ALL).expect("a route");
+                let r = map.route(&im.tree, a, b, DRY).expect("a route");
                 ns.push(t.elapsed().as_nanos());
                 searched.push(u128::from(r.searched));
                 hops.push(r.hops.len() as u128);
@@ -493,8 +496,19 @@ fn a1_ten_thousand_routes_across_eden() {
     // Untimed: every route's first line stands on its first piece; how many routes cross a link, and which kinds.
     let (mut worst, mut linked) = (0, 0);
     let mut crossed: BTreeMap<String, usize> = BTreeMap::new();
+    // A digest of every route (its length, portals searched, hops and first line), to tell a change in any.
+    let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |v: i64| {
+        for b in v.to_le_bytes() {
+            digest = (digest ^ u64::from(b)).wrapping_mul(0x100_0000_01b3);
+        }
+    };
     for &(a, b) in &pairs {
-        let r = pick.route(&im.tree, a, b, ALL).expect("a route");
+        let r = pick.route(&im.tree, a, b, DRY).expect("a route");
+        mix(r.length as i64);
+        mix(i64::from(r.searched));
+        mix(r.hops.len() as i64);
+        r.first_line.iter().flatten().for_each(|&v| mix(v));
         worst = worst.max(check_first_line(&pick, a, &r));
         let mut any = false;
         for h in &r.hops {
@@ -506,7 +520,8 @@ fn a1_ten_thousand_routes_across_eden() {
         linked += usize::from(any);
     }
     println!(
-        "  every first line on its piece (farthest off {worst} mm); {linked} routes cross a link, {crossed:?}"
+        "  every first line on its piece (farthest off {worst} mm); {linked} routes cross a link, {crossed:?}; digest of all {} routes {digest:016x}",
+        pairs.len()
     );
     println!("  ten routes drawn (world frame, m):");
     for (a, b, r) in &ten {

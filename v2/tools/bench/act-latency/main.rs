@@ -344,7 +344,7 @@ fn kills(dir: &Path, acts: u64, kills: u64, seed: u64) {
     let found = recover(&log).unwrap_or_else(|e| fail(e));
     let mut by_intent: BTreeMap<Id, Vec<u64>> = BTreeMap::new();
     let mut intents_of: BTreeMap<(Vec<u8>, u64), Vec<Id>> = BTreeMap::new();
-    for r in &found.records {
+    for r in found.records.iter().filter(|r| !sim::recorder::is_input(r)) {
         let part = Part::read(r).unwrap_or_else(|e| fail(e));
         for e in &part.effects {
             if let Cause::Intent(id) = e.envelope.cause {

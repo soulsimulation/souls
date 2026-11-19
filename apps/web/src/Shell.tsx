@@ -37,7 +37,7 @@ import {answerApprovalTabs,approvalChannelName,approvalFromHash,askOpenTab} from
 import {useApprovalFollow} from './useApprovalFollow.ts';
 import {FOLLOW_SOUL_WAIT_MS,onFollowSoulRequest,requestFollowSoul} from './follow-soul-request.ts';
 import {onLookAtRequest} from './look-at-request.ts';
-import {worldClockAt,worldTimeText} from './world-clock.ts';
+import {worldClockAt,worldMinutes,worldTimeText} from './world-clock.ts';
 import type { WorldViewerHandle, WorldViewerState } from './WorldViewer.ts';
 import { worldKey } from './world-path.ts';
 // A world made with "New world" (the world launcher): its god panel carries sign-in, claim, approvals and Join as a
@@ -214,13 +214,14 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   const soulBodies=bodiesFromEvents(sim.edge??[]);
   const localClassroomPresentation=classroomProjection(edenExpansion,sim.conn.welcome?.worldId,Object.hasOwn(r.entities,classroomScreenEntityId),viewerState?.presentation==='live'&&!viewerState.loading&&!viewerState.unavailableReason,lessonIndex,cfg.worldId);
   const openAccount = () => { setAdvanced(false); setPairCode(null); setTab('my soul'); revealPanel(); };
+  const worldClock=worldClockAt((sim as Souls&{takes?:{chunks?:unknown[]}|null}).takes?.chunks,viewerState?.shownTick);
   return (
     <div ref={frame} className={`human-world ${advanced ? 'has-advanced' : ''}`}>
       {!launcherWorld&&<OldWorldApprovals linkId={approvalId} auth={auth} accountAuthRequired={cfg.accountAuthRequired===true} onLinkDone={()=>{setApprovalId(null);history.replaceState(null,'',location.pathname+location.search+'#watch');}}/>}
       <div className="world-scene"><LiveWorld sim={sim} selected={selected} onSelect={inspect} onChipNote={text=>setChipNote({text,at:Date.now()})} embedded bootWorldId={launcherWorld?cfg.worldId:undefined} {...{edenExpansion,edenExpected,localClassroomPresentation,publishSpeechAnchors:!advanced,humanPresets:humanPresetsEnabled&&edenExpansion}} hideControls={!advanced} hideSoulInfo={!advanced} viewportInsets={viewportInsets} onViewerHandle={receiveHandle} onViewerState={receiveState} onInitialProgress={advanced ? undefined : setInitialProgress} ownedIds={ownedIds} /></div>
       <VisitorWelcome key={privatePanelKey} api={api} siteApi={siteApi} worldPath={worldPath} ownerId={currentMe?.userId??null} worldId={cfg.worldId} worldName={worldName} build={cfg.build} handle={viewerHandle} state={viewerState}/>
       <WorldSpeechOverlay root={frame} sim={sim} state={viewerState} active={!advanced} handle={viewerHandle}/>
-      {!advanced && <ViewerFrame handle={viewerHandle} state={viewerState} dt={sim.conn.welcome?.dt ?? 0.05} navigationOpen={navigationOpen} onNavigationChange={setNavigationOpen} onNavigationOpen={openNavigation} worldTime={worldTimeText(worldClockAt((sim as Souls&{takes?:{chunks?:unknown[]}|null}).takes?.chunks,viewerState?.shownTick))} connected={!connectionLost(sim.conn)} connecting={!sim.conn.welcome} worldName={worldName} followName={viewerState?.cameraMode === 'follow' || viewerState?.flyingTo ? r.souls.get(viewerState.flyingTo ?? viewerState.selection.soulId ?? '')?.name ?? null : null} selectedName={r.souls.get(viewerState?.selection.soulId ?? '')?.name ?? null} slots={{ status: statusSlot, camera: cameraSlot }} initial={initialProgress} />}
+      {!advanced && <ViewerFrame handle={viewerHandle} state={viewerState} dt={sim.conn.welcome?.dt ?? 0.05} navigationOpen={navigationOpen} onNavigationChange={setNavigationOpen} onNavigationOpen={openNavigation} worldTime={worldTimeText(worldClock)} worldMinutes={worldMinutes(worldClock)} connected={!connectionLost(sim.conn)} connecting={!sim.conn.welcome} worldName={worldName} followName={viewerState?.cameraMode === 'follow' || viewerState?.flyingTo ? r.souls.get(viewerState.flyingTo ?? viewerState.selection.soulId ?? '')?.name ?? null : null} selectedName={r.souls.get(viewerState?.selection.soulId ?? '')?.name ?? null} slots={{ status: statusSlot, camera: cameraSlot }} initial={initialProgress} />}
       <header className={`world-hud${advanced ? '' : ' slim'}`}>
         {advanced && <>
         <a href="/" className="world-home">SIM</a>
