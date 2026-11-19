@@ -1,0 +1,23 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Tower of Hanoi (from #1794): the seven-move solution takes all three rings from a to c; a larger ring onto a smaller is refused on the way; then reset puts them back on a, and a second reset is refused.",
+  "cases": [
+    {
+      "name": "solve_in_seven_moves_then_reset",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","h1"]},"h1":{"kind":"eden:hanoi_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"h1","form":"move_small","args":{"to":"c"}},"receipt":"rh1","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"small","n":1,"to":"c"},{"change":"set","node":"h1","field":"moves","n":4,"to":1}],"events":[{"event":"eden:ring_moved","node":"h1","changes":[0]},{"event":"eden:ring_moved","node":"h1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"move_medium","args":{"from":"a","to":"c"}},"receipt":"rh1x","expect":{"verdict":"no","reason":"field_differs","need":4}},
+        {"act":{"this":"h1","form":"move_medium","args":{"from":"a","to":"b"}},"receipt":"rh2","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"medium","n":2,"to":"b"},{"change":"set","node":"h1","field":"moves","n":4,"to":2}],"events":[{"event":"eden:ring_moved","node":"h1","changes":[0]},{"event":"eden:ring_moved","node":"h1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"move_small","args":{"to":"b"}},"receipt":"rh3","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"small","n":1,"to":"b"},{"change":"set","node":"h1","field":"moves","n":4,"to":3}],"events":[{"event":"eden:ring_moved","node":"h1","changes":[0]},{"event":"eden:ring_moved","node":"h1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"move_large","args":{"from":"a","to":"c"}},"receipt":"rh4","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"large","n":3,"to":"c"},{"change":"set","node":"h1","field":"moves","n":4,"to":4}],"events":[{"event":"eden:ring_moved","node":"h1","changes":[0]},{"event":"eden:ring_moved","node":"h1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"move_small","args":{"to":"a"}},"receipt":"rh5","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"small","n":1,"to":"a"},{"change":"set","node":"h1","field":"moves","n":4,"to":5}],"events":[{"event":"eden:ring_moved","node":"h1","changes":[0]},{"event":"eden:ring_moved","node":"h1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"move_medium","args":{"from":"b","to":"c"}},"receipt":"rh6","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"medium","n":2,"to":"c"},{"change":"set","node":"h1","field":"moves","n":4,"to":6}],"events":[{"event":"eden:ring_moved","node":"h1","changes":[0]},{"event":"eden:ring_moved","node":"h1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"move_small","args":{"to":"c"}},"receipt":"rh7","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"small","n":1,"to":"c"},{"change":"set","node":"h1","field":"moves","n":4,"to":7}],"events":[{"event":"eden:ring_moved","node":"h1","changes":[0]},{"event":"eden:ring_moved","node":"h1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"h1","form":"reset"},"receipt":"rh8","expect":{"verdict":"yes","changes":[{"change":"set","node":"h1","field":"small","n":1,"to":"a"},{"change":"set","node":"h1","field":"medium","n":2,"to":"a"},{"change":"set","node":"h1","field":"large","n":3,"to":"a"}],"events":[{"event":"eden:reset","node":"h1","changes":[0]},{"event":"eden:reset","node":"h1","changes":[1]},{"event":"eden:reset","node":"h1","changes":[2]}],"timers":[]}},
+        {"act":{"this":"h1","form":"reset"},"receipt":"rh9","expect":{"verdict":"no","reason":"field_differs","need":1}}
+      ],
+      "after": {"h1":{"kind":"eden:hanoi_board","fields":{"small":"a","medium":"a","large":"a","moves":7}}}
+    }
+  ]
+}

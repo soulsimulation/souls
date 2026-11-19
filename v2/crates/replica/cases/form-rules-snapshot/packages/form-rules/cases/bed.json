@@ -1,0 +1,174 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:bed (SA-X24): two places to lie or sleep (sleeping pulls the quilt over), get up, and make it again once nobody is in it. It takes two Souls to move.",
+  "cases": [
+    {
+      "name": "bed_lie_free",
+      "act": { "this": "t1", "form": "lie", "args": { "side": "left" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "slots": { "left": [], "right": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "bed_lie_when_full",
+      "act": { "this": "t1", "form": "lie", "args": { "side": "left" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "slots": { "left": ["o0"], "right": ["o1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "fix": null }
+    },
+    {
+      "name": "bed_sleep_free",
+      "act": { "this": "t1", "form": "sleep", "args": { "side": "left" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "slots": { "left": [], "right": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "bed_sleep_when_full",
+      "act": { "this": "t1", "form": "sleep", "args": { "side": "left" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "slots": { "left": ["o0"], "right": ["o1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "fix": null }
+    },
+    {
+      "name": "bed_get_up_lying_there",
+      "act": { "this": "t1", "form": "get_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "slots": { "left": ["b1"], "right": [] }, "links": { "sleeper": ["b1"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "bed_get_up_when_nobody_lies_there",
+      "act": { "this": "t1", "form": "get_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "slots": { "left": [], "right": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_linked", "need": 0, "detail": { "link": "sleeper", "count": 0 } }
+    },
+    {
+      "name": "bed_get_under_covers_free",
+      "act": { "this": "t1", "form": "get_under_covers", "args": { "side": "right" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "slots": { "left": ["b2"], "right": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "bed_get_under_covers_when_full",
+      "act": { "this": "t1", "form": "get_under_covers", "args": { "side": "right" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "slots": { "left": ["b2"], "right": ["b3"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "fix": null }
+    },
+    {
+      "name": "bed_make_when_empty",
+      "act": { "this": "t1", "form": "make" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "fields": { "covers": "pulled_up" } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 520, 800] }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "bed_make_with_someone_in_it",
+      "act": { "this": "t1", "form": "make" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:bed",
+            "fields": { "covers": "pulled_up" },
+            "slots": { "left": ["b2"] },
+            "links": { "sleeper": ["b2"] }
+          },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 520, 800] },
+          "b2": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "already_linked", "need": 0, "detail": { "link": "sleeper", "count": 1 } }
+    },
+    {
+      "name": "bed_make_from_too_far",
+      "act": { "this": "t1", "form": "make" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:bed", "fields": { "covers": "pulled_up" } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 520, 2400] }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 1, "detail": { "point": "foot", "move": "press" } }
+    }
+  ]
+}
