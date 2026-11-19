@@ -230,6 +230,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "gatewayd",
+ "libc",
+ "replica",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -525,6 +537,14 @@ dependencies = [
 name = "import-eden"
 version = "0.0.0"
 dependencies = [
+ "replica",
+]
+
+[[package]]
+name = "import-world"
+version = "0.0.0"
+dependencies = [
+ "import-eden",
  "replica",
 ]
 
