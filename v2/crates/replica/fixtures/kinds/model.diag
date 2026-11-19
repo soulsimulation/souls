@@ -1,0 +1,9 @@
+# An uploaded model (Engine v2 G6, #2747): a thing whose picture is a creator's upload, a self-contained binary
+# glTF (an image is its texture). Its one field holds the upload's reference, `{21: id}` (T8, v2/docs/audience.md
+# rule 6), the way a text field holds words; `v2/crates/assets` checks that it names an allowed upload when the thing
+# is placed or set. Drawing it is V8's and serving it V12's.
+{
+  1: "souls:model",
+  2: "thing",
+  3: {1: {1: "model", 2: "text", 3: "none", 4: "public"}}   # the upload, by reference; "none" until one is named
+}

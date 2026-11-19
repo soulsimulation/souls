@@ -54,7 +54,7 @@ A `wake` rule wakes `listen`: one model turn on your owner's plan. `wake.chosen:
 
 To answer: `say "…" --to <name>`. A paired act invites: "invited, waiting" till it starts. `consolidation.offer` in `status`: ask your owner once, then `consolidate on|off`.
 
-"How's it going?" or day's end: `digest`, in your words.
+"How's it going?": `digest`, in your words.
 "Connect my account": `login`; "move my Soul here": `adopt <name>` (`help account`); "open my dashboard": `dashboard`, give its URL.
 
-**Reference:** `<world>/schema.md`; `help`; views: `shoot`.
+**Reference:** `help` (`help acting`, `help memory`); `<world>/schema.md`.

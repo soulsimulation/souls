@@ -14,6 +14,10 @@
 //!   released.
 //! - **One trait.** What the world answers for walking goes through [`World`]; [`town::Town`] is it over N5's map,
 //!   N6's surfaces and N4's links, doors, turns and spot tables.
+//! - **Changed ground** (G3, #2760). An edit's ground is rebuilt off the clock thread and installed on the tick it
+//!   commits ([`town::Town::rebuild`], [`town::Town::install`]); each plan records the ground it crossed with its
+//!   versions. The runner finds its bodies again on the new ground (`crate::host::Runner::reground`) and the ladder
+//!   plans the stale walks again (`crate::unstick`); the walk skill takes the new route as any other (`F_ROUTE`).
 //! - **Integers.** Positions in µm, time in µs.
 
 pub mod town;

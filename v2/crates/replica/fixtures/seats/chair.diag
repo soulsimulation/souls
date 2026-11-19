@@ -1,0 +1,3 @@
+# A chair's seat (Engine v2 B3, #2682; v2/crates/replica/src/moves.rs `Place`): slot 1, 450 mm above the floor from the
+# chair's model geometry (the test world's SEAT_HEIGHT), and a stand point 300 mm in front of it, in the slot's frame.
+{1: 1, 2: 450, 3: [0, 300]}
