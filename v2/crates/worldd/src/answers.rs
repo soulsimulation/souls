@@ -1172,7 +1172,10 @@ impl Clock {
         // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
         let mut members = BTreeSet::new();
         if let words::Form::Members(activity) = form {
-            match body_of(&intent).and_then(|b| words::members(self.replica.tree(), activity, b)) {
+            match self
+                .body_of(&intent)
+                .and_then(|b| words::members(self.replica.tree(), activity, b))
+            {
                 Ok(m) => members = m,
                 Err(reason) => {
                     let a = self.refusal(actor, sequence, reason);
