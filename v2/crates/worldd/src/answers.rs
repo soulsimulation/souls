@@ -18,8 +18,11 @@
 //! **A move** (a walk, a sit or a rise, I4b #3156) is taken the same way, but goes to the world's bodies
 //! ([`crate::bodies`]) instead of the checkers. At the next tick it starts, or is refused by name, and writes an entry
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
-//! how) and is answered: a receipt naming both entries when done, else a refusal naming how it ended
-//! (`claim-taken`, `resource-held`, `out-of-reach`, ...). One answer, at its end: I7's accept-then-resolve is not here.
+//! how) and is answered: a receipt naming its entries when done, else a refusal naming how it ended
+//! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
+//! speed, plus a margin and crossings, at most 180 s and never beyond the intent's expiry. Its deadline is written
+//! as C20's entry and it receives C20's one progress answer if still going at 10 s. C21's watch ends a stalled walk
+//! `walk.blocked`; waiting at a link and being carried do not count as stalled walking.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
 //! sit, a lie or a rise runs to its end (a seat is never left half taken) and ends so then; a walk a new move
 //! replaces ends `claim-taken` in the tick the new move starts.
@@ -303,10 +306,17 @@ struct Carry {
     next_intent: u64,
     placed: Placed,
     tick: i64,
+    orders: Vec<Value>,
 }
 
 impl Carry {
-    fn of(sequences: &Sequences, next_intent: u64, placed: Placed, tick: i64) -> Carry {
+    fn of(
+        sequences: &Sequences,
+        next_intent: u64,
+        placed: Placed,
+        tick: i64,
+        orders: &[Effect],
+    ) -> Carry {
         Carry {
             sequences: sequences
                 .kept()
@@ -315,6 +325,7 @@ impl Carry {
             next_intent,
             placed,
             tick,
+            orders: orders.iter().map(Effect::to_value).collect(),
         }
     }
 
@@ -351,6 +362,9 @@ impl Carry {
         ]);
         if let Ok(t) = u64::try_from(self.tick) {
             m.insert(4, Value::Uint(t));
+        }
+        if !self.orders.is_empty() {
+            m.insert(5, Value::Array(self.orders.clone()));
         }
         encode(&Value::Map(m)).unwrap_or_default()
     }
@@ -394,7 +408,38 @@ impl Carry {
         if let Some(Value::Uint(t)) = m.get(&4) {
             c.tick = i64::try_from(*t).unwrap_or(i64::MAX);
         }
+        if let Some(Value::Array(rows)) = m.get(&5) {
+            c.orders = rows.clone();
+        }
         Some(c)
+    }
+}
+
+/// Keep only active order starts in original arrival order, including across checkpoint/tail overlap.
+fn remember_orders(active: &mut Vec<Effect>, effects: &[Effect]) {
+    for e in effects {
+        for ev in e.events.iter().flatten() {
+            let Some(id) = ev.fields.get(&1) else {
+                continue;
+            };
+            if ev.name.as_str() == "souls:order-ended" {
+                active.retain(|e| {
+                    !e.events
+                        .iter()
+                        .flatten()
+                        .any(|ev| ev.fields.get(&1) == Some(id))
+                });
+            } else if ev.name.as_str() == "souls:order"
+                && !active.iter().any(|e| {
+                    e.events
+                        .iter()
+                        .flatten()
+                        .any(|ev| ev.fields.get(&1) == Some(id))
+                })
+            {
+                active.push(e.clone());
+            }
+        }
     }
 }
 
@@ -673,7 +718,7 @@ struct Open {
     expiry: Micros,
     /// Its deadline at its arrival, world time.
     due: Micros,
-    /// A form's act: its run's deadline, from the run's start (C20).
+    /// A form or gateway walk: its own deadline, from its start (C20/C29).
     run_due: Option<Micros>,
     intent: Value,
     waiters: Vec<Reply>,
@@ -730,6 +775,8 @@ struct Clock {
     bodies: Option<Bodies>,
     /// Move intents taken since the last tick, committed at the next (I4b).
     moving: Vec<(Id, Asked)>,
+    /// Gateway walks with route deadlines and the shared C21 stall watch (C29).
+    walks: BTreeMap<Id, acts::Walk>,
     /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
@@ -748,6 +795,7 @@ struct Clock {
     engine_acts: Vec<engine::Act>,
     /// Engine acts written this tick, answered with a receipt once their entries are applied.
     engine_done: Vec<Id>,
+    order_records: Vec<Effect>,
     /// Intents arrived since the last tick, taken at the start of the next; and those a script set for a tick.
     pending: Vec<(Vec<u8>, Reply, Stamps)>,
     scheduled: BTreeMap<i64, Vec<(Vec<u8>, Reply)>>,
@@ -896,8 +944,8 @@ pub const MOVE_ENDED: &str = "souls:move-ended";
 /// How an act still going at its deadline ends (C8), and the move it drove with it.
 pub const TIMED_OUT: &str = "act.timed-out";
 
-/// The event of the entry a form's act writes when its run starts (C20, #3469): field 1 the body, 5 the act's
-/// deadline, world time µs (its start plus its steps' span, `sim::forms::span`). Its cause is the intent, so the
+/// The event a form or gateway walk writes when planned (C20/C29): field 1 the body, 5 the act's
+/// deadline, world time µs (its start plus its steps' span or planned route time). Its cause is the intent, so the
 /// act's receipt names it.
 pub const ACT_DEADLINE: &str = "souls:act-deadline";
 
@@ -907,7 +955,7 @@ pub const LEFT: u64 = 5;
 /// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
 /// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
 /// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, when a
-/// form's act is still running at the deadline it got on arrival and its run is due later.
+/// form or gateway walk is still running at its arrival deadline and its own deadline is later.
 pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
     let mut answer = match (Answer::Accepted {
         actor,
@@ -1117,6 +1165,7 @@ impl Clock {
         let Some(o) = self.open.remove(&id) else {
             return;
         };
+        self.walks.remove(&id);
         self.in_flight.remove(&(o.key.clone(), o.sequence));
         self.deadlines.close(o.body, id);
         self.progress.retain(|p| p.0 != id);
@@ -1309,6 +1358,56 @@ impl Clock {
                 let id = matches!(a, Answer::Receipt { .. }).then_some(id);
                 return self.answered(key, sequence, id, Some(value), &a, (vec![reply], stamps));
             }
+        }
+        // Standing orders are accepted once and recorded now; their later inputs and named ends are logged.
+        if matches!(intent.kind(), Ok(Kind::Order)) || intent.verb.as_str() == "souls:cancel" {
+            let result = self
+                .body_of(&intent)
+                .map_err(|name| Refusal {
+                    name,
+                    detail: String::new(),
+                })
+                .and_then(|body| match self.bodies.as_mut() {
+                    Some(b) => crate::orders::accept(b, &intent, body, id, now),
+                    None => Err(Refusal {
+                        name: "orders-off",
+                        detail: String::new(),
+                    }),
+                });
+            let effects = self
+                .bodies
+                .as_mut()
+                .map(|b| std::mem::take(&mut b.orders.log))
+                .unwrap_or_default();
+            let result = result.and_then(|()| self.write_all(effects));
+            let answer = match result {
+                Ok(()) => {
+                    self.next_intent += 1;
+                    self.inputs.push(Input::Intent {
+                        id,
+                        soul: self.body_of(&intent).unwrap_or(self.zone),
+                        verb: intent.verb.clone(),
+                        words: None,
+                    });
+                    Answer::Receipt {
+                        actor,
+                        sequence,
+                        intent: id,
+                        entries: self.receipts.entries(id).to_vec(),
+                        names: BTreeMap::new(),
+                    }
+                }
+                Err(r) => self.refusal(actor, sequence, r.name),
+            };
+            let accepted = matches!(answer, Answer::Receipt { .. }).then_some(id);
+            return self.answered(
+                key,
+                sequence,
+                accepted,
+                Some(value),
+                &answer,
+                (vec![reply], stamps),
+            );
         }
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
@@ -2191,7 +2290,18 @@ impl Clock {
         let Some(b) = self.bodies.as_mut() else {
             return;
         };
-        let ended = b.step(now);
+        let mut ended = b.step(now);
+        let orders = std::mem::take(&mut b.orders.log);
+        let mut deadlines = Vec::new();
+        for (id, walk) in &mut self.walks {
+            let (due, blocked) = walk.step(b, now);
+            if let Some(due) = due {
+                deadlines.push((*id, due));
+            }
+            if blocked && b.cancel(*id) == Some(Cut::Stopped) {
+                ended.push((*id, Err(acts::BLOCKED.to_owned())));
+            }
+        }
         // Where the planner's answers came back late (K18b), for the recorder: a replay takes them at the same tick.
         for (at, taken) in b.late() {
             self.inputs.push(Input::Planned {
@@ -2200,9 +2310,15 @@ impl Clock {
             });
         }
         let heard = std::mem::take(&mut b.heard);
+        if !orders.is_empty() {
+            self.write_own(orders, "standing orders");
+        }
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
             self.write_own(vec![e], "an utterance");
+        }
+        for (id, due) in deadlines {
+            self.run_started(id, due, now);
         }
         for (id, how) in ended {
             self.settle(id, how, now);
@@ -2324,9 +2440,15 @@ impl Clock {
         let Some(due) = self.forms.forms.due(run) else {
             return;
         };
+        self.run_started(id, due, now);
+    }
+
+    /// C20's deadline entry and single progress answer also serve a planned gateway walk (C29).
+    fn run_started(&mut self, id: Id, due: Micros, now: Micros) {
         let Some(o) = self.open.get_mut(&id) else {
             return;
         };
+        let due = due.min(o.expiry);
         o.run_due = Some(due);
         let (body, first) = (o.body, o.due.min(due));
         self.deadlines.close(body, id);
@@ -2394,6 +2516,11 @@ impl Clock {
             }
         }
         let started = b.start(asks);
+        for (&body, &(_, id)) in &b.runner.asks {
+            if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
+                self.walks.insert(id, acts::Walk::new(body, id, now));
+            }
+        }
         // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
         let replaced = b.replaced();
         self.bodies = Some(b);
@@ -2589,6 +2716,7 @@ impl Clock {
             w.offer(buildsafe::moving(b));
         }
         at[5] = mark();
+        remember_orders(&mut self.order_records, &self.effects);
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
         let inputs = match std::mem::take(&mut self.inputs) {
             i if i.is_empty() => None,
@@ -2699,6 +2827,7 @@ impl Clock {
             self.next_intent,
             self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
             self.tick,
+            &self.order_records,
         );
         let version = Version {
             lineage: self.lineage,
@@ -2964,6 +3093,7 @@ pub fn start<S: Storage + 'static>(
     let mut last = None;
     let mut restart = Restart::default();
     let mut blobs = Blobs::default();
+    let mut order_records = Vec::new();
     let records: &[Vec<u8>] = match restored {
         Some(r) => {
             let logged = found.first + found.records.len() as u64;
@@ -2981,6 +3111,17 @@ pub fn start<S: Storage + 'static>(
                 }
                 next_intent = c.next_intent.max(1);
                 placed = c.placed;
+                if !c.orders.is_empty() {
+                    let v = Value::Map(BTreeMap::from([
+                        (1, Value::Bytes(world.header().hash().to_bytes())),
+                        (2, Value::Array(c.orders)),
+                    ]));
+                    let bytes = encode(&v).map_err(|e| Refusal {
+                        name: "encoding",
+                        detail: e.to_string(),
+                    })?;
+                    order_records = Part::read(&bytes)?.effects;
+                }
                 last = (c.tick >= 0).then_some(c.tick);
             }
             restart.checkpoint = Some(r.root.record);
@@ -3001,6 +3142,7 @@ pub fn start<S: Storage + 'static>(
         }
         restart.applied += 1;
         receipts.index(&part.effects);
+        remember_orders(&mut order_records, &part.effects);
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
         for e in &part.effects {
@@ -3029,6 +3171,22 @@ pub fn start<S: Storage + 'static>(
             }
         }
     }
+    // Active starts are carried by the checkpoint; later starts/ends have just replayed above.
+    let order_parts = if order_records.is_empty() {
+        Vec::new()
+    } else {
+        let value = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(world.header().hash().to_bytes())),
+            (
+                2,
+                Value::Array(order_records.iter().map(Effect::to_value).collect()),
+            ),
+        ]));
+        vec![Part::read(&encode(&value).map_err(|e| Refusal {
+            name: "encoding",
+            detail: e.to_string(),
+        })?)?]
+    };
     let zone = Id::new(cfg.lineage, 0).ok_or(Refusal {
         name: "id-counter",
         detail: "the zone".into(),
@@ -3050,7 +3208,13 @@ pub fn start<S: Storage + 'static>(
     {
         let at = log.durable_mark().at();
         if at.record >= records {
-            let carry = Carry::of(&sequences, next_intent, placed.clone(), last.unwrap_or(-1));
+            let carry = Carry::of(
+                &sequences,
+                next_intent,
+                placed.clone(),
+                last.unwrap_or(-1),
+                &order_records,
+            );
             let version = Version {
                 lineage: cfg.lineage,
                 zone,
@@ -3259,6 +3423,7 @@ pub fn start<S: Storage + 'static>(
         parts: Vec::new(),
         bodies: None,
         moving: Vec::new(),
+        walks: BTreeMap::new(),
         overdue: BTreeSet::new(),
         edits,
         edited: Vec::new(),
@@ -3269,6 +3434,7 @@ pub fn start<S: Storage + 'static>(
             .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
+        order_records,
         pending: Vec::new(),
         scheduled: BTreeMap::new(),
         inputs: Vec::new(),
@@ -3325,6 +3491,9 @@ pub fn start<S: Storage + 'static>(
                                 "worldd: {} stands, not seated again: {why}",
                                 replica::world_model::show(body)
                             );
+                        }
+                        if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
+                            eprintln!("worldd: standing orders were not restored: {r}");
                         }
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
@@ -4350,6 +4519,79 @@ mod tests {
             Mapping::from_fields(root.fields()),
             Some(second),
             "A3: the same on replay"
+        );
+    }
+}
+
+#[cfg(test)]
+mod standing_order_carry_tests {
+    use super::*;
+
+    fn effect(intent: Id, ended: bool) -> Effect {
+        Effect {
+            envelope: Envelope {
+                sequence: 0,
+                at: 1,
+                cause: Cause::Intent(intent),
+                actor: Actor::Soul(intent),
+                audience: Audience::Everyone,
+                node: intent,
+            },
+            body: Body::Changes(Vec::new()),
+            events: Some(vec![replica::effects::Event {
+                name: name(if ended {
+                    "souls:order-ended"
+                } else {
+                    "souls:order"
+                }),
+                fields: BTreeMap::from([
+                    (1, intent.to_value()),
+                    (
+                        2,
+                        Value::Text(name(if ended {
+                            "souls:order-cancelled"
+                        } else {
+                            "souls:hold"
+                        })),
+                    ),
+                ]),
+                changes: Vec::new(),
+                rest: Rest::new(),
+            }]),
+            rest: Rest::new(),
+        }
+    }
+
+    #[test]
+    fn carry_preserves_fifo_ignores_overlap_and_forgets_ended_orders() {
+        let a = Id::new(Scope([0x73; 16]), 1).unwrap();
+        let b = Id::new(Scope([0x73; 16]), 2).unwrap();
+        let mut active = Vec::new();
+        remember_orders(&mut active, &[effect(a, false), effect(b, false)]);
+        remember_orders(&mut active, &[effect(a, false)]); // checkpoint/tail overlap is idempotent.
+        assert_eq!(
+            active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
+            vec![a, b]
+        );
+        let carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &active);
+        let bytes = carry.to_bytes();
+        assert_eq!(Carry::read(&bytes).unwrap().orders, carry.orders);
+        let Value::Map(mut old) = decode(&bytes).unwrap().value else {
+            panic!("carry")
+        };
+        old.remove(&5);
+        assert!(
+            Carry::read(&encode(&Value::Map(old)).unwrap())
+                .unwrap()
+                .orders
+                .is_empty(),
+            "older carry reads without orders"
+        );
+        remember_orders(&mut active, &[effect(a, true)]);
+        assert_eq!(
+            active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
+            vec![b],
+            "cancelled order cannot restart"
         );
     }
 }

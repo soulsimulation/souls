@@ -59,3 +59,5 @@ When your owner gives a time or a condition, write a schedule entry with the act
 - Unreachable: say where you got to; it isn't the place asked.
 - `which-soul`: pair, or name one with `--soul`.
 - A timeout or `not-connected`: run it once more; then tell your owner.
+
+Protocol standing orders are `souls:hold`, `souls:follow` and `souls:queue`, each with a bounded world-time expiry; their starts, inputs and named ends stay in the world log.
