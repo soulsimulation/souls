@@ -172,15 +172,10 @@ impl Geometry for Sight<'_> {
         let here = sim::walk::node_of(me);
         let to = view.stand_near(floor, at, reach, Some(me));
         // On the body's own ground the walk goes to the point itself when there is no place: it ends there by name.
-        if floor == here {
-            return Some(vec![Leg {
-                to: to.unwrap_or(at),
-                link: None,
-            }]);
-        }
-        let Some(to) = to else {
+        let Some(to) = to.or_else(|| (floor == here).then_some(at)) else {
             return Some(Vec::new());
         };
+        // A same-ground route may enter and leave a building: keep its doorway crossings as legs too (C28).
         Some(view.plan(me, floor, to).unwrap_or_default())
     }
 
@@ -750,3 +745,6 @@ pub fn intent(id: Id, expiry: Micros, actor: Actor, bytes: &[u8]) -> Intent {
         digest: replica::ids::sha256(bytes),
     }
 }
+
+#[cfg(test)]
+mod tests;
