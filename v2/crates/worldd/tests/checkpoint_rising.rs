@@ -115,6 +115,7 @@ fn rise(b: &mut Bodies, n: u64) -> Result<(), Refusal> {
         body: body(),
         actor: Actor::Soul(body()),
         ask: Ask::Rise,
+        fallbacks: Vec::new(),
     };
     b.start(vec![(id(100 + n), asked)]).remove(0).1
 }

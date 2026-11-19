@@ -18,7 +18,7 @@
 
 use crate::apply::Replica;
 use crate::edit::{OPS_MOST, Op, Ref, Spot};
-use crate::effects::{Actor, read_id};
+use crate::effects::{Actor, Body, Effect, read_id};
 use crate::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use crate::ids::{Id, Scope, Version};
 use crate::intents::{Fallback, Hello, Intent, PROTOCOL, Target};
@@ -173,15 +173,19 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
 const VIEW_SUBSCRIBE: u64 = 30;
 const VIEW_ITEM: u64 = 31;
 const VIEW_REFUSED: u64 = 32;
-/// The level a Soul's daemon subscribes at: outline. What it reads is addressed to it, sent at every level (R4 rule 5).
-const HEARING_LEVEL: u64 = 3;
+/// The level a Soul's daemon subscribes at: sampled, so every entry of a body near it that is not a plain motion
+/// sample reaches it (R4 rule 2; R9b, #3201). What is addressed to it is sent at every level (R4 rule 5).
+const FOLLOW_LEVEL: u64 = 2;
+/// R4's entry item (`worldd::views::subscription::Kind::Entry`): `{1: 1, 2: entry}`.
+const ENTRY_ITEM: u64 = 1;
 
 fn id_text(id: Id) -> String {
     format!("{}-{}", to_hex(&id.scope().0), id.counter())
 }
 
-/// A Soul's subscription to what it hears (C6, #3390): `{30: {1: [{2: body}], 2: outline, 3: budget}}`, its own body
-/// followed, so the world addresses to it each utterance that body hears (R4 rule 5).
+/// A Soul's subscription to what it hears (C6, #3390) and to the entries of the bodies near it (R9b, #3201): `{30:
+/// {1: [{2: body}], 2: sampled, 3: budget}}`, its own body followed, so the world addresses to it each utterance that
+/// body hears (R4 rule 5) and sends it the entries of its interest set (R4 rule 2, [`wire_entry`]).
 #[wasm_bindgen(js_name = wireSubscribe)]
 pub fn wire_subscribe(scope: &[u8], counter: u64, budget: u64) -> Result<Vec<u8>, JsError> {
     let scope = Scope(
@@ -195,7 +199,7 @@ pub fn wire_subscribe(scope: &[u8], counter: u64, budget: u64) -> Result<Vec<u8>
             1,
             Value::Array(vec![Value::Map(BTreeMap::from([(2, body.to_value())]))]),
         ),
-        (2, Value::Uint(HEARING_LEVEL)),
+        (2, Value::Uint(FOLLOW_LEVEL)),
         (3, Value::Uint(budget)),
     ]));
     encode(&Value::Map(BTreeMap::from([(VIEW_SUBSCRIBE, request)]))).map_err(js)
@@ -224,6 +228,75 @@ pub fn wire_heard(frame: &[u8]) -> Result<String, JsError> {
         h.sequence,
         h.at,
         id_text(h.speaker)
+    ))
+}
+
+/// The largest integer a JavaScript number holds exactly.
+const SAFE_MOST: u64 = (1 << 53) - 1;
+
+/// An event field's value as JSON: an integer, a name, an id as `<scope hex>-<counter>`, or any other value as its
+/// encoding's hex (quoted).
+fn json_value(v: &Value) -> Result<String, JsError> {
+    Ok(match v {
+        Value::Uint(u) if *u <= SAFE_MOST => u.to_string(),
+        Value::Nint(n) if *n < SAFE_MOST => format!("-{}", n + 1),
+        // A name holds letters, digits and `_ - . : / @` only (T0 rule 6): nothing to escape.
+        Value::Text(name) => format!("\"{}\"", name.as_str()),
+        _ => match read_id(v) {
+            Ok(id) => format!("\"{}\"", id_text(id)),
+            Err(_) => format!("\"{}\"", to_hex(&encode(v).map_err(js)?)),
+        },
+    })
+}
+
+/// An entry in a view item frame (R4's `{1: 1, 2: entry}`: an entry of a body in the interest set) as JSON, for the
+/// daemon to follow (R9b, #3201): `{"sequence":n,"at":n,"actor":"<id>"|null,"node":"<id>","changes":n,"events":
+/// [{"name":"..","fields":{"<n>":<value>}}]}`, `actor` null for the world or a creator; empty when the item is not
+/// an entry.
+#[wasm_bindgen(js_name = wireEntry)]
+pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
+    let Value::Map(mut m) = decode(frame).map_err(js)?.value else {
+        return Err(JsError::new("frame-not-a-record"));
+    };
+    let Some(Value::Bytes(item)) = m.remove(&VIEW_ITEM) else {
+        return Err(JsError::new("frame-not-an-item"));
+    };
+    let Value::Map(mut item) = decode(&item).map_err(js)?.value else {
+        return Err(JsError::new("item-not-a-record"));
+    };
+    if item.get(&1) != Some(&Value::Uint(ENTRY_ITEM)) {
+        return Ok(String::new());
+    }
+    let entry = item
+        .remove(&2)
+        .ok_or_else(|| JsError::new("item-without-entry"))?;
+    let e = Effect::read(entry).map_err(js)?;
+    let actor = match e.envelope.actor {
+        Actor::Soul(id) => format!("\"{}\"", id_text(id)),
+        Actor::Creator(_) | Actor::World => "null".to_owned(),
+    };
+    let changes = match &e.body {
+        Body::Changes(c) => c.len(),
+        _ => 0,
+    };
+    let mut events = Vec::new();
+    for ev in e.events.iter().flatten() {
+        let mut fields = Vec::new();
+        for (k, v) in &ev.fields {
+            fields.push(format!("\"{k}\":{}", json_value(v)?));
+        }
+        events.push(format!(
+            r#"{{"name":"{}","fields":{{{}}}}}"#,
+            ev.name.as_str(),
+            fields.join(",")
+        ));
+    }
+    Ok(format!(
+        r#"{{"sequence":{},"at":{},"actor":{actor},"node":"{}","changes":{changes},"events":[{}]}}"#,
+        e.envelope.sequence,
+        e.envelope.at,
+        id_text(e.envelope.node),
+        events.join(",")
     ))
 }
 
