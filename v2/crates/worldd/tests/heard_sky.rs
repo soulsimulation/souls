@@ -164,17 +164,25 @@ fn a1_an_utterance_in_the_running_tick_records_its_hearers() {
     let said: Vec<(Id, BTreeSet<Id>, Value)> = entries(&log)
         .iter()
         .flat_map(|e| {
-            e.events.iter().flatten().filter(|v| v.name.as_str() == SAID).map(|v| {
-                let hearers = match v.fields.get(&3) {
-                    Some(Value::Array(a)) => a.iter().map(|h| read_id(h).unwrap()).collect(),
-                    _ => BTreeSet::new(),
-                };
-                (e.envelope.node, hearers, v.fields[&1].clone())
-            })
+            e.events
+                .iter()
+                .flatten()
+                .filter(|v| v.name.as_str() == SAID)
+                .map(|v| {
+                    let hearers = match v.fields.get(&3) {
+                        Some(Value::Array(a)) => a.iter().map(|h| read_id(h).unwrap()).collect(),
+                        _ => BTreeSet::new(),
+                    };
+                    (e.envelope.node, hearers, v.fields[&1].clone())
+                })
         })
         .collect();
     let s = souls();
-    println!("A1: utterances in the log: {}; hearers {:?}", said.len(), said.first().map(|x| &x.1));
+    println!(
+        "A1: utterances in the log: {}; hearers {:?}",
+        said.len(),
+        said.first().map(|x| &x.1)
+    );
     assert_eq!(said.len(), 1, "A1: one utterance, written once");
     assert_eq!(said[0].0, s[0], "A1: written by the speaker's body");
     assert_eq!(
@@ -210,6 +218,7 @@ fn sky_world(store: Mem) -> World {
     cfg.tick = std::time::Duration::from_secs(1);
     cfg.views = true;
     cfg.sky = Some(sky());
+    cfg.measures = false;
     answers::start(
         toggles::World::build(1, 3, 0).replica,
         toggles::rules(),

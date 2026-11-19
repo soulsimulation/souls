@@ -77,11 +77,15 @@ use crate::checkers::{self, Act, Candidate, Rules};
 use crate::measures::{self, Measures, Stamps};
 use crate::views::Tier;
 use replica::apply::Replica;
-use replica::effects::{Actor, Body, Cause, Effect, Envelope, Event as Named, Part, Refusal};
+use replica::effects::{
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event as Named, Part, Refusal, Rest,
+    TimerRec,
+};
 use replica::encode::{Name, Value, decode, encode};
-use replica::ids::{Hash, Id, Purpose, Scope, Version};
+use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
 use replica::intents::{Answer, INTENT_MOST, Intent, Target};
 use replica::pose::Pose;
+use replica::sky::{self, Sky};
 use replica::sync::{self, Records, Served, wire};
 use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::views::Redactions;
@@ -91,10 +95,12 @@ use sim::checkpoint::{Blobs, Checkpoints};
 use sim::clock::{Clock as Pace, Heartbeat, Ticker};
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
+use sim::daylight::{self, Daylight, Write as Fire};
 use sim::frozen::Publisher;
 use sim::log::{Log, Storage};
 use sim::recorder::{self, Input};
 use sim::speech;
+use sim::timers::{DueList, Timer};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -106,6 +112,16 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 type R<T> = Result<T, Refusal>;
+
+fn recs_of(changes: Vec<Change>) -> Vec<ChangeRec> {
+    changes
+        .into_iter()
+        .map(|change| ChangeRec {
+            change,
+            rest: Rest::new(),
+        })
+        .collect()
+}
 
 /// Makes the world's bodies on the thread that steps them (a skill is not sent between threads), each standing where
 /// the log last had it (`Placed`, empty on a first start; [`Bodies::add_body_at`]).
@@ -217,6 +233,9 @@ pub struct Config {
     pub measures: bool,
     /// Where `health.json` is written every two seconds, when measures are on.
     pub health: Option<PathBuf>,
+    /// The day, night and weather (E6) a start writes on the world node when it holds none; a world node that holds
+    /// its settings keeps them. `None`: a world without settings has no sky.
+    pub sky: Option<daylight::Config>,
 }
 
 impl Config {
@@ -237,6 +256,7 @@ impl Config {
             roots: None,
             measures: true,
             health: None,
+            sky: None,
         }
     }
 }
@@ -414,6 +434,65 @@ struct Clock {
     records: u64,
     tick: i64,
     measures: Option<Arc<Measures>>,
+    /// The world node's day, night and weather (E6, #3369), when the world has them.
+    sky: Option<Heavens>,
+    /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
+    tick_us: Micros,
+}
+
+/// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
+/// by the tick that holds it, and each fire's entries written on the world node.
+struct Heavens {
+    daylight: Daylight,
+    /// The world node's timers: `souls:light`, `souls:day`, `souls:weather`.
+    due: DueList,
+    /// Each timer's id now, by name: a fire clears it and sets the next.
+    timers: BTreeMap<Name, Id>,
+    mint: Minter,
+    /// A first start writes the settings and the first light, date and weather at its first tick.
+    first: bool,
+}
+
+/// The scope the sky's timer ids are minted in.
+const SKY_TIMERS: Scope = Scope([0xe6; 16]);
+
+impl Heavens {
+    /// The sky of `replica`'s world node: its settings as the node holds them (a restart rebuilds the due list from
+    /// the timers the tree holds), else `new`'s, written at the first tick; `None` with neither.
+    fn of(replica: &Replica, new: Option<daylight::Config>) -> Option<Heavens> {
+        let tree = replica.tree();
+        let root = tree.node(tree.root())?;
+        let world = root.id();
+        let (cfg, first) = match daylight::Config::read(root.fields()) {
+            Some(c) => (c, false),
+            None => (new?, true),
+        };
+        let names = [sky::T_LIGHT, sky::T_DAY, sky::T_WEATHER];
+        let mut due = DueList::new();
+        let mut timers = BTreeMap::new();
+        let mut mint = Minter::new(SKY_TIMERS);
+        for (id, t) in tree.timers() {
+            if t.node == world && names.contains(&t.name.as_str()) {
+                let _ = due.set(Timer {
+                    node: world,
+                    id: *id,
+                    due: t.due,
+                    name: t.name.clone(),
+                });
+                timers.insert(t.name.clone(), *id);
+                if id.scope() == SKY_TIMERS {
+                    mint.past(id.counter());
+                }
+            }
+        }
+        Some(Heavens {
+            daylight: Daylight::new(cfg, world),
+            due,
+            timers,
+            mint,
+            first,
+        })
+    }
 }
 
 /// What an intent becomes: a form's act for the checkers, or a move for the bodies.
@@ -799,6 +878,102 @@ impl Clock {
         }
     }
 
+    /// One fire's two entries on the world node at `at` (E6): its changes with its event, then its old timer cleared
+    /// and the next set; the next goes on the due list.
+    fn put_sky(&mut self, at: Micros, w: Fire) {
+        let Some(h) = self.sky.as_mut() else { return };
+        let Ok(id) = h.mint.mint() else {
+            eprintln!("worldd: the sky's timer ids are spent");
+            return;
+        };
+        let world = h.daylight.world;
+        let mut recs = Vec::new();
+        if let Some(old) = h.timers.insert(w.timer.clone(), id) {
+            recs.push(TimerRec::Clear { timer: old });
+        }
+        recs.push(TimerRec::Set {
+            timer: id,
+            due: w.next,
+            name: w.timer.clone(),
+        });
+        let _ = h.due.set(Timer {
+            node: world,
+            id,
+            due: w.next,
+            name: w.timer,
+        });
+        let changes = Effect {
+            envelope: Clock::own(world, at),
+            body: Body::Changes(recs_of(w.changes)),
+            events: w.event.map(|e| vec![e]),
+            rest: Rest::new(),
+        };
+        let timers = Effect {
+            envelope: Clock::own(world, at),
+            body: Body::Timers(recs),
+            events: None,
+            rest: Rest::new(),
+        };
+        self.write(vec![changes, timers], "the sky");
+    }
+
+    /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at
+    /// world time `now`; then each of its timers due before the next tick's start, fired at its due time against what
+    /// the node announces then, in K9's order. Nothing runs between changes, so a world that catches up 48 hours
+    /// writes what one stepped writes.
+    fn fire_sky(&mut self, now: Micros) {
+        let Some(h) = self.sky.as_mut() else { return };
+        if std::mem::take(&mut h.first) {
+            let world = h.daylight.world;
+            let sets = h
+                .daylight
+                .cfg
+                .fields()
+                .into_iter()
+                .map(|(field, to)| Change::Set {
+                    node: world,
+                    field,
+                    to,
+                    by: None,
+                })
+                .collect();
+            let started = h.daylight.start(now);
+            let settings = Effect {
+                envelope: Clock::own(world, now),
+                body: Body::Changes(recs_of(sets)),
+                events: None,
+                rest: Rest::new(),
+            };
+            self.write(vec![settings], "the sky's settings");
+            match started {
+                Ok(writes) => {
+                    for w in writes {
+                        self.put_sky(now, w);
+                    }
+                }
+                Err(r) => eprintln!("worldd: the sky did not start: {r}"),
+            }
+        }
+        let before = now + self.tick_us;
+        loop {
+            let Some(h) = self.sky.as_mut() else { return };
+            let Some(t) = h.due.fire(before) else { return };
+            let tree = self.replica.tree();
+            let announced = tree.node(tree.root()).and_then(|n| Sky::read(n.fields()));
+            let Some(announced) = announced else {
+                eprintln!(
+                    "worldd: the world node announces no sky; {} not fired",
+                    t.name.as_str()
+                );
+                continue;
+            };
+            match h.daylight.fire(&t.name, t.due, &announced) {
+                Ok(w) => self.put_sky(t.due, w),
+                Err(r) => eprintln!("worldd: the sky's {} did not fire: {r}", t.name.as_str()),
+            }
+        }
+    }
+
     /// Steps 1 to 3 for the bodies (I4b): their due timers, skills and controller, to world time `now`; each move that
     /// ended is answered: a receipt naming its entries when done, else its reason by name. Each utterance a step
     /// started is written with its hearers (B11, #3369): the speaker's entry, as `sim::speech::entry` makes it.
@@ -909,6 +1084,8 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
             }
         }
+        // 1. The world node's sky: its timers due in this tick, each at its due time (E6, #3369).
+        self.fire_sky(now);
         at[2] = mark();
         // 1-3. The bodies' own timers, skills through the host, the controller.
         self.step_bodies(now);
@@ -1285,6 +1462,7 @@ pub fn start<S: Storage + 'static>(
         .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures))
         .map_err(io)?;
     let records = found.records.len() as u64;
+    let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let build = move || Clock {
@@ -1325,6 +1503,8 @@ pub fn start<S: Storage + 'static>(
         records,
         tick: last.unwrap_or(-1),
         measures: clock_measures,
+        sky,
+        tick_us,
     };
     let lockstep = cfg.lockstep;
     let thread_beat = Arc::clone(&beat);
