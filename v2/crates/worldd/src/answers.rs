@@ -316,6 +316,17 @@ pub struct Config {
     pub measures: bool,
     /// Where `health.json` is written every two seconds, when measures are on.
     pub health: Option<PathBuf>,
+    /// Each log record once it is on the disk, input records included, in order (C1, #3365): `worldd serve`'s own
+    /// view tier and shipper read them here, off the clock thread.
+    pub synced: Option<Sender<Synced>>,
+}
+
+/// A record on the disk ([`Config::synced`]): its number in the log, its bytes, and whether it is the recorder's input
+/// record (K12) rather than a tick's part.
+pub struct Synced {
+    pub record: u64,
+    pub bytes: Vec<u8>,
+    pub input: bool,
 }
 
 impl Config {
@@ -335,6 +346,7 @@ impl Config {
             audit: 64,
             measures: true,
             health: None,
+            synced: None,
         }
     }
 }
@@ -349,6 +361,8 @@ pub struct World {
     pub measures: Option<Arc<Measures>>,
     /// How this start found the world (K18c).
     pub restart: Restart,
+    /// The log's durable mark: a tier of the caller's own waits on it (C1).
+    pub durable: Durable,
     clock: Option<JoinHandle<()>>,
 }
 
@@ -1114,6 +1128,7 @@ fn answer_loop<S: Storage + 'static>(
     ticks: Receiver<Tick>,
     tier: Option<Arc<Tier>>,
     measures: Option<Arc<Measures>>,
+    synced: Option<Sender<Synced>>,
 ) {
     for (k, t) in ticks.into_iter().enumerate() {
         let k = k as u64;
@@ -1121,14 +1136,23 @@ fn answer_loop<S: Storage + 'static>(
             m.queues[measures::LOG].enter(k, t.handed.unwrap_or_else(measures::steady_us));
         }
         let mut last = None;
+        let mut appended = Vec::new();
         for (k, bytes) in [t.inputs, t.record].into_iter().enumerate() {
             let Some(bytes) = bytes else { continue };
             let copy = (k == 1 && tier.is_some()).then(|| bytes.clone());
+            let kept = synced.as_ref().map(|_| bytes.clone());
             match log.append(bytes) {
                 Ok(n) => {
                     last = Some(n);
                     if let (Some(tier), Some(b)) = (&tier, copy) {
                         tier.offer(n, b);
+                    }
+                    if let Some(b) = kept {
+                        appended.push(Synced {
+                            record: n,
+                            bytes: b,
+                            input: k == 0,
+                        });
                     }
                 }
                 Err(e) => {
@@ -1142,6 +1166,11 @@ fn answer_loop<S: Storage + 'static>(
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
+        }
+        if let Some(tx) = &synced {
+            for s in appended {
+                let _ = tx.send(s);
+            }
         }
         let synced = measures.as_ref().map(|_| measures::steady_us());
         for (waiters, frame, mut stamps) in t.replies {
@@ -1337,12 +1366,14 @@ pub fn start<S: Storage + 'static>(
         measures::write_health(Arc::clone(m), path, measures::EVERY);
     }
     let durable = log.durable_mark();
+    let world_durable = log.durable_mark();
+    let synced = cfg.synced.take();
     let (answers, ticks) = channel();
     let answer_tier = tier.clone();
     let answer_measures = measures.clone();
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures))
+        .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures, synced))
         .map_err(io)?;
     let records = found.first + found.records.len() as u64;
     let clock_measures = measures.clone();
@@ -1409,6 +1440,12 @@ pub fn start<S: Storage + 'static>(
                     Err(e) => eprintln!("worldd: the bodies did not start, moves are refused: {e}"),
                 }
             }
+            // The state this start resumes from, bodies included: after a kill it equals the last logged tick's (C1).
+            eprintln!(
+                "worldd: started at tick {} state {}",
+                c.tick,
+                replica::encode::to_hex(&c.state())
+            );
             // Takes one event; false once the world is to stop.
             let take = |c: &mut Clock, e: Event| -> Option<Sender<Ran>> {
                 match e {
@@ -1509,6 +1546,7 @@ pub fn start<S: Storage + 'static>(
         tier,
         measures,
         restart,
+        durable: world_durable,
         clock: Some(clock),
     })
 }

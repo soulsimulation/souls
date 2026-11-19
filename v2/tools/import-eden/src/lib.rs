@@ -871,7 +871,7 @@ fn entry(sequence: u64, node: Id, changes: Vec<Change>) -> Effect {
 }
 
 /// The import's one header: this build, the schema by hash, the zone rooted at `zone`, epoch 0, and every kind pinned.
-fn header(zone: Id, rules: &Rules) -> R<Header> {
+pub fn header(zone: Id, rules: &Rules) -> R<Header> {
     let build = Hash::of(Purpose::Fixture, b"souls/import-eden/1").to_bytes();
     let v = Value::Map(BTreeMap::from([
         (1, Value::Bytes(build)),

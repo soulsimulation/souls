@@ -11,8 +11,9 @@ rustix = { version = "1", default-features = false, features = ["time", "std"] }
 sim = { path = "../sim" }
 # The built-in walk, run behind the host for a move intent (I4b, #3156).
 skills = { path = "../skills" }
+# `worldd serve` reads a world's facts file with N1's loader (C1, #3365).
+import-eden = { path = "../../tools/import-eden" }
 
 [dev-dependencies]
 # N2's test world, where a scripted client walks, sits and rises (I4b, #3156).
-import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }
