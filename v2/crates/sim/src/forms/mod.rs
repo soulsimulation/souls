@@ -509,7 +509,7 @@ impl Forms {
         let fields = BTreeMap::from([
             (1, Value::Uint(o.run)),
             (2, o.body.to_value()),
-            (3, Value::Text(how)),
+            (3, Value::Bytes(how.as_str().as_bytes().to_vec())),
         ]);
         self.out.push(entry(o, at, changes, name(ENDED), fields));
     }
