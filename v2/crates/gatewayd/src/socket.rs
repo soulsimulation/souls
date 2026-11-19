@@ -84,7 +84,8 @@ fn own_answer(answer: Answer) -> Vec<u8> {
     encode(&Value::Map([(2, answer.to_value())].into())).unwrap_or_default()
 }
 
-fn refused(actor: Actor, sequence: u64, reason: &str, now: Value) -> Vec<u8> {
+/// A refusal the gateway gives itself, by name.
+pub fn refused(actor: Actor, sequence: u64, reason: &str, now: Value) -> Vec<u8> {
     own_answer(Answer::Refused {
         actor,
         sequence,
@@ -242,11 +243,21 @@ fn take_intent(
             gw.link.now(),
         ));
     }
+    let left = intent.expiry.saturating_sub(unix_us());
     match gw
         .link
-        .submit(grant.key(), intent.sequence, bytes, received)
+        .submit(grant.key(), actor, intent.sequence, bytes, received, left)
     {
         Sent::Sent => None,
         Sent::Restarting => Some(refused(actor, intent.sequence, RESTARTING, gw.link.now())),
     }
+}
+
+/// The wall clock, µs from the Unix epoch: an intent's expiry is world time, which is real time (T5).
+// The gateway's one wall-clock read: how long an intent has left (C8, #3396). The gateway is not the engine.
+#[allow(clippy::disallowed_methods)]
+fn unix_us() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
 }

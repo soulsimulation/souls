@@ -1,6 +1,7 @@
 //! Agents' sockets (Engine v2 I1, #2683). `gatewayd` is a program of its own that holds every agent's socket, so a
 //! world restarts without closing one: the agent sees a pause, and each intent it sent is answered once, by its
-//! receipt or by `world.restarting`.
+//! receipt, by `world.restarting`, or, when the world is away past the intent's deadline, by `act.timed-out` or
+//! `intent.expired` (C8, `world_link`).
 //!
 //! - [`socket`]: one WebSocket per agent, through axum's upgrade, one task and one bounded outbound queue each. The
 //!   first frame each way is T10's (`v2/docs/intents.md` rule 12); sign-in follows it, by header or first message.
@@ -164,6 +165,19 @@ impl Gateway {
         };
         if let Some(who) = who {
             self.receipts.write(&who, outcome);
+        }
+    }
+
+    /// An answer the gateway gives itself to the actor `key` (`{2: answer}`, not kept for a resume), sent to its
+    /// socket if one is signed in; a socket whose queue is full is let go, as by [`Gateway::deliver`].
+    pub fn tell(&self, key: &[u8], frame: Vec<u8>) {
+        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(held) = hub.grants.get_mut(key)
+            && let Some((_, tx)) = &held.session
+            && tx.try_send(frame).is_err()
+        {
+            held.session = None;
+            (self.log)("a socket's outbound queue was full; it was let go and may resume");
         }
     }
 
