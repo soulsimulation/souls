@@ -7,6 +7,9 @@
 //! another. The rebuild and install times are printed with their p50, p99 and most; the first ten open-ground cuts are
 //! compared square by square with a whole cut of the same tree, and at the end 500 routes on the map as installed are
 //! compared with a map built whole from the committed tree.
+//!
+//! G2b (#3488): `eden_guard_judges_only_what_a_change_can_affect` (same command, `--test g3b eden_guard`) runs G2's
+//! guard on the town and the whole-world guard for each of the 220 changes and compares their verdicts.
 
 // Times its own runs: the wall-clock rule (K7) binds the engine, not this test.
 #![allow(clippy::disallowed_methods)]
@@ -21,10 +24,10 @@ use replica::encode::{Value, encode};
 use replica::ids::Id;
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::world_model::Audience;
-use sim::edit::safety::{Who, guard};
+use sim::edit::safety::{Known, Who, guard, guard_on};
 use sim::ground::scene::Scene;
-use sim::ground::{HUMAN_RADIUS, OpenGround};
-use sim::routes::{HANDS, Hop, Map, Route};
+use sim::ground::{HUMAN_RADIUS, OpenGround, SQUARE};
+use sim::routes::{ALL, HANDS, Hop, Map, Route};
 use sim::walk::town::Town;
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -199,17 +202,20 @@ fn apply(t: &mut Town, p: &Part, times: &mut Times) -> Vec<(i32, i32)> {
     cut
 }
 
-#[test]
-#[ignore = "needs the exported Eden facts file"]
-fn eden_changes_cut_only_their_squares() {
-    let t0 = Instant::now();
-    let mut t = eden();
-    println!("Eden town built whole in {} ms", t0.elapsed().as_millis());
-    let ground = t.ground;
-    let gh = t.tree.handle(ground).unwrap();
-    // Things standing on the open ground with a box of their own, by a seeded draw.
-    let mut things: Vec<Id> = t
-        .tree
+/// A seeded draw.
+fn draw(mut seed: u64) -> impl FnMut() -> usize {
+    move || {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 33) as usize
+    }
+}
+
+/// The things standing on the open ground with a box of their own and no children, in the tree's order.
+fn open_things(t: &Town) -> Vec<Id> {
+    let gh = t.tree.handle(t.ground).unwrap();
+    t.tree
         .children(gh)
         .unwrap()
         .iter()
@@ -221,14 +227,97 @@ fn eden_changes_cut_only_their_squares() {
                     .is_some_and(|k| k.is_empty())
         })
         .map(|n| n.id())
-        .collect();
-    let mut seed = 0x3449_u64;
-    let mut next = move || {
-        seed = seed
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        (seed >> 33) as usize
-    };
+        .collect()
+}
+
+/// Each building's floors, but the open ground's.
+fn building_floors(t: &Town) -> Vec<Vec<Id>> {
+    t.buildings
+        .iter()
+        .filter(|b| b.thing != t.ground)
+        .map(|b| b.floors.keys().copied().collect())
+        .collect()
+}
+
+/// The first thing with a box anywhere below one of `floors` (in a room, on a floor).
+fn inside_thing(t: &Town, floors: &[Id]) -> Option<Id> {
+    let tree = &t.tree;
+    floors.iter().find_map(|&f| {
+        let mut stack: Vec<_> = tree.handle(f).into_iter().collect();
+        while let Some(h) = stack.pop() {
+            let kids = tree.children(h).unwrap_or(&[]);
+            stack.extend(kids.iter().rev().copied());
+            if let Some(n) = kids
+                .iter()
+                .filter_map(|&c| tree.node(c))
+                .find(|n| n.fields().contains_key(&F_SOLIDS))
+            {
+                return Some(n.id());
+            }
+        }
+        None
+    })
+}
+
+const TICK: i64 = 50_000;
+const SPEED: i64 = 1_400_000;
+
+/// 20 walkers between seeded standing places of the open ground, each sent off: the runner, their ladder, and where
+/// each starts.
+fn walkers(
+    t: &mut Town,
+    next: &mut impl FnMut() -> usize,
+) -> (sim::host::Runner, sim::unstick::Ladder, Vec<Vec3>) {
+    let ground = t.ground;
+    let mut spots = Vec::new();
+    for q in 0..t.map.counts().0 as u32 {
+        if t.map.patch_of(q).node == ground && t.map.water_of(q).is_none() {
+            spots.extend(
+                t.map
+                    .standing(q)
+                    .into_iter()
+                    .map(|s| Vec3::new(s[0] * 1000, 0, s[2] * 1000)),
+            );
+        }
+    }
+    let mut c = sim::host::Runner::new(TICK);
+    let mut ladder = sim::unstick::Ladder::new();
+    let mut starts = Vec::new();
+    while starts.len() < 20 {
+        let (a, b) = (spots[next() % spots.len()], spots[next() % spots.len()]);
+        let n = starts.len() as u64;
+        let who = common::id(10_000 + n);
+        let Ok(body) = t.surfaces[&ground].place(
+            who,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            a,
+            Quat::IDENTITY,
+        ) else {
+            continue;
+        };
+        let Ok(legs) = common::walk(&mut c, t, body, SPEED, ground, b) else {
+            continue;
+        };
+        ladder.add(who, common::id(20_000 + n), SPEED, ground, b, legs);
+        starts.push(a);
+    }
+    (c, ladder, starts)
+}
+
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn eden_changes_cut_only_their_squares() {
+    let t0 = Instant::now();
+    let mut t = eden();
+    println!("Eden town built whole in {} ms", t0.elapsed().as_millis());
+    let ground = t.ground;
+    let gh = t.tree.handle(ground).unwrap();
+    // Things standing on the open ground with a box of their own, by a seeded draw.
+    let mut things = open_things(&t);
+    let mut next = draw(0x3449);
     for k in (1..things.len()).rev() {
         things.swap(k, next() % (k + 1));
     }
@@ -276,31 +365,10 @@ fn eden_changes_cut_only_their_squares() {
     // Inside buildings: the thing with a box on a floor of 20 buildings, set to a crate.
     let mut inside = Times::default();
     let mut done = 0;
-    let buildings: Vec<(Id, Vec<Id>)> = t
-        .buildings
-        .iter()
-        .filter(|b| b.thing != ground)
-        .map(|b| (b.thing, b.floors.keys().copied().collect()))
-        .collect();
-    for (_, floors) in buildings {
-        let tree = &t.tree;
-        // The first thing with a box anywhere below a floor (in a room, on a floor).
-        let thing = floors.iter().find_map(|&f| {
-            let mut stack: Vec<_> = tree.handle(f).into_iter().collect();
-            while let Some(h) = stack.pop() {
-                let kids = tree.children(h).unwrap_or(&[]);
-                stack.extend(kids.iter().rev().copied());
-                if let Some(n) = kids
-                    .iter()
-                    .filter_map(|&c| tree.node(c))
-                    .find(|n| n.fields().contains_key(&F_SOLIDS))
-                {
-                    return Some(n.id());
-                }
-            }
-            None
-        });
-        let Some(thing) = thing else { continue };
+    for floors in building_floors(&t) {
+        let Some(thing) = inside_thing(&t, &floors) else {
+            continue;
+        };
         let p = crate_box(&t, thing);
         apply(&mut t, &p, &mut inside);
         assert!(
@@ -429,71 +497,14 @@ fn eden_no_tick_stalls_while_the_ground_changes() {
     use replica::effects::Header;
     use replica::tree::Tree;
     use sim::ground::Versions;
-    use sim::host::Runner;
-    use sim::unstick::Ladder;
     use sim::walk::town::Basis;
     use std::sync::mpsc::channel;
-    const TICK: i64 = 50_000;
-    const SPEED: i64 = 1_400_000;
     let mut t = eden();
     let ground = t.ground;
-    let gh = t.tree.handle(ground).unwrap();
-    let mut seed = 0x0034_49a4_u64;
-    let mut next = move || {
-        seed = seed
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        (seed >> 33) as usize
-    };
-    // 20 walkers between seeded standing places of the open ground.
-    let mut spots = Vec::new();
-    for q in 0..t.map.counts().0 as u32 {
-        if t.map.patch_of(q).node == ground && t.map.water_of(q).is_none() {
-            spots.extend(
-                t.map
-                    .standing(q)
-                    .into_iter()
-                    .map(|s| Vec3::new(s[0] * 1000, 0, s[2] * 1000)),
-            );
-        }
-    }
-    let mut c = Runner::new(TICK);
-    let mut ladder = Ladder::new();
-    let mut walkers = 0u64;
-    while walkers < 20 {
-        let (a, b) = (spots[next() % spots.len()], spots[next() % spots.len()]);
-        let who = common::id(10_000 + walkers);
-        let Ok(body) = t.surfaces[&ground].place(
-            who,
-            Frame {
-                node: ground,
-                slot: None,
-            },
-            a,
-            Quat::IDENTITY,
-        ) else {
-            continue;
-        };
-        let Ok(legs) = common::walk(&mut c, &mut t, body, SPEED, ground, b) else {
-            continue;
-        };
-        ladder.add(who, common::id(20_000 + walkers), SPEED, ground, b, legs);
-        walkers += 1;
-    }
-    let mut things: Vec<Id> = t
-        .tree
-        .children(gh)
-        .unwrap()
-        .iter()
-        .filter_map(|&c| t.tree.node(c))
-        .filter(|n| {
-            n.fields().contains_key(&F_SOLIDS)
-                && t.tree
-                    .children(t.tree.handle(n.id()).unwrap())
-                    .is_some_and(|k| k.is_empty())
-        })
-        .map(|n| n.id())
-        .collect();
+    let mut next = draw(0x0034_49a4);
+    let (mut c, mut ladder, starts) = walkers(&mut t, &mut next);
+    let walkers = starts.len();
+    let mut things = open_things(&t);
     for k in (1..things.len()).rev() {
         things.swap(k, next() % (k + 1));
     }
@@ -612,4 +623,217 @@ fn eden_no_tick_stalls_while_the_ground_changes() {
     if !cfg!(debug_assertions) {
         assert_eq!(over, 0, "A4: no tick takes 50 ms or more");
     }
+}
+
+/// Bodies standing near `node` before a change to it (G2b): on the open ground, within 3 m of where it stands or of
+/// where a set-down puts it (1.5 m along x); inside a building, on the floor it is under. At most 16, spread out,
+/// each with a different set of abilities.
+fn near(t: &Town, node: Id, first: u64) -> Vec<Who> {
+    let tree = &t.tree;
+    let n = tree.node(tree.handle(node).unwrap()).unwrap();
+    let mut spots: Vec<(Id, Vec3)> = Vec::new();
+    let um = |s: [i64; 3]| Vec3::new(s[0] * 1000, s[1] * 1000, s[2] * 1000);
+    if n.parent() == Some(t.ground) {
+        let at = n.place().unwrap().position;
+        let c = [at.x / 1000, at.z / 1000];
+        let sq = [c[0].div_euclid(SQUARE), c[1].div_euclid(SQUARE)];
+        for q in 0..t.map.counts().0 as u32 {
+            let p = t.map.patch_of(q);
+            let Some((i, j)) = p.square else { continue };
+            if p.node != t.ground
+                || t.map.water_of(q).is_some()
+                || (i64::from(i) - sq[0]).abs() > 1
+                || (i64::from(j) - sq[1]).abs() > 1
+            {
+                continue;
+            }
+            for s in t.map.standing(q) {
+                let d = |x: i64| (s[0] - x).pow(2) + (s[2] - c[1]).pow(2);
+                if d(c[0]).min(d(c[0] + 1_500)) <= 3_000i64.pow(2) {
+                    spots.push((t.ground, um(s)));
+                }
+            }
+        }
+    } else {
+        let mut up = n.parent();
+        while let Some(f) = up {
+            if t.map.is_floor(f) {
+                break;
+            }
+            up = tree
+                .handle(f)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.parent());
+        }
+        if let Some(f) = up {
+            for q in 0..t.map.counts().0 as u32 {
+                if t.map.patch_of(q).node == f {
+                    spots.extend(t.map.standing(q).into_iter().map(|s| (f, um(s))));
+                }
+            }
+        }
+    }
+    let step = spots.len().div_ceil(16).max(1);
+    spots
+        .into_iter()
+        .step_by(step)
+        .enumerate()
+        .map(|(k, (on, at))| who(first + k as u64, on, at, (k as u8) & ALL))
+        .collect()
+}
+
+fn who(n: u64, node: Id, at: Vec3, has: u8) -> Who {
+    Who {
+        soul: common::id(100 + n),
+        body: common::id(200 + n),
+        pose: Pose {
+            frame: Frame { node, slot: None },
+            position: at,
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: node,
+                height: 0,
+            },
+        },
+        has,
+        crossing: None,
+    }
+}
+
+#[derive(Default)]
+struct Guarded {
+    whole: Vec<u128>,
+    on: Vec<u128>,
+    judged: usize,
+    unsafe_: BTreeMap<&'static str, usize>,
+}
+
+/// G2's guard on `p`, on the town (G2b) and whole, timed, with the verdicts for the walkers and the bodies near `node`
+/// compared; then the change is made.
+fn guarded(t: &mut Town, p: &Part, node: Id, walkers: &[Who], g: &mut Guarded, times: &mut Times) {
+    let mut bodies = walkers.to_vec();
+    bodies.extend(near(t, node, 1_000));
+    let header = t.doors.header.clone();
+    let t1 = Instant::now();
+    let known = Known::of(t);
+    let on = guard_on(&t.tree, &header, p, &known).expect("the guard on the town");
+    g.on.push(t1.elapsed().as_micros());
+    drop(known);
+    let v = on.judge(&bodies);
+    if std::env::var_os("G2B_ON_ONLY").is_none() {
+        let t0 = Instant::now();
+        let whole = guard(&t.tree, &header, Some(t.ground), p).expect("the whole guard");
+        g.whole.push(t0.elapsed().as_micros());
+        assert_eq!(
+            v,
+            whole.judge(&bodies),
+            "A3: the guard on the town judges as the whole world's"
+        );
+    }
+    g.judged += bodies.len();
+    for u in &v {
+        *g.unsafe_.entry(u.name).or_default() += 1;
+    }
+    apply(t, p, times);
+    if std::env::var_os("G2B_DEBUG").is_some() {
+        println!(
+            "  guard on the town {:.2} ms; the rebuild alone {:.2} ms, squares {}, floors touched {}",
+            *g.on.last().unwrap() as f64 / 1000.0,
+            *times.rebuild.last().unwrap() as f64 / 1000.0,
+            times.squares.last().unwrap(),
+            times.touched.last().unwrap()
+        );
+    }
+}
+
+/// G2b on Eden (#3488): G2's guard for each of G3b's 220 changes (this file's 120, then A4's 100), with 20 walkers,
+/// cuts only what the change can affect and judges as the whole-world guard does: each change's verdict, for the
+/// walkers and up to 16 bodies near the thing changed, is compared with the whole-world guard's. Both are timed.
+/// `G2B_ON_ONLY=1` times the guard on the town alone.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn eden_guard_judges_only_what_a_change_can_affect() {
+    let (mut g, mut times) = (Guarded::default(), Times::default());
+    let walkers_on = |starts: &[Vec3], ground: Id| -> Vec<Who> {
+        starts
+            .iter()
+            .enumerate()
+            .map(|(k, &a)| who(k as u64, ground, a, HANDS))
+            .collect()
+    };
+    // A set-down (moved 1.5 m) and a creator's edit (set to a crate) in turn.
+    let changes = |things: &[Id]| -> Vec<(Id, bool)> {
+        let take = things.iter().take(100).enumerate();
+        take.map(|(k, &n)| (n, k % 2 == 0)).collect()
+    };
+    // This file's 120: 100 on the open ground, then one inside each of 20 buildings.
+    let mut t = eden();
+    let ground = t.ground;
+    let (_, _, starts) = walkers(&mut t, &mut draw(0x0034_49a4));
+    let bodies = walkers_on(&starts, ground);
+    let mut things = open_things(&t);
+    let mut next = draw(0x3449);
+    for k in (1..things.len()).rev() {
+        things.swap(k, next() % (k + 1));
+    }
+    for (node, set_down) in changes(&things) {
+        let p = if set_down {
+            moved(&t, node)
+        } else {
+            crate_box(&t, node)
+        };
+        guarded(&mut t, &p, node, &bodies, &mut g, &mut times);
+    }
+    let mut done = 0;
+    for floors in building_floors(&t) {
+        let Some(thing) = inside_thing(&t, &floors) else {
+            continue;
+        };
+        let p = crate_box(&t, thing);
+        guarded(&mut t, &p, thing, &bodies, &mut g, &mut times);
+        done += 1;
+        if done == 20 {
+            break;
+        }
+    }
+    // A4's 100, on a fresh Eden with its walkers: set-downs and creator's edits in turn.
+    let mut t = eden();
+    let mut next = draw(0x0034_49a4);
+    let (_, _, starts) = walkers(&mut t, &mut next);
+    let bodies = walkers_on(&starts, ground);
+    let mut things = open_things(&t);
+    for k in (1..things.len()).rev() {
+        things.swap(k, next() % (k + 1));
+    }
+    for (node, set_down) in changes(&things) {
+        let p = if set_down {
+            moved(&t, node)
+        } else {
+            crate_box(&t, node)
+        };
+        guarded(&mut t, &p, node, &bodies, &mut g, &mut times);
+    }
+    let n = g.on.len();
+    let ms = |v: &[u128]| {
+        let mut v = v.to_vec();
+        format!(
+            "p50 {:.2} ms, p99 {:.2} ms, most {:.2} ms",
+            pct(&mut v, 50),
+            pct(&mut v, 99),
+            pct(&mut v, 100)
+        )
+    };
+    println!(
+        "A2 the guard on the town: {n} changes, {} built whole by the rebuild; {}",
+        times.whole,
+        ms(&g.on)
+    );
+    if !g.whole.is_empty() {
+        println!("A2 the whole-world guard: {}", ms(&g.whole));
+        println!(
+            "A3 {n} changes, {} bodies judged, the same verdicts; unsafe by name {:?}",
+            g.judged, g.unsafe_
+        );
+    }
+    assert_eq!(n, 220, "G3b's 220 changes");
 }

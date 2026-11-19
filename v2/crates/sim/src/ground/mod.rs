@@ -1084,7 +1084,9 @@ impl Versions {
 }
 
 /// The fields a scene is read from: a change to any other (a door's open field, a name) leaves the ground as it was.
-const SHAPE: [u64; 11] = [
+/// A floor's stairs, ramps and ladders (`crate::links::F_STAIRS`) are read with it: they are the map's links (G2b).
+const SHAPE: [u64; 12] = [
+    crate::links::F_STAIRS,
     scene::F_OPEN_DOOR_LINK,
     scene::F_OUTLINE,
     scene::F_SOLIDS,

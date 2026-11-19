@@ -314,19 +314,20 @@ impl Bodies {
         out
     }
 
-    /// Every body in id order, those the controller steps and those resting in a seat's slot (which it keeps apart),
-    /// each with its stance when in a slot.
+    /// Every body the controller holds, in id order: those it steps and those resting in a seat's slot (which it keeps
+    /// apart), a rising one included, each with its stance when in a slot.
     fn every(&self) -> Placed {
         let c = &self.runner.controller;
-        let mut out: Placed = c.bodies().map(|b| (b.id, (b.pose, None))).collect();
-        for (body, _, stance) in self.slots.seated() {
-            if let Some(b) = c.body(body)
-                && b.pose.support == Support::Slot
-            {
-                out.insert(body, (b.pose, Some(stance)));
-            }
-        }
-        out
+        c.ids()
+            .filter_map(|id| {
+                let b = c.body(id)?;
+                let stance = match b.pose.support {
+                    Support::Slot => self.slots.stance(id),
+                    _ => None,
+                };
+                Some((id, (b.pose, stance)))
+            })
+            .collect()
     }
 
     /// Where each body is now, a seated one with its stance: what a checkpoint carries (K18c, #3176).
@@ -534,10 +535,11 @@ impl Bodies {
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
             let _ = self.runner.tick(&mut self.town);
-            // Who hears each utterance the step started, as the bodies stand after it (B11, #3369).
+            // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
+            // zone, a seated or lying one included (#3393).
             let said = std::mem::take(&mut self.runner.said);
             let c = &self.runner.controller;
-            let ids: Vec<Id> = c.bodies().map(|b| b.id).collect();
+            let ids: Vec<Id> = c.ids().collect();
             let at = self.runner.now;
             for (speaker, s) in speech::heard(&mut self.hearing, c.near(), ids, &said) {
                 self.heard.push((speaker, s, at));
