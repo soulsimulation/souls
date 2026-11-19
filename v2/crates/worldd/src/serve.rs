@@ -26,8 +26,8 @@
 //! (`answers::start`), which restores the newest checkpoint and replays the records after it. It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the stream's tier, off the clock
-//! thread. The Souls in `world.json` stand on the open ground at their places on a first start, where the log last had
-//! them after it.
+//! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
+//! `world.json`'s Souls are their tokens' grants (`souls.tokens`), born as any Soul is.
 //!
 //! **Joins and leaves** (C3, #3367): no Soul stands in the world until it acts. A Soul's first intent, sent with
 //! its token through the gateway, births its body by K10 (`answers::Join`): a `souls:body` node on the open ground by
