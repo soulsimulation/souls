@@ -1,0 +1,58 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cutting_donor",
+  "owner": "thing",
+  "state": {
+    "shoots": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 800] },
+    "shoot": { "role": "contact", "at_mm": [0, 800, 0] }
+  },
+  "geometry": { "bounds_mm": [620, 1060, 500] },
+  "forms": {
+    "take_cutting": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "pot": { "type": "thing", "select": { "of": "things", "kind": "eden:nursery_pot", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "hand", "free": true },
+        { "need": "state", "field": "shoots", "at_least": 1 },
+        { "need": "room" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "shoot" },
+        { "step": "move", "move": "press", "toward": { "arg": "pot" } },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "shoots", "from": "this", "into": { "arg": "pot" }, "amount": 1, "event": "cutting_taken" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:cutting_donor",
+    "table": [
+      { "part": "shoot.1", "field": "shoots", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "shoot.2", "field": "shoots", "do": "show", "range": [1, 2], "to": [0, 1] },
+      { "part": "shoot.3", "field": "shoots", "do": "show", "range": [2, 3], "to": [0, 1] }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,160,0],"size":[500,320,480],"tint":"pot"},{"kind":"box","at":[0,330,0],"size":[440,40,420],"tint":"soil"},{"kind":"box","at":[0,600,0],"size":[45,520,45],"tint":"stem"},{"kind":"box","at":[-170,740,0],"size":[35,360,35],"tint":"stem","role":"shoot.1"},{"kind":"box","at":[-105,850,15],"size":[190,45,120],"tint":"leaf","role":"shoot.1"},{"kind":"box","at":[-225,750,-15],"size":[180,45,120],"tint":"leaf","role":"shoot.1"},{"kind":"box","at":[0,795,0],"size":[35,360,35],"tint":"stem","role":"shoot.2"},{"kind":"box","at":[65,905,15],"size":[190,45,120],"tint":"leaf","role":"shoot.2"},{"kind":"box","at":[-55,805,-15],"size":[180,45,120],"tint":"leaf","role":"shoot.2"},{"kind":"box","at":[170,850,0],"size":[35,360,35],"tint":"stem","role":"shoot.3"},{"kind":"box","at":[235,960,15],"size":[190,45,120],"tint":"leaf","role":"shoot.3"},{"kind":"box","at":[115,860,-15],"size":[180,45,120],"tint":"leaf","role":"shoot.3"}],"palette":{"pot":"#955a3e","soil":"#4a3626","stem":"#507443","leaf":"#83ac57"},"tags":["garden","herb","propagation","object"]}
+  },
+  "text": {
+    "card": "A herb with three shoots to spare: take one as a cutting into a nursery pot.",
+    "garden": "garden",
+    "cutting": "cutting",
+    "propagate": "propagate",
+    "howto_propagate": "With a hand free, take a cutting into the nearest empty nursery pot, then plant it in that pot."
+  },
+  "card": { "text": "card", "category": "garden", "synonyms": ["cutting", "propagate"] },
+  "howtos": {
+    "propagate": { "text": "howto_propagate", "steps": [{ "form": "take_cutting" }] }
+  }
+}

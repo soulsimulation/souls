@@ -1,0 +1,14 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lawn",
+  "owner": "place",
+  "geometry": {"bounds_mm":[20000,100,20000]},
+  "looks": {"model":"look:lawn"},
+  "text": {
+    "card": "A mown lawn: open grass to walk across, or to sit and lie on.",
+    "ground": "ground",
+    "grass": "grass",
+    "park": "park"
+  },
+  "card": {"text":"card","category":"ground","synonyms":["grass","park"]}
+}

@@ -1,0 +1,320 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "The twinkle lights (core/twinkle-lights@1, 4 placed). Today they have state on and no forms; here they switch like the festoon, at a plate on the left post.",
+ "cases": [
+  {
+   "name": "twinkle_lights_switch_on_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:twinkle_lights",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -3960,
+       1200,
+       245
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "twinkle_lights_switch_on_when_already_on_names_switch_off",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:twinkle_lights",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -3960,
+       1200,
+       245
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "switch_off"
+    }
+   }
+  },
+  {
+   "name": "twinkle_lights_switch_on_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:twinkle_lights",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -3960,
+       1200,
+       3045
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  },
+  {
+   "name": "twinkle_lights_switch_off_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:twinkle_lights",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -3960,
+       1200,
+       245
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "twinkle_lights_switch_off_when_already_off_names_switch_on",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:twinkle_lights",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -3960,
+       1200,
+       245
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  },
+  {
+   "name": "twinkle_lights_switch_off_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:twinkle_lights",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -3960,
+       1200,
+       3045
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  }
+ ]
+}

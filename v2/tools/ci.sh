@@ -67,6 +67,9 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 # The page's pose (V7, #2716): a body's bones as a function of its record and time, the same at 30 and 144 frames a
 # second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
 step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts'
+# The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
+# worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts).
+step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts'
 
 # The ids goldens (T3, #2640): the same WASM build in Node gives fixtures/ids/goldens.txt exactly, as the native build
 # does in `cargo test` (crates/replica/tests/ids.rs).
@@ -133,6 +136,8 @@ step client-command node --test client/src/brief/*.test.mjs client/src/find/*.te
 step client-stats node --test client/src/stats/*.test.mjs
 # The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
 step client-check node --test client/src/check/*.test.mjs
+# Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else.
+step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the

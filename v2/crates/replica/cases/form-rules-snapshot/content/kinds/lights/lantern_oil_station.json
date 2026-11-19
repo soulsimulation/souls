@@ -1,0 +1,59 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lantern_oil_station",
+  "owner": "thing",
+  "state": {
+    "oil": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 800], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "out": { "admits": "thing", "kinds": ["eden:oil_lantern"], "most": 1, "at_mm": [-180, 992, 80], "fits_mm": [280, 400, 300] }
+  },
+  "geometry": { "bounds_mm": [900, 1250, 650] },
+  "forms": {
+    "refill": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "lantern": { "type": "thing", "select": { "of": "things", "kind": "eden:oil_lantern", "in": "this", "anchor": "this", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "state", "field": "oil", "at_least": 1, "says": "no_oil" },
+        { "need": "hand", "empty": true, "says": "put_down_first" },
+        { "need": "room", "says": "already_charged" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "wait", "us": 10000000 }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "oil", "from": "this", "into": { "arg": "lantern" }, "amount": 1, "event": "refilled" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:lantern_oil_station",
+    "table": [
+      { "part": "fill", "field": "oil", "do": "scale", "axis": "y", "range": [0, 3], "to": [0, 1000] }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,965,0],"size":[900,30,650],"tint":"wood"},{"kind":"box","at":[-370,475,-250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[370,475,-250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[-370,475,250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[370,475,250],"size":[55,950,55],"tint":"wood"},{"kind":"box","at":[-180,986,80],"size":[280,12,300],"tint":"tray"},{"kind":"cyl","at":[240,1100,-120],"r":80,"h":240,"segments":8,"tint":"tank","material":"glass"},{"kind":"cyl","at":[240,1095,-120],"r":72,"h":220,"segments":8,"tint":"oil","role":"fill","pivot":[240,985,-120]}],"palette":{"wood":"#7a5a3c","tray":"#3c3a36","tank":"#9aa3a0","oil":"#c8a03c"},"tags":["camping","lighting","station","object"]}
+  },
+  "text": {
+    "card": "An oil supply with three measured charges: refill an empty lantern set on it.",
+    "no_oil": "No measured oil charges remain.",
+    "put_down_first": "Put down what you are holding before refilling.",
+    "already_charged": "The lantern already has a full session charge.",
+    "light": "light",
+    "oil": "oil",
+    "lamp_oil": "lamp oil",
+    "howto_refill": "Set an empty, unlit lantern on the tray, refill it with empty hands for ten seconds, then take it and light it."
+  },
+  "card": { "text": "card", "category": "light", "synonyms": ["oil", "lamp_oil"] },
+  "howtos": {
+    "refill": { "text": "howto_refill", "steps": [{ "form": "refill" }] }
+  }
+}

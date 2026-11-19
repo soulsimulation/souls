@@ -1,0 +1,147 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Rabbit care (from #1797): a Soul with empty hands feeds the first of two rabbits (box 3 to 2, rabbit 0 to 1); feeding it again is refused and nothing moves; the second rabbit is fed (box 2 to 1). Portions are conserved: box and rabbits hold three between them.",
+  "cases": [
+    {
+      "name": "feed_two_rabbits_one_refused",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "f1",
+              "r1",
+              "r2"
+            ]
+          },
+          "f1": {
+            "kind": "eden:rabbit_feed"
+          },
+          "r1": {
+            "kind": "eden:garden_rabbit"
+          },
+          "r2": {
+            "kind": "eden:garden_rabbit"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "f1",
+            "form": "feed_rabbit",
+            "args": {
+              "rabbit": "r1"
+            }
+          },
+          "receipt": "rr1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "f1",
+                "field": "feed",
+                "n": 1,
+                "to": 2,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "feed",
+                "n": 1,
+                "to": 1,
+                "by": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rabbit_fed",
+                "node": "f1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "f1",
+            "form": "feed_rabbit",
+            "args": {
+              "rabbit": "r1"
+            }
+          },
+          "receipt": "rr2",
+          "expect": {
+            "verdict": "no",
+            "reason": "no_room",
+            "need": 2
+          }
+        },
+        {
+          "act": {
+            "this": "f1",
+            "form": "feed_rabbit",
+            "args": {
+              "rabbit": "r2"
+            }
+          },
+          "receipt": "rr3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "f1",
+                "field": "feed",
+                "n": 1,
+                "to": 1,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "r2",
+                "field": "feed",
+                "n": 1,
+                "to": 1,
+                "by": 1
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "f1": {
+          "kind": "eden:rabbit_feed",
+          "fields": {
+            "feed": 1
+          }
+        },
+        "r1": {
+          "kind": "eden:garden_rabbit",
+          "fields": {
+            "feed": 1
+          }
+        },
+        "r2": {
+          "kind": "eden:garden_rabbit",
+          "fields": {
+            "feed": 1
+          }
+        }
+      }
+    }
+  ]
+}
