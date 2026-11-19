@@ -23,6 +23,10 @@
 //                                             names which Soul asks, when the home has more than one
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop                            ends the daemon
+//   souls.mjs pending --check                 for a scheduler (R20): prints nothing, exits 0 when a message or a wake
+//                                             waits, 1 when not (2 on a failure); starts the daemon, sends nothing
+//   souls.mjs help schedule-wake              the scheduler line that serves a message while no chat is open (R20)
+//   act ... --for <message id>                the act serves that owner's message; its outcome closes it (R13)
 //   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
 //   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
 //   souls.mjs schedule add "<when>" <act> [<act>...] | wake "<why>"  [--until <time>] [--missed drop|tell|late <n>m]
@@ -37,16 +41,16 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
 import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'history', 'stats', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'history', 'stats', 'pending', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
-export const LOCAL = ['digest', 'consolidate', 'schedule'];
+export const LOCAL = ['digest', 'consolidate', 'schedule', 'help'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /**
@@ -87,7 +91,7 @@ export function requestOf(argv) {
   const args = [...argv], opts = {};
   // history's --soul is its question; --as is the Soul asking.
   const asking = args.includes('history');
-  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed']) {
+  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for']) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
@@ -98,11 +102,14 @@ export function requestOf(argv) {
     const [sub = 'list', ...more] = rest;
     return { local: op, soul: opts.soul, sub, args: more, until: opts.until, missed: opts.missed };
   }
+  if (op === 'help') return { local: op, soul: opts.soul, topic: rest[0] };
   if (LOCAL.includes(op)) return { local: op, soul: opts.soul, since: opts.since ?? null, refs: rest.includes('--refs'), force: rest.includes('--force') };
   if (!OPS.includes(op)) return { refused: 'unknown-command', detail: `one of ${OPS.join(', ')}` };
   const req = { op };
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
   if (op === 'act' || op === 'can') req.acts = rest;
+  if (op === 'act' && opts.for !== undefined) req.for = opts.for;
+  if (op === 'pending' && rest[0] !== '--check') return { refused: 'pending-check', detail: 'pending --check; a turn reads what waits with wait 0' };
   if (op === 'pair') req.url = rest[0];
   if (op === 'say') req.words = rest.join(' ');
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
@@ -117,11 +124,37 @@ export function requestOf(argv) {
 /** A local command: the Soul named, else the home's only Soul with a memory folder. */
 async function local({ local: op, soul: named, since, refs, force, ...asked }, home) {
   if (op === 'schedule') return schedule(home, named, asked);
+  if (op === 'help') return help(home, named, asked.topic);
   const souls = existsSync(join(home, 'souls')) ? readdirSync(join(home, 'souls')).filter((s) => existsSync(join(soulDirOf(home, s), 'memory'))) : [];
   const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
   if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a memory'}`), { code: 'which-soul' });
   if (op === 'digest') return { ok: true, soul, ...digestOf(soulDirOf(home, soul), { since, refs }) };
   return { ok: true, soul, ...(await consolidateIn(home, soulDirOf(home, soul), { force })) };
+}
+
+const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
+
+/**
+ * R20 (#3328): `help schedule-wake`, the line an owner's scheduler runs so a message written while no chat is open is
+ * served: `pending --check` gates a headless turn, which starts only when a message or a wake waits. The turn uses
+ * the harness's own login.
+ */
+function help(home, named, topic) {
+  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
+  const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
+  const cli = `node ${shq(script)}${sel}`;
+  const prompt = `Work in the folder ${folder}. Run: ${cli} wait 0. For each event of kind mail, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
+  const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
+  return {
+    ok: true, topic, folder, prompt,
+    command: {
+      any: `${check} && <your harness's command that starts a turn with this prompt> ${shq(prompt)}`,
+      claude: `${check} && claude -p ${shq(prompt)} --allowedTools 'Bash(node:*)'`,
+      // Codex's default sandbox refuses the client its home (`home-unreadable`); this one lets it reach the daemon.
+      codex: `${check} && codex exec --skip-git-repo-check --sandbox workspace-write -c sandbox_workspace_write.network_access=true ${shq(prompt)}`,
+    },
+    note: 'Schedule command.any (cron, launchd, or any scheduler that runs a shell) every few minutes. pending --check prints nothing and exits 0 only when a message or a wake waits, so an idle check starts no turn and spends nothing; it starts the daemon if it is down and sends no intent.',
+  };
 }
 
 /**
@@ -159,10 +192,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
       if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
       const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;
-      out(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
+      const answer = await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms });
+      // R20: pending --check prints nothing: exit 0 when a turn has something to serve, 1 when not, 2 on a failure.
+      if (req.op === 'pending') {
+        if (answer.ok !== true) throw Object.assign(new Error(answer.detail ?? 'pending failed'), { code: answer.code });
+        process.exitCode = answer.due ? 0 : 1;
+      } else out(answer);
     }
   } catch (e) {
-    out({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) });
-    process.exitCode = 1;
+    if (req?.op === 'pending') {
+      process.stderr.write(JSON.stringify({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }) + '\n');
+      process.exitCode = 2;
+    } else {
+      out({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) });
+      process.exitCode = 1;
+    }
   }
 }

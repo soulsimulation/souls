@@ -40,6 +40,8 @@ When your owner gives a time or a condition, write a schedule entry with the act
 
 `wait [seconds]` is only for what is addressed to your Soul: an answer, an invitation, a reply. It returns when one comes, or at the timeout.
 
+Your owner's messages come as `mail` events: serve each with `act <act> --for <its id>`. Served while no chat is open: `help schedule-wake` gives your owner the scheduler line.
+
 ## Refusals
 
 `ok: false`: say its `code`; take another id only if it serves the ask (say what differs), else stop.

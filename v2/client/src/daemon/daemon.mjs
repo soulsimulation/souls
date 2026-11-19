@@ -42,6 +42,8 @@
 //     {"op":"wake","do":"add|remove|budget|list",...}   the wake rules; `wait` hands the queued wakes as `wakes`
 //     {"op":"act",...,"for":"<message id>"}           this act serves that message: its outcome closes it
 //     {"op":"event","event":{...}}                    an event as R9's matcher takes it, until frames carry them
+//     {"op":"pending"}                                R20's (#3328) check for a scheduler: `due` when a message is
+//                                                     open or wakes can be handed now; it sends and takes nothing
 //   and R16's (#2817), from the world's public history (`history` in its config) and the Soul's memory, the copy as
 //   it is (naming only), so it ends with `at` and not `changed`:
 //     {"op":"history","at":"<place>"} | {"thing":"<id>"} | {"soul":"<id or name>"}, "since"/"until": world µs
@@ -193,7 +195,7 @@ const rankedOf = new Map(); // sequence → how many verbs it ranked, until answ
 const movesOf = new Map(); // sequence → its move's form (C14), until answered: a receipt says whether the body sits
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
-let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now();
+let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now(), signedInAt = 0;
 
 function send(bytes, sequence, ranked) {
   // Written down before it goes, so neither a drop nor a restart sends it again.
@@ -207,6 +209,7 @@ function send(bytes, sequence, ranked) {
 
 /** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
 function current() {
+  if (!signedIn) signedInAt = Date.now();
   signedIn = true;
   attempt = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
@@ -489,7 +492,9 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'stop']);
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
@@ -556,8 +561,17 @@ function sendIntent(ranked, { target, words, args, basis, expiry }) {
 
 async function answer(req) {
   // R13: a command from the model's turn shows that what a reader was handed was taken.
-  if (!['wait', 'status'].includes(req.op)) wakes.confirm();
+  if (!['wait', 'status', 'pending'].includes(req.op)) wakes.confirm();
   switch (req.op) {
+    case 'pending': {
+      // R20 (#3328): whether a turn has anything to serve: an open message, or wakes the budget lets through now. It
+      // sends nothing and takes nothing. A daemon just signed in waits for the gateway's first read of the mailbox
+      // (about a second, gatewayd's mailbox POLL), so a message written while it was down is seen on this check.
+      const until = Date.now() + Math.min(Number(req.within ?? 4000), 10_000);
+      while (!signedIn && Date.now() < until) await sleep(50);
+      while (signedIn && mail.size === 0 && Date.now() - signedInAt < MAILBOX_FIRST_MS && Date.now() < until) await sleep(50);
+      return { ok: true, due: mail.size > 0 || wakes.due(Date.now()), mail: mail.size, connected: signedIn };
+    }
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
       return {
@@ -688,17 +702,19 @@ const server = createServer((c) => {
       Promise.resolve().then(() => { const req = JSON.parse(line); op = OPS.has(req.op) ? req.op : 'unknown'; return answer(req); })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
         .then((out) => {
+          // R20: a scheduler's check is not the agent: it takes nothing an answer to the agent would carry.
+          const check = op === 'pending';
           // R9: the reflexes that fired since the answer before, in this one's `changed`.
-          const fired = reflexes.changed();
+          const fired = check ? [] : reflexes.changed();
           if (fired.length) out.changed = { ...(out.changed ?? {}), reflexes: fired };
           // R15: what the schedule missed while the daemon was off, once, in the next answer.
-          if (state.schedule.missed.length) {
+          if (!check && state.schedule.missed.length) {
             out.missed = { note: MISSED_NOTE, entries: state.schedule.missed.splice(0) };
             save();
           }
           // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
           const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
-          if (op !== 'stats') trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
+          if (op !== 'stats' && !check) trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
           if (!c.destroyed) c.write(said);
         });
     }
