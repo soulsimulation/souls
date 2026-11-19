@@ -5,7 +5,8 @@
 //!   token as `Authorization: Bearer <token>`, or, with the sign-in for test worlds on, `Bearer test:<name>`.
 //!   Answers `{"world": {...}}`, or `{"refused", "detail"}`; a limit's refusal (429) adds `limit` and `retry_after`.
 //! - `POST /v1/worlds/settings` with `{"world", "unlisted"?, "closed"?}`, signed in the same way as the world's creator
-//!   (W9, #2827): answers `{"world": {...}}`, the row as set; with neither switch, the row as it is.
+//!   (W9, #2827): answers `{"world": {...}}`, the row as set; with neither switch, the row as it is. With
+//!   `"picture": <base64url>` it also sets the list's picture (G10, #2800), refused by G6's code when the file fails.
 
 use serde_json::{Value, json};
 
@@ -59,11 +60,22 @@ pub fn settings(req: &Request, app: &App) -> Answer {
         .unwrap_or_default();
     let switch = |k: &str| body.get(k).and_then(Value::as_bool);
     let note = format!("account#{}", correlate(&account.account));
+    let picture = match body.get("picture").and_then(Value::as_str) {
+        None => None,
+        Some(t) => match crate::accounts::from_b64url(t)
+            .ok_or_else(|| "picture".to_string())
+            .and_then(|f| super::list_picture(&f))
+        {
+            Ok(url) => Some(url),
+            Err(code) => return (400, json!({"refused": code}), format!("{note} {code}")),
+        },
+    };
     match worlds.settings(
         world,
         account.principal,
         switch("unlisted"),
         switch("closed"),
+        picture.as_deref(),
     ) {
         Ok(row) => (200, json!({"world": row}), note),
         Err(e) => {

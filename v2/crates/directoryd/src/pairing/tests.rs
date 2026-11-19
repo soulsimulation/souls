@@ -342,7 +342,7 @@ fn w9_a1_the_account_lists_its_souls_and_devices_and_revokes_one() {
 
 /// A PNG of `side` by `side` RGB pixels, all zero, its pixel data in one stored (uncompressed) zlib block; `text`
 /// adds a tEXt chunk, metadata G6's check strips.
-fn png(side: u32, text: Option<&str>) -> Vec<u8> {
+pub(crate) fn png(side: u32, text: Option<&str>) -> Vec<u8> {
     fn chunk(out: &mut Vec<u8>, ty: &[u8; 4], data: &[u8]) {
         out.extend_from_slice(&(data.len() as u32).to_be_bytes());
         let start = out.len();
