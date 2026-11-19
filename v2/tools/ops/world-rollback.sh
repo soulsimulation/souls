@@ -7,4 +7,4 @@ rec="$WORLDS_ROOT/deploys/$WORLD"
 [[ -r $rec ]] || { echo "no deploy recorded for $WORLD in $rec: nothing to roll back" >&2; exit 2; }
 read -r old new < "$rec"
 undo "bash v2/tools/ops/world-deploy.sh $WORLD   (from $old to $new again)"
-run "$LIB/deploy" rollback "$WORLD" "$old" --from "$new" --probe "$ETC/probe/$WORLD"
+run "$LIB/deploy" rollback "$WORLD" "$old" --from "$new"
