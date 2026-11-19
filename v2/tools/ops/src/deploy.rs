@@ -87,6 +87,13 @@ fn main() {
     if rollback {
         let from = from_hex(get("--from").unwrap_or_else(|| fail("no --from build")))
             .unwrap_or_else(|e| fail(e));
+        // Only the live build is taken back (O18, #2811): the world's pin must be `--from`.
+        let live = supervisor::pin(store, &root, &world).map_or_else(|e| fail(e), |(b, _)| b);
+        if live != from {
+            let live = replica::encode::to_hex(&live);
+            println!("refused: rollback.wrong-from: the world is pinned to {live}, not --from");
+            std::process::exit(1)
+        }
         // Whether the build being left wrote anything is not known here: assume it did, so the schemas are compared.
         let mut tl = Timeline::default();
         let r = d.roll_back(&build, &from, true, &mut unit, &mut probe, &mut |s| {
