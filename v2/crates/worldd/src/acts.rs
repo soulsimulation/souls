@@ -475,7 +475,8 @@ impl Acts {
                     );
                 }
                 // Thing and slot arguments (F4, C12): bound here, as `Forms::commit` binds none yet.
-                let steps = skills::form_runner::bind_in(&entry, form, &args.slots)?;
+                let steps =
+                    skills::form_runner::bind_args(&entry, form, &args.things, &args.slots)?;
                 let effects =
                     skills::form_runner::bind_effects_in(&entry, form, &args.things, &args.slots)?;
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;

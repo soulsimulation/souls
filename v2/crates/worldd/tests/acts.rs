@@ -225,15 +225,23 @@ fn entries() -> Json {
     let vessel = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
       "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
-      "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] } } }"#,
+      "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] },
+        "discard": { "who": "anyone", "steps": [{ "step": "use_held" }],
+          "effects": [{ "change": "remove", "what": "this", "event": "discarded" }] },
+        "rest_by": { "who": "anyone",
+          "steps": [{ "step": "settle", "posture": "sit" }, { "step": "wait", "us": 500000 }, { "step": "rise" }] } } }"#,
     )
     .unwrap();
+    // A create names its kind pinned (C25's `stock`).
     let rack = parse(
-        r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
+        &r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
       "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] } },
       "slots": { "rest": { "admits": "thing" } },
       "forms": { "put": { "who": "anyone",
-        "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] } } }"#,
+        "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] },
+        "stock": { "who": "anyone", "steps": [],
+          "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" }] } } }"#
+            .replace("PLANK", &fullname(PLANK)),
     )
     .unwrap();
     Json::Obj(vec![(VESSEL.into(), vessel), (RACK.into(), rack)])
@@ -672,5 +680,37 @@ fn a4_two_souls_carry_a_plank_together_through_the_gateway() {
         c.act("activity:leave", Some(carry), BTreeMap::new())
             .expect("left");
     }
+    run.stop();
+}
+
+/// C25 (#3496) A1, A3: through the gateway, a form with no steps (the rack's `stock`, which makes a plank in its slot)
+/// applies its effect at once: one act, one receipt, the plank in the rack's slot in the log replayed. The vessel's `rest_by` settles the
+/// body on the ground, pauses and rises: done. Its `discard` (`use_held`, then a removal) is refused `not-held` while
+/// the body does not hold it, and after a take removes it: done.
+#[test]
+fn c25_no_steps_settle_rise_and_use_held_through_the_gateway() {
+    let (run, mut a, _) = serve("c25");
+    let stocked = a.act("test:stock", Some(rack()), BTreeMap::new());
+    println!("C25 stock: {stocked:?}");
+    assert!(!stocked.expect("the stock lands").is_empty(), "one receipt");
+    let r = run.replay();
+    let t = r.tree();
+    let made = t.children(t.handle(rack()).unwrap()).map_or(0, <[_]>::len);
+    assert_eq!(made, 1, "a plank in the rack's slot");
+    let rested = a.act("test:rest_by", Some(vessel()), BTreeMap::new());
+    println!("C25 rest_by: {rested:?}");
+    assert!(rested.is_ok(), "settled, paused and rose");
+    let early = a.act("test:discard", Some(vessel()), BTreeMap::new());
+    println!("C25 discard before a take: {early:?}");
+    assert_eq!(early, Err("not-held".to_owned()));
+    a.act("test:take", Some(vessel()), BTreeMap::new())
+        .expect("the take lands");
+    let discarded = a.act("test:discard", Some(vessel()), BTreeMap::new());
+    println!("C25 discard: {discarded:?}");
+    assert!(!discarded.expect("the discard lands").is_empty());
+    assert!(
+        run.replay().tree().handle(vessel()).is_none(),
+        "the vessel is gone"
+    );
     run.stop();
 }

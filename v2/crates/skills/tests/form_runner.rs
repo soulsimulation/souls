@@ -1,6 +1,6 @@
 //! F1's checks on a fake host (#2766): every entry in `kinds/` binds its forms and runs them through to a named end;
-//! a passed deadline ends a run by name; an old timer changes nothing; a step kind not built is refused by name. No
-//! kind is named here: each check runs over the folder's files.
+//! a passed deadline ends a run by name; an old timer changes nothing; a malformed or unknown step is refused by name.
+//! No kind is named here: each check runs over the folder's files.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -55,6 +55,8 @@ struct Fake {
     at: Vec3,
     next: u8,
     timers: BTreeMap<Id, (Micros, Name)>,
+    /// The node is in the body's hand (C25): the body is its parent.
+    held: bool,
 }
 
 impl Host for Fake {
@@ -68,7 +70,7 @@ impl Host for Fake {
         (n == node()).then(|| Seen {
             id: node(),
             kind: Name::new("test:node").expect("a name"),
-            parent: None,
+            parent: self.held.then(body),
             position: self.at,
             fields: BTreeMap::new(),
         })
@@ -205,7 +207,7 @@ fn a3_a_passed_deadline_ends_the_run_by_name_and_so_does_a_failed_move() {
 }
 
 #[test]
-fn a_step_kind_not_built_is_refused_by_name_and_so_is_an_unknown_point() {
+fn a_malformed_or_unknown_step_is_refused_by_name_and_so_is_an_unknown_point() {
     let (entry, forms) = entries().remove(0);
     let form = &forms[0];
     let with = |steps: &str| {
@@ -215,9 +217,8 @@ fn a_step_kind_not_built_is_refused_by_name_and_so_is_an_unknown_point() {
         parse(&text).expect("JSON")
     };
     for (steps, want) in [
-        ("{\"step\":\"rise\"}", "step-not-built"),
+        ("{\"step\":\"settle\"}", "step-malformed"),
         ("{\"step\":\"sit\",\"slot\":\"x\"}", "slot-unknown"),
-        ("{\"step\":\"use_held\"}", "step-not-built"),
         ("{\"step\":\"fly\"}", "step-unknown"),
         (
             "{\"step\":\"walk_to\",\"point\":\"nowhere\"}",
@@ -291,4 +292,110 @@ fn c17_a_sit_step_binds_its_slot_and_posture_and_runs_through_the_seat() {
     assert!(r.take_effect(), "the effect's instant is the sit's contact");
     let end = r.wake(&mut h, Woke::Moved(Name::new("done").unwrap()));
     assert_eq!(ended(&end), Some("done"));
+}
+
+/// C25 (#3496): every step shape binds. A form with no steps binds to none and its run lands its effects at once,
+/// ending done. A slot named as a walk's point is walked to at its stand point (or the slot itself, with none). `rise`,
+/// `settle` (sit or lie) and `use_held` bind; a walk to a thing argument walks to that node, and one not given is
+/// refused `arg-missing`. The form's `reparent` of the actor to `here` is a rise's own hand-off, not an effect.
+#[test]
+fn c25_every_step_shape_binds() {
+    let entry = parse(
+        r#"{"format":"souls-entry/1","kind":"t:x","points":{"p":{"role":"stand","at_mm":[0,0,500]}},
+        "slots":{"a":{"admits":"body","posture":"sit","at_mm":[0,450,0],"stand":"p"},
+                 "top":{"admits":"body","at_mm":[0,900,0]}},
+        "state":{"n":{"n":1,"type":"int","default":0,"min":0,"max":9}},
+        "forms":{
+          "none":{"steps":[],"effects":[{"change":"set","field":"n","to":1}]},
+          "seat":{"steps":[{"step":"walk_to","point":"a"},{"step":"sit","slot":"a"},{"step":"rise"}],
+                  "effects":[{"change":"reparent","what":"actor","into":"here"},{"change":"set","field":"n","to":2}]},
+          "up":{"steps":[{"step":"walk_to","point":"top"}]},
+          "rest":{"steps":[{"step":"settle","posture":"sit"},{"step":"settle","posture":"lie"},{"step":"rise"}]},
+          "use":{"steps":[{"step":"use_held"}]},
+          "go":{"takes":{"room":{"type":"part"}},"steps":[{"step":"walk_to","point":{"arg":"room"}}]}}}"#,
+    )
+    .expect("JSON");
+    assert_eq!(bind(&entry, "none").expect("binds"), vec![]);
+    let seat = bind(&entry, "seat").expect("binds");
+    assert_eq!(
+        seat[0],
+        Step::WalkTo {
+            point: Name::new("p").unwrap(),
+            at: Vec3::new(0, 0, 500_000)
+        }
+    );
+    assert_eq!(seat[2], Step::Rise);
+    let effects = skills::form_runner::bind_effects(&entry, "seat").expect("binds");
+    assert_eq!(
+        effects.len(),
+        1,
+        "the rise carries the reparent: {effects:?}"
+    );
+    assert_eq!(
+        bind(&entry, "up").expect("binds"),
+        vec![Step::WalkTo {
+            point: Name::new("top").unwrap(),
+            at: Vec3::new(0, 900_000, 0)
+        }]
+    );
+    assert_eq!(
+        bind(&entry, "rest").expect("binds"),
+        vec![
+            Step::Settle { lie: false },
+            Step::Settle { lie: true },
+            Step::Rise
+        ]
+    );
+    assert_eq!(bind(&entry, "use").expect("binds"), vec![Step::UseHeld]);
+    assert_eq!(bind(&entry, "go").expect_err("refused").name, "arg-missing");
+    let room = fixture(9);
+    let things = BTreeMap::from([("room".to_owned(), room)]);
+    assert_eq!(
+        skills::form_runner::bind_args(&entry, "go", &things, &BTreeMap::new()).expect("binds"),
+        vec![Step::WalkToNode { node: room }]
+    );
+}
+
+/// C25 (#3496) A1, A3: the runner over each new shape. No steps: done at once, the effect taken (one act, one
+/// receipt). `rise` and `settle` ask the world and go on when it answers done. `use_held` is the hand step: the
+/// effect's instant when the node is in the body's hand, else the run ends `not-held`.
+#[test]
+fn c25_the_runner_runs_every_step_shape() {
+    let mut h = Fake::default();
+    let mut r = Runner::new(Vec::new(), node(), Limits::default());
+    assert_eq!(ended(&r.wake(&mut h, Woke::Start)), Some("done"));
+    assert!(r.take_effect(), "the effect lands at once");
+    assert!(h.timers.is_empty());
+
+    let done = || Woke::Moved(Name::new("done").unwrap());
+    let steps = vec![Step::Settle { lie: true }, Step::Rise];
+    let mut r = Runner::new(steps, node(), Limits::default());
+    assert!(matches!(
+        r.wake(&mut h, Woke::Start),
+        Next::Settle { lie: true }
+    ));
+    assert!(matches!(r.wake(&mut h, done()), Next::Rise));
+    assert_eq!(ended(&r.wake(&mut h, done())), Some("done"));
+    assert!(r.take_effect(), "no hand step: the effect at the end");
+    assert!(h.timers.is_empty(), "the step's deadline cleared");
+
+    let mut r = Runner::new(vec![Step::Rise], node(), Limits::default());
+    r.wake(&mut h, Woke::Start);
+    let refused = r.wake(&mut h, Woke::Moved(Name::new("not-seated").unwrap()));
+    assert_eq!(
+        ended(&refused),
+        Some("not-seated"),
+        "a rise ends by its name"
+    );
+
+    let use_held = || vec![Step::UseHeld, Step::Wait(1_000_000)];
+    let mut r = Runner::new(use_held(), node(), Limits::default());
+    assert_eq!(ended(&r.wake(&mut h, Woke::Start)), Some("not-held"));
+    assert!(!r.take_effect(), "no effect");
+    h.held = true;
+    let mut r = Runner::new(use_held(), node(), Limits::default());
+    assert!(matches!(r.wake(&mut h, Woke::Start), Next::Sleep));
+    assert!(r.take_effect(), "the effect's instant is the use");
+    let (id, ..) = h.only();
+    assert_eq!(ended(&r.wake(&mut h, Woke::Timer(id))), Some("done"));
 }

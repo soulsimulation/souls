@@ -54,6 +54,13 @@
 //!   A `walk_to` asks the world for its legs ([`Host::legs`]): the point carried onto the floor a body stands on and
 //!   the route there across doors and stairs; before a sit, to a place within [`SIT_REACH`] of the stand point.
 //!
+//! - **Every step shape** (C25, #3496). A form with no steps lands its effects at once and ends `done`. A `walk_to`
+//!   that names a slot as its point walks to that slot's `stand` point (or the slot itself). A `rise` asks the world
+//!   to stand the body up ([`Next::Rise`]): out of its seat by B3's rise, the form's `reparent` of the actor to
+//!   `here` being its hand-off; from a ground posture; at once for a body already standing. A `settle` asks for a
+//!   ground posture where the body stands ([`Next::Settle`]). A `use_held` is a hand step on the thing the body holds,
+//!   ended `not-held` when it holds none.
+//!
 //! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
 
 use std::collections::BTreeMap;
@@ -69,13 +76,15 @@ use replica::time::Micros;
 use crate::route::{Leg, Route};
 
 /// One step of a form, bound. The closed list is SA-F1's (`walk_to`, `sit`, `rise`, `move`, `take`, `put`,
-/// `use_held`, `wait`, `settle`); the kinds F1 builds are these three, and F4's `take` and `put` are bound as a `move`
-/// (their transfer is an effect, [`Effect::Take`] and [`Effect::Put`]), or with no `move` as a [`Step::Hand`] (C12).
-/// The rest are refused by name at bind.
+/// `use_held`, `wait`, `settle`), every one built (C25, #3496): F4's `take` and `put` are bound as a `move` (their
+/// transfer is an effect, [`Effect::Take`] and [`Effect::Put`]), or with no `move` as a [`Step::Hand`] (C12).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
     /// Walk to a point of the node, µm in the node's frame.
     WalkTo { point: Name, at: Vec3 },
+    /// Walk to another node, a form's thing or part argument (C25, #3496): to its place, or the nearest place within
+    /// [`REACH`] of it where a body may stand.
+    WalkToNode { node: Id },
     /// A move by name toward a point of the node.
     Move { name: Name, at: Name },
     /// A pause of a fixed length, µs.
@@ -86,6 +95,16 @@ pub enum Step {
     /// Sit, or lie, in slot `slot` of the node (C17): B3's seat taken by B2's sit or lie move, as the gateway's sit
     /// takes it. It lies when the slot's posture is `lie` or the step is a `lie`.
     Sit { slot: u64, lie: bool },
+    /// Rise (C25, #3496): out of the body's seat by B3's rise, onto its stand point; up from a ground posture a
+    /// `settle` took; nothing for a body already standing, as today's `stand` is. The form's `reparent` of the actor
+    /// to `here` is the rise's own hand-off.
+    Rise,
+    /// Settle (C25, SA-G3): a ground posture, sitting or lying, taken where the body stands, with no slot. It holds
+    /// until a rise or the body's next walk.
+    Settle { lie: bool },
+    /// Use the thing the form is done at, held in the body's hand (C25): a hand step with no move of its own, at once;
+    /// `not-held` when the body does not hold it.
+    UseHeld,
 }
 
 /// How far from a point a walk to it may end, µm, when a body cannot stand on the point itself (C15, #3447): an arm
@@ -96,9 +115,6 @@ pub const REACH: i64 = replica::moves::REACH_MOST + 600_000;
 /// the sit's and the lie's own reach (B2's data, a body's 0.6 m) less how near the walk comes to its end
 /// ([`crate::route::AT_GOAL`]), so the seat is in reach where the walk stops.
 pub const SIT_REACH: i64 = 600_000 - crate::route::AT_GOAL;
-
-/// The step kinds of SA-F1's closed list that later tasks build. A form that has one is refused `step-not-built`.
-pub const NOT_BUILT: [&str; 3] = ["rise", "use_held", "settle"];
 
 fn name(t: &str) -> Name {
     Name::new(t).unwrap_or_else(|| unreachable!("a fixed name"))
@@ -165,7 +181,8 @@ fn move_name(t: &str) -> Result<Name, Refusal> {
 }
 
 /// Binds form `form` of the kind `entry` (a `souls-entry/1` entry) into its steps, all or none: `form-unknown`,
-/// `form-has-no-steps`, `step-not-built` (with the step's kind), `step-unknown`, `step-malformed`, `point-unknown`.
+/// `step-unknown`, `step-malformed`, `point-unknown`. A form with no steps binds to none: its effects land at once
+/// (C25, #3496).
 pub fn bind(entry: &Value, form: &str) -> Result<Vec<Step>, Refusal> {
     bind_in(entry, form, &BTreeMap::new())
 }
@@ -177,29 +194,8 @@ fn slot_def(entry: &Value, n: u64) -> Option<(&str, &Value)> {
     Some((k.as_str(), v))
 }
 
-/// The point a `walk_to` names by argument (C12): `{"arg": a}` with `a` a slot argument bound in `slots` walks to
-/// that slot's `stand` point, or to the slot itself when it names none. A slot argument not given is refused
-/// `arg-missing`; a thing argument is `step-not-built` (a walk to another node is not built here).
-fn walk_to_arg(
-    entry: &Value,
-    form: &Value,
-    a: &str,
-    slots: &BTreeMap<String, u64>,
-) -> Result<Step, Refusal> {
-    let Some(&n) = slots.get(a) else {
-        let ty = form
-            .get("takes")
-            .and_then(|t| t.get(a))
-            .and_then(|t| t.get("type"));
-        return match ty.and_then(Value::str) {
-            Some("slot") => refuse("arg-missing", a),
-            _ => refuse("step-not-built", format!("walk_to {a}: a thing argument")),
-        };
-    };
-    let (slot, def) = slot_def(entry, n).ok_or_else(|| Refusal {
-        name: "slot-unknown",
-        detail: format!("{a}: slot {n}"),
-    })?;
+/// A walk to slot `slot` (`def` its definition): to its `stand` point, or to the slot itself when it names none.
+fn walk_to_slot(entry: &Value, slot: &str, def: &Value) -> Result<Step, Refusal> {
     match def.get("stand").and_then(Value::str) {
         Some(p) => Ok(Step::WalkTo {
             point: a_name(p)?,
@@ -212,6 +208,28 @@ fn walk_to_arg(
     }
 }
 
+/// The point a `walk_to` names by argument (C12): `{"arg": a}` with `a` a slot argument bound in `slots` walks to
+/// that slot's `stand` point, or to the slot itself when it names none; a thing (or part) argument bound in `things`
+/// walks to that node (C25, #3496). An argument not given is refused `arg-missing`.
+fn walk_to_arg(
+    entry: &Value,
+    a: &str,
+    things: &BTreeMap<String, Id>,
+    slots: &BTreeMap<String, u64>,
+) -> Result<Step, Refusal> {
+    if let Some(&node) = things.get(a) {
+        return Ok(Step::WalkToNode { node });
+    }
+    let Some(&n) = slots.get(a) else {
+        return refuse("arg-missing", a);
+    };
+    let (slot, def) = slot_def(entry, n).ok_or_else(|| Refusal {
+        name: "slot-unknown",
+        detail: format!("{a}: slot {n}"),
+    })?;
+    walk_to_slot(entry, slot, def)
+}
+
 /// [`bind`], with the form's slot arguments `slots` (name to slot number, 1, 2, ... in the entry's order): a
 /// `walk_to` may name its point by argument ([`walk_to_arg`]), and a `take` or `put` with no `move` is bound as
 /// [`Step::Hand`].
@@ -220,13 +238,21 @@ pub fn bind_in(
     form: &str,
     slots: &BTreeMap<String, u64>,
 ) -> Result<Vec<Step>, Refusal> {
+    bind_args(entry, form, &BTreeMap::new(), slots)
+}
+
+/// [`bind_in`], with the form's thing (and part) arguments `things` too: a `walk_to` may name a node by argument
+/// (C25, #3496).
+pub fn bind_args(
+    entry: &Value,
+    form: &str,
+    things: &BTreeMap<String, Id>,
+    slots: &BTreeMap<String, u64>,
+) -> Result<Vec<Step>, Refusal> {
     let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
         return refuse("form-unknown", form);
     };
     let steps = f.get("steps").and_then(Value::arr).unwrap_or(&[]);
-    if steps.is_empty() {
-        return refuse("form-has-no-steps", form);
-    }
     steps
         .iter()
         .map(|s| {
@@ -238,9 +264,14 @@ pub fn bind_in(
                         .and_then(|p| p.get("arg"))
                         .and_then(Value::str)
                     {
-                        return walk_to_arg(entry, f, a, slots);
+                        return walk_to_arg(entry, a, things, slots);
                     }
                     let p = text(s.get("point"), "walk_to.point")?;
+                    // A slot named as the point (C25, #3496): its stand point, as a slot argument's walk goes.
+                    let declared = entry.get("points").and_then(|ps| ps.get(p)).is_some();
+                    if !declared && let Some(def) = entry.get("slots").and_then(|ss| ss.get(p)) {
+                        return walk_to_slot(entry, p, def);
+                    }
                     Ok(Step::WalkTo {
                         point: a_name(p)?,
                         at: point(entry, p)?,
@@ -284,7 +315,13 @@ pub fn bind_in(
                     }
                     _ => refuse("step-malformed", "wait.us: whole microseconds above zero"),
                 },
-                k if NOT_BUILT.contains(&k) => refuse("step-not-built", k),
+                "rise" => Ok(Step::Rise),
+                "settle" => match s.get("posture").and_then(Value::str) {
+                    Some("sit") => Ok(Step::Settle { lie: false }),
+                    Some("lie") => Ok(Step::Settle { lie: true }),
+                    _ => refuse("step-malformed", "settle.posture: sit or lie"),
+                },
+                "use_held" => Ok(Step::UseHeld),
                 k => refuse("step-unknown", k),
             }
         })
@@ -443,6 +480,15 @@ pub fn bind_effects_in(
         .filter_map(|s| s.get("slot").and_then(&reparent))
         .filter(|&i| effects[i].get("what").and_then(Value::str) == Some("actor"))
         .collect();
+    // So is a rise's (C25, #3496): the form's `reparent` of the actor to `here` is the body handed out of its seat.
+    if steps
+        .iter()
+        .any(|s| s.get("step").and_then(Value::str) == Some("rise"))
+        && let Some(i) = reparent(&Value::Str("here".into()))
+        && effects[i].get("what").and_then(Value::str) == Some("actor")
+    {
+        carried.push(i);
+    }
     let mut what = |s: &Value, into: &Value| match (s.get("what"), reparent(into)) {
         (Some(w), _) => of(Some(w), args),
         (None, Some(i)) => {
@@ -593,6 +639,11 @@ pub enum Next {
     /// Take the seat in slot `slot` of `node` by B2's sit (or lie) move through B3's seats, as the gateway's sit
     /// does (C17), then wake the runner with [`Woke::Contact`] at the hand-off and [`Woke::Moved`] at its end.
     Sit { node: Id, slot: u64, lie: bool },
+    /// Rise (C25): out of the body's seat by B3's rise, or up from a ground posture, then wake the runner with
+    /// [`Woke::Moved`]; at once `done` for a body standing.
+    Rise,
+    /// Take a ground posture where the body stands (C25), then wake the runner with [`Woke::Moved`].
+    Settle { lie: bool },
     /// Nothing until the next wake.
     Sleep,
     /// The run is over, with its name. Whatever the run started and has not ended (a walk, a move, a timer) the world
@@ -621,9 +672,12 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(steps: Vec<Step>, node: Id, limits: Limits) -> Runner {
-        let hand = steps
-            .iter()
-            .position(|s| matches!(s, Step::Move { .. } | Step::Hand | Step::Sit { .. }));
+        let hand = steps.iter().position(|s| {
+            matches!(
+                s,
+                Step::Move { .. } | Step::Hand | Step::Sit { .. } | Step::UseHeld
+            )
+        });
         Runner {
             steps,
             node,
@@ -715,6 +769,27 @@ impl Runner {
                     self.limits.tick,
                 )))
             }
+            Step::WalkToNode { node } => {
+                let Some(seen) = host.read(node) else {
+                    return self.end(host, name("thing-missing"));
+                };
+                let legs = match seen.parent.and_then(|p| host.legs(p, seen.position, REACH)) {
+                    Some(l) if l.is_empty() => return self.end(host, name("souls:no-way")),
+                    Some(l) => l.into_iter().map(|(to, link)| Leg { to, link }).collect(),
+                    None => vec![Leg {
+                        to: host
+                            .stand_near(seen.position, REACH)
+                            .unwrap_or(seen.position),
+                        link: None,
+                    }],
+                };
+                self.timer = Some(host.set_timer(self.limits.walk, name("souls:form-deadline")));
+                Next::Walk(Box::new(Route::new(
+                    legs,
+                    self.limits.speed,
+                    self.limits.tick,
+                )))
+            }
             Step::Move { name: mv, at } => {
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
@@ -743,6 +818,25 @@ impl Runner {
                 }
                 self.advance(host)
             }
+            Step::Rise | Step::Settle { .. } => {
+                self.timer =
+                    Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
+                match step {
+                    Step::Settle { lie } => Next::Settle { lie },
+                    _ => Next::Rise,
+                }
+            }
+            // The thing is in the body's hand: its parent in the tree is the body (B4's take).
+            Step::UseHeld => {
+                let body = host.body();
+                if host.read(self.node).and_then(|n| n.parent) != Some(body) {
+                    return self.end(host, name("not-held"));
+                }
+                if self.hand == Some(self.at) {
+                    self.effect_now();
+                }
+                self.advance(host)
+            }
         }
     }
 
@@ -760,7 +854,10 @@ impl Runner {
         let step = self.steps.get(self.at).cloned();
         // A move is left at its next phase boundary; anything else at once. A run left has no effect from then on.
         if why == Woke::Leave {
-            if matches!(step, Some(Step::Move { .. } | Step::Sit { .. })) {
+            if matches!(
+                step,
+                Some(Step::Move { .. } | Step::Sit { .. } | Step::Rise)
+            ) {
                 self.leaving = true;
                 return Next::Sleep;
             }
@@ -785,7 +882,7 @@ impl Runner {
                     _ => self.end(host, name("deadline-passed")),
                 }
             }
-            (Woke::Walked(p), Some(Step::WalkTo { .. })) => match p {
+            (Woke::Walked(p), Some(Step::WalkTo { .. } | Step::WalkToNode { .. })) => match p {
                 Progress::Done => self.advance(host),
                 Progress::Failed(n) => self.end(host, n),
                 Progress::Going => Next::Sleep,
@@ -796,7 +893,10 @@ impl Runner {
                 self.effect_now();
                 Next::Sleep
             }
-            (Woke::Moved(how), Some(Step::Move { .. } | Step::Sit { .. })) => {
+            (
+                Woke::Moved(how),
+                Some(Step::Move { .. } | Step::Sit { .. } | Step::Rise | Step::Settle { .. }),
+            ) => {
                 if how.as_str() == "done" {
                     self.advance(host)
                 } else {
