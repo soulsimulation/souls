@@ -58,12 +58,14 @@
 //! 0. the intents that arrived since the last tick are taken (the recorder's inputs, K12);
 //! 1. due timers: acts whose deadline passed end `act.timed-out` (K9's due list); the world node's light, day and
 //!    weather timers due before the next tick fire at their due times and write their entries (E6, #3369; a first
-//!    start writes [`Config::sky`] when the node holds no settings); a move's phase timers fire;
+//!    start writes [`Config::sky`] when the node holds no settings); loose things' ends due fire likewise (F10b,
+//!    [`crate::loose`]); a move's phase timers fire;
 //! 2. skills step through the host, each one unit in K11's wrapper (K13a, T9b/T9c; a panic ends that skill only);
 //! 3. the controller steps the bodies (B1), moves and seats included (B2, B3); each utterance a step started is
 //!    written with its hearers (`sim::speech::heard`, B11, #3369);
 //! 4. committed acts: the checks that came back are committed (I3, I4), then the checked edits (G1b, `sim::edit`;
-//!    each counts as outstanding, so lockstep waits for it as for an act), and new moves start (I4b);
+//!    each counts as outstanding, so lockstep waits for it as for an act), and new moves start (I4b); what they made
+//!    loose gets its end, and what they made kept loses it (F10b, [`crate::loose`]);
 //! 5. the tick's input record, then its part, go to the log (K4, K12): the part carries the answers ([`ANSWERED`]),
 //!    the bodies that moved ([`BODIES`]), the tick ([`TICK`]) and the zone's state hash after it ([`STATE`]);
 //! 6. the frozen copy is published (K8);
@@ -92,6 +94,7 @@ use crate::acts::{self, Acts};
 use crate::bodies::{self, Ask, Asked, Bodies, Placed};
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::engine::{self, Engine};
+use crate::loose::Ends;
 use crate::measures::{self, Measures, Stamps};
 use crate::views::Tier;
 use crate::words;
@@ -672,6 +675,9 @@ struct Clock {
     tick_us: Micros,
     /// Joins and leaves (C3), when the world births its Souls' bodies.
     life: Option<Lives>,
+    /// Loose things' ends (F10b, #3476), and the ends of owner's links the tick's acts ended.
+    loose: Ends,
+    unlinked: Vec<Id>,
 }
 
 /// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
@@ -1836,6 +1842,27 @@ impl Clock {
         }
     }
 
+    /// Step 1 for loose things (F10b, #3476): each end due before the next tick's start, written at its due time.
+    fn fire_loose(&mut self, now: Micros) {
+        let before = now + self.tick_us;
+        while let Some(e) = self.loose.next(self.replica.tree(), before) {
+            self.write_own(vec![e], "a loose thing's end");
+        }
+    }
+
+    /// After step 4 (F10b, #3476): each thing the tick's acts made loose gets its end, each made kept loses it.
+    fn set_loose(&mut self, now: Micros) {
+        if self.loose.idle() {
+            return;
+        }
+        let mut nodes = Ends::touched(&self.effects);
+        nodes.extend(self.unlinked.drain(..));
+        let timers = self.loose.after(self.replica.tree(), nodes, now);
+        if !timers.is_empty() {
+            self.write_own(timers, "loose things' timers");
+        }
+    }
+
     /// Steps 1 to 3 for the bodies (I4b): their due timers, skills and controller, to world time `now`; each move that
     /// ended is answered: a receipt naming its entries when done, else its reason by name. Each utterance a step
     /// started is written with its hearers (B11, #3369): the speaker's entry, as `sim::speech::entry` makes it.
@@ -2085,6 +2112,8 @@ impl Clock {
         }
         // 1. The world node's sky: its timers due in this tick, each at its due time (E6, #3369).
         self.fire_sky(now);
+        // 1. Loose things' ends due in this tick, each at its due time (F10b, #3476).
+        self.fire_loose(now);
         at[3] = mark();
         // 1-3. The bodies' own timers, skills through the host, the controller.
         self.step_bodies(now);
@@ -2110,6 +2139,11 @@ impl Clock {
                     Err(reason) => self.end(id, |c| c.refusal(actor, sequence, &reason)),
                 }
                 continue;
+            }
+            if !self.loose.idle() {
+                let changes = checks.candidates.iter().flat_map(|c| &c.changes);
+                let ends = Ends::unlinking(self.replica.tree(), changes);
+                self.unlinked.extend(ends);
             }
             match commit(&mut self.replica, &checks, now) {
                 Outcome::Applied { part, .. } => {
@@ -2144,6 +2178,8 @@ impl Clock {
         self.start_forms(now);
         self.start_moves(now);
         self.write_forms(now);
+        // 4. What the tick's acts made loose or kept: its timers, in the same tick (F10b, #3476).
+        self.set_loose(now);
         at[5] = mark();
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
         let inputs = match std::mem::take(&mut self.inputs) {
@@ -2569,6 +2605,12 @@ pub fn start<S: Storage + 'static>(
         Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
         None => None,
     };
+    let loose = Ends::start(
+        world.tree(),
+        crate::loose::lives(&rules.kinds),
+        zone,
+        world.version(),
+    )?;
     let publisher = Arc::new(Publisher::new(&world));
     let (kinds, library) = (rules.kinds.clone(), acts::library()?);
     let (header, engine_header) = (world.header().clone(), world.header().clone());
@@ -2720,6 +2762,8 @@ pub fn start<S: Storage + 'static>(
         tick_us,
         text,
         life,
+        loose,
+        unlinked: Vec::new(),
     };
     let lockstep = cfg.lockstep;
     let thread_beat = Arc::clone(&beat);
