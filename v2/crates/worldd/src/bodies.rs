@@ -534,10 +534,11 @@ impl Bodies {
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
             let _ = self.runner.tick(&mut self.town);
-            // Who hears each utterance the step started, as the bodies stand after it (B11, #3369).
+            // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
+            // zone, a seated or lying one included (#3393).
             let said = std::mem::take(&mut self.runner.said);
             let c = &self.runner.controller;
-            let ids: Vec<Id> = c.bodies().map(|b| b.id).collect();
+            let ids: Vec<Id> = c.ids().collect();
             let at = self.runner.now;
             for (speaker, s) in speech::heard(&mut self.hearing, c.near(), ids, &said) {
                 self.heard.push((speaker, s, at));
