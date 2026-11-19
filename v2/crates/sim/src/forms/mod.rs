@@ -17,8 +17,9 @@
 //!   instant has come, each of the form's effects is written as one log entry ([`Forms::out`]): one generic set,
 //!   caused by the intent, with a `souls:effect` event that holds its key (the effect's number, the intent's expiry and
 //!   the digest of what it asked). The key is (intent id, effect number). An effect counts as applied only once the log
-//!   holds it: the log's writer hands each entry back to [`Forms::logged`], and recovery after a restart is
-//!   [`Forms::recover`] over the same entries, never a form run again. A key already written or waiting to be is
+//!   holds it: the log's writer ([`Forms::write`], called by worldd's clock thread each tick, #3257) hands each entry
+//!   back to [`Forms::logged`], and recovery after a restart is [`Forms::recover`] over the same entries (worldd's,
+//!   when it opens its log), never a form run again. A key already written or waiting to be is
 //!   never written again, so a resent intent, a doubled timer or a restart cannot apply an effect twice; a resend gets
 //!   the first receipt ([`Asked::Applied`]), or the run in progress ([`Asked::Running`]). The same intent id with
 //!   other contents is refused (`intent-key-reused`), and an intent past its expiry is refused (`intent-expired`):
@@ -52,11 +53,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use replica::apply::Replica;
 use replica::audience;
 use replica::effects::{
-    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Refusal, Rest, read_id,
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Part, Refusal, Rest, read_id,
 };
-use replica::encode::{Name, Value};
+use replica::encode::{Name, Value, encode};
 use replica::host::Progress;
 use replica::ids::{Id, Minter};
 use replica::moves::Move;
@@ -118,7 +120,7 @@ pub enum Asked {
 
 /// The name of the event that carries an effect's key.
 const KEY: &str = "souls:effect";
-/// A run's start and its end: fields 1 the run, 2 the body, and on the end 3 the ending's name.
+/// A run's start and its end: fields 1 the run, 2 the body, and on the end 3 the ending's name (its bytes).
 const STARTED: &str = "souls:form-started";
 const ENDED: &str = "souls:form-ended";
 /// The reservation's link type: from the body to the thing.
@@ -377,7 +379,8 @@ impl Forms {
         let fields = BTreeMap::from([
             (1, Value::Uint(o.run)),
             (2, o.body.to_value()),
-            (3, Value::Text(how)),
+            // The name's bytes: an event's text is a namespaced name (T6), and an ending's name is not one.
+            (3, Value::Bytes(how.as_str().as_bytes().to_vec())),
         ]);
         self.out.push(entry(o, at, changes, name(ENDED), fields));
     }
@@ -396,6 +399,48 @@ impl Forms {
         });
         kept.entries.entry(n).or_insert(e.envelope.sequence);
         self.expiring.insert((expiry, id));
+    }
+
+    /// The log's writer (#3257): the entries waiting in [`Forms::out`], numbered from `replica`'s version and applied to
+    /// it as one T6 part, each then handed to [`Forms::logged`]. The part goes in the tick's record, which the log
+    /// appends; a kill before that loses the world that logged them with it, and [`Forms::recover`] reads the log
+    /// alone. A part that does not apply is refused by name and its entries are dropped unapplied.
+    pub fn write(&mut self, replica: &mut Replica) -> Result<Option<Part>, Refusal> {
+        if self.out.is_empty() {
+            return Ok(None);
+        }
+        let mut effects = std::mem::take(&mut self.out);
+        for (e, n) in effects.iter_mut().zip(replica.version()..) {
+            e.envelope.sequence = n;
+        }
+        let v = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(replica.header().hash().to_bytes())),
+            (
+                2,
+                Value::Array(effects.iter().map(Effect::to_value).collect()),
+            ),
+        ]));
+        let part = encode(&v)
+            .map_err(|e| Refusal {
+                name: "encoding",
+                detail: e.to_string(),
+            })
+            .and_then(|b| Part::read(&b))
+            .and_then(|p| replica.apply(&p).map(|()| p));
+        match part {
+            Ok(p) => {
+                for e in &p.effects {
+                    self.logged(e);
+                }
+                Ok(Some(p))
+            }
+            Err(r) => {
+                for (key, _, _) in effects.iter().filter_map(key_of) {
+                    self.pending.remove(&key);
+                }
+                Err(r)
+            }
+        }
     }
 
     /// Forgets the keys of intents whose expiry passed before `now`; a resend of one is refused `intent-expired`.

@@ -5,9 +5,10 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use replica::apply::Replica;
 use replica::bodies::{Class, Family};
-use replica::effects::fixture_bytes;
-use replica::effects::{Actor, Body, Cause, Change, Effect};
+use replica::effects::{Actor, Body, Cause, Change, Effect, Part};
+use replica::effects::{FIXTURE_HEADER, FIXTURES, fixture_bytes};
 use replica::encode::{Name, Value, decode};
 use replica::host::{Answer, Ask, Seen};
 use replica::ids::{Id, Minter, Scope};
@@ -23,6 +24,7 @@ use super::{Asked, Forms, Intent, Receipt, World};
 use crate::controller::Controller;
 use crate::ground::Piece;
 use crate::host::Geometry;
+use crate::log::{Log, Mem};
 use crate::mover::Surface;
 use crate::moves::{Moves, Reach, load};
 use crate::timers::DueList;
@@ -202,6 +204,18 @@ impl Bench {
     fn add(&mut self, entry: &json::Value, at: Vec3, thing: Vec3) -> (Id, Id) {
         let body = self.mint.mint().expect("id");
         let node = self.mint.mint().expect("id");
+        self.place(entry, at, thing, body, node)
+    }
+
+    /// [`Bench::add`] with the body and the thing given.
+    fn place(
+        &mut self,
+        entry: &json::Value,
+        at: Vec3,
+        thing: Vec3,
+        body: Id,
+        node: Id,
+    ) -> (Id, Id) {
         let frame = Frame {
             node: fixture(1),
             slot: None,
@@ -448,6 +462,82 @@ impl Bench {
     }
 }
 
+/// The world's log writer (#3257): the replica the entries apply to, and K4's log on a disk in memory. Each tick,
+/// [`Forms::write`] numbers and applies the waiting entries and hands them back as logged, and the part is appended
+/// and made durable; a restart opens the log from the disk alone and reads it back with [`Forms::recover`].
+struct Writer {
+    disk: Mem,
+    log: Log<Mem>,
+    replica: Replica,
+}
+
+/// T6's base fixture: a room with a body (`ee..ee` 2) and a key (`ee..ee` 6) in it.
+fn base() -> Replica {
+    static BYTES: std::sync::OnceLock<(Vec<u8>, Vec<u8>)> = std::sync::OnceLock::new();
+    let (header, part) = BYTES.get_or_init(|| {
+        let base = FIXTURES
+            .iter()
+            .find(|(n, _)| *n == "0-base")
+            .expect("the base")
+            .1;
+        (
+            fixture_bytes(FIXTURE_HEADER).expect("a header"),
+            fixture_bytes(base).expect("the base"),
+        )
+    });
+    let mut r = Replica::start(header).expect("a replica");
+    r.apply_bytes(part).expect("applies");
+    r
+}
+
+impl Writer {
+    fn new() -> Writer {
+        Writer::open(Mem::default())
+    }
+
+    /// Opens the log on `disk`, applying its records to the base world.
+    fn open(disk: Mem) -> Writer {
+        let (log, found) = Log::open(disk.clone(), 1).expect("opens");
+        let mut replica = base();
+        for r in &found.records {
+            replica.apply_bytes(r).expect("a record applies");
+        }
+        Writer { disk, log, replica }
+    }
+
+    /// Every entry in the log, read back from the disk.
+    fn entries(&self) -> Vec<Effect> {
+        let bytes = self.disk.0.lock().expect("the disk").bytes.clone();
+        crate::log::recover(&bytes)
+            .expect("recovers")
+            .records
+            .iter()
+            .flat_map(|r| Part::read(r).expect("a part").effects)
+            .collect()
+    }
+
+    /// The tick's entries written; `kept` false is a kill before the record reaches the log: they are lost with it.
+    fn write(&mut self, forms: &mut Forms, kept: bool) -> u64 {
+        let Some(part) = forms.write(&mut self.replica).expect("written") else {
+            return 0;
+        };
+        if kept {
+            let n = self.log.append(part.stored().to_vec()).expect("appended");
+            self.log.wait_durable(n + 1).expect("durable");
+        }
+        part.effects.len() as u64
+    }
+
+    /// The process dies: the log is opened again from the disk alone, and the forms are read back from it.
+    fn restart(self, now: Micros) -> (Writer, Forms) {
+        let disk = self.disk.clone();
+        drop(self);
+        let w = Writer::open(Mem::with(disk.0.lock().expect("the disk").bytes.clone()));
+        let forms = Forms::recover(&w.entries(), now);
+        (w, forms)
+    }
+}
+
 /// The log's entries that are a form's effects (not a run's start or end, F3).
 fn effect_entries(log: &[Effect]) -> Vec<&Effect> {
     log.iter()
@@ -572,12 +662,13 @@ fn f2_a2_a3_ten_thousand_runs_with_resends_doubled_timers_and_kills_apply_each_e
     let (mut resends, mut across, mut doubled, mut kills, mut lost) =
         (0u64, 0u64, 0u64, 0u64, 0u64);
     let mut in_log = 0u64;
+    let ee = |n| Id::new(Scope([0xee; 16]), n).expect("an id");
     for seed in 0..RUNS {
         let mut rng = seed;
         let mut b = Bench::new();
-        let (body, node) = b.add(&entry, start, Vec3::ZERO);
+        let (body, node) = b.place(&entry, start, Vec3::ZERO, ee(2), ee(6));
         let it = intent(body, seed);
-        let mut log: Vec<Effect> = Vec::new();
+        let mut w = Writer::new();
         let mut receipts: Vec<Receipt> = Vec::new();
         assert!(matches!(
             b.ask(body, node, &entry, &form, limits, it),
@@ -595,17 +686,16 @@ fn f2_a2_a3_ten_thousand_runs_with_resends_doubled_timers_and_kills_apply_each_e
             let r = splitmix(&mut rng) % 100;
             // At most three kills a run. One before the tick's effects reach the log loses them; one after keeps them.
             let kill = killed < 3 && r < 4;
+            let written = w.write(&mut b.forms, !(kill && r < 2));
             if kill && r < 2 {
-                lost += b.forms.out.len() as u64;
-            } else {
-                b.flush(&mut log);
+                lost += written;
             }
             if kill {
                 killed += 1;
                 let now = b.now;
                 b = Bench::new();
-                b.add(&entry, start, Vec3::ZERO);
-                b.forms = Forms::recover(&log, now);
+                b.place(&entry, start, Vec3::ZERO, body, node);
+                (w, b.forms) = w.restart(now);
                 b.now = now;
                 restarted = true;
             }
@@ -630,6 +720,8 @@ fn f2_a2_a3_ten_thousand_runs_with_resends_doubled_timers_and_kills_apply_each_e
         }
         kills += killed;
         assert!(b.forms.is_empty(), "seed {seed}: the run never ended");
+        w.write(&mut b.forms, true);
+        let log = w.entries();
         let last = b.ask(body, node, &entry, &form, limits, it);
         // Each effect is in the log exactly once, and every receipt is the first.
         for n in 0..effects {
