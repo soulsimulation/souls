@@ -350,6 +350,7 @@ dependencies = [
  "subtle",
  "tokio",
  "tokio-tungstenite",
+ "worldd",
 ]
 
 [[package]]
