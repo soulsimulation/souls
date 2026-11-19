@@ -11,8 +11,9 @@
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
 //! [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
-//! --stall-for <s>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the order
-//! taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
+//! --stall-for <s>] [--views <path>]`. Subscriptions are served on `--views` (default: the socket's path with
+//! `.views`; `worldd::views::served`). With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it
+//! takes, in the order taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
 //! hex>` after each tick that changed the world, so a test can check a client's copy against the place. Measures
 //! (O4, #2694) are on unless `--no-measures`; `health.json` goes to `--health` (default: the log's path with
 //! `.health.json`). `--stall-after` holds the clock thread `--stall-for` seconds, once, that many seconds after
@@ -108,7 +109,7 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
              [--bodies <n>] [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
-             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>]"
+             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>] [--views <path>]"
         );
         2
     };
@@ -124,7 +125,14 @@ pub fn run(args: &[String]) -> i32 {
         return usage();
     };
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
+    let views = arg("--views").map_or_else(|| path.with_extension("views"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
+    let feed = worldd::views::served::start();
+    cfg.served = feed.as_ref().ok().cloned();
+    if let Err(e) = feed.and_then(|f| worldd::views::served::listen(f, &views)) {
+        eprintln!("worldd: views: {e}");
+        return 1;
+    }
     if args.iter().any(|a| a == "--testworld") {
         cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| {
             worldd::testbodies::bodies()

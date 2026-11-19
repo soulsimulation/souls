@@ -6,6 +6,11 @@
 // and the first click or key starts it. The switch silences effects and is remembered (`settings.ts`); of two open
 // tabs, only the one that holds the focus sounds (`focus.ts`).
 //
+// V22 (#3337): the layer also starts the music radio (`../music/`, today's player carried over): each tick it hands the
+// player the switch, the station, the volume, whether sound has started and whether this tab holds the focus, and each
+// gesture lets a held-back start try again. Arrival, which the player waits for, is the first frame with a world time.
+// The radio's controls sit beside the switch; `window.__edenMusic` reports it, as today.
+//
 // `globalThis.v2sound` reports for the proof: `log()` every one-shot started (its world time, its offset, when it was
 // heard by the performance clock), `frames()` the time drawn by the performance clock, `lags()` how far each sound's
 // start fell from its drawn moment, `happened()` the record's sounds other than steps, `state()` the voices, and
@@ -15,6 +20,9 @@ import { heardAt, lastingOf, plain, Steps, soundsOf, type Heard, type Lasting, t
 import type { Happened } from './record.ts';
 import { loadSettings, saveSettings, type SoundSettings } from './settings.ts';
 import { loop, shot, LOOPS, type LoopSound, type ShotSound } from './synth.ts';
+import { arrivalMark } from '../music/arrival.ts';
+import { loadPiece, loadStation, markIndependent, musicControls, musicWanted, saveStation } from '../music/controls.ts';
+import { musicGesture, musicLevel, musicLog, musicState, musicTap, musicTrackSeconds, nextPiece, preferPiece, syncMusic } from '../music/music.ts';
 
 type Vec = [number, number, number];
 type Sample = readonly [string, string, number | null, number, number, number, number];
@@ -34,6 +42,8 @@ type Voice = { src: AudioBufferSourceNode; gain: GainNode; pan: PannerNode; loop
  *  little; a jump of the clock beyond these is a seek. */
 const AHEAD = 600_000, BACK_JUMP = 100_000, FORWARD_JUMP = 2_000_000;
 const store = () => { try { return localStorage; } catch { return null; } };
+/** How often the music player is ticked, ms (today's sound layer tick). */
+const MUSIC_TICK_MS = 100;
 
 export class WorldSound {
   readonly settings: SoundSettings = loadSettings(store());
@@ -56,12 +66,25 @@ export class WorldSound {
   private fresh = true;
   private frameLog: [number, number][] = [];
   private recorder: { rec: MediaRecorder; parts: Blob[] } | null = null;
+  private station: string = loadStation(store());
 
   constructor(place: Placing) {
     this.place = place;
+    const bar = document.createElement('div');
+    Object.assign(bar.style, { position: 'fixed', top: '8px', right: '8px', zIndex: '10', display: 'flex', gap: '4px', alignItems: 'center' });
     this.button = document.createElement('button');
-    Object.assign(this.button.style, { position: 'fixed', top: '8px', right: '8px', zIndex: '10', font: '12px system-ui', padding: '4px 8px', opacity: '0.85' });
-    document.body.append(this.button);
+    Object.assign(this.button.style, { font: '12px system-ui', padding: '4px 8px', opacity: '0.85' });
+    bar.append(this.button);
+    document.body.append(bar);
+    this.settings.music = musicWanted(store(), this.settings.music, this.settings.muted);
+    preferPiece(loadPiece(store()));
+    musicControls(bar, {
+      store: store(),
+      music: () => this.settings.music,
+      setMusic: (on) => { this.settings.music = on; this.save(); this.music(); },
+      station: () => this.station,
+      setStation: (id) => { this.station = id; saveStation(store(), id); markIndependent(store()); this.music(); },
+    });
     // The switch: before sound has started, a click starts it (as any gesture does); after, it turns effects off or on.
     this.button.onclick = (e) => {
       e.stopPropagation();
@@ -71,7 +94,10 @@ export class WorldSound {
     const gesture = (e: Event) => { if (e.target !== this.button && this.ctx?.state !== 'running') this.start(); };
     addEventListener('pointerdown', gesture, { capture: true });
     addEventListener('keydown', gesture, { capture: true });
-    this.focus?.subscribe(() => this.label());
+    for (const ev of ['pointerdown', 'keydown', 'touchend', 'click'] as const) addEventListener(ev, () => musicGesture(), { capture: true, passive: true });
+    this.focus?.subscribe(() => (this.label(), this.music()));
+    setInterval(() => this.music(), MUSIC_TICK_MS);
+    Object.assign(globalThis, { __edenMusic: { state: musicState, log: musicLog, level: musicLevel, next: nextPiece, trackSeconds: musicTrackSeconds } });
     this.label();
     Object.assign(globalThis, { v2sound: this.report() });
   }
@@ -91,6 +117,7 @@ export class WorldSound {
   frame(t: number | null, ear: Ear): void {
     const wall = performance.now();
     if (t === null) return;
+    arrivalMark('first-live-frame');
     this.frameLog.push([wall, t]);
     if (this.frameLog.length > 4000) this.frameLog.splice(0, 1000);
     const step = this.lastT === null ? 0 : t - this.lastT;
@@ -153,9 +180,19 @@ export class WorldSound {
     this.focus?.claim();
   }
 
+  /** The music player's tick: the switch, the station, the volume, whether sound has started and this tab may sound. */
+  private music(): void {
+    syncMusic({ on: this.settings.music, station: this.station, volume: this.settings.volume, unlocked: this.ctx?.state === 'running', audible: this.focus?.audible() ?? true });
+  }
+
+  private save(): void {
+    saveSettings(store(), this.settings);
+    markIndependent(store());
+  }
+
   private toggle(): void {
     this.settings.muted = !this.settings.muted;
-    saveSettings(store(), this.settings);
+    this.save();
     if (this.settings.muted) this.silence();
     this.label();
   }
@@ -229,6 +266,8 @@ export class WorldSound {
       record: () => {
         const ctx = this.ctx!, dest = ctx.createMediaStreamDestination();
         this.master!.connect(dest);
+        const music = musicTap();
+        if (music) ctx.createMediaStreamSource(music).connect(dest);
         const rec = new MediaRecorder(dest.stream, { mimeType: 'audio/webm' }), parts: Blob[] = [];
         rec.ondataavailable = (e) => parts.push(e.data);
         rec.start(1000);
