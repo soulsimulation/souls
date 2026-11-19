@@ -32,10 +32,16 @@ step tests cargo test --workspace --locked
 # The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md).
 # The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
 step origin-headers node --test tools/origin/origin.test.mjs
+# The install (O17, #2810): nothing it would write, and no unit, user or port it names, is today's system's.
+step install-apart bash tools/ops/install.sh check
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
 step cost node --test tools/ops/cost/cost.test.mjs
+# The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
+step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
+# The driver's loads (I10, #2693): the shared shapes imported, the stretch merged, every kind given a verb.
+step driver-loads node --test tools/driver/loads.test.mjs
 
 # The WASM build: one artifact (wasm-bindgen --target web) that Node loads with initSync and a page with init().
 # The command's version is the wasm-bindgen crate's in Cargo.lock; it is installed under target/, which CI caches.
@@ -119,6 +125,16 @@ step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p re
     cargo test -p replica --test intents --locked the_built_checker_artifact_loads_by_its_hash -- --nocapture'
 # The client's library by build hash (R5, #2699): cached or downloaded, refused by name, run in a worker with a limit.
 step client-sync node --test client/src/sync/*.test.mjs
+# The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4); R5b's resync after a long cut.
+step client-daemon bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/daemon/*.test.mjs'
+# The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
+step client-command node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs
+# The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
+step client-stats node --test client/src/stats/*.test.mjs
+# The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
+step client-check node --test client/src/check/*.test.mjs
+# The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
+step client-reflex node --test client/src/reflex/*.test.mjs
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
@@ -132,6 +148,10 @@ step rules-equal node --input-type=module -e '
   const got = r.rules_run(readFileSync("target/tmp/rules/run.json", "utf8")), want = readFileSync("target/tmp/rules/native.txt", "utf8");
   console.log(`rules-equal: ${want.split("\n").length - 1} cases, WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} native`);
   if (got !== want) process.exit(1);'
+# The fact sheet (V10, #2720): a 20 s recording's live and history sheets and one factsAt record, the same bytes
+# from the same WASM build in Node as natively (tools/facts/wasm.mjs).
+step facts-wasm bash -c 'cargo run -p facts --release --locked --quiet -- vectors target/facts-vectors &&
+  node tools/facts/wasm.mjs target/wasm-load/pkg target/facts-vectors'
 # The form rules' drift report (R2, #2685): the live packages/form-rules cases against this library, whose required
 # test reads a pinned snapshot. Only the daily full run on main (schedule) or V2_FULL=1, never per change; it prints
 # each disagreement and never fails the job.

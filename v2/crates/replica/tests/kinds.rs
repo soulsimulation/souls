@@ -219,7 +219,8 @@ fn a3_a_fourth_kind_written_at_run_time_loads_without_a_rebuild() {
     let text = std::fs::read_to_string(&file).unwrap();
     let loaded = kinds.load(&[("sitter.diag", &text)]);
     assert!(kinds.refused().is_empty(), "{:?}", kinds.refused());
-    assert_eq!(kinds.len(), 5);
+    // The fixture kinds (cup, lamp, room, seat and G6's uploaded model) and the sitter.
+    assert_eq!(kinds.len(), 6);
     names.extend(loaded.iter().cloned());
     let h = header(&names);
     let sitter = full(&names, "souls:sitter");
@@ -283,7 +284,8 @@ fn a5_a_thing_whose_kind_is_missing_or_bad_still_loads_as_unknown_kind() {
     for e in kinds.refused() {
         println!("A5: refused: {e}");
     }
-    assert_eq!(names.len(), 3, "the world starts with the good kinds");
+    // Cup, room, seat and G6's uploaded model; the lamp's file is bad.
+    assert_eq!(names.len(), 4, "the world starts with the good kinds");
     let e = kinds
         .refused()
         .iter()
