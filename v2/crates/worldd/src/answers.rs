@@ -18,8 +18,11 @@
 //! **A move** (a walk, a sit or a rise, I4b #3156) is taken the same way, but goes to the world's bodies
 //! ([`crate::bodies`]) instead of the checkers. At the next tick it starts, or is refused by name, and writes an entry
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
-//! how) and is answered: a receipt naming both entries when done, else a refusal naming how it ended
-//! (`claim-taken`, `resource-held`, `out-of-reach`, ...). One answer, at its end: I7's accept-then-resolve is not here.
+//! how) and is answered: a receipt naming its entries when done, else a refusal naming how it ended
+//! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
+//! speed, plus a margin and crossings, at most 180 s and never beyond the intent's expiry. Its deadline is written
+//! as C20's entry and it receives C20's one progress answer if still going at 10 s. C21's watch ends a stalled walk
+//! `walk.blocked`; waiting at a link and being carried do not count as stalled walking.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
 //! sit, a lie or a rise runs to its end (a seat is never left half taken) and ends so then; a walk a new move
 //! replaces ends `claim-taken` in the tick the new move starts.
@@ -645,7 +648,7 @@ struct Open {
     expiry: Micros,
     /// Its deadline at its arrival, world time.
     due: Micros,
-    /// A form's act: its run's deadline, from the run's start (C20).
+    /// A form or gateway walk: its own deadline, from its start (C20/C29).
     run_due: Option<Micros>,
     intent: Value,
     waiters: Vec<Reply>,
@@ -702,6 +705,8 @@ struct Clock {
     bodies: Option<Bodies>,
     /// Move intents taken since the last tick, committed at the next (I4b).
     moving: Vec<(Id, Asked)>,
+    /// Gateway walks with route deadlines and the shared C21 stall watch (C29).
+    walks: BTreeMap<Id, acts::Walk>,
     /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
@@ -862,8 +867,8 @@ pub const MOVE_ENDED: &str = "souls:move-ended";
 /// How an act still going at its deadline ends (C8), and the move it drove with it.
 pub const TIMED_OUT: &str = "act.timed-out";
 
-/// The event of the entry a form's act writes when its run starts (C20, #3469): field 1 the body, 5 the act's
-/// deadline, world time µs (its start plus its steps' span, `sim::forms::span`). Its cause is the intent, so the
+/// The event a form or gateway walk writes when planned (C20/C29): field 1 the body, 5 the act's
+/// deadline, world time µs (its start plus its steps' span or planned route time). Its cause is the intent, so the
 /// act's receipt names it.
 pub const ACT_DEADLINE: &str = "souls:act-deadline";
 
@@ -873,7 +878,7 @@ pub const LEFT: u64 = 5;
 /// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
 /// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
 /// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, when a
-/// form's act is still running at the deadline it got on arrival and its run is due later.
+/// form or gateway walk is still running at its arrival deadline and its own deadline is later.
 pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
     let mut answer = match (Answer::Accepted {
         actor,
@@ -1083,6 +1088,7 @@ impl Clock {
         let Some(o) = self.open.remove(&id) else {
             return;
         };
+        self.walks.remove(&id);
         self.in_flight.remove(&(o.key.clone(), o.sequence));
         self.deadlines.close(o.body, id);
         self.progress.retain(|p| p.0 != id);
@@ -2008,7 +2014,17 @@ impl Clock {
         let Some(b) = self.bodies.as_mut() else {
             return;
         };
-        let ended = b.step(now);
+        let mut ended = b.step(now);
+        let mut deadlines = Vec::new();
+        for (id, walk) in &mut self.walks {
+            let (due, blocked) = walk.step(b, now);
+            if let Some(due) = due {
+                deadlines.push((*id, due));
+            }
+            if blocked && b.cancel(*id) == Some(Cut::Stopped) {
+                ended.push((*id, Err(acts::BLOCKED.to_owned())));
+            }
+        }
         // Where the planner's answers came back late (K18b), for the recorder: a replay takes them at the same tick.
         for (at, taken) in b.late() {
             self.inputs.push(Input::Planned {
@@ -2020,6 +2036,9 @@ impl Clock {
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
             self.write_own(vec![e], "an utterance");
+        }
+        for (id, due) in deadlines {
+            self.run_started(id, due, now);
         }
         for (id, how) in ended {
             self.settle(id, how, now);
@@ -2141,9 +2160,15 @@ impl Clock {
         let Some(due) = self.forms.forms.due(run) else {
             return;
         };
+        self.run_started(id, due, now);
+    }
+
+    /// C20's deadline entry and single progress answer also serve a planned gateway walk (C29).
+    fn run_started(&mut self, id: Id, due: Micros, now: Micros) {
         let Some(o) = self.open.get_mut(&id) else {
             return;
         };
+        let due = due.min(o.expiry);
         o.run_due = Some(due);
         let (body, first) = (o.body, o.due.min(due));
         self.deadlines.close(body, id);
@@ -2211,6 +2236,11 @@ impl Clock {
             }
         }
         let started = b.start(asks);
+        for (&body, &(_, id)) in &b.runner.asks {
+            if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
+                self.walks.insert(id, acts::Walk::new(body, id, now));
+            }
+        }
         // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
         let replaced = b.replaced();
         self.bodies = Some(b);
@@ -3014,6 +3044,7 @@ pub fn start<S: Storage + 'static>(
         parts: Vec::new(),
         bodies: None,
         moving: Vec::new(),
+        walks: BTreeMap::new(),
         overdue: BTreeSet::new(),
         edits,
         edited: Vec::new(),

@@ -114,8 +114,8 @@ impl Planner {
                 Some(Ok(p)) => {
                     out.searched += 1;
                     self.town
-                        .plan(body, target.node, p)
-                        .map(|legs| (p, legs))
+                        .plan_with_metrics(body, target.node, p)
+                        .map(|(legs, metrics)| (p, legs, metrics))
                         .map_err(|e| e.name)
                 }
                 Some(Err(name)) => Err(name),
