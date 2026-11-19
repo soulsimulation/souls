@@ -239,6 +239,14 @@ impl Gateway {
         }
     }
 
+    /// A text frame for `key`'s signed-in socket alone, now (G11: the directory's reply to that socket's prayer frame).
+    pub fn post_text(&self, key: &[u8], frame: String) {
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(tx) = hub.grants.get(key).and_then(|h| h.mail.as_ref()) {
+            let _ = tx.try_send(frame);
+        }
+    }
+
     /// An answer the gateway gives itself to the actor `key` (`{2: answer}`, not kept for a resume), sent to its
     /// socket if one is signed in; a socket whose queue is full is let go, as by [`Gateway::deliver`].
     pub fn tell(&self, key: &[u8], frame: Vec<u8>) {

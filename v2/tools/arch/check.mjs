@@ -98,6 +98,10 @@ export function floats(file, src) {
   return out;
 }
 
+// G1e (#3532): the served-edit test drives a real gateway. These dependencies stay test-only;
+// listing them here never permits them in worldd's normal or build dependencies, or in another crate.
+export const DEV_ALLOWED = { worldd: ['gatewayd', 'tokio', 'tokio-tungstenite', 'futures-util', 'axum'] };
+
 /** The crates under v2/crates and their dependencies, from `cargo metadata`, against ALLOWED. */
 export function dependencies(packages) {
   const out = [];
@@ -108,8 +112,8 @@ export function dependencies(packages) {
       out.push(problem('crate-dependency', p.name, `a crate under v2/crates with no allowed list (${deps.join(', ') || 'no dependencies'})`));
       continue;
     }
-    for (const d of deps.filter(d => !allowed.includes(d))) {
-      out.push(problem('crate-dependency', p.name, `depends on \`${d}\`, which is not on its list`));
+    for (const d of p.dependencies.filter(d => !allowed.includes(d.name) && !(d.kind === 'dev' && DEV_ALLOWED[p.name]?.includes(d.name)))) {
+      out.push(problem('crate-dependency', p.name, `depends on \`${d.name}\`, which is not on its list`));
     }
   }
   return out;
@@ -147,11 +151,15 @@ async function selfTest() {
     ['float-in-replica', 'a float in a selector', floats('crates/replica/src/selectors.rs', read('selector.rs'))],
     ['float-in-replica', 'a float in a form rule', floats('crates/replica/src/form_rules.rs', read('form_rule.rs'))],
     ['crate-dependency', 'replica gains a dependency', dependencies(JSON.parse(read('metadata.json')).packages)],
+    ...DEV_ALLOWED.worldd.flatMap(name => [null, 'build'].map(kind =>
+      ['crate-dependency', `worldd gains ${name} as ${kind ?? 'normal'}`, dependencies([{ name: 'worldd', dependencies: [{ name, kind }] }])])),
+    ...DEV_ALLOWED.worldd.map(name =>
+      ['crate-dependency', `sim gains worldd's test dependency ${name}`, dependencies([{ name: 'sim', dependencies: [{ name, kind: 'dev' }] }])]),
     ['v2-imports-today', 'a v2 crate imports today\'s packages', today('crates/sim/src/ground/legacy.rs', read('imports_today.rs'))],
     ['t1-check-wired', 'T1\'s planted systems removed', t1Wired('crates/replica/tests/zones.rs', 'fn a1_only() {}')],
     ['import from v2/', 'a file outside v2/ imports from it', scrubLine(read('outside_v2.ts').trim(), 'apps/web/src/seeded.ts')],
   ];
-  const out = [];
+  const out = dependencies([{ name: 'worldd', dependencies: DEV_ALLOWED.worldd.map(name => ({ name, kind: 'dev' })) }]);
   for (const [rule, what, got] of cases) {
     const hit = got.some(g => g.startsWith(rule));
     console.log(`  seeded: ${what}: ${hit ? got.find(g => g.startsWith(rule)) : 'NOT CAUGHT'}`);

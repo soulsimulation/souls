@@ -58,6 +58,12 @@
 //! day's bundle index is written again each time a bundle closes. A restart archives again from record 0: what was
 //! stored is passed over when the same and written over when made from more records ([`Again`]).
 //!
+//! **Its creator** (G1e, #3532): with a store, the world's one creator is the one its record in the directory names
+//! (the list's row for its lineage and zone, then that name's record, `directoryd::worlds::list::creator_of`), read
+//! at the start and again every 30 s. Only that creator's edits are taken, each judged by G2's rule on the town before
+//! it commits (`answers`'s edit checker); every other actor's, and every edit while the record names none, is refused
+//! `edit.not-the-creator`. Without a store the world takes no edits.
+//!
 //! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town).
 
 // The process reads the wall clock once for the stream's anchor (V1 rule 5); the engine never does.
@@ -71,10 +77,13 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 
 use archive::{Archiver, Shared};
+use directoryd::accounts::principal_text;
 use directoryd::directory::Directory;
 use directoryd::directory::store::{Object, Store, When};
+use directoryd::worlds::list::creator_of;
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource};
+use replica::edit::World as Editing;
 use replica::effects::{Effect, Refusal};
 use replica::encode::{Name, Value, encode, from_hex, to_hex};
 use replica::ids::{Id, Scope, sha256};
@@ -91,6 +100,7 @@ use sim::walk::town::Town;
 use supervisor::bucket::Under;
 use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
+use worldd::buildsafe::Creator;
 use worldd::checkers::Rules;
 use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out::{self, Writer};
@@ -134,6 +144,9 @@ fn eden_sky(lineage: Scope) -> sim::daylight::Config {
     sim::daylight::Config::today(cal, u64::from_le_bytes(seed))
 }
 
+/// How often the world's record is read again for its creator (G1e).
+const CREATOR_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Souls stand this far apart along x on a first start, mm.
 const APART_MM: i64 = 2_000;
 
@@ -156,6 +169,8 @@ struct Built {
     header: replica::effects::Header,
     part: Vec<u8>,
     town: Town,
+    /// The planner's copy of the town (K18b), built with it before the clock and its watchdog start.
+    planner: Town,
     ground: Id,
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
@@ -207,10 +222,14 @@ fn build(facts: &str) -> R<Built> {
     let rules = im.rules.clone();
     let doors = Doors::new(header.clone(), im.rules, next);
     let town = Town::new(im.tree, ground, doors).map_err(|e| format!("the town: {e:?}"))?;
+    let planner = town
+        .copy()
+        .map_err(|e| format!("the planner's town: {e:?}"))?;
     Ok(Built {
         header,
         part,
         town,
+        planner,
         ground,
         root,
         rules,
@@ -462,9 +481,10 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
 }
 
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
-/// where the log last had it. The world's seats are added ([`places`]).
+/// where the log last had it. The planner keeps its own town and all declared seats are registered.
 fn bodies(
     town: Town,
+    planner: Town,
     ground: Id,
     placed: &Placed,
     places: Vec<PlaceAt>,
@@ -484,10 +504,11 @@ fn bodies(
             at.push(a);
         }
     }
-    let mut b = Bodies::new(town, 50_000)?;
+    let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
     }
+
     for a in at {
         b.add_body_at(family.clone(), a, placed)?;
     }
@@ -690,6 +711,33 @@ fn off_machine(
     Ok(off)
 }
 
+/// The world's one creator, read from its record in the directory `spec` names (G1e, #3532) at the start, and again
+/// each [`CREATOR_EVERY`] on a thread of its own: a change replaces it (there is never more than one), and a failed
+/// read keeps the last.
+fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
+    let store = supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?;
+    let (lineage, zone) = (built.root.scope().0, built.header.zone);
+    let read = move || creator_of(&store, &lineage, zone);
+    let creator = Arc::new(Creator::new(read().map_err(refusal)?));
+    let say = |c: Option<Id>| c.map_or_else(|| "none".to_owned(), principal_text);
+    println!("creator: {}", say(creator.get()));
+    let watched = Arc::clone(&creator);
+    std::thread::Builder::new()
+        .name("creator".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(CREATOR_EVERY);
+                match read() {
+                    Ok(c) if watched.set(c) => println!("creator: {}", say(c)),
+                    Ok(_) => {}
+                    Err(e) => eprintln!("worldd: the creator's record: {}", refusal(e)),
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(creator)
+}
+
 /// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] [--machine
 /// <name>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB).
 pub fn run(args: &[String]) -> i32 {
@@ -755,6 +803,10 @@ fn serve(args: &[String]) -> R<()> {
         .or_else(|| std::env::var("WORLDD_STORE").ok())
         .or_else(|| std::env::var(directoryd::directory::s3::URL_ENV).ok())
         .filter(|s| !s.trim().is_empty());
+    let creator = match &bucket {
+        Some(spec) => Some(creator(spec, &built)?),
+        None => None,
+    };
     let mut off = match bucket {
         Some(spec) => {
             let machine = arg(args, "--machine")
@@ -801,7 +853,17 @@ fn serve(args: &[String]) -> R<()> {
     cfg.sky = Some(eden_sky(built.root.scope()));
     // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
     cfg.engine = Some((built.rules.clone(), Vec::new()));
-    let (town, ground) = (built.town, built.ground);
+    // G1e (#3532): with a directory, the world's one creator edits it, as its record names it now.
+    if let Some(c) = creator {
+        cfg.edits = Some(Editing {
+            // Not read: the checker takes the creator from `cfg.creator`.
+            creator: built.header.zone,
+            kinds: built.rules.kinds.clone(),
+        });
+        cfg.creator = Some(c);
+    }
+    let (town, planner, ground) = (built.town, built.planner, built.ground);
+
     // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
     let int = |v: &Json| match v {
         Json::Int(n) => i64::try_from(*n).ok(),
@@ -820,7 +882,7 @@ fn serve(args: &[String]) -> R<()> {
         per_tick: 8,
     });
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
-        bodies(town, ground, placed, places.clone())
+        bodies(town, planner, ground, placed, places.clone())
     }));
     let empty = Replica::start(built.header.stored()).map_err(refusal)?;
     let world = answers::start(empty.frozen(), rules, store, cfg).map_err(refusal)?;
