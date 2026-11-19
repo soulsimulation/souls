@@ -208,9 +208,11 @@ pub fn wire_heard(frame: &[u8]) -> Result<String, JsError> {
 /// A Soul's intent with no parameters, `verb` a ranked list of verbs split by spaces (the rest are its fallbacks,
 /// R7), each on `target` (a node's id as `<scope hex>-<counter>`, or empty for none), decided against `basis` (a
 /// version's bytes; empty for the zero version) and expiring at `expiry` world microseconds; read back as the world
-/// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b).
+/// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b). C10 (#3414): `target`
+/// may be one id per verb, split by spaces; `args`, the first verb's thing arguments as `name=<id>` split by spaces, is
+/// parameter 1 as C2's `[[name, id], ...]`.
 #[wasm_bindgen(js_name = wireIntent)]
-// JS calls it with positional arguments; the words came last (C4, #3368).
+// JS calls it with positional arguments; the words came last (C4, #3368), then the arguments (C10, #3414).
 #[allow(clippy::too_many_arguments)]
 pub fn wire_intent(
     scope: &[u8],
@@ -221,19 +223,39 @@ pub fn wire_intent(
     expiry: u64,
     target: &str,
     words: Option<String>,
+    args: Option<String>,
 ) -> Result<Vec<u8>, JsError> {
-    let target = match target {
-        "" => None,
-        t => {
-            let (scope, counter) = t
-                .split_once('-')
-                .and_then(|(s, c)| Some((from_hex(s).ok()?.try_into().ok()?, c.parse().ok()?)))
-                .ok_or_else(|| JsError::new("target-not-an-id"))?;
-            let id =
-                Id::new(Scope(scope), counter).ok_or_else(|| JsError::new("target-not-an-id"))?;
-            Some(Target::Node(id))
-        }
+    let node = |t: &str| -> Result<Option<Target>, JsError> {
+        Ok(match t {
+            "" => None,
+            t => {
+                let (scope, counter) = t
+                    .split_once('-')
+                    .and_then(|(s, c)| Some((from_hex(s).ok()?.try_into().ok()?, c.parse().ok()?)))
+                    .ok_or_else(|| JsError::new("target-not-an-id"))?;
+                let id = Id::new(Scope(scope), counter)
+                    .ok_or_else(|| JsError::new("target-not-an-id"))?;
+                Some(Target::Node(id))
+            }
+        })
     };
+    let mut targets = target
+        .split(' ')
+        .map(node)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter();
+    let target = targets.next().flatten();
+    let args = (args
+        .unwrap_or_default()
+        .split(' ')
+        .filter(|a| !a.is_empty()))
+    .map(|a| match a.split_once('=').map(|(k, v)| (k, node(v))) {
+        Some((k, Ok(Some(Target::Node(id))))) => {
+            Ok(Value::Array(vec![Value::Bytes(k.into()), id.to_value()]))
+        }
+        _ => Err(JsError::new("arg-not-name-and-id")),
+    })
+    .collect::<Result<Vec<_>, _>>()?;
     let scope = Scope(
         scope
             .try_into()
@@ -260,7 +282,7 @@ pub fn wire_intent(
         .map(|v| {
             v.map(|verb| Fallback {
                 verb,
-                target: target.clone(),
+                target: targets.next().flatten().or_else(|| target.clone()),
                 parameters: BTreeMap::new(),
                 resources: Vec::new(),
             })
@@ -278,6 +300,7 @@ pub fn wire_intent(
                 )
             })
             .into_iter()
+            .chain((!args.is_empty()).then_some((1, Value::Array(args))))
             .collect(),
         sequence,
         basis,

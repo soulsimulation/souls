@@ -20,6 +20,9 @@
 //! A `souls-entry/1` file (`content/kinds`) is turned into this numbered form by [`entry::entry_to_kind`].
 //! - **8, forms:** what can be done with it, `{1: name, 2: steps}`, each step a move by name and then its arguments.
 //!
+//! - **7, geometry:** `{1: bounds_mm [width, height, depth], 2: front}`, read by [`place::Geometry`]: a thing's two
+//!   outlines and whether it has a front (E4, #2772).
+//!
 //! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12). An
 //! authored body's resources, declared actions and models are section 13, read by [`body::Decl`] (B13).
 //!
@@ -29,12 +32,13 @@
 
 pub mod body;
 pub mod entry;
+pub mod place;
 pub mod sizes;
 
 use crate::encode::{Name, Value, encode};
 use crate::ids::{Hash, KindRefusal, KindSource, name_kinds};
 use crate::world_model::Kind as Admits;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub const SECTION_OWNER: u64 = 2;
@@ -150,6 +154,8 @@ pub struct KindDef {
     /// Section 11's bound: how many children of each admitted kind (plain `namespace:name`) it holds at most. A kind
     /// read from a list of names alone (a fixture's, no bound) has none here.
     pub most: BTreeMap<String, u64>,
+    /// Section 7, its size and front (E4), for a kind that declares one.
+    pub geometry: Option<place::Geometry>,
 }
 
 impl KindDef {
@@ -202,7 +208,7 @@ impl std::error::Error for KindError {}
 #[derive(Clone, Debug, Default)]
 pub struct Kinds {
     by_hash: BTreeMap<Hash, KindDef>,
-    by_name: HashMap<String, Hash>,
+    by_name: BTreeMap<String, Hash>,
     refused: Vec<KindError>,
 }
 
@@ -245,6 +251,7 @@ impl Kinds {
                             slots,
                             links,
                             most,
+                            geometry,
                         } = d;
                         let def = KindDef {
                             name,
@@ -257,6 +264,7 @@ impl Kinds {
                             slots,
                             links,
                             most,
+                            geometry,
                         };
                         self.by_hash.insert(k.hash, def);
                     }
@@ -423,6 +431,7 @@ struct Sections {
     slots: BTreeMap<u64, Slot>,
     links: BTreeMap<u64, LinkType>,
     most: BTreeMap<String, u64>,
+    geometry: Option<place::Geometry>,
 }
 
 /// Reads and checks the sections this module knows.
@@ -728,8 +737,14 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         }
     };
 
+    // Section 7 is in the hash whatever it holds; one not in E4's shape is not read, as an unread section is not.
+    let geometry = s
+        .get(&place::SECTION_GEOMETRY)
+        .and_then(|v| place::Geometry::read(v).ok());
+
     Ok(Sections {
         body,
+        geometry,
         state,
         points,
         forms,

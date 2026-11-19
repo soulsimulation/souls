@@ -15,7 +15,7 @@
 //! ([`start_with`], `Hub::seed`). Started with K16's store (`Hub::with_words`), it sends each utterance a subscriber
 //! hears with its words, read for that subscriber's audiences (C6, #3390).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -96,7 +96,7 @@ fn audiences(v: &Value) -> R<BTreeSet<Id>> {
 /// The view tier's thread: a fault in a record is named and the tier goes on; the clock never waits on it.
 fn run(mut hub: Hub, rx: &Receiver<Cmd>) {
     // (connection, gateway's number) -> (hub's number, where its items go).
-    let mut subs: HashMap<(u64, u64), Held> = HashMap::new();
+    let mut subs: BTreeMap<(u64, u64), Held> = BTreeMap::new();
     while let Ok(cmd) = rx.recv() {
         match cmd {
             Cmd::Record(bytes) => {
@@ -298,7 +298,7 @@ mod tests {
         let mut cfg = Config::new(LINEAGE, 1);
         cfg.tick = Duration::from_millis(10);
         cfg.measures = false;
-        cfg.views = Some(feed.clone());
+        cfg.served = Some(feed.clone());
         let world =
             answers::start(w.replica, toggles::rules(), Mem::with(Vec::new()), cfg).unwrap();
 
@@ -396,7 +396,7 @@ mod tests {
         let mut cfg = Config::new(LINEAGE, 1);
         cfg.tick = Duration::from_millis(10);
         cfg.measures = false;
-        cfg.views = Some(feed.clone());
+        cfg.served = Some(feed.clone());
         cfg.text = Some(text);
         let world =
             answers::start(w.replica, toggles::rules(), Mem::with(Vec::new()), cfg).unwrap();

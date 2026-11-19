@@ -24,7 +24,7 @@
 //!
 //! Not here: the tick loop that calls this and writes the entries, moves (B2), sleep and wake (O2), timed values (F5).
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use replica::effects::{Refusal, TimerState};
 use replica::encode::Name;
@@ -51,8 +51,8 @@ pub type Key = (Micros, Id);
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DueList {
     due: BTreeMap<Key, (Id, Name)>,
-    by_id: HashMap<Id, Micros>,
-    by_node: HashMap<Id, BTreeSet<Id>>,
+    by_id: BTreeMap<Id, Micros>,
+    by_node: BTreeMap<Id, BTreeSet<Id>>,
 }
 
 fn refusal(name: &'static str, id: Id) -> Refusal {

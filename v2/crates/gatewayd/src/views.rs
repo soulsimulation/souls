@@ -14,7 +14,7 @@
 //! whose item queue is full is let go, as a slow stream is. A subscription outlives a restart of the world: it is
 //! sent again on reconnect, and the new hub opens with its grant.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -66,7 +66,7 @@ pub struct Views {
 struct State {
     next: u64,
     /// By number: its subscribe frame to the world, and its socket's item queue.
-    subs: HashMap<u64, (Vec<u8>, mpsc::Sender<Vec<u8>>)>,
+    subs: BTreeMap<u64, (Vec<u8>, mpsc::Sender<Vec<u8>>)>,
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
 }
 

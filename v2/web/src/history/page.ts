@@ -9,13 +9,14 @@ import type { NodeRec, SampleRec } from '../source/source.ts';
 import { HistoryClock } from './clock.ts';
 import { historyBase, writeMoment, type Moment } from './link.ts';
 import type { HistoryMsg, Seeked } from './worker.ts';
+import type { Happened } from '../sound/record.ts';
 
 export { readMoment } from './link.ts';
 
 const DAY_US = 86_400_000_000, SLOT_US = 600_000_000;
 
 export type HistoryHooks = {
-  apply(nodes: NodeRec[], removed: string[], samples: SampleRec[]): void;
+  apply(nodes: NodeRec[], removed: string[], samples: SampleRec[], happened?: Happened[]): void;
   /** A node's world matrix, once drawn (the camera's frame). */
   frame(id: string): THREE.Matrix4 | null;
   /** The world's root node, once known. */
@@ -72,7 +73,7 @@ export class HistoryPage {
     const s: Seeked = m.s;
     if (s.seq !== this.seq) return; // a newer seek replaced it
     this.fetching = false;
-    this.hooks.apply(s.nodes, [], s.samples);
+    this.hooks.apply(s.nodes, [], s.samples, s.happened);
     this.loadedTo = s.next ?? s.start + s.length;
     this.nextStart = s.next;
     if (this.opened.hash === null) Object.assign(this.opened, { hash: s.hash, bytes: s.bytes, seekMs: performance.now() - this.asked, workerMs: s.ms });
