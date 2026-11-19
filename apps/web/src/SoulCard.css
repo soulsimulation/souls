@@ -74,4 +74,5 @@
 }
 /* LINK integration: on a phone the Reconnect prompt is clamped to ~3 scrollable lines so Copy stays on screen (the full text still copies) */
 @media (max-width: 700px), (pointer: coarse){.soul-prompt{max-height:4.6em;margin:6px 0}}
-.human-world .soul-card .soul-retire{display:flex;align-items:center;gap:8px;padding-top:8px}
+.human-world .soul-card .soul-retire{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-top:8px}
+.human-world .soul-card .soul-retire>p{flex-basis:100%;margin:0}
