@@ -283,6 +283,7 @@ fn f5_a3_a_kettle_boils_and_whistles_once_with_the_world_as_actor() {
                 mint: &mut mint,
                 moves: &mut moves,
                 library: &[],
+                places: None,
                 seed: 1,
             };
             if forms.fire(&mut w, &t) {

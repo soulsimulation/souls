@@ -89,6 +89,15 @@ export function soulsWithTokens(root) {
     .map(([id]) => id);
 }
 
+/** The worlds (this home's keys) where Soul `soul` holds a token. The tokens themselves are not returned. */
+export function worldsOf(root, soul) {
+  const worlds = readJson(join(root, CREDENTIALS)).souls?.[soul] ?? {};
+  return Object.keys(worlds).filter((k) => typeof worlds[k]?.token === 'string');
+}
+
+/** The folder a person sees: the one holding `.souls/`, or a SOULS_HOME itself. */
+export const folderOf = (root) => (basename(root) === HOME_NAME ? dirname(root) : root);
+
 /**
  * What the daemon connects with: the world's gateway, the Soul's grant (its actor, the token's part before the
  * secret: `soul-<scope hex>-<counter>`, or a world creator's, `creator-<scope hex>-<counter>`, G7 #2796) and the

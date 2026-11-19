@@ -4,7 +4,7 @@
 // loopback, in front of a real launcher (fake minds, a synthetic Clerk issuer, production's satellite and primary
 // settings, an alias and the /worlds prefix from reslug), a directory answering W3's GET /v1/worlds, the viewers' origin
 // and the new page's built files. Then, from outside with front-check.mjs: before the switch (must fail), the README's
-// SWITCH script, every point, the poster with the launcher stopped, the README's BACK script, and again (must fail).
+// SWITCH script, every point, the poster and the site's pages (O23) with the launcher stopped, the README's BACK script, and again (must fail).
 // Production's names, paths and ports are swapped for the scratch host's; the scripts run as written otherwise, with a
 // systemctl that reloads the scratch Caddy and runs the unit's ExecStart.
 //   BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web <v2/web build> --today-web <apps/web build> [--keep]
@@ -68,7 +68,11 @@ const directory = createServer((req, res) => {
 const streams = join(dir, 'streams');
 mkdirSync(streams);
 writeFileSync(join(streams, 'pointer'), 'standin');
-const origin = createOrigin(streams).server.listen(port.origin, '127.0.0.1');
+// the site's pages (O23): the page's changelog files and one release in news.jsonl, as release.sh news writes it
+const news = join(dir, 'news');
+mkdirSync(news);
+writeFileSync(join(news, 'news.jsonl'), `${JSON.stringify({ kind: 'release', version: '0.0-standin', commit: '0'.repeat(40), date: '2026-11-19', link: `${PUBLIC}/changelog#v0.0-standin` })}\n`);
+const origin = createOrigin(streams, { web, data: news }).server.listen(port.origin, '127.0.0.1');
 stops.push(() => directory.close(), () => origin.close());
 
 // the scratch host: /etc, the live release and the map under the scratch folder
@@ -130,7 +134,7 @@ try {
   const up = await run('switched, everything up', { points: POINTS });
   await L.close();
   L = null;
-  const down = await run("switched, today's launcher stopped", { points: ['poster'], stopped: `/w/${slugs[1]}/` });
+  const down = await run("switched, today's launcher stopped", { points: ['poster', 'site'], stopped: `/w/${slugs[1]}/` });
   L = await openLauncher(launcherCfg);
   await script('BACK');
   const back = await run('switched back (must fail as before the switch)', { points: ['worlds', 'list'] }, true);

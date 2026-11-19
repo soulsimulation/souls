@@ -15,7 +15,9 @@ const MEDIA = /\.(glb|gltf|bin|drc|ktx2|basis|hdr|exr|fbx|obj|blend|usdz|png|jpe
 // Same list as the negations in the root .gitignore (and the media audit's keep list).
 const KEEP = [/^apps\/web\/pwa\/icon-(\d+|mark|social)\.png$/, /^apps\/web\/src\/media\/gallery-loop\.mp4$/, /^tools\/god-skill\/reference\/kit-primitives\.png$/, /^tools\/playtest\/review\/fixtures\/runs\/.+\.png$/, /^apps\/server\/test\/fixtures\/sample-texture\.jpg$/,
   // The released Soul client, gzipped text, for the upgrade compatibility test (#1938).
-  /^tools\/world-launcher\/soul\/released\/2\.32\.0\/(eden\.mjs|skill\.md)\.gz$/];
+  /^tools\/world-launcher\/soul\/released\/2\.32\.0\/(eden\.mjs|skill\.md)\.gz$/,
+  // R18 (#2821): reviewed released-client text fixtures, matching the media guard's two exact paths.
+  /^v2\/client\/test\/compat\/released\/2\.36\.2\/(eden\.mjs|skill\.md)\.gz$/];
 // Dropped by decision: the Mars archive photo gallery, its captions and the 2020 evidence strip are never pulled or
 // committed. Under history/ and 2020/ only the wall, mural, sign and Portal screen texture crops are media.
 const DROPPED = /^mars\/viewer\/public\/(2020\/evidence\/|(history|2020)\/.*\.(json|html|md)$)|discord/i;
