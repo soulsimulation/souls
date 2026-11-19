@@ -28,8 +28,15 @@ use crate::token::Grant;
 pub const POLL: Duration = Duration::from_secs(1);
 /// The longest answer read from the directory.
 const ANSWER_MOST: u64 = 4 << 20;
-/// The longest close passed on (the directory reads at most 4,096 bytes).
-const CLOSE_MOST: usize = 1024;
+/// The longest frame passed on: a close, or a prayer or an answer (G11; the directory reads at most 40,000 bytes).
+const CLOSE_MOST: usize = 40_000;
+/// The frames passed on to the directory by their first key, and where; G11's prayers are answered back.
+const PASSED: [(&str, &str); 4] = [
+    ("{\"close\"", "close"),
+    ("{\"pray\"", "pray"),
+    ("{\"prayers\"", "prayers"),
+    ("{\"answer\"", "answer"),
+];
 
 /// The directory's address (`host:port`) and the key its mailbox requests take.
 pub struct Mailbox {
@@ -97,7 +104,10 @@ pub async fn run(gw: Arc<Gateway>) {
 /// it, and ignores anything else). Once the directory closed the message, the close goes to the view sockets that
 /// watch that grant (W10) as the agent sent it.
 pub fn on_text(gw: &Arc<Gateway>, grant: Grant, text: &str) {
-    if text.len() > CLOSE_MOST || !text.starts_with("{\"close\"") {
+    let Some((_, path)) = PASSED.iter().find(|(p, _)| text.starts_with(p)) else {
+        return;
+    };
+    if text.len() > CLOSE_MOST {
         return;
     }
     let (gw, soul, body) = (gw.clone(), grant.to_text(), text.to_owned());
@@ -105,12 +115,13 @@ pub fn on_text(gw: &Arc<Gateway>, grant: Grant, text: &str) {
         let Some(mb) = gw.mailbox.get() else {
             return;
         };
-        match http(mb, "POST", "/v1/mailbox/close", &soul, &body).await {
-            Some(answer) if answer.contains("\"closed\":true") => {
+        match http(mb, "POST", &format!("/v1/mailbox/{path}"), &soul, &body).await {
+            Some(reply) if *path != "close" => gw.post_text(&grant.key(), reply),
+            Some(reply) if reply.contains("\"closed\":true") => {
                 gw.tell_watchers(&grant.key(), body)
             }
             Some(_) => {}
-            None => (gw.log)("a message's close was not taken by the directory"),
+            None => (gw.log)("a mailbox frame was not taken by the directory"),
         }
     });
 }

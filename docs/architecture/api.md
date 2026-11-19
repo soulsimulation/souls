@@ -70,7 +70,9 @@ Every installed client upgrades through these parts, so they never change (#1938
   `{ok:false, code:"gone", message:"resolve was removed, and this Soul client still uses it. Run: node eden.mjs upgrade", run}`.
 
 `tools/world-launcher/soul-upgrade-compat.test.mjs` upgrades the released 2.32.0 client to head through them, and shows it
-printing the refusal.
+printing the refusal. `v2/client/test/compat/upgrade-compat.test.mjs` (from v2/ alone) runs the released 2.36.2 client
+against the new engine's answers: it prints the refusal, and a home it keeps comes across by `upgrade`, its Souls paired
+again by their former ids and their memory untouched, and back by `upgrade --rollback` (R18, #2821).
 
 ## Signed-in owner
 
