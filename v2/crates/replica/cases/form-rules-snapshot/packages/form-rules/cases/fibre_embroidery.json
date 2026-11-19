@@ -1,0 +1,167 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:embroidery_hoop (from #1791). Three thread units of each colour (red, blue, gold) and the stitches made with them (red_stitches, ...), conserved: a stitch moves one unit from a colour's thread to its stitches, unpicking moves it back; at most six stitches in all (a sum need on the three, as the stitch would leave them). Four seconds with empty hands. Refused with the original's words: the cloth full or that colour spent ('The cloth is full or that thread colour is spent. Unpick an actual stitch to reuse its thread.'), nothing of that colour to unpick ('Choose an occupied stitch from inspection.', the original's words less its slot numbers) and a hand holding something ('Put down held items before embroidery work.'). The hoop is taken with a free hand.",
+  "cases": [
+    {
+      "name": "embroidery_hoop_take_every_need_met",
+      "act": {"this":"h1","form":"take"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "embroidery_hoop_take_hands_full",
+      "act": {"this":"h1","form":"take"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":"x1","right":"x2"}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "hoop_stitch_red_every_need_met",
+      "act": {"this":"h1","form":"stitch_red"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hoop_stitch_red_holding_something",
+      "act": {"this":"h1","form":"stitch_red"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "hoop_stitch_red_colour_spent",
+      "act": {"this":"h1","form":"stitch_red"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"red":0,"red_stitches":3}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"h1","field":"red","has":0,"amount":1},"fix":null,"says":"full_or_spent"}
+    },
+    {
+      "name": "hoop_stitch_red_cloth_full",
+      "act": {"this":"h1","form":"stitch_red"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"blue":0,"blue_stitches":3,"gold":0,"gold_stitches":3}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"detail":{"fields":["red_stitches","blue_stitches","gold_stitches"],"found":7,"wanted":{"at_most":6},"after_moves":true},"fix":null,"says":"full_or_spent"}
+    },
+    {
+      "name": "hoop_unpick_red_every_need_met",
+      "act": {"this":"h1","form":"unpick_red"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"red":2,"red_stitches":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hoop_unpick_red_no_stitch",
+      "act": {"this":"h1","form":"unpick_red"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"red_stitches","found":0,"wanted":{"at_least":1}},"fix":{"form":"stitch_red"},"says":"no_stitch"}
+    },
+    {
+      "name": "hoop_unpick_red_holding_something",
+      "act": {"this":"h1","form":"unpick_red"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"red":2,"red_stitches":1}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":1,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "hoop_stitch_blue_every_need_met",
+      "act": {"this":"h1","form":"stitch_blue"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hoop_stitch_blue_holding_something",
+      "act": {"this":"h1","form":"stitch_blue"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "hoop_stitch_blue_colour_spent",
+      "act": {"this":"h1","form":"stitch_blue"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"blue":0,"blue_stitches":3}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"h1","field":"blue","has":0,"amount":1},"fix":null,"says":"full_or_spent"}
+    },
+    {
+      "name": "hoop_stitch_blue_cloth_full",
+      "act": {"this":"h1","form":"stitch_blue"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"red":0,"red_stitches":3,"gold":0,"gold_stitches":3}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"detail":{"fields":["red_stitches","blue_stitches","gold_stitches"],"found":7,"wanted":{"at_most":6},"after_moves":true},"fix":null,"says":"full_or_spent"}
+    },
+    {
+      "name": "hoop_unpick_blue_every_need_met",
+      "act": {"this":"h1","form":"unpick_blue"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"blue":2,"blue_stitches":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hoop_unpick_blue_no_stitch",
+      "act": {"this":"h1","form":"unpick_blue"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"blue_stitches","found":0,"wanted":{"at_least":1}},"fix":{"form":"stitch_blue"},"says":"no_stitch"}
+    },
+    {
+      "name": "hoop_unpick_blue_holding_something",
+      "act": {"this":"h1","form":"unpick_blue"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"blue":2,"blue_stitches":1}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":1,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "hoop_stitch_gold_every_need_met",
+      "act": {"this":"h1","form":"stitch_gold"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hoop_stitch_gold_holding_something",
+      "act": {"this":"h1","form":"stitch_gold"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "hoop_stitch_gold_colour_spent",
+      "act": {"this":"h1","form":"stitch_gold"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"gold":0,"gold_stitches":3}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"h1","field":"gold","has":0,"amount":1},"fix":null,"says":"full_or_spent"}
+    },
+    {
+      "name": "hoop_stitch_gold_cloth_full",
+      "act": {"this":"h1","form":"stitch_gold"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"red":0,"red_stitches":3,"blue":0,"blue_stitches":3}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":2,"detail":{"fields":["red_stitches","blue_stitches","gold_stitches"],"found":7,"wanted":{"at_most":6},"after_moves":true},"fix":null,"says":"full_or_spent"}
+    },
+    {
+      "name": "hoop_unpick_gold_every_need_met",
+      "act": {"this":"h1","form":"unpick_gold"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"gold":2,"gold_stitches":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "hoop_unpick_gold_no_stitch",
+      "act": {"this":"h1","form":"unpick_gold"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"field_differs","need":0,"detail":{"field":"gold_stitches","found":0,"wanted":{"at_least":1}},"fix":{"form":"stitch_gold"},"says":"no_stitch"}
+    },
+    {
+      "name": "hoop_unpick_gold_holding_something",
+      "act": {"this":"h1","form":"unpick_gold"},
+      "state": {"actor":"b1","nodes":{"h1":{"kind":"eden:embroidery_hoop","fields":{"gold":2,"gold_stitches":1}},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":1,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    }
+  ]
+}

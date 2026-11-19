@@ -1,0 +1,1340 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:crank_lamp (from #1873). Charge is a count, 0 to 6. Cranking (four seconds, a hand free) adds 2 while the lamp is dark and has room for two ('There is not room for two more charges; spend charge on illumination first'; 'Wait for the light to expire or extinguish it before cranking'). Shining for 5, 10 or 15 seconds spends 1, 2 or 3 charge, lights it and sets a timer after which the world puts it out ('This lamp needs N stored charge for that interval; crank it first or choose fewer seconds'; 'already illuminating; wait for expiry or extinguish it'). Extinguishing ends it early with no refund ('This lamp is already dark'). The original's one form with a seconds argument is three forms here: a set's `by` and a timer's `after_us` are fixed numbers. A flag reads back as 1 or 0.",
+ "cases": [
+  {
+   "name": "crank_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "crank"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 4
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "crank_while_lit_names_extinguish",
+   "act": {
+    "this": "l1",
+    "form": "crank"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "on": true,
+       "charge": 2
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "extinguish"
+    }
+   }
+  },
+  {
+   "name": "crank_no_room_for_two_names_shining",
+   "act": {
+    "this": "l1",
+    "form": "crank"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 5
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "charge",
+     "found": 5,
+     "wanted": {
+      "at_most": 4
+     }
+    },
+    "fix": {
+     "form": "shine_10s"
+    }
+   }
+  },
+  {
+   "name": "crank_hands_full",
+   "act": {
+    "this": "l1",
+    "form": "crank"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp"
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "x2": {
+      "kind": "eden:cup"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 2,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "crank_out_of_reach",
+   "act": {
+    "this": "l1",
+    "form": "crank"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       1200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 3,
+    "detail": {
+     "point": "crank",
+     "move": "crank"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "crank"
+    }
+   }
+  },
+  {
+   "name": "shine_5s_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "shine_5s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "shine_5s_already_lit_names_extinguish",
+   "act": {
+    "this": "l1",
+    "form": "shine_5s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "on": true,
+       "charge": 6
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "extinguish"
+    }
+   }
+  },
+  {
+   "name": "shine_5s_too_little_charge_names_crank",
+   "act": {
+    "this": "l1",
+    "form": "shine_5s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 0
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "charge",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": {
+     "form": "crank"
+    }
+   }
+  },
+  {
+   "name": "shine_5s_hands_full",
+   "act": {
+    "this": "l1",
+    "form": "shine_5s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 6
+      }
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "x2": {
+      "kind": "eden:cup"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 2,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "shine_5s_out_of_reach",
+   "act": {
+    "this": "l1",
+    "form": "shine_5s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 6
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       1200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 3,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  },
+  {
+   "name": "shine_10s_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "shine_10s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 2
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "shine_10s_already_lit_names_extinguish",
+   "act": {
+    "this": "l1",
+    "form": "shine_10s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "on": true,
+       "charge": 6
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "extinguish"
+    }
+   }
+  },
+  {
+   "name": "shine_10s_too_little_charge_names_crank",
+   "act": {
+    "this": "l1",
+    "form": "shine_10s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 1
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "charge",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": {
+     "form": "crank"
+    }
+   }
+  },
+  {
+   "name": "shine_10s_hands_full",
+   "act": {
+    "this": "l1",
+    "form": "shine_10s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 6
+      }
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "x2": {
+      "kind": "eden:cup"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 2,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "shine_10s_out_of_reach",
+   "act": {
+    "this": "l1",
+    "form": "shine_10s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 6
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       1200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 3,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  },
+  {
+   "name": "shine_15s_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "shine_15s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 3
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "shine_15s_already_lit_names_extinguish",
+   "act": {
+    "this": "l1",
+    "form": "shine_15s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "on": true,
+       "charge": 6
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "extinguish"
+    }
+   }
+  },
+  {
+   "name": "shine_15s_too_little_charge_names_crank",
+   "act": {
+    "this": "l1",
+    "form": "shine_15s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 2
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "charge",
+     "found": 2,
+     "wanted": {
+      "at_least": 3
+     }
+    },
+    "fix": {
+     "form": "crank"
+    }
+   }
+  },
+  {
+   "name": "shine_15s_hands_full",
+   "act": {
+    "this": "l1",
+    "form": "shine_15s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 6
+      }
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "x2": {
+      "kind": "eden:cup"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 2,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "shine_15s_out_of_reach",
+   "act": {
+    "this": "l1",
+    "form": "shine_15s"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 6
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       1200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 3,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  },
+  {
+   "name": "goes_dark_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "goes_dark"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "goes_dark_already_dark",
+   "act": {
+    "this": "l1",
+    "form": "goes_dark"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "shine_10s"
+    }
+   }
+  },
+  {
+   "name": "extinguish_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "extinguish"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "extinguish_already_dark_names_shining",
+   "act": {
+    "this": "l1",
+    "form": "extinguish"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "charge": 6
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "shine_10s"
+    }
+   }
+  },
+  {
+   "name": "extinguish_out_of_reach",
+   "act": {
+    "this": "l1",
+    "form": "extinguish"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:crank_lamp",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       250,
+       1200
+      ]
+     }
+    },
+    "moves": {
+     "crank": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  }
+ ]
+}

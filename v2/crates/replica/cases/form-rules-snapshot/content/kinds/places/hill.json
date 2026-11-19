@@ -1,0 +1,91 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hill",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      200000,
+      40000,
+      200000
+    ]
+  },
+  "looks": {
+    "model": "look:hill",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            0,
+            0
+          ],
+          "profile": [
+            [
+              80000,
+              0
+            ],
+            [
+              70000,
+              5859
+            ],
+            [
+              60000,
+              10938
+            ],
+            [
+              50000,
+              15234
+            ],
+            [
+              40000,
+              18750
+            ],
+            [
+              30000,
+              21484
+            ],
+            [
+              20000,
+              23438
+            ],
+            [
+              10000,
+              24609
+            ],
+            [
+              0,
+              25000
+            ]
+          ],
+          "segments": 24,
+          "tint": "grass"
+        }
+      ],
+      "round": 0,
+      "palette": {
+        "grass": "#7fa35a"
+      },
+      "tags": [
+        "terrain",
+        "hill"
+      ]
+    }
+  },
+  "text": {
+    "card": "A hill to walk up and over.",
+    "land": "land",
+    "rise": "rise",
+    "knoll": "knoll",
+    "slope": "slope"
+  },
+  "card": {
+    "text": "card",
+    "category": "land",
+    "synonyms": [
+      "rise",
+      "knoll",
+      "slope"
+    ]
+  }
+}

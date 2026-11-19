@@ -1,0 +1,47 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:guitar_stand",
+  "owner": "thing",
+  "state": {},
+  "points": {"front":{"role":"stand","at_mm":[0,0,450]}},
+  "slots": {"cradle":{"admits":"thing","kinds":["eden:guitar"],"most":1,"at_mm":[0,300,0]}},
+  "geometry": {"bounds_mm":[450,1400,350]},
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "guitar": {
+          "type": "thing",
+          "select": {"of":"things","kind":"eden:guitar","in":"this","anchor":"this","order":"nearest","rank":1}
+        }
+      },
+      "needs": [{"need":"hand","free":true}],
+      "steps": [{"step":"walk_to","point":"front"}],
+      "effects": [{"change":"reparent","what":{"arg":"guitar"},"into":"actor_hand","event":"took_the_guitar"}]
+    },
+    "put_back": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {"guitar":{"type":"thing"}},
+      "needs": [{"need":"held_by_actor","thing":{"arg":"guitar"}},{"need":"slot_free","slot":"cradle"}],
+      "steps": [{"step":"walk_to","point":"front"}],
+      "effects": [{"change":"reparent","what":{"arg":"guitar"},"into":"cradle","event":"put_the_guitar_back"}]
+    }
+  },
+  "motion": {"how":"one_hand"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:guitar_stand",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"collide":false,"kind":"cyl","at":[0,30,0],"r":160,"h":40,"color":"#222222"},
+        {"collide":false,"kind":"cyl","at":[0,300,-60],"r":12,"h":550,"color":"#222222"}
+      ],
+      "tags": ["music","stand"]
+    }
+  },
+  "text": {"card":"A floor stand that holds a guitar: take it, or put it back.","instrument":"instrument","stand":"stand"},
+  "card": {"text":"card","category":"instrument","synonyms":["stand"]}
+}
