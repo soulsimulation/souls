@@ -227,7 +227,8 @@ fn json_value(v: &Value) -> Result<String, JsError> {
     })
 }
 
-/// An entry in a view item frame (R4's `{1: 1, 2: entry}`: an entry of a body in the interest set) as JSON, for the
+/// An entry in a view item frame (R4's `{1: 1, 2: entry}` or an addressed activity notification's
+/// `{1: 9, 2: entry bytes}`) as JSON, for the
 /// daemon to follow (R9b, #3201): `{"sequence":n,"at":n,"actor":"<id>"|null,"node":"<id>","changes":n,"events":
 /// [{"name":"..","fields":{"<n>":<value>}}]}`, `actor` null for the world or a creator; empty when the item is not
 /// an entry.
@@ -242,13 +243,34 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
     let Value::Map(mut item) = decode(&item).map_err(js)?.value else {
         return Err(JsError::new("item-not-a-record"));
     };
-    if item.get(&1) != Some(&Value::Uint(ENTRY_ITEM)) {
+    let addressed = item.get(&1) == Some(&Value::Uint(crate::speech::ADDRESSED));
+    if !addressed && item.get(&1) != Some(&Value::Uint(ENTRY_ITEM)) {
         return Ok(String::new());
     }
-    let entry = item
+    let mut entry = item
         .remove(&2)
         .ok_or_else(|| JsError::new("item-without-entry"))?;
+    if addressed {
+        let Value::Bytes(bytes) = entry else {
+            return Err(JsError::new("addressed-entry-not-bytes"));
+        };
+        entry = decode(&bytes).map_err(js)?.value;
+    }
     let e = Effect::read(entry).map_err(js)?;
+    if addressed
+        && (e
+            .events
+            .iter()
+            .flatten()
+            .any(|ev| ev.name.as_str() == crate::speech::SAID)
+            || !e
+                .events
+                .iter()
+                .flatten()
+                .any(|ev| crate::activity::addressed(ev.name.as_str(), &ev.fields).is_some()))
+    {
+        return Ok(String::new());
+    }
     let actor = match e.envelope.actor {
         Actor::Soul(id) => format!("\"{}\"", id_text(id)),
         Actor::Creator(_) | Actor::World => "null".to_owned(),
