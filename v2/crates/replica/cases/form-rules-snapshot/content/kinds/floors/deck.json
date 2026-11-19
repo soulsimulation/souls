@@ -1,0 +1,14 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:deck",
+  "owner": "place",
+  "geometry": {"bounds_mm":[8000,1600,8000]},
+  "looks": {"model":"look:deck"},
+  "text": {
+    "card": "A raised wooden deck on posts, with rails: walk out onto it.",
+    "ground": "ground",
+    "boardwalk": "boardwalk",
+    "platform": "platform"
+  },
+  "card": {"text":"card","category":"ground","synonyms":["boardwalk","platform"]}
+}

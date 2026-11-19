@@ -54,3 +54,50 @@ export function cluster(m: LodMesh, cell: number): LodMesh {
   }
   return out;
 }
+
+/** A body kind's simple model (B13, #2744), as the importer writes it and the crowd draws it for its farthest level:
+ *  `crowd-mesh/1`, little-endian: the eight bytes `CMESH1\0\0`, the vertex and index counts (u32 each), then position,
+ *  normal and colour (f32 × 3 each), skin indices (u16 × 4), skin weights (f32 × 4) and the indices (u32). */
+const MAGIC = 'CMESH1\0\0';
+
+export function encodeMesh(m: LodMesh): Uint8Array {
+  const n = m.position.length / 3;
+  const parts: ArrayBufferView[] = [m.position, m.normal, m.color, m.skinIndex, m.skinWeight, m.index];
+  const size = 16 + parts.reduce((s, p) => s + p.byteLength, 0);
+  const out = new Uint8Array(size);
+  for (let i = 0; i < 8; i++) out[i] = MAGIC.charCodeAt(i);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(8, n, true);
+  dv.setUint32(12, m.index.length, true);
+  let at = 16;
+  for (const p of parts) {
+    out.set(new Uint8Array(p.buffer, p.byteOffset, p.byteLength), at);
+    at += p.byteLength;
+  }
+  return out;
+}
+
+export function decodeMesh(b: Uint8Array): LodMesh {
+  for (let i = 0; i < 8; i++) if (b[i] !== MAGIC.charCodeAt(i)) throw new Error('not a crowd-mesh/1 file');
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const n = dv.getUint32(8, true), k = dv.getUint32(12, true);
+  const copy = b.slice(16).buffer; // aligned
+  if (copy.byteLength !== n * (12 * 3 + 8 + 16) + k * 4) throw new Error('crowd-mesh/1: wrong length');
+  let at = 0;
+  const take = <T>(C: new (buf: ArrayBuffer, off: number, len: number) => T, len: number, bytes: number): T => {
+    const v = new C(copy, at, len);
+    at += len * bytes;
+    return v;
+  };
+  return {
+    position: take(Float32Array, n * 3, 4), normal: take(Float32Array, n * 3, 4), color: take(Float32Array, n * 3, 4),
+    skinIndex: take(Uint16Array, n * 4, 2), skinWeight: take(Float32Array, n * 4, 4), index: take(Uint32Array, k, 4),
+  };
+}
+
+/** The mesh clustered on ever larger cells until it has at most `triangles` triangles. */
+export function simplify(m: LodMesh, triangles: number): LodMesh {
+  let out = m;
+  for (let cell = 0.02; out.index.length / 3 > triangles; cell *= 1.15) out = cluster(m, cell);
+  return out;
+}

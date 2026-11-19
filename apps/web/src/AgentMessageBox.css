@@ -28,3 +28,4 @@
 .agent-message-receipt[data-thinking] .agent-message-state{animation:agent-message-pulse 1.4s ease-in-out infinite}
 @keyframes agent-message-pulse{50%{opacity:.25}}
 @media (prefers-reduced-motion:reduce){.agent-message-act>i,.agent-message-receipt[data-thinking] .agent-message-state{animation:none}}
+.agent-message .agent-message-hint{margin:4px 0 0;font-size:12px;line-height:1.45;opacity:.85}

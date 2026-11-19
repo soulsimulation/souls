@@ -1,0 +1,122 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The Open / Closed sign (from #1254) at closing time and the next morning: turned to Closed, turning it to Closed again is refused and changes nothing, then it is turned back to Open.",
+ "cases": [
+  {
+   "name": "closed_for_the_night_open_again",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "eden:open_sign"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       40,
+       1100,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "s1",
+      "form": "turn_to_closed"
+     },
+     "receipt": "ro1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "s1",
+        "field": "open",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:turned_to_closed",
+        "node": "s1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "s1",
+      "form": "turn_to_closed"
+     },
+     "receipt": "ro2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "s1",
+      "form": "turn_to_open"
+     },
+     "receipt": "ro3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "s1",
+        "field": "open",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:turned_to_open",
+        "node": "s1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "s1": {
+     "kind": "eden:open_sign",
+     "fields": {
+      "open": 1
+     }
+    }
+   }
+  }
+ ]
+}

@@ -10,17 +10,28 @@
 //!   answered from the bodies within [`LEAVE`] of it, never a scan of the hall ([`Hearing::holders`]).
 //! - **Resolved at write.** [`said`] gives the record for an utterance the controller started this tick: the words'
 //!   reference, the reach, the public audience and the hearers as they are at that instant.
+//! - **Each tick** (#3231): after the controller's step the world's tick calls [`heard`], which brings the sets up to
+//!   date from the bodies that moved and gives each started utterance's record, and writes each as [`entry`] says. The
+//!   view tier reads the entry from the log and addresses it to each hearer's subscription
+//!   (`worldd::views::subscription`, R4's addressed queue).
 //!
-//! Not here: a whisper, a shout and devices that carry a voice (E13: other values of the record's reach and audience,
-//! no change of format), conversations (the Soul Actions tranche), playing sound (lane V), delivering an utterance to
-//! each hearer's subscription (R4's addressed queue, `Hub::address`).
+//! - **A reach from a closed list** (E13, #2784; `replica::speech::Reach`), resolved by [`said_by`] against what
+//!   carries a voice ([`Carriers`]): a whisper is heard by the one named body within the world's whisper radius and
+//!   read by its Soul alone; a raised voice by every body within the loud radius on the speaker's node; a call by the
+//!   members of the activity, wherever they are, if the speaker is one; a device by the bodies near each receiver of
+//!   its link that is on. A call and a device are heard by talk's hearers too. The format of the record is B11's.
+//!
+//! Not here: sound through walls, recorded sounds (Soul Actions), charging a speaker by its hearers (I8), who may
+//! speak through a thing (F6), the device link read from the tree, conversations (E26), playing sound (lane V).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::controller::Line;
 use crate::index::Index;
+use replica::effects::{Body, Effect, Envelope, Rest};
 use replica::ids::Id;
-use replica::speech::Said;
+use replica::speech::{Device, Radii, Reach, Said};
+use replica::time::Micros;
 use replica::world_model::Audience;
 
 /// A body enters a Soul's interest set closer than this, µm (talking distance and a step).
@@ -118,14 +129,148 @@ impl Hearing {
     }
 }
 
-/// The record of ordinary talk by `speaker`, as the controller started it this tick: its words' reference and length,
-/// the public audience, a reach of [`LEAVE`], and the Souls whose interest set holds the speaker now.
+/// What carries a voice beyond the air (E13): the world's radii, the members of each activity and the device links.
+pub struct Carriers<'a> {
+    pub radii: Radii,
+    /// The bodies of an activity's members (`activity::Activities::members`); none when it is not live.
+    pub members: &'a dyn Fn(Id) -> Vec<Id>,
+    /// The device links, by their sender thing.
+    pub devices: &'a BTreeMap<Id, Device>,
+}
+
+/// No activity has members.
+fn no_members(_: Id) -> Vec<Id> {
+    Vec::new()
+}
+
+/// The record of ordinary talk by `speaker`, as the controller started it this tick: [`said_by`] with the default
+/// radii, no activity and no device.
 pub fn said(hearing: &Hearing, index: &Index, speaker: Id, line: &Line) -> Said {
+    let devices = BTreeMap::new();
+    let carriers = Carriers {
+        radii: Radii::default(),
+        members: &no_members,
+        devices: &devices,
+    };
+    said_by(hearing, index, &carriers, speaker, line)
+}
+
+/// The bodies within `r` of `body`, on its node.
+fn around(index: &Index, body: Id, r: i64) -> BTreeSet<Id> {
+    let Some((node, p)) = index.body(body) else {
+        return BTreeSet::new();
+    };
+    index
+        .bodies_within(node, p, r)
+        .into_iter()
+        .map(|(b, _)| b)
+        .collect()
+}
+
+/// The record of an utterance by `speaker`, as the controller started it this tick: its words' reference and length,
+/// and the reach, audience and hearers its [`Reach`] gives now. Talk's reach is [`LEAVE`] and its hearers the Souls
+/// whose interest set holds the speaker.
+pub fn said_by(
+    hearing: &Hearing,
+    index: &Index,
+    carriers: &Carriers,
+    speaker: Id,
+    line: &Line,
+) -> Said {
+    let radii = carriers.radii;
+    let (reach, audience, hearers) = match line.reach {
+        Reach::Whisper { body, soul } => {
+            let hears = around(index, speaker, radii.whisper).contains(&body) && body != speaker;
+            let hearers = hears.then_some(body).into_iter().collect();
+            (radii.whisper, Audience::Of(soul), hearers)
+        }
+        Reach::Talk => (LEAVE, Audience::Everyone, hearing.holders(index, speaker)),
+        Reach::Loud => (
+            radii.loud,
+            Audience::Everyone,
+            around(index, speaker, radii.loud),
+        ),
+        Reach::Members(activity) => {
+            let mut hearers = hearing.holders(index, speaker);
+            let members = (carriers.members)(activity);
+            if members.contains(&speaker) {
+                hearers.extend(members);
+            }
+            (LEAVE, Audience::Everyone, hearers)
+        }
+        Reach::Through(sender) => {
+            let mut hearers = hearing.holders(index, speaker);
+            for r in carriers
+                .devices
+                .get(&sender)
+                .into_iter()
+                .flat_map(|d| &d.receivers)
+                .filter(|r| r.on)
+            {
+                hearers.extend(
+                    index
+                        .bodies_within(r.node, r.at, r.radius)
+                        .into_iter()
+                        .map(|(b, _)| b),
+                );
+            }
+            (LEAVE, Audience::Everyone, hearers)
+        }
+    };
     Said {
         words: line.words,
-        reach_mm: (LEAVE / 1_000) as u64,
-        audience: Audience::Everyone,
-        hearers: hearing.holders(index, speaker),
+        reach_mm: (reach / 1_000).max(0) as u64,
+        audience,
+        hearers,
         length: line.length,
+    }
+}
+
+/// One tick of speech, run by the world's tick after the controller's step: brings every body's interest set up to
+/// date (`bodies` are every body the world holds; only those that moved, came or went are worked out again), then
+/// gives the record of each utterance the step started (`Stepped::said`), its hearers as they are now, in order.
+/// [`heard_by`] with the default radii, no activity and no device.
+pub fn heard(
+    hearing: &mut Hearing,
+    index: &Index,
+    bodies: impl IntoIterator<Item = Id>,
+    started: &[(Id, Line, Micros)],
+) -> Vec<(Id, Said)> {
+    let devices = BTreeMap::new();
+    let carriers = Carriers {
+        radii: Radii::default(),
+        members: &no_members,
+        devices: &devices,
+    };
+    heard_by(hearing, index, &carriers, bodies, started)
+}
+
+/// [`heard`], each utterance resolved by its reach against `carriers` ([`said_by`]).
+pub fn heard_by(
+    hearing: &mut Hearing,
+    index: &Index,
+    carriers: &Carriers,
+    bodies: impl IntoIterator<Item = Id>,
+    started: &[(Id, Line, Micros)],
+) -> Vec<(Id, Said)> {
+    hearing.update(index, bodies);
+    started
+        .iter()
+        .map(|(speaker, line, _)| (*speaker, said_by(hearing, index, carriers, *speaker, line)))
+        .collect()
+}
+
+/// The log entry an utterance is written as: its `souls:said` event in an entry of no changes, written by the
+/// speaker's body (`node`) with the utterance's audience. Sequence, time, cause and actor are the writer's.
+pub fn entry(envelope: Envelope, speaker: Id, said: &Said) -> Effect {
+    Effect {
+        envelope: Envelope {
+            node: speaker,
+            audience: said.audience,
+            ..envelope
+        },
+        body: Body::Changes(Vec::new()),
+        events: Some(vec![said.event()]),
+        rest: Rest::new(),
     }
 }

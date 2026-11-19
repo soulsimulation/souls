@@ -1,0 +1,625 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:cutting_sheet (from #1747). A whole sheet is cut once: the sheet keeps a quarter, a half or three quarters of its width (part) and the complementary piece is made beside it. Refused as the original refused: a sheet already cut ('Choose an uncut sheet and a supported division first.'), something held ('Put down what you are holding before cutting paper.'). Nothing makes a cut sheet whole again, so no fix is named. Every piece is taken with a free hand.",
+  "cases": [
+    {
+      "name": "cut_quarter_every_need_met",
+      "act": {
+        "this": "s1",
+        "form": "cut_quarter"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "cut_quarter_already_cut",
+      "act": {
+        "this": "s1",
+        "form": "cut_quarter"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet",
+            "fields": {
+              "part": "half"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "part",
+          "found": "half",
+          "wanted": {
+            "is": "whole"
+          }
+        },
+        "fix": null,
+        "says": "uncut_only"
+      }
+    },
+    {
+      "name": "cut_quarter_holding_something",
+      "act": {
+        "this": "s1",
+        "form": "cut_quarter"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "p1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "cut_half_every_need_met",
+      "act": {
+        "this": "s1",
+        "form": "cut_half"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "cut_half_already_cut",
+      "act": {
+        "this": "s1",
+        "form": "cut_half"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet",
+            "fields": {
+              "part": "half"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "part",
+          "found": "half",
+          "wanted": {
+            "is": "whole"
+          }
+        },
+        "fix": null,
+        "says": "uncut_only"
+      }
+    },
+    {
+      "name": "cut_half_holding_something",
+      "act": {
+        "this": "s1",
+        "form": "cut_half"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "p1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "cut_three_quarter_every_need_met",
+      "act": {
+        "this": "s1",
+        "form": "cut_three_quarter"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "cut_three_quarter_already_cut",
+      "act": {
+        "this": "s1",
+        "form": "cut_three_quarter"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet",
+            "fields": {
+              "part": "half"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "part",
+          "found": "half",
+          "wanted": {
+            "is": "whole"
+          }
+        },
+        "fix": null,
+        "says": "uncut_only"
+      }
+    },
+    {
+      "name": "cut_three_quarter_holding_something",
+      "act": {
+        "this": "s1",
+        "form": "cut_three_quarter"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "p1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "cutting_sheet_take_every_need_met",
+      "act": {
+        "this": "s1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "cutting_sheet_take_both_hands_full",
+      "act": {
+        "this": "s1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "h1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "h2": {
+            "kind": "eden:cutting_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "paper_quarter_take_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_quarter"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "paper_quarter_take_both_hands_full",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_quarter"
+          },
+          "h1": {
+            "kind": "eden:paper_quarter"
+          },
+          "h2": {
+            "kind": "eden:paper_quarter"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "paper_half_take_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "paper_half_take_both_hands_full",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_half"
+          },
+          "h1": {
+            "kind": "eden:paper_half"
+          },
+          "h2": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "paper_three_quarter_take_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_three_quarter"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "paper_three_quarter_take_both_hands_full",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_three_quarter"
+          },
+          "h1": {
+            "kind": "eden:paper_three_quarter"
+          },
+          "h2": {
+            "kind": "eden:paper_three_quarter"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

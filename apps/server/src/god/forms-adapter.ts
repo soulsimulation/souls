@@ -36,6 +36,10 @@
 //   placed so the entry's outlet point is over the target, for the move's pour time, with the level after from the
 //   rules' amount. A consume is mars:cup_v1 (stage drink, one sip), the level before and the sip from the rules'
 //   amount. Today's drink draws a mug's pose for any shape. The amounts are applied at the end, as any `set`.
+// - Crossings that are due: before a thing's form is planned or ended, each of its world forms (`starts: timer`,
+//   `who: world`) whose need on a timed field has crossed its level by the world's time is run once, at the time it
+//   crossed, with the world as actor (the kettle's `boiled`), as Engine v2's due list would; a thing nobody acts on
+//   catches up the next time someone does.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { opSchema, type Op, type StoredDef, type WorldModel } from '@souls/world-compiler';
@@ -43,7 +47,8 @@ import { HUMAN_RADIUS } from '../../../../mars/viewer/engine/world/catalog.ts';
 import { apply, effects, type Change } from '../../../../packages/form-rules/src/effects.ts';
 import { surfaceSlotsOf, slotOccupant } from '../../../../mars/viewer/engine/items/model.ts';
 import { canPoint, TILT, TILT_MORE } from '../../../../mars/viewer/engine/items/watering.ts';
-import type { Entry, Form } from '../../../../packages/form-rules/src/rules.ts';
+import { DT } from '../../../../mars/viewer/engine/runtime/runtime.ts';
+import { crossing, type Entry, type Form } from '../../../../packages/form-rules/src/rules.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Vec2 = [number, number];
@@ -71,6 +76,8 @@ const KEPT = new Set(['set', 'transfer', 'reparent']);
 const BODY_KIND = 'eden:humanoid';
 /** The node the rules see as the actor's place (here). */
 const HERE = '@here';
+/** The actor of a form the world starts (a crossing that is due). */
+const WORLD = '@world';
 /** Who may start a form here: anyone, or its holder (the rules' held_by_actor need decides who holds it). */
 const WHO = new Set([undefined, 'anyone', 'holder']);
 type Takes = Record<string, { type?: string; select?: { of?: string; kind?: string; order?: string; rank?: number } }>;
@@ -214,8 +221,8 @@ export function createFormsAdapter(h: FormsHost) {
     if (!out.right && typeof gripped === 'string' && out.left !== gripped) out.right = gripped;
     return out;
   };
-  /** What the form needs and does now, asked of @souls/form-rules as the world: the thing's fields as today's store holds
-   *  them, the god things the body holds, the form's argument things, its effector in the thing's frame (whole
+  /** What the form needs and does now, asked of @souls/form-rules as the world at its current time: the thing's fields as
+   *  today's store holds them, the god things the body holds, the form's argument things, its effector in the thing's frame (whole
    *  millimetres) and where each thing is: in a hand, in a place on another thing, or loose in the actor's place. */
   function ask(t: NonNullable<ReturnType<typeof thing>>, id: string, f: FormRef, action: string, bodyId: string, effector: number[], receipt: string): any {
     const args = argsOf(t, id, f, bodyId), kinds: Record<string, Entry> = {}, nodes: Record<string, any> = {};
@@ -240,8 +247,54 @@ export function createFormsAdapter(h: FormsHost) {
       }
       here.push(n);
     }
-    const input = { kinds, act: { this: f.body ? bodyId : id, form: action, args }, state: { actor: bodyId, nodes, moves: moves() } };
+    // the world's time now, in whole microseconds: a timed field (the kettle's heat) is read and set at it
+    const now_us = nowUs();
+    const input = { kinds, act: { this: f.body ? bodyId : id, form: action, args }, state: { actor: bodyId, nodes, moves: moves(), now_us } };
     return Object.assign(effects({ ...input, receipt }), { input });
+  }
+  /** The world's time now, in whole microseconds. */
+  const nowUs = () => Math.round(h.engine.world.tick * DT * 1_000_000);
+  /** Each `set` of a rules answer as one engine op per thing, skipping a field that already holds its value; a refusal
+   *  when a thing it names is gone. */
+  function setOps(changes: Change[]): Op[] | Refusal {
+    const patches = new Map<string, Record<string, unknown>>();
+    for (const c of changes) {
+      if (c.change !== 'set') continue;
+      const x = thing(c.node); if (!x) return { code: 'object.refused', reason: `${nameOf(c.node)} is gone; nothing changed.` };
+      if (fieldsOf(x)[c.field] === (c as { to?: unknown }).to) continue;   // an amount of 0 (a full kettle): no edit for it
+      patches.set(c.node, { ...patches.get(c.node), [c.field]: valueFor(x.def, c.field, (c as { to?: unknown }).to) });
+    }
+    return [...patches].map(([node, state]) => opSchema.parse({ op: 'set', id: node, state }));
+  }
+  /** Crossings run, by thing, form and the time each crossed: each runs once. */
+  const ran = new Set<string>();
+  /** Run the thing's world forms that are due now: every need on a timed field has crossed its level (`crossing`, from the
+   *  time the field was set) by the world's time. Each is asked and applied at the latest of those crossings, as the
+   *  world, so a value it sets runs on from the moment it crossed. */
+  function runDue(id: string): void {
+    const t = thing(id); if (!t) return;
+    const now = nowUs();
+    for (const [name, form] of Object.entries(t.entry.forms ?? {})) {
+      if (form.starts !== 'timer' || form.who !== 'world') continue;
+      const fields = fieldsOf(t);
+      let at: number | null = null;
+      for (const n of (form.needs ?? []) as any[]) {
+        const def = n?.need === 'state' ? (t.entry.state as Record<string, any> | undefined)?.[n.field] : undefined;
+        if (def?.type !== 'timed') continue;
+        const level = 'at_least' in n ? { at_least: n.at_least } : 'at_most' in n ? { at_most: n.at_most } : null;
+        const c = level && crossing(def, fields[n.field], level, (fields[n.field] as { set_us?: unknown })?.set_us);
+        if (typeof c !== 'number' || c > now) { at = null; break; }
+        at = Math.max(at ?? c, c);
+      }
+      if (at === null) continue;
+      const key = `${id}|${name}|${at}`; if (ran.has(key)) continue; ran.add(key);
+      const input = { kinds: { [t.entry.kind]: t.entry }, act: { this: id, form: name, args: {} }, state: { actor: WORLD, nodes: { [id]: { kind: t.entry.kind, fields }, [WORLD]: {} }, moves: moves(), now_us: at } };
+      const r: any = effects({ ...input, receipt: `${id}:${name}@${at}` });
+      if (r.verdict !== 'yes' || !apply(input.state as never, r).ok) continue;   // its other needs do not hold: not due
+      const ops = setOps(r.changes as Change[]);
+      if (!Array.isArray(ops)) continue;
+      if (ops.length && !h.commit(ops, `world ${name} ${id}`).accepted) h.log(`forms: ${name} on ${id}: the world refused it`);
+    }
   }
   /** The rules' own verdict for a refusal's `decided` (SA-C3), without the input `ask` keeps beside it. */
   const verdictOf = (r: any) => { const { input: _input, ...v } = r; return v; };
@@ -274,6 +327,7 @@ export function createFormsAdapter(h: FormsHost) {
   const standsOf = (id: string): Vec3[] => { const x = thing(id); if (!x) return []; const wp = M().worldPose(x.e); return Object.values(x.entry.points ?? {}).filter((p) => (p as { role?: string }).role === 'stand').map((p) => toWorld(wp, p.at_mm)); };
   /** The steps of a form for this body, or a refusal; null when this is not an entry thing's form. */
   function plan(soul: { entityId: string }, id: string, action: string): { steps: Step[]; summary: string } | Refusal | null {
+    runDue(id);
     const t = thing(id), f = t && formOf(t.entry, action); if (!t || !f) return null;
     latest.delete(soul.entityId);   // a refusal leaves no earlier yes for `begun` to keep
     const form = f.form, body = all()[soul.entityId]; if (!body?.pose?.p) return null;
@@ -314,7 +368,8 @@ export function createFormsAdapter(h: FormsHost) {
         steps.push({ verb: 'mars:put_item', params: { item: c.node, surfaceSlot: free.id } });
         continue;
       }
-      if (s.step === 'walk_to') { const p = points[String((s as { point?: string } & typeof s).point)]; if (!p) return { code: 'form.no-point', reason: `${nameOf(id)} has no point ${(s as { point?: string } & typeof s).point}.` }; const w = toWorld(wp, p.at_mm); walk([w[0], w[2]], toWorld(wp, [0, 0, 0])); continue; }
+      // a walk to a point, or to an area by its centre (a tree's shade, a stair's top, inside a greenhouse)
+      if (s.step === 'walk_to') { const name = String((s as { point?: string } & typeof s).point), p = points[name] ?? (t.entry as { areas?: Record<string, { at_mm: number[] }> }).areas?.[name]; if (!p) return { code: 'form.no-point', reason: `${nameOf(id)} has no point ${(s as { point?: string } & typeof s).point}.` }; const w = toWorld(wp, p.at_mm); walk([w[0], w[2]], toWorld(wp, [0, 0, 0])); continue; }
       const toward = argName((s as { toward?: unknown }).toward);
       if (s.step === 'move' && s.at === undefined && toward) {
         // a move toward an argument with no point (hold under a tap): walk to clear ground by it and stand there a moment
@@ -384,7 +439,8 @@ export function createFormsAdapter(h: FormsHost) {
    *  anything that is not an entry thing's form, and for a programme that did not finish (today's failure stands). */
   function outcome(capability: string, bodyId: string, finished: boolean): 'done' | Refusal | null {
     const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability); if (!m) return null;
-    const [, id, action] = m, t = thing(id), f = t && formOf(t.entry, action), n = underWay.get(id) ?? 0;
+    const [, id, action] = m; runDue(id);
+    const t = thing(id), f = t && formOf(t.entry, action), n = underWay.get(id) ?? 0;
     if (n) { if (n > 1) underWay.set(id, n - 1); else underWay.delete(id); }
     const key = `${bodyId}|${capability}`, before = planned.get(key); planned.delete(key);
     if (!t && n && !M().entities.get(id)) return finished ? { code: 'form.thing_removed', reason: 'The thing was removed before this was done; nothing changed.' } : null;
@@ -420,15 +476,8 @@ export function createFormsAdapter(h: FormsHost) {
     // every set, on any thing it names, checked by the rules' own apply (whole, balanced) and committed as one edit
     const checked = apply(r.input.state, r);
     if (!checked.ok) return { code: `form.${checked.reason}`, reason: `${nameOf(id)}: the change could not be applied (${checked.reason.replace(/_/g, ' ')}); nothing changed.` };
-    const patches = new Map<string, Record<string, unknown>>();
-    for (const c of r.changes as Change[]) {
-      if (c.change !== 'set') continue;
-      const x = c.node === id ? t : thing(c.node); if (!x) return { code: 'object.refused', reason: `${nameOf(c.node)} is gone; nothing changed.` };
-      if (fieldsOf(x)[c.field] === (c as { to?: unknown }).to) continue;   // an amount of 0 (a full kettle): no edit for it
-      const def = x.def;
-      patches.set(c.node, { ...patches.get(c.node), [c.field]: valueFor(def, c.field, (c as { to?: unknown }).to) });
-    }
-    const ops = [...patches].map(([node, state]) => opSchema.parse({ op: 'set', id: node, state }));
+    const ops = setOps(r.changes as Change[]);
+    if (!Array.isArray(ops)) return ops;
     if (ops.length && !h.commit(ops, `${bodyId} ${action} ${id}`).accepted)
       return { code: 'object.refused', reason: `The world refused that change to ${nameOf(id)}.` };
     if (r.timers?.length) h.log(`forms: ${action} on ${id}: ${r.timers.length} timer(s) not run (new engine only)`);

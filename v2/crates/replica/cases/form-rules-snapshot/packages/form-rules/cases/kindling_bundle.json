@@ -1,0 +1,35 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:kindling_bundle (from #1621): the bundle a prepared block leaves on its out surface. Anyone with a free hand takes it (a change of parent).",
+  "cases": [
+    {
+      "name": "take_every_need_met",
+      "act": { "this": "kb1", "form": "take" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "eden:kindling_block", "fields": { "stock": 0 }, "slots": { "out": ["kb1"] } },
+          "kb1": { "kind": "eden:kindling_bundle" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "take_no_free_hand",
+      "act": { "this": "kb1", "form": "take" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "kb1": { "kind": "eden:kindling_bundle" },
+          "kb2": { "kind": "eden:kindling_bundle" },
+          "kb3": { "kind": "eden:kindling_bundle" },
+          "b1": { "hands": { "left": "kb2", "right": "kb3" } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": { "step": "put" } }
+    }
+  ]
+}

@@ -787,7 +787,8 @@ pub struct Effect {
 }
 
 impl Effect {
-    fn read(v: Value) -> R<Effect> {
+    /// One entry from its value (a history bundle's records are entries, V4).
+    pub(crate) fn read(v: Value) -> R<Effect> {
         let mut r = Rec::of(v, "an effect")?;
         let envelope = Envelope {
             sequence: read_uint(&r.take(1, "an effect")?, "a sequence")?,
@@ -1193,6 +1194,47 @@ fn link_value(l: &LinkState) -> Value {
     ]))
 }
 
+impl NodeState {
+    /// A node in the state layout (`State::to_value`), as a view's carried record holds it (T7 rule 4).
+    pub fn read(v: &Value) -> R<NodeState> {
+        let mut r = Rec::of(v.clone(), "a node")?;
+        let n = NodeState {
+            kind: read_name(r.take(1, "a node")?, "a node's kind")?,
+            parent: r.opt(2).map(|p| read_id(&p)).transpose()?,
+            slot: r.opt(3).map(|s| read_uint(&s, "a slot")).transpose()?,
+            audience: read_audience(r.take(4, "a node")?)?,
+            fields: read_map(r.take(5, "a node")?, "a node's fields")?,
+            place: r.opt(6),
+            motion: r.opt(7),
+        };
+        r.closed("a node")?;
+        Ok(n)
+    }
+}
+
+impl LinkState {
+    /// A link in the state layout (`State::to_value`).
+    pub fn read(v: &Value) -> R<LinkState> {
+        let mut r = Rec::of(v.clone(), "a link")?;
+        let ends = read_array(r.take(2, "a link")?, "a link's ends")?;
+        let [a, b] = ends.as_slice() else {
+            return not_record("a link has two ends");
+        };
+        let l = LinkState {
+            ty: read_name(r.take(1, "a link")?, "a link's type")?,
+            ends: [read_id(a)?, read_id(b)?],
+            owner: match read_uint(&r.take(3, "a link")?, "a link's owning end")? {
+                0 => End::First,
+                1 => End::Second,
+                _ => return not_record("a link's owning end is 0 or 1"),
+            },
+            audience: read_audience(r.take(4, "a link")?)?,
+        };
+        r.closed("a link")?;
+        Ok(l)
+    }
+}
+
 fn pairs<T>(m: &BTreeMap<Id, T>, f: impl Fn(&T) -> Value) -> Value {
     Value::Array(
         m.iter()
@@ -1542,6 +1584,7 @@ impl State {
                 self.nodes.retain(|id, _| !gone.contains(id));
                 self.links
                     .retain(|_, l| !gone.contains(&l.ends[0]) && !gone.contains(&l.ends[1]));
+                self.timers.retain(|_, t| !gone.contains(&t.node));
             }
             Change::Reparent { node, from, pose } => {
                 own.check(*node)?;
