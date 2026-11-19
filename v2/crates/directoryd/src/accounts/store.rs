@@ -69,6 +69,11 @@ impl Store {
              CREATE TABLE IF NOT EXISTS account_principals_v1(account_id TEXT PRIMARY KEY
                REFERENCES provider_accounts_v1(account_id), principal_id TEXT NOT NULL UNIQUE,
                created_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS account_grants_v1(account_id TEXT NOT NULL
+               REFERENCES provider_accounts_v1(account_id), grant_text TEXT NOT NULL, follow TEXT,
+               UNIQUE(account_id, grant_text));
+             CREATE TABLE IF NOT EXISTS revoked_sessions_v1(issuer TEXT NOT NULL, session_id TEXT NOT NULL,
+               revoked_at INTEGER NOT NULL, PRIMARY KEY(issuer, session_id));
              COMMIT;",
         )
         .map_err(owned)?;
@@ -117,6 +122,51 @@ impl Store {
         };
         tx.commit()?;
         Ok(Account { account, principal })
+    }
+
+    /// Records that `account` owns `grant` (a Soul, `soul-…`, or a world it creates, `creator-…`; V13b), with the
+    /// body the page follows for it, if any.
+    pub fn own(&self, account: &str, grant: &str, follow: Option<&str>) -> Result<(), StoreError> {
+        let db = self.db.lock().expect("the store");
+        db.execute(
+            "INSERT INTO account_grants_v1(account_id, grant_text, follow) VALUES (?1, ?2, ?3)
+             ON CONFLICT(account_id, grant_text) DO UPDATE SET follow = excluded.follow",
+            params![account, grant, follow],
+        )?;
+        Ok(())
+    }
+
+    /// What `account` owns: each grant and the body the page follows for it, in the order recorded.
+    pub fn grants(&self, account: &str) -> Result<Vec<(String, Option<String>)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let mut q = db.prepare(
+            "SELECT grant_text, follow FROM account_grants_v1 WHERE account_id = ?1 ORDER BY rowid",
+        )?;
+        let rows = q.query_map(params![account], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Records that a session was signed out: it gets no view token again, however long its token holds.
+    pub fn revoke_session(&self, issuer: &str, session: &str, now: u64) -> Result<(), StoreError> {
+        let db = self.db.lock().expect("the store");
+        db.execute(
+            "INSERT OR IGNORE INTO revoked_sessions_v1(issuer, session_id, revoked_at) VALUES (?1, ?2, ?3)",
+            params![issuer, session, now as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Whether a session was signed out.
+    pub fn revoked(&self, issuer: &str, session: &str) -> Result<bool, StoreError> {
+        let db = self.db.lock().expect("the store");
+        Ok(db
+            .query_row(
+                "SELECT 1 FROM revoked_sessions_v1 WHERE issuer = ?1 AND session_id = ?2",
+                params![issuer, session],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
     }
 
     /// A consistent copy of the store at `to`, taken while it is in use (SQLite's online backup), for O20 to ship.

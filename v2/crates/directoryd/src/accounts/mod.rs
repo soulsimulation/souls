@@ -7,12 +7,14 @@
 //!   each account to a random principal id. Only principal ids appear in effects (T8, `v2/docs/audience.md` rule 5).
 //! - [`start`]: what the program refuses to start with, among them the sign-in for local and test worlds on a public
 //!   address.
-//! - [`serve`]: the two sign-in requests over HTTP.
+//! - [`serve`]: the sign-in requests over HTTP, the session exchange and sign-out.
+//! - [`view`]: a signed-in session exchanges for a short-lived gateway view token (V13b, #3407).
 
 pub mod serve;
 pub mod session;
 pub mod start;
 pub mod store;
+pub mod view;
 
 use replica::ids::{Id, Scope};
 use ring::rand::{SecureRandom, SystemRandom};
