@@ -29,13 +29,16 @@ pub struct Config {
     pub store: PathBuf,
     pub provider: Option<Provider>,
     pub test_sign_in: bool,
+    /// The file holding the key the gateway reads and closes the mailbox with (R13); without it those requests are off.
+    pub mailbox_key: Option<PathBuf>,
     /// Pairing's store (W2), and the gateway's tokens file it writes; pairing is off without the store.
     pub pairing: Option<PathBuf>,
     pub gateway_tokens: Option<PathBuf>,
 }
 
 pub const USAGE: &str = "directoryd --listen <addr:port> --public-url <origin> --store <absolute path> \
-(--issuer <https origin> --parties <origin,origin> | --test-sign-in) [--pairing <path> [--gateway-tokens <path>]]";
+(--issuer <https origin> --parties <origin,origin> | --test-sign-in) [--pairing <path> [--gateway-tokens <path>]] \
+[--mailbox-key <file>]";
 
 /// Reads the arguments (without the program's name) and refuses what must not run. A refusal starts with
 /// "refusing to start".
@@ -46,6 +49,7 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
     let mut issuer = None;
     let mut parties = None;
     let mut test_sign_in = false;
+    let mut mailbox_key = None;
     let (mut pairing, mut gateway_tokens) = (None, None);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -61,6 +65,7 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
             "--issuer" => issuer = Some(value()?),
             "--parties" => parties = Some(value()?),
             "--test-sign-in" => test_sign_in = true,
+            "--mailbox-key" => mailbox_key = Some(PathBuf::from(value()?)),
             "--pairing" => pairing = Some(PathBuf::from(value()?)),
             "--gateway-tokens" => gateway_tokens = Some(PathBuf::from(value()?)),
             _ => return Err(format!("refusing to start: unknown argument {a}; {USAGE}")),
@@ -123,6 +128,7 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
         store,
         provider,
         test_sign_in,
+        mailbox_key,
         pairing,
         gateway_tokens,
     })

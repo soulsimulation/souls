@@ -940,7 +940,24 @@ pub fn judge(
 ) -> R<Vec<Unsafe>> {
     // G2's guard cuts the ground on both sides of the change: never on the clock thread (G3b, #3449).
     crate::commit::off_clock();
-    let (_, v) = safety::check(tree, header, ground, part, bodies).map_err(|e| Refusal {
+    verdict(safety::check(tree, header, ground, part, bodies))
+}
+
+/// [`judge`] in a zone with a town (G2b, #3488): the guard cuts only what the set-down can affect
+/// (`safety::guard_on`); `known` is the town as it stood at the copy's version.
+pub fn judge_on(
+    tree: &Tree,
+    header: &Header,
+    part: &Part,
+    bodies: &[Who],
+    known: &safety::Known,
+) -> R<Vec<Unsafe>> {
+    crate::commit::off_clock();
+    verdict(safety::check_on(tree, header, part, bodies, known))
+}
+
+fn verdict(r: Result<(safety::Guard, Vec<Unsafe>), String>) -> R<Vec<Unsafe>> {
+    let (_, v) = r.map_err(|e| Refusal {
         name: "setdown.unsafe-check",
         detail: e,
     })?;
