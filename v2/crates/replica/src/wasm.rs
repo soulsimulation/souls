@@ -249,7 +249,8 @@ fn json_value(v: &Value) -> Result<String, JsError> {
     })
 }
 
-/// An entry in a view item frame (R4's `{1: 1, 2: entry}`: an entry of a body in the interest set) as JSON, for the
+/// An entry in a view item frame (R4's `{1: 1, 2: entry}` or an addressed activity notification's
+/// `{1: 9, 2: entry bytes}`) as JSON, for the
 /// daemon to follow (R9b, #3201): `{"sequence":n,"at":n,"actor":"<id>"|null,"node":"<id>","changes":n,"events":
 /// [{"name":"..","fields":{"<n>":<value>}}]}`, `actor` null for the world or a creator; empty when the item is not
 /// an entry.
@@ -264,13 +265,34 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
     let Value::Map(mut item) = decode(&item).map_err(js)?.value else {
         return Err(JsError::new("item-not-a-record"));
     };
-    if item.get(&1) != Some(&Value::Uint(ENTRY_ITEM)) {
+    let addressed = item.get(&1) == Some(&Value::Uint(crate::speech::ADDRESSED));
+    if !addressed && item.get(&1) != Some(&Value::Uint(ENTRY_ITEM)) {
         return Ok(String::new());
     }
-    let entry = item
+    let mut entry = item
         .remove(&2)
         .ok_or_else(|| JsError::new("item-without-entry"))?;
+    if addressed {
+        let Value::Bytes(bytes) = entry else {
+            return Err(JsError::new("addressed-entry-not-bytes"));
+        };
+        entry = decode(&bytes).map_err(js)?.value;
+    }
     let e = Effect::read(entry).map_err(js)?;
+    if addressed
+        && (e
+            .events
+            .iter()
+            .flatten()
+            .any(|ev| ev.name.as_str() == crate::speech::SAID)
+            || !e
+                .events
+                .iter()
+                .flatten()
+                .any(|ev| crate::activity::addressed(ev.name.as_str(), &ev.fields).is_some()))
+    {
+        return Ok(String::new());
+    }
     let actor = match e.envelope.actor {
         Actor::Soul(id) => format!("\"{}\"", id_text(id)),
         Actor::Creator(_) | Actor::World => "null".to_owned(),
@@ -385,21 +407,44 @@ pub fn wire_intent(
             })
         })
         .collect::<Result<_, _>>()?;
+    let mut parameters: BTreeMap<_, _> = words
+        .map(|w| {
+            (
+                1,
+                Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
+            )
+        })
+        .into_iter()
+        .chain((!args.is_empty()).then_some((1, Value::Array(args))))
+        .chain(numbered(params.as_deref(), &node)?)
+        .collect();
+    // An activity kind is pinned as a name and a binary hash, like an edit's kind: no text exceeds I2's limit.
+    if matches!(verb.as_str(), "activity:offer" | "activity:propose")
+        && let Some(Value::Text(kind)) = parameters.get(&1)
+        && let Some((plain, hash)) = kind.as_str().split_once('@')
+    {
+        let bytes = from_hex(hash).map_err(|_| JsError::new("activity-kind-bad-pin"))?;
+        if plain.is_empty()
+            || plain.len() > crate::intent_decode::LIMITS.text_bytes as usize
+            || bytes.len() != 34
+            || bytes[..2] != [0x12, 0x20]
+            || hash != to_hex(&bytes)
+        {
+            return Err(JsError::new("activity-kind-bad-pin"));
+        }
+        parameters.insert(
+            1,
+            Value::Array(vec![
+                Value::Text(Name::new(plain).ok_or_else(|| JsError::new("activity-kind-bad-pin"))?),
+                Value::Bytes(bytes),
+            ]),
+        );
+    }
     let intent = Intent {
         actor: Actor::Soul(id),
         verb,
         target,
-        parameters: words
-            .map(|w| {
-                (
-                    1,
-                    Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
-                )
-            })
-            .into_iter()
-            .chain((!args.is_empty()).then_some((1, Value::Array(args))))
-            .chain(numbered(params.as_deref(), &node)?)
-            .collect(),
+        parameters,
         sequence,
         basis,
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
@@ -409,7 +454,7 @@ pub fn wire_intent(
         body: None,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
-    Intent::read(&bytes).map_err(js)?;
+    crate::intent_decode::decode(&bytes).map_err(js)?;
     Ok(bytes)
 }
 
@@ -583,11 +628,98 @@ fn json_str(s: &str) -> String {
     out
 }
 
+/// Ordinary kinds text names its references together. An imported world's lines are independently named instead
+/// (`import_eden::name_kind`), and may hold several revisions of one plain name. Keep each under its full hash.
+fn creator_kinds(text: &str) -> Result<BTreeMap<String, Kind>, crate::world_model::Refusal> {
+    let mut kinds = parse_kinds(text).or_else(|_| -> Result<_, crate::world_model::Refusal> {
+        let mut kinds = BTreeMap::new();
+        for line in text.lines() {
+            kinds.extend(parse_kinds(line)?);
+        }
+        Ok(kinds)
+    })?;
+    // C3 extends body admission at boot without revising imported kind definitions. The world's export names
+    // those exact full place kinds; both description and local checks apply the same in-memory extension.
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("# souls-boot-body"))
+    {
+        let target = line
+            .strip_prefix("# souls-boot-body ")
+            .filter(|s| !s.is_empty() && s.split_whitespace().count() == 1 && *s == s.trim())
+            .ok_or_else(|| {
+                crate::world_model::Refusal::Source("malformed boot-body admission".into())
+            })?;
+        let kind = kinds
+            .get_mut(target)
+            .filter(|k| k.owner == "place")
+            .ok_or_else(|| {
+                crate::world_model::Refusal::Source(
+                    "boot-body target must be an existing full place kind".into(),
+                )
+            })?;
+        kind.children.insert("body".into());
+    }
+    // Runtime activity pins are hashes of role definitions, not serialized T3 kind lines. Project only the
+    // world's explicit boot registration/admission; no imported definition is rewritten or rehashed.
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("# souls-boot-activity"))
+    {
+        let bad =
+            || crate::world_model::Refusal::Source("malformed boot-activity projection".into());
+        let fields: Vec<_> = line
+            .strip_prefix("# souls-boot-activity ")
+            .ok_or_else(bad)?
+            .split_whitespace()
+            .collect();
+        let [target, activity] = fields.as_slice() else {
+            return Err(bad());
+        };
+        let (base, hash) = activity.split_once('@').ok_or_else(bad)?;
+        if base.is_empty()
+            || Name::new(base).is_none()
+            || hash.len() != 68
+            || !hash.starts_with("1220")
+            || !hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(bad());
+        }
+        if kinds.get(*target).is_none_or(|kind| kind.owner != "place") {
+            return Err(crate::world_model::Refusal::Source(
+                "boot-activity target must be an existing full place kind".into(),
+            ));
+        }
+        let runtime = Kind {
+            owner: "activity".into(),
+            children: Default::default(),
+            slots: Default::default(),
+            hands: None,
+        };
+        if kinds.get(*activity).is_some_and(|kind| kind != &runtime) {
+            return Err(crate::world_model::Refusal::Source(
+                "boot-activity collides with an existing kind".into(),
+            ));
+        }
+        kinds.insert((*activity).to_owned(), runtime);
+        kinds
+            .get_mut(*target)
+            .expect("validated place")
+            .children
+            .insert(base.to_owned());
+    }
+    Ok(kinds)
+}
+
 /// The kinds a world pins, from its kinds text, as JSON `{"<full name>": {"owner": .., "admits": [..], "slots":
 /// {"<n>": [..]}}}`: what a creator may place, and in what.
 #[wasm_bindgen(js_name = editKinds)]
 pub fn edit_kinds(kinds: &str) -> Result<String, JsError> {
-    let kinds = parse_kinds(kinds).map_err(|e| JsError::new(&format!("kinds-text: {e:?}")))?;
+    let kinds = creator_kinds(kinds).map_err(|e| JsError::new(&format!("kinds-text: {e:?}")))?;
     let list = |l: &BTreeSet<String>| l.iter().map(|n| json_str(n)).collect::<Vec<_>>().join(",");
     let out: Vec<String> = kinds
         .iter()
@@ -678,7 +810,7 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
     let kinds: Option<BTreeMap<String, Kind>> = if kinds.trim().is_empty() {
         None
     } else {
-        match parse_kinds(kinds) {
+        match creator_kinds(kinds) {
             Ok(k) => Some(k),
             Err(e) => return no(None, "edit.kinds-text", &format!("{e:?}")),
         }

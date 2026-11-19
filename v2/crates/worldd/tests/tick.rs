@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use import_eden::Import;
@@ -229,7 +230,11 @@ fn run_to(w: &World, tick: i64) -> Ran {
 /// An answer: `Ok(entries)` for a receipt, `Err(reason)` for a refusal.
 fn answer(rx: &Receiver<Vec<u8>>) -> Result<Vec<u64>, String> {
     let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
-    let Value::Map(m) = decode(&frame).unwrap().value else {
+    answer_frame(&frame)
+}
+
+fn answer_frame(frame: &[u8]) -> Result<Vec<u64>, String> {
+    let Value::Map(m) = decode(frame).unwrap().value else {
         panic!("a frame")
     };
     let Some(Value::Map(a)) = m.get(&2) else {
@@ -682,14 +687,18 @@ fn k18b_a2_a_route_search_on_the_clock_thread_fails() {
     let _ = t.line(&body, Vec3::new(88_000_000, 0, -5_000_000));
 }
 
-/// A free-running clock from one tick (`.1` µs): real time since it started, so a world's first tick is tick 1, next to
-/// lockstep's first.
-struct FromZero(std::time::Instant, i64);
+/// Held at one tick until the scheduled arrivals are acknowledged; then real time since release, so a world's first
+/// tick is tick 1, next to lockstep's first. Construction time cannot run past the arrivals' fixed ticks.
+struct FromZero(Arc<OnceLock<std::time::Instant>>, i64);
 
 impl sim::clock::Clock for FromZero {
     #[allow(clippy::disallowed_methods)] // a test's real clock
     fn now(&mut self) -> i64 {
-        self.1 + self.0.elapsed().as_micros() as i64
+        self.1
+            + self
+                .0
+                .get()
+                .map_or(0, |zero| zero.elapsed().as_micros() as i64)
     }
 
     fn sleep_until(&mut self, t: i64) {
@@ -751,9 +760,8 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
     let live = || {
         let store = Mem::with(Vec::new());
         let mut cfg = config(BTreeMap::new());
-        #[allow(clippy::disallowed_methods)] // a test's real clock
-        let zero = std::time::Instant::now();
-        cfg.clock = Some(Box::new(FromZero(zero, tick_us)));
+        let zero = Arc::new(OnceLock::new());
+        cfg.clock = Some(Box::new(FromZero(zero.clone(), tick_us)));
         let w = answers::start(lamp_world().replica, toggles::rules(), store.clone(), cfg).unwrap();
         let to_chair = at(&w, 20, intent(p[0].0, 1, "eden:walk", Some(chair()), None));
         let stroll = at(
@@ -767,18 +775,67 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
                 Some(Vec3::new(-44_000_000, 0, 38_000_000)),
             ),
         );
+        // The same sender's FIFO RunTo is acknowledged only after both ArrivalAt events were consumed. In a free
+        // world it observes the current tick; the held test clock prevents catch-up from passing ticks 20 and 21.
+        let (done, consumed) = channel();
+        w.events.send(Event::RunTo { tick: 1, done }).unwrap();
+        let queued = consumed
+            .recv_timeout(Duration::from_secs(20))
+            .unwrap_or_else(|e| {
+                panic!(
+                    "K18b scheduled-arrival barrier: {e}; beat {:?}",
+                    w.beat.read()
+                )
+            });
+        assert!(
+            queued.tick < 20,
+            "arrivals queued before tick 20: {queued:?}"
+        );
+        #[allow(clippy::disallowed_methods)]
+        // a test's real clock, released after the processed-event barrier
+        zero.set(std::time::Instant::now()).unwrap();
+        let observed_answer = |rx: &Receiver<Vec<u8>>, label: &str| {
+            let frame = rx.recv_timeout(Duration::from_secs(20)).unwrap_or_else(|e| {
+                let records = recover(&bytes(&store)).unwrap().records;
+                let inputs = recorder::inputs(&records).unwrap();
+                let intents: Vec<_> = inputs
+                    .iter()
+                    .flat_map(|(tick, rows)| rows.iter().map(move |row| (*tick, row)))
+                    .filter_map(|(tick, row)| match row {
+                        recorder::Input::Intent { verb, .. } => Some((tick, verb.as_str())),
+                        _ => None,
+                    })
+                    .take(8)
+                    .collect();
+                let answered: usize = records
+                    .iter()
+                    .filter(|r| !recorder::is_input(r))
+                    .filter_map(|r| Part::read(r).ok())
+                    .map(|p| match p.rest.get(&answers::ANSWERED) {
+                        Some(Value::Array(rows)) => rows.len(),
+                        _ => 0,
+                    })
+                    .sum();
+                panic!(
+                    "K18b {label}: {e}; beat {:?}; records {}; intents {intents:?}; answered {answered}",
+                    w.beat.read(),
+                    records.len()
+                );
+            });
+            answer_frame(&frame)
+        };
         while w.beat.read().0 < 5 {
             std::thread::sleep(Duration::from_millis(5));
         }
         w.events
             .send(Event::Stall(Duration::from_millis(400)))
             .unwrap();
-        let walked = answer(&to_chair);
-        let strolled = answer(&stroll);
+        let walked = observed_answer(&to_chair, "walk to chair");
+        let strolled = observed_answer(&stroll, "stroll");
         let (reply, sit) = channel();
         w.door()
             .arrive(intent(p[0].0, 2, "eden:sit", Some(chair()), None), reply);
-        let sat = answer(&sit);
+        let sat = observed_answer(&sit, "sit");
         std::thread::sleep(Duration::from_millis(300));
         w.stop();
         println!("K18b free-running: walk {walked:?}, stroll {strolled:?}, sit {sat:?}");

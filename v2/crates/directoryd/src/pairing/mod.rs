@@ -23,7 +23,7 @@
 pub mod route;
 pub mod souls;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::accounts::random;
 use replica::encode::{from_hex, to_hex};
@@ -360,8 +360,25 @@ impl Pairing {
         code: &str,
         now: u64,
     ) -> Result<String, (&'static str, Option<String>)> {
+        self.approve_holding(account, code, now, |_| false)
+    }
+
+    /// [`Pairing::approve`], where `holds` says which grants the account holds in the accounts store (a world's
+    /// creator account holds its `creator-…` grant, recorded by the import or `--test-own`; G7b, #3477): a creator
+    /// grant the approving account holds is registered to it first. A creator grant no account here holds, or another
+    /// account does, is refused `not-the-creator`.
+    pub fn approve_holding(
+        &self,
+        account: &str,
+        code: &str,
+        now: u64,
+        holds: impl Fn(&str) -> bool,
+    ) -> Result<String, (&'static str, Option<String>)> {
         let (code, _, soul, _, force, _, _) =
             self.guess(account, code, now).map_err(|e| (e, None))?;
+        if let Some(g) = soul.as_deref().filter(|g| is_creator_grant(g) && holds(g)) {
+            self.register(g, account).map_err(|_| ("store", None))?;
+        }
         // Each change is made only to a request still pending: of two approvals at once, one finds it gone.
         let refuse = |name: &'static str, device: Option<String>| {
             let changed = self.db.lock().expect("the store").execute(
@@ -377,7 +394,11 @@ impl Pairing {
         };
         let grant = match soul {
             Some(g) => match self.soul_of(&g).map_err(|e| (e, None))? {
+                None if is_creator_grant(&g) => return refuse("not-the-creator", None),
                 None => return refuse("unknown-soul", None),
+                Some((owner, _)) if owner != account && is_creator_grant(&g) => {
+                    return refuse("not-the-creator", None);
+                }
                 Some(_) if self.retired(&g).map_err(|e| (e, None))? => {
                     return refuse("soul-retired", None);
                 }

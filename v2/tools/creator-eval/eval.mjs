@@ -1,85 +1,132 @@
 #!/usr/bin/env node
-// The creator's eval (Engine v2 G7, #2796): fresh agents in a real harness (Claude Code, `claude -p`), each given only
-// the creator's skill (`v2/client/skills/creator.md`) and its world, build a room with a door and a seat. Each run has
-// its own world (`worldd gateway-link --creator`, G1b) behind a real gateway (`gatewayd`), and an empty folder outside
-// any repository holding the skill, the command and a home already holding the creator's token (the directory cannot
-// yet register a v2 world's creator grant to an account, so pairing is done for it). Per run it reports the agent's
-// turns, tokens, commands and refusals, what stands in the world after, and whether the token's secret appears in the
-// transcript, the command's output or the daemon's files.
+// The creator's eval (Engine v2 G7, #2796; on a served Eden, G7b #3477): fresh agents in a real harness (Claude Code,
+// `claude -p`), each given only the creator's skill (`v2/client/skills/creator.md`) and its world, build a room with a
+// door and a seat. Each run has its own Eden world (`worldd seed --creator`, then `worldd serve`: Eden's kinds, the
+// world's one creator) behind a real gateway (`gatewayd`), and a directory (`directoryd --test-sign-in`) whose test
+// person `creator` holds the world's creator grant, as the accounts import records a creator account. The creator's
+// home is paired for real (`pair.mjs --creator`): a request approved by another test person is refused by name first
+// (A1), then the creator account's approval registers the grant and hands the daemon its token. The agent works in an
+// fresh private scratch folder holding the skill, the command and that home. Per run it reports the pairing,
+// the agent's turns, tokens, commands and refusals, what the run built in the world, and whether the token's secret
+// appears in the transcript, the command's output or the daemon's files.
 //
-//   SEAT_CONFIG_DIR=<signed-in Claude config dir> node v2/tools/creator-eval/eval.mjs --out <dir> [--runs 2]
-//     [--model sonnet] [--max-turns 40]
-//   Run from anywhere after `cargo build -p gatewayd -p worldd --locked` and replica's wasm-bindgen package in
-//   v2/target/wasm-load/pkg. Prints one JSON line per run, then the summary; `<dir>/run-<n>/` keeps the transcript.
+//   SEAT_CONFIG_DIR=<signed-in Claude config dir> node v2/tools/creator-eval/eval.mjs --facts <eden facts.json>
+//     --out <dir> [--runs 2] [--model sonnet] [--max-turns 40] [--pair-only | --external-driver]
+//   Run after `cargo build -p gatewayd -p worldd -p directoryd --locked` and replica's wasm-bindgen package in
+//   v2/target/wasm-load/pkg. The facts file is `node v2/tools/import-eden/export/export.ts`'s. `--pair-only` stops
+//   each run after the pairing (no agent, no model). Prints one JSON line per run, then the summary; `<dir>/run-<n>/`
+//   keeps the transcript. `--external-driver` writes private `ready.json` paths for a native worker, then waits up
+//   to twenty minutes for its `transcript.jsonl` and `complete` marker before the same grading and cleanup.
 
 import { execFile, spawn } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../..');
 const GOD = join(v2, 'client/src/creator/souls-god.mjs');
+const PAIR = join(v2, 'client/src/pair/pair.mjs');
 const SKILL = join(v2, 'client/skills/creator.md');
 const PKG = process.env.SOULS_REPLICA_PKG ?? join(v2, 'target/wasm-load/pkg');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
-// What `worldd gateway-link --creator` pins (`worldd::checkers::toggles::kinds`), as the creator's home keeps it.
-const KINDS = `{1: "souls:place", 2: "place", 11: ["souls:room"]}
-{1: "souls:room", 2: "place", 11: ["body", "thing"]}
-{1: "souls:body", 2: "family", 6: {1: ["thing"], 2: ["thing"]}}
-{1: "souls:item", 2: "thing"}
-{1: "r2:lamp", 2: "thing"}
-`;
 export const TASK = 'You are the creator of a Souls world. Read creator.md in this folder: it is your only guide. Then build a room with a door and a seat in it, using only `node souls-god.mjs`. When you are done, say what you built, with each id, and anything you could not build and why.';
 
 const args = process.argv.slice(2);
 const opt = (n, d) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] : d; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Starts the world and the gateway; gives the gateway's address and a stop. */
-async function world(dir, creator, token) {
-  const sock = join(dir, 'w.sock'), tokens = join(dir, 'tokens.txt');
-  writeFileSync(tokens, `creator-${creator} ${createHash('sha256').update(token).digest('hex')}\n`);
-  const procs = [spawn(bin('worldd'), ['gateway-link', '--socket', sock, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--rooms', '1', '--bodies', '1', '--creator', creator, '--no-measures', '--log', join(dir, 'world.log')], { stdio: 'ignore' })];
-  for (let k = 0; ; k++) {
-    try { if (statSync(sock).isSocket()) break; } catch { /* not yet */ }
-    if (k > 500) throw new Error('the world did not start');
-    await sleep(20);
-  }
-  const gw = spawn(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', sock, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], { stdio: ['ignore', 'pipe', 'ignore'] });
-  procs.push(gw);
-  const addr = await new Promise((ok, fail) => {
+/** Spawns `cmd` and resolves with the first match of `re` in its standard output. */
+function started(cmd, argv, re, procs, log) {
+  const p = spawn(cmd, argv, { stdio: ['ignore', 'pipe', 'pipe'] });
+  procs.push(p);
+  return new Promise((ok, fail) => {
     let out = '';
-    gw.stdout.on('data', (d) => { out += d; const m = /listening (\S+)\n/.exec(out); if (m) ok(m[1]); });
-    gw.on('exit', (c) => fail(new Error(`gatewayd ended (${c})`)));
+    p.stdout.on('data', (d) => { appendFileSync(log, d); out += d; const m = re.exec(out); if (m) ok(m[1]); });
+    p.stderr.on('data', (d) => appendFileSync(log, d));
+    p.on('error', fail);
+    p.on('exit', (c) => fail(new Error(`${cmd} ended (${c}); see its service log`)));
   });
-  return { gateway: `ws://${addr}/v2/ws`, stop: () => procs.forEach((p) => p.kill()) };
 }
 
-/** The agent's folder: the skill, the command and a home holding the creator's token, outside any repository. */
-function folder(gateway, id, token) {
-  const at = mkdtempSync(join(tmpdir(), 'souls-creator-'));
+/** Seeds and serves an Eden world whose creator is `creator`, with a gateway and a directory; their addresses. */
+async function world(dir, facts, creator) {
+  const procs = [];
+  try {
+    const w = join(dir, 'world'), sock = join(dir, 'w.sock'), tokens = join(dir, 'tokens');
+    await new Promise((ok, fail) => execFile(bin('worldd'), ['seed', '--facts', facts, '--dir', w, '--souls', '1', '--creator', creator],
+      (e) => (e ? fail(e) : ok())));
+    writeFileSync(tokens, '');
+    await started(bin('worldd'), ['serve', '--dir', w, '--socket', sock], /(listening) /, procs, join(dir, 'worldd.log'));
+    const directory = await started(bin('directoryd'), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1', '--store', join(dir, 'directory'),
+      '--test-sign-in', '--test-own', `creator=creator-${creator}`, '--pairing', join(dir, 'pairing.sqlite'), '--gateway-tokens', tokens], /listening on (\S+)\n/, procs, join(dir, 'directoryd.log'));
+    const gw = await started(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', sock, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/, procs, join(dir, 'gatewayd.log'));
+    return { directory: `http://${directory}`, gateway: `ws://${gw}/v2/ws`, kinds: join(w, 'world.kinds'), stop: () => procs.forEach((p) => p.kill()) };
+  } catch (e) {
+    procs.forEach((p) => p.kill());
+    throw e;
+  }
+}
+
+/** `pair.mjs --creator` into `home`; `person` approves on the card. Its last answer line. */
+function pair(home, w, grant, person) {
+  return new Promise((ok) => {
+    const p = spawn(process.execPath, [PAIR, '--directory', w.directory, '--world', 'local', '--gateway', w.gateway, '--device', 'eval', '--label', 'creator eval', '--creator', grant],
+      { env: { PATH: process.env.PATH, SOULS_HOME: home }, stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    p.stdout.on('data', async (d) => {
+      out += d;
+      const asked = out.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((j) => j?.step === 'approve');
+      if (asked && !p.approved) {
+        p.approved = true;
+        await fetch(new URL('/v1/pair/approve', w.directory), { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code: asked.code, confirm: true, test_person: person }) });
+      }
+    });
+    p.on('exit', () => ok(JSON.parse(out.trim().split('\n').at(-1) || '{}')));
+  });
+}
+
+/** The agent's private folder, beside the retained run output under ignored scratch; its home is paired below. */
+export function folder(dir) {
+  const at = join(dir, 'agent');
+  mkdirSync(at, { recursive: true, mode: 0o700 });
   copyFileSync(SKILL, join(at, 'creator.md'));
   writeFileSync(join(at, 'souls-god.mjs'), `// The creator's command (Souls v2): runs v2/client/src/creator/souls-god.mjs.\nimport { spawnSync } from 'node:child_process';\nprocess.exitCode = spawnSync(process.execPath, [${JSON.stringify(GOD)}, ...process.argv.slice(2)], { stdio: 'inherit' }).status ?? 1;\n`);
   const home = join(at, '.souls');
   mkdirSync(join(home, 'kinds'), { recursive: true, mode: 0o700 });
-  writeFileSync(join(home, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway } } }));
-  writeFileSync(join(home, 'credentials.json'), JSON.stringify({ souls: { [id]: { local: { token } } } }), { mode: 0o600 });
-  chmodSync(join(home, 'credentials.json'), 0o600);
-  writeFileSync(join(home, 'kinds', 'local.kinds'), KINDS);
   return { at, home };
 }
 
-/** The agent, in a clean environment: only Read and the command. Gives its stream-json transcript. */
+/** The agent, in a clean environment: Read, the command and jq for its JSON output. Gives its transcript. */
 function agent(at, { model, maxTurns }) {
   // USER and LOGNAME: the seat's sign-in is in the login keychain, which Claude Code finds by them.
   const env = { HOME: process.env.HOME, PATH: process.env.PATH, USER: process.env.USER ?? '', LOGNAME: process.env.LOGNAME ?? '', LANG: process.env.LANG ?? 'en_US.UTF-8', CLAUDE_CONFIG_DIR: process.env.SEAT_CONFIG_DIR, SOULS_HOME: join(at, '.souls'), SOULS_REPLICA_PKG: PKG };
   return new Promise((ok) => {
     execFile('claude', ['-p', TASK, '--output-format', 'stream-json', '--verbose', '--model', model, '--max-turns', String(maxTurns),
-      '--allowedTools', 'Read', 'Bash(node souls-god.mjs:*)'], { cwd: at, env, maxBuffer: 64 << 20, timeout: 20 * 60_000 }, (e, stdout) => ok(stdout || String(e)));
+      '--allowedTools', 'Read', 'Bash(node souls-god.mjs:*)', 'Bash(jq:*)'], { cwd: at, env, maxBuffer: 64 << 20, timeout: 20 * 60_000 }, (e, stdout) => ok(stdout || String(e)));
   });
+}
+
+/** A native worker uses the same prepared home and leaves its transcript before the completion marker. No tokens
+ * enter the manifest. Its paths are private run output; the normal before/after grading and token audit still run.
+ * The transcript uses the same assistant tool_use, user tool_result and final result records as the default driver.
+ */
+export async function externalAgent(at, dir, run, { within = 20 * 60_000, poll = 200 } = {}) {
+  const manifest = resolve(dir, 'ready.json'), transcript = resolve(dir, 'transcript.jsonl'), complete = resolve(dir, 'complete');
+  writeFileSync(manifest, JSON.stringify({ run, folder: at, home: join(at, '.souls'), command: 'node souls-god.mjs',
+    skill: join(at, 'creator.md'), task: TASK, environment: { SOULS_HOME: join(at, '.souls'), SOULS_REPLICA_PKG: PKG },
+    transcript, complete, withinMs: within }, null, 2) + '\n', { mode: 0o600 });
+  console.log(JSON.stringify({ step: 'external-driver-ready', run, manifest }));
+  const until = Date.now() + within;
+  while (!existsSync(complete)) {
+    if (Date.now() >= until) throw new Error('external creator driver timed out before completion');
+    await sleep(poll);
+  }
+  const text = readFileSync(transcript, 'utf8');
+  if (!text.trim()) throw new Error('external creator driver left an empty transcript');
+  return text;
 }
 
 /** The numbers: turns, tokens, commands and refusals, from the transcript. */
@@ -101,44 +148,86 @@ export function measure(transcript) {
   };
 }
 
-/** What stands in the world after: each room the run placed and the kinds in it. */
-function built(home) {
-  return new Promise((ok) => execFile(process.execPath, [GOD, 'describe'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG } }, (_, out) => {
-    const d = JSON.parse(String(out).trim().split('\n').at(-1) || '{}');
-    const nodes = d.nodes ?? [];
-    const rooms = nodes.filter((n) => n.kind === 'souls:room');
-    ok({ text: out, rooms: rooms.map((r) => ({ id: r.id, holds: nodes.filter((n) => n.parent === r.id).map((n) => n.kind) })) });
+/** The reported construction, from the same final description used to grade the run. */
+export function construction(nodes, before) {
+  const kind = new Map(nodes.map((n) => [n.id, n.kind]));
+  const parent = new Map(nodes.map((n) => [n.id, n.parent]));
+  const path = (id) => { const p = []; for (let at = parent.get(id); at; at = parent.get(at)) p.push(kind.get(at)); return p; };
+  const added = nodes.filter((n) => !before.has(n.id)).map((n) => ({ id: n.id, kind: n.kind, in: path(n.id).slice(0, 3) }));
+  const rooms = added.filter((n) => /:room(?:@|$)/.test(n.kind)).map((r) => ({ id: r.id, holds: added.filter((n) => parent.get(n.id) === r.id).map((n) => n.kind) }));
+  return { ids: new Set(nodes.map((n) => n.id)), added, rooms };
+}
+
+/** What the run built: each node not in the world before (`before`, ids), by kind, with the kinds of its parents. */
+function built(home, before) {
+  return new Promise((ok, fail) => execFile(process.execPath, [GOD, 'describe'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, maxBuffer: 256 << 20 }, (error, out) => {
+    let d;
+    try { d = JSON.parse(String(out).trim().split('\n').at(-1) || '{}'); } catch { return fail(new Error('describe returned invalid JSON')); }
+    if (error || d.ok === false || !Array.isArray(d.nodes)) return fail(new Error(`describe refused: ${d.code ?? 'no-world'}${d.detail ? `: ${d.detail}` : ''}`));
+    ok({ text: String(out), ...construction(d.nodes, before) });
   }));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  if (!process.env.SEAT_CONFIG_DIR) { console.error('set SEAT_CONFIG_DIR to a signed-in Claude config directory'); process.exit(2); }
+  const pairOnly = args.includes('--pair-only');
+  const externalDriver = args.includes('--external-driver');
+  if (!pairOnly && !externalDriver && !process.env.SEAT_CONFIG_DIR) { console.error('set SEAT_CONFIG_DIR to a signed-in Claude config directory'); process.exit(2); }
+  const facts = resolve(opt('--facts', '.local/import-eden/eden-2026.facts.json'));
   const out = resolve(opt('--out', '.local/creator-eval'));
   const runs = Number(opt('--runs', 2)), model = opt('--model', 'sonnet'), maxTurns = Number(opt('--max-turns', 40));
   const all = [];
   for (let n = 1; n <= runs; n++) {
     const dir = join(out, `run-${n}`);
+    rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
-    const scope = randomBytes(16).toString('hex'), secret = randomBytes(32).toString('hex');
-    const creator = `${scope}-1`, token = `creator-${creator}.${secret}`, id = `c_${creator}`;
-    const w = await world(dir, creator, token);
-    const f = folder(w.gateway, id, token);
+    const creator = `${randomBytes(16).toString('hex')}-1`, grant = `creator-${creator}`, id = `c_${creator}`;
+    const w = await world(dir, facts, creator);
+    const f = folder(dir);
     try {
-      const transcript = await agent(f.at, { model, maxTurns });
+      // A1: another account's approval is refused by name; the creator account's pairs the home.
+      const refused = await pair(f.home, w, grant, 'someone-else');
+      const paired = await pair(f.home, w, grant, 'creator');
+      const pairing = { other: refused.code ?? null, creator: paired.ok ? paired.soul : paired.code };
+      if (!paired.ok) throw new Error(`pairing refused: ${paired.code}`);
+      copyFileSync(w.kinds, join(f.home, 'kinds', 'local.kinds'));
+      // The gateway rereads the directory's token hashes every two seconds.
+      await sleep(2200);
+      let ready = false;
+      for (let k = 0; k < 100; k++) {
+        const s = await new Promise((ok) => execFile(process.execPath, [GOD, 'status'], { env: { PATH: process.env.PATH, SOULS_HOME: f.home, SOULS_REPLICA_PKG: PKG } }, (_, o) => ok(String(o))));
+        let status;
+        try { status = JSON.parse(s); } catch { /* a failed command is not ready */ }
+        if (status?.connected && !status.syncing && Object.keys(status.roots ?? {}).length) { ready = true; break; }
+        await sleep(200);
+      }
+      if (!ready) throw new Error('creator daemon did not become current within the readiness window');
+      const before = await built(f.home, new Set());
+      writeFileSync(join(dir, 'describe-before.json'), before.text);
+      if (pairOnly) {
+        const row = { run: n, pairing, nodes: before.ids.size, describeBytes: Buffer.byteLength(before.text) };
+        console.log(JSON.stringify(row));
+        all.push(row);
+        continue;
+      }
+      const transcript = externalDriver ? await externalAgent(f.at, dir, n) : await agent(f.at, { model, maxTurns });
       writeFileSync(join(dir, 'transcript.jsonl'), transcript);
-      const after = await built(f.home);
+      const after = await built(f.home, before.ids);
       const runtime = join(f.home, 'souls', id, 'runtime');
       const files = readdirSync(runtime).filter((x) => statSync(join(runtime, x)).isFile()).map((x) => readFileSync(join(runtime, x), 'utf8'));
+      const secret = JSON.parse(readFileSync(join(f.home, 'credentials.json'), 'utf8')).souls[id].local.token.split('.')[1];
       const leaked = [transcript, after.text, ...files].some((t) => t.includes(secret));
-      const row = { run: n, model, ...measure(transcript), rooms: after.rooms, tokenFound: leaked };
+      const row = { run: n, model: externalDriver ? 'native-codex' : model, pairing, ...measure(transcript),
+        ...(externalDriver ? { cost: null, tokens: null } : {}), added: after.added, rooms: after.rooms, tokenFound: leaked };
       writeFileSync(join(dir, 'result.json'), JSON.stringify(row, null, 2) + '\n');
       console.log(JSON.stringify(row));
       all.push(row);
     } finally {
+      const daemonLog = join(f.home, 'souls', id, 'runtime', 'daemon.log');
+      try { copyFileSync(daemonLog, join(dir, 'daemon.log')); } catch {}
       await new Promise((ok) => execFile(process.execPath, [GOD, 'stop'], { env: { PATH: process.env.PATH, SOULS_HOME: f.home, SOULS_REPLICA_PKG: PKG } }, ok));
       w.stop();
       rmSync(f.at, { recursive: true, force: true });
     }
   }
-  console.log(JSON.stringify({ runs: all.length, tokenFound: all.some((r) => r.tokenFound), turns: all.map((r) => r.turns), refusals: all.map((r) => r.refusals) }));
+  console.log(JSON.stringify({ runs: all.length, tokenFound: all.some((r) => r.tokenFound), pairing: all.map((r) => r.pairing), turns: all.map((r) => r.turns), refusals: all.map((r) => r.refusals) }));
 }

@@ -1529,7 +1529,28 @@ impl World for Town {
     }
 
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
-        let (legs, ground, squares) = plan_on(
+        self.plan_with_metrics(body, node, goal)
+            .map(|(legs, _)| legs)
+    }
+}
+
+/// Metrics of the actual N5 route, kept beside its legs for a gateway act's deadline (C29). Neither straight
+/// distance nor the legs alone include the route's obstacle corners and crossing frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RouteMetrics {
+    pub length_mm: u64,
+    pub links: usize,
+}
+
+impl Town {
+    /// The existing route search, with its metrics retained. Called by the planner, never by the clock.
+    pub fn plan_with_metrics(
+        &mut self,
+        body: &Body,
+        node: Id,
+        goal: Vec3,
+    ) -> Result<(Vec<Leg>, RouteMetrics), Refusal> {
+        let (legs, ground, squares, metrics) = plan_on(
             &mut MapRef::Own(&mut self.map),
             &self.tree,
             &self.link_at,
@@ -1541,7 +1562,7 @@ impl World for Town {
         )?;
         self.planned.insert(body.id, ground);
         self.planned_squares.insert(body.id, squares);
-        Ok(legs)
+        Ok((legs, metrics))
     }
 }
 
@@ -1562,7 +1583,7 @@ fn plan_on(
     body: &Body,
     node: Id,
     goal: Vec3,
-) -> Result<(Vec<Leg>, Crossed, Squares), Refusal> {
+) -> Result<(Vec<Leg>, Crossed, Squares, RouteMetrics), Refusal> {
     let here = node_of(body);
     let from = map
         .get()
@@ -1609,7 +1630,15 @@ fn plan_on(
         to: goal,
         link: None,
     });
-    Ok((legs, ground, squares))
+    let metrics = RouteMetrics {
+        length_mm: route.length,
+        links: route
+            .hops
+            .iter()
+            .filter(|h| matches!(h, Hop::Link { .. }))
+            .count(),
+    };
+    Ok((legs, ground, squares, metrics))
 }
 
 impl<'a> View<'a> {
@@ -1778,7 +1807,7 @@ impl<'a> View<'a> {
             node,
             goal,
         )
-        .map(|(legs, _, _)| legs)
+        .map(|(legs, _, _, _)| legs)
     }
 
     /// Each node's surface a body stands on.
