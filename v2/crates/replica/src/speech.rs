@@ -61,7 +61,7 @@ pub enum Reach {
     /// A raised voice: every Soul within [`Radii::loud`] of the speaker, on its node. Public.
     Loud,
     /// To the members of an activity the speaker is in, at any distance (a call is an activity both joined, E8), and
-    /// to talk's hearers. Public.
+    /// to no one else: the activity's audience (E26a, #3504).
     Members(Id),
     /// Through a thing: to the Souls near each receiver of the device link it sends on that is on ([`Device`]), and
     /// to talk's hearers. Public.

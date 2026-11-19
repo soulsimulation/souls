@@ -116,7 +116,7 @@ use sim::recorder::{self, Input};
 use sim::speech;
 use sim::text::Store;
 use sim::timers::{DueList, Timer};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -945,6 +945,17 @@ impl Clock {
         }
         let mut value = intent.to_value();
         let form = words::form(&intent);
+        // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
+        let mut members = BTreeSet::new();
+        if let words::Form::Members(activity) = form {
+            match body_of(&intent).and_then(|b| words::members(self.replica.tree(), activity, b)) {
+                Ok(m) => members = m,
+                Err(reason) => {
+                    let a = self.refusal(actor, sequence, reason);
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                }
+            }
+        }
         let mut kept = Vec::new();
         if has_words(&value) {
             // The words go to the store and the intent is logged with their references (V1b); refused, it is logged
@@ -975,7 +986,7 @@ impl Clock {
             let entry = match body_of(&intent) {
                 Ok(b) if self.replica.node(b).is_some() => {
                     let env = words::envelope(self.replica.version(), now, id, actor, b);
-                    words::entry(form, &value, &kept, b, env)
+                    words::entry(form, &value, &kept, b, members, env)
                 }
                 Ok(_) => Some(Err("intent.no-body")),
                 Err(e) => Some(Err(e)),
