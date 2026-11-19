@@ -625,6 +625,10 @@ struct Open {
     sequence: u64,
     body: Id,
     expiry: Micros,
+    /// Its deadline at its arrival, world time.
+    due: Micros,
+    /// A form's act: its run's deadline, from the run's start (C20).
+    run_due: Option<Micros>,
     intent: Value,
     waiters: Vec<Reply>,
     stamps: Stamps,
@@ -643,6 +647,8 @@ struct Tick {
     handed: Option<u64>,
     /// The tick's parts, handed to the sync thread once its records are on the disk (C16).
     parts: Vec<Arc<Part>>,
+    /// Answers sent as they are, with no block: a form act's progress (C20).
+    bare: Vec<(Vec<Reply>, Vec<u8>)>,
 }
 
 struct Clock {
@@ -669,6 +675,9 @@ struct Clock {
     fresh: Vec<(Hash, Vec<u8>)>,
     checked: Vec<(Act, Checks)>,
     replies: Vec<Out>,
+    /// Progress answers (C20), by act: sent after the tick's sync with its answers, as they are, never kept or logged;
+    /// one whose act ends in the same tick is dropped, as its answer says more.
+    progress: Vec<(Id, Vec<Reply>, Vec<u8>)>,
     rows: Vec<Value>,
     effects: Vec<Effect>,
     parts: Vec<Arc<Part>>,
@@ -687,7 +696,7 @@ struct Clock {
     /// Soul Actions (C2, #3366): the forms in progress, and the form acts taken since the last tick, committed at
     /// the next through the form runner when the world has bodies.
     forms: Acts,
-    forming: Vec<(Id, Act, sim::forms::Intent, BTreeMap<String, Id>)>,
+    forming: Vec<(Id, Act, sim::forms::Intent, acts::Args)>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
@@ -794,24 +803,40 @@ enum Taken {
     Engine(engine::Act),
 }
 
-/// A form's thing arguments (F4) from an intent's parameter 1: `[[name as bytes, id], ...]`.
-fn thing_args(intent: &Intent) -> BTreeMap<String, Id> {
+/// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
+/// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
+fn thing_args(intent: &Intent) -> acts::Args {
+    let mut args = acts::Args::default();
     let Some(Value::Array(pairs)) = intent.parameters.get(&1) else {
-        return BTreeMap::new();
+        return args;
     };
-    pairs
-        .iter()
-        .filter_map(|p| match p {
-            Value::Array(kv) => match kv.as_slice() {
-                [Value::Bytes(k), v] => Some((
-                    String::from_utf8(k.clone()).ok()?,
-                    replica::effects::read_id(v).ok()?,
-                )),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect()
+    for p in pairs {
+        if let Value::Array(kv) = p
+            && let [Value::Bytes(k), v] = kv.as_slice()
+            && let Ok(k) = String::from_utf8(k.clone())
+        {
+            use skills::form_runner::Arg;
+            match v {
+                Value::Uint(n) => drop(args.slots.insert(k, *n)),
+                // A value by name, and words by their reference (`{21: id}`, K16): a set's arguments (C24).
+                Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
+                Value::Map(m) if m.len() == 1 => {
+                    if let Some(Ok(id)) = m
+                        .get(&replica::audience::REFERENCE)
+                        .map(replica::effects::read_id)
+                    {
+                        args.values.insert(k, Arg::Text(id));
+                    }
+                }
+                _ => {
+                    if let Ok(id) = replica::effects::read_id(v) {
+                        args.things.insert(k, id);
+                    }
+                }
+            }
+        }
+    }
+    args
 }
 
 /// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
@@ -822,6 +847,36 @@ pub const MOVE_STARTED: &str = "souls:move-started";
 pub const MOVE_ENDED: &str = "souls:move-ended";
 /// How an act still going at its deadline ends (C8), and the move it drove with it.
 pub const TIMED_OUT: &str = "act.timed-out";
+
+/// The event of the entry a form's act writes when its run starts (C20, #3469): field 1 the body, 5 the act's
+/// deadline, world time µs (its start plus its steps' span, `sim::forms::span`). Its cause is the intent, so the
+/// act's receipt names it.
+pub const ACT_DEADLINE: &str = "souls:act-deadline";
+
+/// The answer's field of a progress answer that holds how long the act has left, µs ([`progress`]).
+pub const LEFT: u64 = 5;
+
+/// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
+/// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
+/// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, when a
+/// form's act is still running at the deadline it got on arrival and its run is due later.
+pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
+    let mut answer = match (Answer::Accepted {
+        actor,
+        sequence,
+        intent,
+    })
+    .to_value()
+    {
+        Value::Map(m) => m,
+        _ => BTreeMap::new(),
+    };
+    answer.insert(LEFT, Value::Uint(u64::try_from(left).unwrap_or(0)));
+    encode(&Value::Map(
+        [(1, version.clone()), (2, Value::Map(answer))].into(),
+    ))
+    .unwrap_or_default()
+}
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| Name::new("act.refused").expect("a name"))
@@ -1016,6 +1071,7 @@ impl Clock {
         };
         self.in_flight.remove(&(o.key.clone(), o.sequence));
         self.deadlines.close(o.body, id);
+        self.progress.retain(|p| p.0 != id);
         if let Some(m) = &self.measures {
             if o.stamps.0[2].is_none() {
                 m.ended_unchecked(id.counter());
@@ -1278,11 +1334,8 @@ impl Clock {
             verb: intent.verb.clone(),
             words: None,
         });
-        self.deadlines.open(
-            body,
-            id,
-            intent.expiry.min(now.saturating_add(self.deadline)),
-        );
+        let due = intent.expiry.min(now.saturating_add(self.deadline));
+        self.deadlines.open(body, id, due);
         self.in_flight.insert((key.clone(), sequence), id);
         self.open.insert(
             id,
@@ -1292,6 +1345,8 @@ impl Clock {
                 sequence,
                 body,
                 expiry: intent.expiry,
+                due,
+                run_due: None,
                 intent: value,
                 waiters: vec![reply],
                 stamps,
@@ -1786,6 +1841,18 @@ impl Clock {
     /// list it took (C14): `5: its rank` (0 the intent's own) and `6: its target`. Its cause is the intent, so the
     /// receipt finds it.
     fn note(&mut self, id: Id, event: &str, how: Option<&str>, at: Micros) {
+        self.note_with(id, event, how, None, at);
+    }
+
+    /// [`Clock::note`], with field 5 the act's deadline, world time µs, when given (C20).
+    fn note_with(
+        &mut self,
+        id: Id,
+        event: &str,
+        how: Option<&str>,
+        due: Option<Micros>,
+        at: Micros,
+    ) {
         let Some(o) = self.open.get(&id) else { return };
         let mut fields = BTreeMap::from([(1, o.body.to_value())]);
         if let Some((rank, target)) = self.bodies.as_mut().and_then(|b| b.took(id)) {
@@ -1796,6 +1863,9 @@ impl Clock {
         }
         if let Some(h) = how {
             fields.insert(2, Value::Bytes(h.as_bytes().to_vec()));
+        }
+        if let Some(d) = due.and_then(|d| u64::try_from(d).ok()) {
+            fields.insert(5, Value::Uint(d));
         }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
@@ -2078,7 +2148,8 @@ impl Clock {
                 now,
             );
             match r {
-                Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), now),
+                Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), None, now),
+                Ok(sim::forms::Asked::Started(run)) => self.form_started(id, run, now),
                 Ok(_) => {}
                 Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
             }
@@ -2144,16 +2215,58 @@ impl Clock {
                 });
             }
         }
-        for (id, how) in self.forms.ended() {
-            self.form_ended(id, how, now);
+        for (id, how, why) in self.forms.ended() {
+            self.form_ended(id, how, why, now);
         }
     }
 
-    /// A form's run ended: an entry naming how, then its intent's answer, a receipt when `done`.
-    fn form_ended(&mut self, id: Id, how: String, now: Micros) {
+    /// A form's run started (C20, #3469): its act's deadline becomes the run's own, its start plus its steps' span
+    /// (`sim::forms::span`: its walk, its moves and its pauses), written as an [`ACT_DEADLINE`] entry its receipt
+    /// names. The due list keeps the sooner of that and the deadline set at its arrival: an act still running at its
+    /// arrival deadline with a later run deadline is answered in progress then ([`Clock::still_running`]).
+    fn form_started(&mut self, id: Id, run: sim::forms::RunId, now: Micros) {
+        let Some(due) = self.forms.forms.due(run) else {
+            return;
+        };
+        let Some(o) = self.open.get_mut(&id) else {
+            return;
+        };
+        o.run_due = Some(due);
+        let (body, first) = (o.body, o.due.min(due));
+        self.deadlines.close(body, id);
+        self.deadlines.open(body, id, first);
+        self.note_with(id, ACT_DEADLINE, None, Some(due), now);
+    }
+
+    /// A deadline of act `id` passed at `now` (C20): when it is a form's act whose run's deadline is later, its
+    /// deadline moves there and it is answered in progress ([`progress`]), so the gateway waits for it rather than
+    /// answering `act.timed-out` itself. Whether it did.
+    fn still_running(&mut self, id: Id, now: Micros) -> bool {
+        let Some(o) = self.open.get(&id) else {
+            return false;
+        };
+        let Some(due) = o.run_due.filter(|d| *d > now) else {
+            return false;
+        };
+        let frame = progress(
+            &self.version(),
+            o.actor,
+            o.sequence,
+            id,
+            due.saturating_sub(now),
+        );
+        self.progress.push((id, o.waiters.clone(), frame));
+        self.deadlines.open(o.body, id, due);
+        true
+    }
+
+    /// A form's run ended: an entry naming how (and for a walk that stalled, what blocked it: C21), then its intent's
+    /// answer, a receipt when `done`.
+    fn form_ended(&mut self, id: Id, how: String, why: Option<String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let (actor, sequence) = (o.actor, o.sequence);
-        self.note(id, FORM_ENDED, Some(&how), now);
+        let noted = why.map_or_else(|| how.clone(), |w| format!("{how}: {w}"));
+        self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
                 actor,
@@ -2275,6 +2388,10 @@ impl Clock {
         // 1. Due timers: acts whose deadline passed. A walk going for one stops in this tick and its end is written
         // by the deadline's name; a sit, a lie or a rise runs to its end, and the act ends with it.
         while let Some(id) = self.deadlines.due(now) {
+            // A form's act whose run is due later is answered in progress, and kept to the run's deadline (C20).
+            if self.still_running(id, now) {
+                continue;
+            }
             let Some(o) = self.open.get(&id) else {
                 continue;
             };
@@ -2427,13 +2544,18 @@ impl Clock {
         let bytes = inputs.as_ref().map_or(0, Vec::len) + record.as_ref().map_or(0, Vec::len);
         let written = u64::from(inputs.is_some()) + u64::from(record.is_some());
         let handed = mark();
-        if written > 0 || !replies.is_empty() || !parts.is_empty() {
+        let progress: Vec<_> = std::mem::take(&mut self.progress)
+            .into_iter()
+            .map(|(_, to, frame)| (to, frame))
+            .collect();
+        if written > 0 || !replies.is_empty() || !progress.is_empty() || !parts.is_empty() {
             let _ = self.answers.send(Tick {
                 inputs,
                 record,
                 replies,
                 started: at[0],
                 handed,
+                bare: progress,
                 parts,
             });
         }
@@ -2621,6 +2743,11 @@ fn answer_loop<S: Storage + 'static>(
                 }
                 None => frame,
             };
+            for w in waiters {
+                let _ = w.send(frame.clone());
+            }
+        }
+        for (waiters, frame) in t.bare {
             for w in waiters {
                 let _ = w.send(frame.clone());
             }
@@ -2930,6 +3057,7 @@ pub fn start<S: Storage + 'static>(
         fresh,
         checked: Vec::new(),
         replies: Vec::new(),
+        progress: Vec::new(),
         rows: Vec::new(),
         effects: Vec::new(),
         parts: Vec::new(),
