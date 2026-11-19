@@ -51,7 +51,7 @@ pub fn accept(b: &mut Bodies, source: &Intent, body: Id, id: Id, now: Micros) ->
     {
         return Err(Refusal {
             name: "order-queue-act",
-            detail: "a seat's sit or lie".into(),
+            detail: "a slot's sit or lie".into(),
         });
     }
     b.town.with_ground(|_, ground| {

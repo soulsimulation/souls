@@ -552,6 +552,6 @@ fn seat_ownership_changes_wake_once_for_take_and_release() {
     assert_eq!(w.slots.changes(), vec![w.chair]);
     w.slots
         .release_body(w.bodies[1])
-        .expect("retirement releases seat");
+        .expect("retirement releases slot");
     assert_eq!(w.slots.changes(), vec![w.chair]);
 }
