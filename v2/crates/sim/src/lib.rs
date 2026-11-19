@@ -26,6 +26,7 @@ pub mod slots;
 pub mod speech;
 pub mod spots;
 pub mod structure;
+pub mod text;
 pub mod timed;
 pub mod timers;
 pub mod tracks;
