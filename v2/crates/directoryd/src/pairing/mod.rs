@@ -16,10 +16,12 @@
 //! - The account page (W9, #2827) lists an account's Souls, each with the device that holds it, and revokes one: its
 //!   token's hash leaves the store and the gateway's tokens file, so the gateway refuses its next intent
 //!   (`token.refused`), and the Soul is unconnected. A revoke takes the Soul to no other device.
+//! - My Souls (W11, #2749): each Soul's world, name, description and picture, and its retirement: see [`souls`].
 //! - Wrong short codes are counted per account: [`GUESSES_MOST`] in [`GUESS_WINDOW`] seconds, then every code is
 //!   refused `code-guesses` until the window passes.
 
 pub mod route;
+pub mod souls;
 #[cfg(test)]
 mod tests;
 
@@ -183,6 +185,7 @@ impl Pairing {
              CREATE TABLE IF NOT EXISTS paired_souls_v1(grant_text TEXT PRIMARY KEY, account TEXT NOT NULL,
                device TEXT, token_hash TEXT);",
         )?;
+        db.execute_batch(souls::SCHEMA)?;
         Ok(Pairing {
             public_url: public_url.trim_end_matches('/').to_string(),
             db: Mutex::new(db),
@@ -375,6 +378,9 @@ impl Pairing {
         let grant = match soul {
             Some(g) => match self.soul_of(&g).map_err(|e| (e, None))? {
                 None => return refuse("unknown-soul", None),
+                Some(_) if self.retired(&g).map_err(|e| (e, None))? => {
+                    return refuse("soul-retired", None);
+                }
                 Some((owner, _)) if owner != account => return refuse("not-yours", None),
                 Some((_, Some(device))) if !force => return refuse("soul-connected", Some(device)),
                 Some(_) => g,
@@ -400,6 +406,7 @@ impl Pairing {
         if changed == 0 {
             return Err(("unknown-code", None));
         }
+        self.note_world(&code, &grant).map_err(|e| (e, None))?;
         Ok(grant)
     }
 

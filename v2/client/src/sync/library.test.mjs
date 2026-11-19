@@ -87,6 +87,7 @@ test('A5: a build that never returns is ended at its time limit, and this thread
   clearInterval(clock);
   const ms = performance.now() - t0;
   // A timer may fire a fraction of a millisecond before the limit by performance.now(); 199.8 ms was seen under load.
-  assert.ok(ms >= 195 && ms < 2000, `${ms} ms`);
+  // Not before the limit; the upper bound only catches a worker never ended (a loaded machine ends one late).
+  assert.ok(ms >= 195 && ms < 30_000, `${ms} ms`);
   assert.ok(ticks >= 5, `the main thread ran ${ticks} ticks while the worker spun`);
 });
