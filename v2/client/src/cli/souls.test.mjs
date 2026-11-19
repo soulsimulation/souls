@@ -221,26 +221,31 @@ test('C4 A1: say and whisper send T8 words through the daemon; the world keeps t
   assert.equal(refused(['lie']), 'lie-names-a-thing');
 });
 
-test('R16: history by thing, place and Soul through the daemon, each named from the copy, under 600 bytes', () => {
+test('R16: history by thing, place and Soul through the daemon, each named from the copy, under 600 bytes', async () => {
   // history's --soul is its question, so the asking Soul is --as.
   assert.deepEqual(requestOf(['history', '--soul', 'Kofi', '--as', A, '--since', '5']), { req: { op: 'history', soul: 'Kofi', since: '5' }, soul: A });
   assert.deepEqual(requestOf(['history', '--at', ROOM]).req, { op: 'history', at: ROOM });
-  const ask = (args, status = 0) => {
-    const r = spawnSync(process.execPath, [CLI, 'history', ...args, '--as', A], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
-    assert.equal(r.status, status, r.stdout + r.stderr);
-    assert.ok(Buffer.byteLength(r.stdout) < 600, `${r.stdout.length} bytes`);
-    return JSON.parse(r.stdout);
-  };
-  const lamp = ask(['--thing', LAMP_B_NAME]);
+  // Run without blocking: the history files are served from this process.
+  const ask = (args, status = 0) => new Promise((ok) => {
+    const p = spawn(process.execPath, [CLI, 'history', ...args, '--as', A], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG } });
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('exit', (code) => {
+      assert.equal(code, status, out);
+      assert.ok(Buffer.byteLength(out) < 600, `${out.length} bytes`);
+      ok(JSON.parse(out));
+    });
+  });
+  const lamp = await ask(['--thing', LAMP_B_NAME]);
   assert.equal(lamp.about, LAMP_B_NAME, 'a name is looked up in the copy');
   assert.equal(lamp.found, 1440);
   assert.deepEqual(lamp.span, { from: 'd1 00:00', to: 'd2 00:00' });
   assert.equal(lamp.lines[0], 'd1 23:59 body 4 r2:switched');
   assert.equal(lamp.more, 1435);
   assert.equal(typeof lamp.at, 'number');
-  const room = ask(['--at', ROOM]);
+  const room = await ask(['--at', ROOM]);
   assert.equal(room.found, 1440 + 24, 'the room and what the copy holds in it');
-  const me = ask(['--soul', 'me']);
+  const me = await ask(['--soul', 'me']);
   assert.deepEqual([me.about, me.found, me.lines[0]], ['me', 24, 'd1 23:00 arrived room 1']);
-  assert.equal(ask(['--soul', 'nobody'], 1).code, 'history-unknown');
+  assert.equal((await ask(['--soul', 'nobody'])).code, 'history-unknown');
 });
