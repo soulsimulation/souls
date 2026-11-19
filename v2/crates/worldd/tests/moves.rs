@@ -754,3 +754,157 @@ fn c14_a_walk_to_a_place_ranked_fallbacks_and_the_local_check() {
         println!("local = world: {l}");
     }
 }
+
+/// The world on a socket, its acts ending `deadline` µs after receipt, and a client on it.
+fn served(deadline: i64, tag: &str) -> (answers::World, Client, Mem, std::path::PathBuf) {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.deadline = deadline;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let path = std::env::temp_dir().join(format!("{tag}-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    accepted.recv().unwrap();
+    (world, Client(stream), store, path)
+}
+
+/// Each tick's record, in order: its move events (entry, intent, event, how) and the body rows it wrote (body,
+/// position).
+type Tick = (Vec<(u64, Id, String, Option<String>)>, Vec<(Id, Vec3)>);
+
+fn ticks(log: &[u8]) -> Vec<Tick> {
+    let mut out = Vec::new();
+    for r in recover(log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+    {
+        let part = Part::read(&r).unwrap();
+        let mut events = Vec::new();
+        for e in &part.effects {
+            let Cause::Intent(id) = e.envelope.cause else {
+                continue;
+            };
+            for ev in e.events.iter().flatten() {
+                let how = ev.fields.get(&2).map(|v| match v {
+                    Value::Bytes(b) => String::from_utf8(b.clone()).unwrap(),
+                    _ => panic!("a name"),
+                });
+                events.push((e.envelope.sequence, id, ev.name.as_str().to_owned(), how));
+            }
+        }
+        let rows = match part.rest.get(&answers::BODIES) {
+            Some(Value::Array(rows)) => rows
+                .iter()
+                .filter_map(worldd::bodies::read_row)
+                .map(|(b, p, _)| (b, p.position))
+                .collect(),
+            _ => Vec::new(),
+        };
+        out.push((events, rows));
+    }
+    out
+}
+
+/// The tick whose record holds `event` of intent `id`, with that event's entry and how it ended.
+fn tick_of(ticks: &[Tick], id: Id, event: &str) -> (usize, u64, Option<String>) {
+    for (k, (events, _)) in ticks.iter().enumerate() {
+        if let Some(e) = events.iter().find(|e| e.1 == id && e.2 == event) {
+            return (k, e.0, e.3.clone());
+        }
+    }
+    panic!("no {event} for {id:?}")
+}
+
+/// A walk whose act times out mid-move stops in the tick its deadline passes: its end is written in that tick by the
+/// deadline's name, `act.timed-out`, and the body is not moved after it.
+#[test]
+fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
+    // The walk to the chair's stand point is about 4 m, near 3 s; its act ends after 1 s.
+    let (world, mut c, store, path) = served(1_000_000, "timeout");
+    c.send(1, "eden:walk", Some(thing()));
+    assert_eq!(c.answer(), Err("act.timed-out".into()));
+    std::thread::sleep(Duration::from_millis(600));
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let log = logged(&bytes);
+    assert_eq!(log.len(), 1, "one intent");
+    let (&id, l) = log.iter().next().unwrap();
+    let events: Vec<(&str, Option<&str>)> =
+        l.iter().map(|e| (e.1.as_str(), e.2.as_deref())).collect();
+    assert_eq!(
+        events,
+        [(MOVE_STARTED, None), (MOVE_ENDED, Some("act.timed-out"))],
+        "the move started and ended by the deadline's name"
+    );
+    let stopped = l[1].4;
+    let stand = Vec3::new(seat_at().x, 0, seat_at().z + 300_000);
+    assert!(
+        !near(stopped, start(), 300_000) && !near(stopped, stand, 300_000),
+        "stopped mid-way: {stopped:?}"
+    );
+    let ticks = ticks(&bytes);
+    let (k, _, _) = tick_of(&ticks, id, MOVE_ENDED);
+    for (n, (_, rows)) in ticks.iter().enumerate().skip(k) {
+        for &(_, p) in rows.iter().filter(|r| r.0 == body_id()) {
+            assert!(
+                n == k && [p.x, p.y, p.z] == stopped,
+                "the body moved after its act ended: tick +{} at {p:?}, stopped at {stopped:?}",
+                n - k
+            );
+        }
+    }
+    println!(
+        "timed out: stopped at {stopped:?} um; {} later records, none moving the body",
+        ticks.len() - k - 1
+    );
+}
+
+/// A walk ended mid-move by a new move of the same body (`claim-taken`) stops in the tick the new move starts: its end
+/// is written in that tick, before the new move's start.
+#[test]
+fn a_walk_cancelled_mid_move_by_a_new_move_ends_in_the_same_tick() {
+    let (world, mut c, store, path) = served(10_000_000, "replaced");
+    c.send(1, "eden:walk", Some(thing()));
+    std::thread::sleep(Duration::from_millis(800));
+    c.send(2, "eden:walk", Some(thing()));
+    assert_eq!(c.answer(), Err("claim-taken".into()), "the walk gave way");
+    let (second, _) = c.answer().expect("the second walk is done");
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let log = logged(&bytes);
+    let first = *log.keys().find(|&&i| i != second).expect("the first walk");
+    let ticks = ticks(&bytes);
+    let (ended, entry, how) = tick_of(&ticks, first, MOVE_ENDED);
+    let (started, next, _) = tick_of(&ticks, second, MOVE_STARTED);
+    assert_eq!(how.as_deref(), Some("claim-taken"));
+    assert_eq!(
+        ended, started,
+        "the first walk's end is in the tick the second starts"
+    );
+    assert!(entry < next, "and written before it");
+}
