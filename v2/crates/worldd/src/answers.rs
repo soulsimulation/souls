@@ -26,6 +26,11 @@
 //! A repeat after a restart gets the answer it had; an intent that was open at the kill was never logged nor
 //! answered, and is taken again when the gateway sends it again.
 //!
+//! **Forms** (F2, #3257): each tick writes the entries forms' runs left ([`sim::forms::Forms::write`]: numbered,
+//! applied and handed back as logged) into the tick's record, and opening the log reads every entry back into them
+//! ([`sim::forms::Forms::recover`]): an effect already logged is never written again, and a run the log shows started
+//! and not ended is ended `restart` in the first tick's record.
+//!
 //! **Free text** goes to K16's text store first and the log holds its reference only (`{21: id}`, T8 rule 6). Words
 //! come in an intent as T8's `{23: words}` (CBOR text is names only, so words are bytes). K16 has no store yet, so an
 //! intent carrying words is refused `intent.text-not-stored` and logged without its intent: none of their bytes
@@ -59,6 +64,7 @@ use replica::time::Micros;
 use replica::world_model::Audience;
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
+use sim::forms::Forms;
 use sim::frozen::Publisher;
 use sim::log::{Log, Storage};
 use std::collections::{BTreeMap, HashMap};
@@ -249,6 +255,9 @@ struct Clock {
     bodies: Option<Bodies>,
     /// Move intents taken since the last tick, committed at the next (I4b).
     moving: Vec<(Id, Asked)>,
+    /// Forms' runs (F1-F3): their entries are written with each tick's record ([`Forms::write`]), and the log is read
+    /// back into them when it is opened ([`Forms::recover`], #3257).
+    forms: Forms,
 }
 
 /// What an intent becomes: a form's act for the checkers, or a move for the bodies.
@@ -708,6 +717,16 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
             }
         }
+        match self.forms.write(&mut self.replica) {
+            Ok(Some(part)) => {
+                self.unsealed = true;
+                self.receipts.index(&part.effects);
+                self.effects.extend(part.effects.iter().cloned());
+                self.parts.push(Arc::new(part));
+            }
+            Ok(None) => {}
+            Err(r) => eprintln!("worldd: a form's entries were not written: {r}"),
+        }
         let deadlines = started.map(|_| measures::steady_us());
         let record = (!self.rows.is_empty() || !self.effects.is_empty()).then(|| {
             let v = Value::Map(BTreeMap::from([
@@ -820,12 +839,14 @@ pub fn start<S: Storage + 'static>(
     let mut sequences = Sequences::default();
     let mut receipts = Receipts::default();
     let mut next_intent = 1;
+    let mut logged = Vec::new();
     for record in &found.records {
         let part = Part::read(record)?;
         if !part.effects.is_empty() {
             world.apply(&part)?;
         }
         receipts.index(&part.effects);
+        logged.extend(part.effects.iter().cloned());
         let Some(Value::Array(rows)) = part.rest.get(&ANSWERED) else {
             continue;
         };
@@ -900,6 +921,7 @@ pub fn start<S: Storage + 'static>(
         measures: clock_measures,
         bodies: None,
         moving: Vec::new(),
+        forms: Forms::new(),
     };
     let tick = cfg.tick;
     let now = cfg.now;
@@ -908,6 +930,7 @@ pub fn start<S: Storage + 'static>(
         .spawn(move || {
             mark_clock_thread();
             let mut c = build();
+            c.forms = Forms::recover(&logged, now());
             if let Some(make) = make {
                 match make() {
                     Ok(mut b) => {
@@ -1495,5 +1518,67 @@ mod tests {
         );
         world.stop();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #3257 A1: opening the log reads it back into the forms ([`Forms::recover`]), and the tick's writer logs what
+    /// they leave ([`Forms::write`]): a run the log shows started and not ended is ended `restart`, in the log.
+    #[test]
+    fn f2_opening_the_log_recovers_forms_and_the_tick_logs_their_entries() {
+        let built = toggles::World::build(1, 4, 0);
+        let (body, thing) = built.pairs[0];
+        let intent = Id::new(LINEAGE, 77).unwrap();
+        let started = Effect {
+            envelope: Envelope {
+                sequence: built.replica.version(),
+                at: 1,
+                cause: Cause::Intent(intent),
+                actor: Actor::Soul(body),
+                audience: Audience::Everyone,
+                node: thing,
+            },
+            body: Body::Changes(Vec::new()),
+            events: Some(vec![Named {
+                name: name("souls:form-started"),
+                fields: BTreeMap::from([(1, Value::Uint(1)), (2, body.to_value())]),
+                changes: Vec::new(),
+                rest: BTreeMap::new(),
+            }]),
+            rest: BTreeMap::new(),
+        };
+        let record = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(built.replica.header().hash().to_bytes())),
+            (2, Value::Array(vec![started.to_value()])),
+        ])))
+        .unwrap();
+        let mem = Mem::default();
+        let (mut log, _) = Log::open(mem.clone(), 1).unwrap();
+        log.append(record).unwrap();
+        let disk = log.close();
+        let store = Held::new(disk.0.lock().unwrap().bytes.clone());
+        let (w, _) = world(store.clone(), 1, 10_000_000);
+        w.stop();
+        let ended: Vec<Effect> = recover(&store.bytes())
+            .unwrap()
+            .records
+            .iter()
+            .flat_map(|r| Part::read(r).unwrap().effects)
+            .filter(|e| e.envelope.cause == Cause::Intent(intent))
+            .filter(|e| {
+                e.events.iter().flatten().any(|v| {
+                    v.name.as_str() == "souls:form-ended"
+                        && v.fields.get(&3) == Some(&Value::Bytes(b"restart".to_vec()))
+                })
+            })
+            .collect();
+        println!(
+            "after the restart: {} ending entry, at sequence {:?}",
+            ended.len(),
+            ended
+                .iter()
+                .map(|e| e.envelope.sequence)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(ended.len(), 1, "one ending entry, written by the tick");
+        assert_eq!(ended[0].envelope.sequence, started.envelope.sequence + 1);
     }
 }
