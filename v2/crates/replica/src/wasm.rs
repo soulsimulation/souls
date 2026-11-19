@@ -580,11 +580,23 @@ fn json_str(s: &str) -> String {
     out
 }
 
+/// Ordinary kinds text names its references together. An imported world's lines are independently named instead
+/// (`import_eden::name_kind`), and may hold several revisions of one plain name. Keep each under its full hash.
+fn creator_kinds(text: &str) -> Result<BTreeMap<String, Kind>, crate::world_model::Refusal> {
+    parse_kinds(text).or_else(|_| {
+        let mut kinds = BTreeMap::new();
+        for line in text.lines() {
+            kinds.extend(parse_kinds(line)?);
+        }
+        Ok(kinds)
+    })
+}
+
 /// The kinds a world pins, from its kinds text, as JSON `{"<full name>": {"owner": .., "admits": [..], "slots":
 /// {"<n>": [..]}}}`: what a creator may place, and in what.
 #[wasm_bindgen(js_name = editKinds)]
 pub fn edit_kinds(kinds: &str) -> Result<String, JsError> {
-    let kinds = parse_kinds(kinds).map_err(|e| JsError::new(&format!("kinds-text: {e:?}")))?;
+    let kinds = creator_kinds(kinds).map_err(|e| JsError::new(&format!("kinds-text: {e:?}")))?;
     let list = |l: &BTreeSet<String>| l.iter().map(|n| json_str(n)).collect::<Vec<_>>().join(",");
     let out: Vec<String> = kinds
         .iter()
@@ -675,7 +687,7 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
     let kinds: Option<BTreeMap<String, Kind>> = if kinds.trim().is_empty() {
         None
     } else {
-        match parse_kinds(kinds) {
+        match creator_kinds(kinds) {
             Ok(k) => Some(k),
             Err(e) => return no(None, "edit.kinds-text", &format!("{e:?}")),
         }

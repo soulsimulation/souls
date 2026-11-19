@@ -98,13 +98,13 @@ function folder() {
   return { at, home };
 }
 
-/** The agent, in a clean environment: only Read and the command. Gives its stream-json transcript. */
+/** The agent, in a clean environment: Read, the command and jq for its JSON output. Gives its transcript. */
 function agent(at, { model, maxTurns }) {
   // USER and LOGNAME: the seat's sign-in is in the login keychain, which Claude Code finds by them.
   const env = { HOME: process.env.HOME, PATH: process.env.PATH, USER: process.env.USER ?? '', LOGNAME: process.env.LOGNAME ?? '', LANG: process.env.LANG ?? 'en_US.UTF-8', CLAUDE_CONFIG_DIR: process.env.SEAT_CONFIG_DIR, SOULS_HOME: join(at, '.souls'), SOULS_REPLICA_PKG: PKG };
   return new Promise((ok) => {
     execFile('claude', ['-p', TASK, '--output-format', 'stream-json', '--verbose', '--model', model, '--max-turns', String(maxTurns),
-      '--allowedTools', 'Read', 'Bash(node souls-god.mjs:*)'], { cwd: at, env, maxBuffer: 64 << 20, timeout: 20 * 60_000 }, (e, stdout) => ok(stdout || String(e)));
+      '--allowedTools', 'Read', 'Bash(node souls-god.mjs:*)', 'Bash(jq:*)'], { cwd: at, env, maxBuffer: 64 << 20, timeout: 20 * 60_000 }, (e, stdout) => ok(stdout || String(e)));
   });
 }
 
@@ -132,7 +132,7 @@ function built(home, before) {
   return new Promise((ok, fail) => execFile(process.execPath, [GOD, 'describe'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, maxBuffer: 256 << 20 }, (error, out) => {
     let d;
     try { d = JSON.parse(String(out).trim().split('\n').at(-1) || '{}'); } catch { return fail(new Error('describe returned invalid JSON')); }
-    if (error || d.ok === false || !Array.isArray(d.nodes)) return fail(new Error(`describe refused: ${d.code ?? 'no-world'}`));
+    if (error || d.ok === false || !Array.isArray(d.nodes)) return fail(new Error(`describe refused: ${d.code ?? 'no-world'}${d.detail ? `: ${d.detail}` : ''}`));
     const nodes = d.nodes;
     const kind = new Map(nodes.map((n) => [n.id, n.kind]));
     const parent = new Map(nodes.map((n) => [n.id, n.parent]));
@@ -166,11 +166,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       copyFileSync(w.kinds, join(f.home, 'kinds', 'local.kinds'));
       // The gateway rereads the directory's token hashes every two seconds.
       await sleep(2200);
-      for (let k = 0; k < 50; k++) {
+      let ready = false;
+      for (let k = 0; k < 100; k++) {
         const s = await new Promise((ok) => execFile(process.execPath, [GOD, 'status'], { env: { PATH: process.env.PATH, SOULS_HOME: f.home, SOULS_REPLICA_PKG: PKG } }, (_, o) => ok(String(o))));
-        if (/"connected":\s*true/.test(s)) break;
+        let status;
+        try { status = JSON.parse(s); } catch { /* a failed command is not ready */ }
+        if (status?.connected && !status.syncing && Object.keys(status.roots ?? {}).length) { ready = true; break; }
         await sleep(200);
       }
+      if (!ready) throw new Error('creator daemon did not become current within the readiness window');
       const before = await built(f.home, new Set());
       writeFileSync(join(dir, 'describe-before.json'), before.text);
       if (pairOnly) {

@@ -19,6 +19,10 @@ token, and you never need it.
 If the home has no creator yet, pair first: `node souls-god.mjs pair <world url> --creator <creator grant>`. It prints
 a link and a short code; the world's owner opens the link signed in and approves. Then run `status`.
 
+On a large world, save `node souls-god.mjs describe > world.json` in your scratch folder. Inspect selected JSON with
+`jq '.kinds | keys' world.json` and `jq '.nodes[] | select(.kind == "eden:ground")' world.json`; filter other kinds or
+node ids the same way. This keeps the whole world out of your tool output. Refresh the file after edits.
+
 ## The world's shape
 
 - The world is a tree. The root is the place (kind `souls:place`). Its shape is the world's own: follow `admits`
@@ -27,7 +31,8 @@ a link and a short code; the world's owner opens the link signed in and approves
 - A thing can only go in something whose kind admits it. `describe` shows each kind's `admits`: a kind name, or a
   category (`thing`, `body`) that admits every kind of that sort.
 - Use the kinds the world already pins. Pick the kind that already offers what Souls should do with it; you cannot
-  invent kinds here.
+  invent kinds here. `describe` lists their full names, including hashes: copy a full name when several revisions
+  share a name. A short name works only when it identifies one pinned kind.
 - Positions are millimetres, `x,y,z`, in the parent's frame: `y` is up. A room's floor is `y` 0.
 - Ids look like `<32 hex>-<number>`. Copy them exactly from `describe` or from an answer.
 

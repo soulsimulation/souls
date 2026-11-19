@@ -516,7 +516,7 @@ function fullKind(kinds, k) {
   const s = String(k ?? '');
   const hit = Object.keys(kinds).filter((n) => n === s || n.split('@')[0] === s || n.split('@')[0].split(':')[1] === s);
   if (hit.length === 1) return hit[0];
-  throw Object.assign(new Error(`${s}: ${hit.length ? 'name it with its namespace' : `not pinned; describe lists ${Object.keys(kinds).map((n) => n.split('@')[0]).join(', ')}`}`), { code: 'edit.kind-unknown' });
+  throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
 }
 /** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
 function batchOf(ops) {
@@ -675,7 +675,7 @@ async function answer(req) {
     }
     case 'describe': return closing({ ok: true }, (rows) => ({
       nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.text ? { text: r.text } : {}) })),
-      kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n.split('@')[0], { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
+      kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
     }));
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4).

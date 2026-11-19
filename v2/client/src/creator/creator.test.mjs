@@ -127,7 +127,8 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const d = await god('describe');
   const place = d.nodes.find((n) => n.kind === 'souls:place');
   assert.ok(place, JSON.stringify(d));
-  assert.deepEqual(d.kinds['souls:place'].admits, ['souls:room']);
+  const placeKind = Object.keys(d.kinds).find((k) => k.startsWith('souls:place@'));
+  assert.deepEqual(d.kinds[placeKind].admits, ['souls:room']);
 
   // A4: check runs on the copy and sends nothing to the world.
   const before = relay.up;
@@ -182,6 +183,37 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const all = await god('status');
   assert.deepEqual(all.unanswered, []);
   console.log(`edits: ${all.sent} sent, ${all.answered} answered`);
+});
+
+test('coexisting pinned revisions stay described and checkable by full name', async () => {
+  const revisions = '{1: "creator:fixture", 2: "thing", 19: "first"}\n{1: "creator:fixture", 2: "thing", 19: "second"}\n';
+  const file = join(home, 'kinds', 'local.kinds');
+  writeFileSync(file, KINDS + revisions);
+  try {
+    const d = await god('describe');
+    assert.equal(d.ok, true, JSON.stringify(d));
+    const names = Object.keys(d.kinds).filter((n) => n.startsWith('creator:fixture@'));
+    assert.equal(names.length, 2);
+    const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+    wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+    const separately = revisions.trim().split('\n').flatMap((line) => Object.keys(JSON.parse(wire.editKinds(line))));
+    assert.deepEqual(names.sort(), separately.sort(), 'exported revisions keep their original hashes');
+    const room = d.nodes.find((n) => n.kind === 'souls:room');
+    for (const kind of names) {
+      const check = await god('check', 'place', kind, '--in', room.id);
+      assert.equal(check.ok, true, JSON.stringify(check));
+      assert.equal(check.kinds, true);
+    }
+    const ambiguous = await god('check', 'place', 'creator:fixture', '--in', room.id);
+    assert.equal(ambiguous.code, 'edit.kind-unknown');
+    assert.match(ambiguous.detail, /ambiguous; copy a full pinned name from describe/);
+    assert.throws(() => wire.editKinds(KINDS + revisions + '{1: "creator:fixture", 2: 42}'), /kinds-text/);
+    // Ordinary sets still name cross-kind references together rather than line by line.
+    const references = '{1: "creator:base", 2: "thing"}\n{1: "creator:linked", 2: "thing", 10: {1: "creator:base"}}';
+    assert.equal(Object.keys(JSON.parse(wire.editKinds(references))).length, 2);
+  } finally {
+    writeFileSync(file, KINDS);
+  }
 });
 
 test('pairing asks for the creator scope and keeps the creator\'s token', async () => {
