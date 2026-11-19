@@ -7,6 +7,9 @@
 //   souls.mjs look                            the brief: my room, cards outward, what changed, the age
 //   souls.mjs find <words...> [--limit n]     one search over the copy
 //   souls.mjs act <verb> [<verb>...]          a ranked list: the first is the act, the rest its fallbacks
+//   souls.mjs say "<words>"                   says the words out loud, to whoever is near
+//   souls.mjs whisper <body id> "<words>"     says them to that one body alone
+//   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
 //   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened, or at the timeout
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop                            ends the daemon
@@ -19,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
 
-export const OPS = ['status', 'look', 'find', 'act', 'wait', 'stats', 'stop'];
+export const OPS = ['status', 'look', 'find', 'act', 'say', 'whisper', 'lie', 'wait', 'stats', 'stop'];
 
 /** The daemon request the arguments make, or a refusal by name. */
 export function requestOf(argv) {
@@ -33,6 +36,9 @@ export function requestOf(argv) {
   const req = { op };
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
   if (op === 'act') req.verbs = rest;
+  if (op === 'say') req.words = rest.join(' ');
+  if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
+  if (op === 'lie') req.this = rest[0];
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
   return { req, soul: opts.soul };
 }
