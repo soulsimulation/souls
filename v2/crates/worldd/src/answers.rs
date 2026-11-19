@@ -1583,6 +1583,16 @@ pub fn start<S: Storage + 'static>(
         .map_err(io)?;
     let records = found.first + found.records.len() as u64;
     let clock_measures = measures.clone();
+    // R5b's first seal hashes every node: taken here, before the clock runs, so no tick waits on it (a big world's
+    // whole tree, sealed at its first sync request, held the clock past K7's watchdog). Later seals hash what changed.
+    let first = world.seal()?;
+    let mut kept = Records::default();
+    kept.keep(&first);
+    let fresh = if cfg.checkpoints.is_some() {
+        first.nodes
+    } else {
+        Vec::new()
+    };
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
     let build = move || Clock {
         replica: world,
@@ -1601,9 +1611,9 @@ pub fn start<S: Storage + 'static>(
         deadline: cfg.deadline,
         arrivals: cfg.arrivals,
         roots: cfg.roots,
-        kept: Records::default(),
-        unsealed: true,
-        fresh: Vec::new(),
+        kept,
+        unsealed: false,
+        fresh,
         checked: Vec::new(),
         replies: Vec::new(),
         rows: Vec::new(),
