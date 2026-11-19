@@ -89,6 +89,8 @@ struct World {
     bodies: Vec<Id>,
     /// Eden's walkers: where each paces from and to, µm in the open ground's frame (V5).
     paths: Vec<(Vec3, Vec3)>,
+    /// Eden's first door, opened and shut every 3 s (V21's sounds): its id and whether it is open.
+    doors: Vec<(Id, bool)>,
     /// The private note, its audience, and every private id written (the note's and its references).
     note: Id,
     secret: Audience,
@@ -141,6 +143,7 @@ impl World {
             room: root,
             bodies: Vec::new(),
             paths: Vec::new(),
+            doors: Vec::new(),
             note: root,
             secret: Audience::Of(secret),
             private: Vec::new(),
@@ -359,6 +362,7 @@ impl World {
         let root = effects[0].envelope.node;
         let mut ground = None;
         let mut centres = Vec::new();
+        let mut doors = Vec::new();
         for e in &effects {
             let Body::Changes(cs) = &e.body else { continue };
             for c in cs {
@@ -370,6 +374,12 @@ impl World {
                 };
                 if *kind == ground_kind {
                     ground = Some((*node, fields.clone()));
+                }
+                if fields.contains_key(&import_eden::F_DOORWAY) && doors.is_empty() {
+                    doors.push((
+                        *node,
+                        fields.get(&import_eden::F_OPEN) == Some(&Value::Uint(1)),
+                    ));
                 }
                 if let Some(Value::Array(pts)) = fields.get(&import_eden::F_OUTLINE)
                     && kind.as_str().starts_with("eden:place@")
@@ -417,6 +427,7 @@ impl World {
             room: ground,
             bodies: Vec::new(),
             paths: Vec::new(),
+            doors,
             // Eden's feed writes no private note (#3239's note is the room run's).
             note: root,
             secret: Audience::Everyone,
@@ -503,6 +514,21 @@ impl World {
             let e = self.entry(node, at, vec![sample]);
             entries.push(e);
         }
+        // Every 3 s the first door opens or shuts: a field set at its entry's time (V21).
+        if n % 60 == 30 && !self.doors.is_empty() {
+            let i = (n / 60) % self.doors.len();
+            let (door, open) = self.doors[i];
+            self.doors[i].1 = !open;
+            let to = Value::Uint(u64::from(!open));
+            let set = Change::Set {
+                node: door,
+                field: import_eden::F_OPEN,
+                to,
+                by: None,
+            };
+            let e = self.entry(door, at, vec![set]);
+            entries.push(e);
+        }
         self.commit(entries)
     }
 }
@@ -552,7 +578,9 @@ fn world(work: &Path, seconds: u64, arm: &str, facts: Option<&Path>) {
     let writer = Writer::create(&www, &w.header, &key, (0, wall_ms)).expect("a writer");
     println!("stream {}", stream::dir(&w.header, &key));
     let stop = Arc::new(AtomicBool::new(false));
-    let following = follow(writer, sub, stop.clone());
+    let following = follow(writer, sub, stop.clone(), move || {
+        i64::try_from(start.elapsed().as_micros()).unwrap_or(i64::MAX)
+    });
     let mut said = Vec::new();
     let ticks = (seconds * 1_000_000 / TICK_US as u64) as usize;
     for n in 0..ticks {

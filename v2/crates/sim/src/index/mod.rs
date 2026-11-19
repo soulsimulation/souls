@@ -22,9 +22,13 @@
 //!   every query of its layer, so it never fills thousands of squares.
 //! - **Integers.** Distances compared squared in `i128`; a distance returned is rounded down by `isqrt`.
 //!
-//! Not here: subscriptions (R4), perception rules, parallel cells (N17), choosing among candidates (E2), whether a
+//! Read side by side: the runner's threads read it at once, and the mover's bodies are entered in id order after
+//! them (N17b, `crate::host`). Not here: subscriptions (R4), perception rules, choosing among candidates (E2), whether a
 //! set-down is allowed (E4, G2). An outline is its box: an exact polygon test is the caller's, on what this returns.
 
+// The tiles' map has a fixed hasher (`Mix`) and is never walked, so its order cannot reach a result (K12's
+// repeat rule, K18 merge).
+#[allow(clippy::disallowed_types)]
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -192,6 +196,7 @@ fn tile_of(i: i64, j: i64) -> ((i64, i64), usize) {
     )
 }
 
+#[allow(clippy::disallowed_types)]
 type Tiles<E> = HashMap<(i64, i64), Tile<E>, BuildHasherDefault<Mix>>;
 
 /// One layer of a node's grid.
@@ -444,7 +449,13 @@ impl Index {
 
     /// Enters body `id` on `node` at `at`, or moves it there.
     pub fn put_body(&mut self, id: Id, node: Id, at: [i64; 2]) {
-        if let Some((from_node, from)) = self.bodies.insert(id, (node, at)) {
+        let from = self.bodies.insert(id, (node, at));
+        self.grid_put(id, from, node, at);
+    }
+
+    /// The grids' part of [`Index::put_body`]: the body was entered at `from`, if anywhere.
+    fn grid_put(&mut self, id: Id, from: Option<(Id, [i64; 2])>, node: Id, at: [i64; 2]) {
+        if let Some((from_node, from)) = from {
             let g = &mut node_mut(&mut self.nodes, from_node).bodies;
             let (a, b) = (g.span(&(id, from).area()).0, g.span(&(id, at).area()).0);
             if from_node == node && a == b {
@@ -468,6 +479,32 @@ impl Index {
     pub fn put_moved(&mut self, b: &Body) {
         let (node, at) = place_of(b);
         self.put_body(b.id, node, at);
+    }
+
+    /// [`Index::put_moved`] for each of `bodies`, in id order, in that order (N17b): where each was entered is found
+    /// in one walk along the entered bodies, not looked up each.
+    pub fn put_moved_sorted<'b>(&mut self, bodies: impl IntoIterator<Item = &'b Body>) {
+        let mut entered = std::mem::take(&mut self.bodies);
+        let mut walk = entered.iter_mut().peekable();
+        let mut missing = Vec::new();
+        for b in bodies {
+            let (node, at) = place_of(b);
+            while walk.next_if(|(id, _)| **id < b.id).is_some() {}
+            match walk.peek_mut() {
+                Some((id, e)) if **id == b.id => {
+                    let from = std::mem::replace(*e, (node, at));
+                    self.grid_put(b.id, Some(from), node, at);
+                }
+                _ => {
+                    // Not entered yet: entered now, in its turn (the grids see the same order).
+                    missing.push((b.id, node, at));
+                    self.grid_put(b.id, None, node, at);
+                }
+            }
+        }
+        drop(walk);
+        entered.extend(missing.into_iter().map(|(id, node, at)| (id, (node, at))));
+        self.bodies = entered;
     }
 
     /// Takes body `id` out; whether it was in.

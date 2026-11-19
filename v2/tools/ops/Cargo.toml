@@ -3,7 +3,7 @@ name = "ops"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Operations tools in Rust (Engine v2, #2635): deploy and roll back one world (O7, #2804); moving a live world to another machine and its kill table (O9, #2828)."
+description = "Operations tools in Rust (Engine v2, #2635): deploy and roll back one world (O7, #2804); the gateway's upgrade (O16, #2809); moving a live world to another machine and its kill table (O9, #2828); a world restored from the bucket alone (O12, #2807)."
 
 [[bin]]
 name = "ops"
@@ -24,6 +24,16 @@ path = "src/plant.rs"
 name = "o7-run"
 path = "src/run.rs"
 
+# `gateway-upgrade <new gatewayd> <world>...`: the gateway's upgrade, never in the same step as a world's deploy (O16).
+[[bin]]
+name = "gateway-upgrade"
+path = "src/gateway_upgrade.rs"
+
+# The O16 run: the gateway upgraded, then killed, under 1,000 agents from the shared shapes.
+[[bin]]
+name = "o16-run"
+path = "src/gateway_run.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 # K4's log and K5's checkpoints.
@@ -36,6 +46,8 @@ worldd = { path = "../../crates/worldd" }
 supervisor = { path = "../../crates/supervisor" }
 # The gate that holds and releases intents (O9).
 gatewayd = { path = "../../crates/gatewayd" }
+# A probe made from a seeded world's facts: its ground (O18b, #3498).
+import-eden = { path = "../import-eden" }
 # The benches' scripted world and the shared store (V3, O3).
 archive = { path = "../archive" }
 # O7's run drives 100 agents through the gateway's socket.
