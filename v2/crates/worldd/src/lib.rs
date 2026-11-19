@@ -8,6 +8,7 @@ pub mod answers;
 pub mod bodies;
 pub mod checkers;
 pub mod engine;
+pub mod loose;
 pub mod measures;
 pub mod shipping;
 pub mod start;
