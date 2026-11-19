@@ -164,6 +164,25 @@ impl Client {
         target: Option<Target>,
         fallbacks: &[Id],
     ) {
+        self.send_as_until(
+            actor,
+            sequence,
+            verb,
+            target,
+            fallbacks,
+            answers::now() + 60_000_000,
+        );
+    }
+
+    fn send_as_until(
+        &mut self,
+        actor: Id,
+        sequence: u64,
+        verb: &str,
+        target: Option<Target>,
+        fallbacks: &[Id],
+        expiry: i64,
+    ) {
         let i = Intent {
             actor: Actor::Soul(actor),
             verb: name(verb),
@@ -177,7 +196,7 @@ impl Client {
                 sequence: 0,
             }
             .to_value(),
-            expiry: answers::now() + 60_000_000,
+            expiry,
             resources: Vec::new(),
             fallbacks: fallbacks
                 .iter()
@@ -344,7 +363,7 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
         );
         assert_eq!(l[0].1, MOVE_STARTED);
         assert_eq!(
-            (l[1].1.as_str(), l[1].2.as_deref()),
+            (l.last().unwrap().1.as_str(), l.last().unwrap().2.as_deref()),
             (MOVE_ENDED, Some("done"))
         );
     }
@@ -536,7 +555,7 @@ fn c4_a2_a_lie_on_a_bed_gets_receipts_like_a_sit() {
         );
         assert_eq!(l[0].1, MOVE_STARTED);
         assert_eq!(
-            (l[1].1.as_str(), l[1].2.as_deref()),
+            (l.last().unwrap().1.as_str(), l.last().unwrap().2.as_deref()),
             (MOVE_ENDED, Some("done"))
         );
     }
@@ -757,11 +776,19 @@ fn c14_a_walk_to_a_place_ranked_fallbacks_and_the_local_check() {
 
 /// The world on a socket, its acts ending `deadline` µs after receipt, and a client on it.
 fn served(deadline: i64, tag: &str) -> (answers::World, Client, Mem, std::path::PathBuf) {
+    served_with(deadline, tag, bodies)
+}
+
+fn served_with(
+    deadline: i64,
+    tag: &str,
+    make: fn() -> Result<Bodies, replica::effects::Refusal>,
+) -> (answers::World, Client, Mem, std::path::PathBuf) {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.tick = Duration::from_millis(50);
     cfg.deadline = deadline;
-    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| make()));
     let world = answers::start(
         toggles::World::build(0, 0, 0).replica,
         toggles::rules(),
@@ -836,13 +863,20 @@ fn tick_of(ticks: &[Tick], id: Id, event: &str) -> (usize, u64, Option<String>) 
     panic!("no {event} for {id:?}")
 }
 
-/// A walk whose act times out mid-move stops in the tick its deadline passes: its end is written in that tick by the
+/// A walk whose explicit expiry passes mid-move stops in the tick its deadline passes: its end is written in that tick by the
 /// deadline's name, `act.timed-out`, and the body is not moved after it.
 #[test]
 fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
-    // The walk to the chair's stand point is about 4 m, near 3 s; its act ends after 1 s.
-    let (world, mut c, store, path) = served(1_000_000, "timeout");
-    c.send(1, "eden:walk", Some(thing()));
+    // The walk is about 4 m, near 3 s; the caller explicitly permits only 1 s (C29).
+    let (world, mut c, store, path) = served(10_000_000, "timeout");
+    c.send_as_until(
+        body_id(),
+        1,
+        "eden:walk",
+        Some(Target::Node(thing())),
+        &[],
+        answers::now() + 1_000_000,
+    );
     assert_eq!(c.answer(), Err("act.timed-out".into()));
     std::thread::sleep(Duration::from_millis(600));
     world.stop();
@@ -856,10 +890,14 @@ fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
         l.iter().map(|e| (e.1.as_str(), e.2.as_deref())).collect();
     assert_eq!(
         events,
-        [(MOVE_STARTED, None), (MOVE_ENDED, Some("act.timed-out"))],
+        [
+            (MOVE_STARTED, None),
+            (answers::ACT_DEADLINE, None),
+            (MOVE_ENDED, Some("act.timed-out"))
+        ],
         "the move started and ended by the deadline's name"
     );
-    let stopped = l[1].4;
+    let stopped = l.last().unwrap().4;
     let stand = Vec3::new(seat_at().x, 0, seat_at().z + 300_000);
     assert!(
         !near(stopped, start(), 300_000) && !near(stopped, stand, 300_000),
@@ -1053,4 +1091,160 @@ fn c19_a_partly_occupied_thing_accepts_a_bare_sit() {
 #[test]
 fn c19_a_partly_occupied_primary_precedes_its_ranked_fallback() {
     multi_slot_eligibility(true);
+}
+
+/// C29: the unchanged 20 m B7b leader distance must outlive the default 10 s and arrive, with exactly one C20
+/// progress frame and a route deadline entry named in its receipt.
+#[test]
+fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
+    let (world, mut c, store, path) = served(10_000_000, "longwalk");
+    let ground = bodies().unwrap().town.ground;
+    let destination = Vec3::new(start().x - 20_000_000, 0, start().z);
+    let i = Intent {
+        actor: Actor::Soul(body_id()),
+        verb: name("eden:walk"),
+        target: Some(Target::Node(ground)),
+        parameters: BTreeMap::from([(
+            1,
+            Value::Array(
+                [destination.x, destination.y, destination.z]
+                    .into_iter()
+                    .map(|n| {
+                        if n < 0 {
+                            Value::Nint(n.unsigned_abs() - 1)
+                        } else {
+                            Value::Uint(n as u64)
+                        }
+                    })
+                    .collect(),
+            ),
+        )]),
+        sequence: 1,
+        basis: Version {
+            lineage: LINEAGE,
+            zone: Id::new(LINEAGE, 0).unwrap(),
+            epoch: 1,
+            sequence: 0,
+        }
+        .to_value(),
+        expiry: answers::now() + 60_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+    };
+    let bytes = encode(&i.to_value()).unwrap();
+    c.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    c.0.write_all(&bytes).unwrap();
+    let mut len = [0; 4];
+    c.0.read_exact(&mut len).unwrap();
+    let mut frame = vec![0; u32::from_be_bytes(len) as usize];
+    c.0.read_exact(&mut frame).unwrap();
+    let Value::Map(m) = decode(&frame).unwrap().value else {
+        panic!("frame")
+    };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        panic!("answer")
+    };
+    assert_eq!(
+        a.get(&3),
+        Some(&Value::Uint(3)),
+        "one in-progress answer at 10 s"
+    );
+    assert!(matches!(a.get(&answers::LEFT), Some(Value::Uint(n)) if *n > 0));
+    let (id, receipt) = c.answer().expect("the next answer is the final receipt");
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let mut due = None;
+    for r in recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            if e.envelope.cause != Cause::Intent(id) {
+                continue;
+            }
+            for ev in e.events.unwrap_or_default() {
+                if ev.name.as_str() == answers::ACT_DEADLINE {
+                    assert!(receipt.contains(&e.envelope.sequence));
+                    let Some(Value::Uint(n)) = ev.fields.get(&5) else {
+                        panic!("deadline")
+                    };
+                    due = Some((*n as i64) - e.envelope.at);
+                }
+            }
+        }
+    }
+    assert!(due.is_some_and(|d| d > 14_000_000 && d <= 180_000_000));
+    let log = logged(&bytes);
+    let end = log[&id].last().unwrap();
+    assert_eq!(end.2.as_deref(), Some("done"));
+    assert!(near(end.4, destination, 100_000), "arrived: {:?}", end.4);
+    println!(
+        "20 m: one progress answer then done; receipt {:?}; planned time {:?}",
+        receipt, due
+    );
+}
+
+/// A synthetic mover edge across an otherwise planned route reproduces a walker making no progress. The test
+/// keeps the map unchanged deliberately: it exercises the same C21 watch as a stale route or a blocked walker.
+fn stalled_bodies() -> Result<Bodies, replica::effects::Refusal> {
+    let mut b = bodies()?;
+    let ground = b.town.ground;
+    let (x, z) = (
+        i32::try_from(start().x / 1000).unwrap(),
+        i32::try_from(start().z / 1000).unwrap(),
+    );
+    let corners = vec![
+        [x - 100, 0, z - 100],
+        [x + 100, 0, z - 100],
+        [x + 100, 0, z + 100],
+        [x - 100, 0, z + 100],
+    ];
+    let surface = sim::mover::Surface::new(
+        ground,
+        vec![sim::ground::Piece {
+            outline: vec![corners.clone()],
+            vertices: corners,
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            ground: sim::gaits::Ground::Dry,
+        }],
+    );
+    let placed = surface.place(
+        body_id(),
+        Frame {
+            node: ground,
+            slot: None,
+        },
+        start(),
+        Quat::IDENTITY,
+    )?;
+    b.runner.controller.regrounded(body_id(), Some(placed))?;
+    b.town.surfaces.insert(ground, surface);
+    Ok(b)
+}
+
+#[test]
+fn a_stalled_gateway_walk_ends_walk_blocked_and_releases_its_body() {
+    let (world, mut c, store, path) = served_with(10_000_000, "blockedwalk", stalled_bodies);
+    c.send(1, "eden:walk", Some(thing()));
+    assert_eq!(c.answer(), Err("walk.blocked".into()));
+    std::thread::sleep(Duration::from_millis(150));
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let log = logged(&bytes);
+    let (&id, l) = log.iter().next().unwrap();
+    assert_eq!(l.last().unwrap().2.as_deref(), Some("walk.blocked"));
+    let ticks = ticks(&bytes);
+    let (end, _, _) = tick_of(&ticks, id, MOVE_ENDED);
+    assert!(
+        ticks
+            .iter()
+            .skip(end + 1)
+            .all(|(_, rows)| rows.iter().all(|r| r.0 != body_id())),
+        "stopped in its ending tick"
+    );
 }
