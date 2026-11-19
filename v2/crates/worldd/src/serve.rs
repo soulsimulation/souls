@@ -141,6 +141,8 @@ struct Built {
     town: Town,
     ground: Id,
     root: Id,
+    /// The world's rules (T2), for the engine's own acts (C2).
+    rules: replica::tree::Rules,
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built.
@@ -172,6 +174,7 @@ fn build(facts: &str) -> R<Built> {
     ))
     .map_err(|e| e.to_string())?;
     let next = im.tree.to_state().next;
+    let rules = im.rules.clone();
     let doors = Doors::new(header.clone(), im.rules, next);
     let town = Town::new(im.tree, ground, doors).map_err(|e| format!("the town: {e:?}"))?;
     Ok(Built {
@@ -180,6 +183,7 @@ fn build(facts: &str) -> R<Built> {
         town,
         ground,
         root,
+        rules,
     })
 }
 
@@ -222,9 +226,22 @@ fn humanoid() -> R<Family> {
             slot: None,
         })
     };
+    // Two hands, each holding in its slot of the body (B4): a form's press, take or put claims one (C2).
+    let hand = |s: &str, slot: u64| -> R<Resource> {
+        Ok(Resource {
+            name: n(s)?,
+            class: Class::Manipulator,
+            slot: Some(slot),
+        })
+    };
     Ok(Family {
         name: n("souls:humanoid")?,
-        resources: vec![leg("souls:leg-left")?, leg("souls:leg-right")?],
+        resources: vec![
+            leg("souls:leg-left")?,
+            leg("souls:leg-right")?,
+            hand("souls:hand-left", 1)?,
+            hand("souls:hand-right", 2)?,
+        ],
     })
 }
 
@@ -663,6 +680,8 @@ fn serve(args: &[String]) -> R<()> {
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.root.scope()));
+    // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
+    cfg.engine = Some((built.rules.clone(), Vec::new()));
     let (town, ground) = (built.town, built.ground);
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
         bodies(town, ground, &souls, placed)
