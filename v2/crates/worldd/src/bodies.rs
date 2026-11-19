@@ -23,6 +23,10 @@
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
 //!   the seat is held in the slots table again and a rise or another sit sees it.
 //!
+//! - **Who hears** (#3369). After each step of the controller the bodies call `sim::speech::heard`, which brings every
+//!   body's interest set up to date and gives each utterance the step started its hearers as they are then; the world
+//!   writes each as `sim::speech::entry` says ([`Bodies::heard`]).
+//!
 //! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
 use std::collections::BTreeMap;
@@ -35,12 +39,14 @@ use replica::ids::{Id, Minter, Scope};
 use replica::intents::{Intent, Target as Aim};
 use replica::moves::{Effector, Move};
 use replica::pose::{Pose, Support, Vec3};
+use replica::speech::Said;
 use replica::time::Micros;
 use sim::controller::Stance;
 use sim::host::Runner;
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
 use sim::slots::{PlaceAt, Request, Slots};
+use sim::speech::{self, Hearing};
 use sim::spots::Target;
 use sim::timers::DueList;
 use sim::walk::town::Town;
@@ -173,6 +179,11 @@ pub struct Bodies {
     ended: Vec<(Id, Result<(), String>)>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
+    /// Every body's interest set (B11, R4), kept as the bodies move.
+    hearing: Hearing,
+    /// The utterances started since the world last took them, each with its speaker, its record (hearers resolved
+    /// when it started) and the world time it started: the world writes each.
+    pub heard: Vec<(Id, Said, Micros)>,
 }
 
 /// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
@@ -236,6 +247,8 @@ impl Bodies {
             live: BTreeMap::new(),
             ended: Vec::new(),
             logged: BTreeMap::new(),
+            hearing: Hearing::new(),
+            heard: Vec::new(),
         })
     }
 
@@ -521,6 +534,14 @@ impl Bodies {
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
             let _ = self.runner.tick(&mut self.town);
+            // Who hears each utterance the step started, as the bodies stand after it (B11, #3369).
+            let said = std::mem::take(&mut self.runner.said);
+            let c = &self.runner.controller;
+            let ids: Vec<Id> = c.bodies().map(|b| b.id).collect();
+            let at = self.runner.now;
+            for (speaker, s) in speech::heard(&mut self.hearing, c.near(), ids, &said) {
+                self.heard.push((speaker, s, at));
+            }
             let walks: Vec<(Id, Id)> = self
                 .live
                 .iter()
