@@ -6,12 +6,28 @@ world's log reaches the bucket within seconds, and the world knows exactly how f
 are `v2/tools/ops/src/drill.rs`; the ten-kill test is `v2/tools/ops/o3-kill.sh`. Not here: an unreachable bucket
 (O10), the operator's restore command, the epoch raise and the restore gate (O12).
 
-**A real world** (O3b, #3458): `worldd serve --dir <world> --store <folder> [--machine <name>]` (or `$WORLDD_STORE`,
-`$WORLDD_MACHINE`) claims its world in O9's folder store and ships each record and checkpoint under that claim; each
+**A real world** (O3b, #3458): `worldd serve --dir <world> --store <store> [--machine <name>]` (or `$WORLDD_STORE`,
+`$WORLDD_MACHINE`) claims its world in the store and ships each record and checkpoint under that claim; each
 start claims again (`shipping::take_over`, as `ops world --restart`) and ships from the mark plus one, so the history
 read from record 0 holds every record once, in order (`crates/worldd/tests/serve.rs`, three SIGKILLs). It also
 archives its history (V3) under `h/<world>/<lineage>/`, which the page's history plays
 (`v2/tools/ops/o3b-history.mjs`). Without a store it ships nothing, as before.
+
+**The store's configuration** (O3c, #3529). One setting form for history, checkpoints, directory claims and O20b's
+backups (`SOULS_BACKUP_URL`): the offsite bucket, keys from the environment and never in the URL, never printed.
+
+```sh
+# In the environment of directoryd, the supervisor and each worldd@ unit (worldd@ reads /etc/souls/directory.env)
+DIRECTORY_STORE_URL=s3:https://<host>/<bucket>/<prefix>   # worldd serve uses it when --store and WORLDD_STORE are unset
+AWS_ACCESS_KEY_ID=<key id>
+AWS_SECRET_ACCESS_KEY=<secret>
+AWS_DEFAULT_REGION=auto                                   # R2's; omit for the default
+```
+
+`--store`, `$WORLDD_STORE` and `ops world <role> <dir> <store> ...` (the restore, `--restore`) take the same form, or
+`folder:<path>` (or a bare path) for O9's folder store on one machine, kept for tests. A start prints only
+`store: the offsite bucket` or `store: a folder standing in for the offsite bucket`. Tests run against
+`directoryd::directory::stand_in`, a local S3 stand-in in the test process; never production's bucket.
 
 ## What it does
 
