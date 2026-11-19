@@ -439,8 +439,9 @@ fn a1_to_a5_ground_rebuilt_where_the_edit_was() {
             );
             assert!(n.max_delay <= 2_000_000, "A1: within 2 s");
             assert_eq!(n.off, 0, "A2: no sample off the current ground");
-            // The bar is the release build's (the debug build in `ci.sh` runs about ten times slower).
-            if !cfg!(debug_assertions) {
+            // A speed bar (real time), the release build's: asserted only in the speed-bar step (ci.sh,
+            // V2_SPEED_BARS=1, release), so a loaded machine's `cargo test --release` does not fail on it.
+            if !cfg!(debug_assertions) && std::env::var_os("V2_SPEED_BARS").is_some() {
                 assert!(n.cut_max_us < 5_000, "A3: under 5 ms");
             }
         }
