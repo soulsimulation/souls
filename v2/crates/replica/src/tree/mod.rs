@@ -250,6 +250,11 @@ impl NodeRef<'_> {
         self.tree.place_of(self.rec)
     }
 
+    /// Its hash as last sealed (K5), covering its children's: none once changed and not sealed since (R5 reads it).
+    pub fn sealed(&self) -> Option<Hash> {
+        self.rec.hash
+    }
+
     /// The motion its last sample gave it, while it moves.
     pub fn moved(&self) -> Option<Moved> {
         match self.rec.at {
@@ -280,6 +285,8 @@ pub struct Tree {
     in_flight: BTreeMap<Id, Away>,
     arrived: BTreeSet<Id>,
     timers: BTreeMap<Id, TimerState>,
+    /// Pending timer ids by their node, so a remove drops its subtree's timers without walking them all. Lookup only.
+    timers_of: HashMap<Id, BTreeSet<Id>>,
     time: Vec<TimeEffect>,
     undo: Vec<Undo>,
     dead: Vec<u32>,
@@ -319,6 +326,7 @@ impl Tree {
             in_flight: BTreeMap::new(),
             arrived: BTreeSet::new(),
             timers: BTreeMap::new(),
+            timers_of: HashMap::new(),
             time: Vec::new(),
             undo: Vec::new(),
             dead: Vec::new(),
@@ -440,6 +448,7 @@ impl Tree {
             in_flight: self.in_flight.clone(),
             arrived: self.arrived.clone(),
             timers: self.timers.clone(),
+            timers_of: self.timers_of.clone(),
             time: self.time.clone(),
             undo: Vec::new(),
             dead: self.dead.clone(),
@@ -467,6 +476,67 @@ impl Tree {
     /// The dense array of moving nodes. A free entry is `None`.
     pub fn moving(&self) -> &[Option<Moving>] {
         &self.moving
+    }
+
+    /// The pending timers by id (T6 rule 15), each with the node that owns it.
+    pub fn timers(&self) -> &BTreeMap<Id, TimerState> {
+        &self.timers
+    }
+
+    /// The time effects applied, in order (T5).
+    pub fn time(&self) -> &[TimeEffect] {
+        &self.time
+    }
+
+    /// A fork's view (K6, #2670; T8 rule 10), made in place and recorded nowhere, since a fork is a view of a
+    /// checkpoint and not a change: drops every node whose audience `seen` refuses, with its subtree and every link
+    /// with an end in them, then every link `seen` refuses, and the timers of nodes gone. The sequence stays.
+    pub fn keep_seen(&mut self, seen: &dyn Fn(Audience) -> bool) {
+        let unseen: Vec<u32> = (0..self.nodes.len() as u32)
+            .filter(|s| *s != self.root && !seen(self.nodes[*s as usize].audience))
+            .collect();
+        for s in unseen {
+            if self.nodes[s as usize].life != Life::Live {
+                continue; // free, in flight, or gone with an ancestor
+            }
+            let gone = self.subtree(s);
+            self.detach(s);
+            for g in &gone {
+                let ends: Vec<Id> = self.nodes[*g as usize]
+                    .links
+                    .iter()
+                    .map(|e| e.link)
+                    .collect();
+                for l in ends {
+                    self.link_take(l);
+                }
+            }
+            for g in gone {
+                self.kill(g);
+            }
+        }
+        let unseen: Vec<Id> = self
+            .links
+            .iter()
+            .filter(|(_, l)| !seen(l.audience))
+            .map(|(i, _)| *i)
+            .collect();
+        for l in unseen {
+            self.link_take(l);
+        }
+        let orphan: Vec<Id> = self
+            .timers
+            .iter()
+            .filter(|(_, t)| self.handle(t.node).is_none())
+            .map(|(i, _)| *i)
+            .collect();
+        for t in orphan {
+            self.timers.remove(&t);
+        }
+        self.undo.clear();
+        for slot in std::mem::take(&mut self.dead) {
+            self.release(slot);
+        }
     }
 
     fn place_of(&self, rec: &NodeRec) -> Option<Place> {
@@ -956,25 +1026,42 @@ impl Tree {
                     due: *due,
                     name: name.clone(),
                 };
-                self.timers.insert(*timer, state);
+                self.timer_put(*timer, state);
                 let timer = *timer;
                 self.log(move |t| {
-                    t.timers.remove(&timer);
+                    t.timer_take(timer);
                 });
             }
             TimerRec::Clear { timer } => match self.timers.get(timer) {
-                Some(s) if s.node == node => {
-                    let timer = *timer;
-                    let old = self.timers.remove(&timer);
-                    self.log(move |t| {
-                        t.timers.extend(old.map(|o| (timer, o)));
-                    });
-                }
+                Some(s) if s.node == node => self.timer_drop(*timer),
                 Some(_) => return refuse("not-own-node", show(*timer)),
                 None => return refuse("timer-missing", show(*timer)),
             },
         }
         Ok(())
+    }
+
+    fn timer_put(&mut self, id: Id, state: TimerState) {
+        self.timers_of.entry(state.node).or_default().insert(id);
+        self.timers.insert(id, state);
+    }
+
+    fn timer_take(&mut self, id: Id) -> Option<TimerState> {
+        let state = self.timers.remove(&id)?;
+        if let Some(ids) = self.timers_of.get_mut(&state.node) {
+            ids.remove(&id);
+            if ids.is_empty() {
+                self.timers_of.remove(&state.node);
+            }
+        }
+        Some(state)
+    }
+
+    /// Drops a pending timer (a clear, or its node's remove), logged so a refused part puts it back.
+    fn timer_drop(&mut self, id: Id) {
+        if let Some(old) = self.timer_take(id) {
+            self.log(move |t| t.timer_put(id, old));
+        }
     }
 
     fn fresh(&self, id: Id) -> R<()> {
@@ -1060,6 +1147,11 @@ impl Tree {
                         .collect();
                     for l in ends {
                         self.link_take(l);
+                    }
+                    // The subtree's pending timers go with it, in the same commit (K2b, #3132).
+                    let id = self.nodes[*s as usize].id;
+                    for timer in self.timers_of.get(&id).cloned().unwrap_or_default() {
+                        self.timer_drop(timer);
                     }
                 }
                 for s in gone {

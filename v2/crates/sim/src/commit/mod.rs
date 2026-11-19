@@ -9,6 +9,10 @@
 //! per node, so a change to any field of a node read invalidates the check (a false conflict costs a re-check, never
 //! a wrong commit). If every candidate's reads changed, the act goes back for one re-check on a newer copy
 //! ([`Outcome::Recheck`]); stale again after that, it is refused (`stale`).
+//!
+//! An act's life around the commit (repeats, receipts, deadlines, expiry) is [`acts`] (I4, #2687).
+
+pub mod acts;
 
 use replica::apply::Replica;
 use replica::effects::{
@@ -139,9 +143,18 @@ fn apply(
         events: None,
         rest: Rest::new(),
     };
+    write(live, &[effect])
+}
+
+/// The one write path: `effects` as one part, applied to `live` whole or not at all. Acts (above) and a creator's
+/// edits (`crate::edit`, G1, #2746) both commit through it.
+pub fn write(live: &mut Replica, effects: &[Effect]) -> Result<Arc<Part>, Refusal> {
     let v = Value::Map(BTreeMap::from([
         (1, Value::Bytes(live.header().hash().to_bytes())),
-        (2, Value::Array(vec![effect.to_value()])),
+        (
+            2,
+            Value::Array(effects.iter().map(Effect::to_value).collect()),
+        ),
     ]));
     let bytes = encode(&v).map_err(|e| Refusal {
         name: "encoding",

@@ -23,6 +23,11 @@
 //!    "succeeds" with the data gone (<https://wiki.postgresql.org/wiki/Fsync_Errors>).
 //! 7. **Sync rules:** `fdatasync` covers a file's changed size; a new file also needs its directory synced; on
 //!    macOS only `F_FULLFSYNC` reaches the disk, so disk numbers are measured on Linux (K-core.md, fact 8).
+//! 8. **A restart reads from its checkpoint** (K4b, #3136): the writer keeps the durable place ([`At`]: record,
+//!    byte, chain checksum), a checkpoint stores it, and [`Log::open_at`] reads the header and the bytes from there
+//!    on, so opening takes the same time however long the log is. What follows is judged as in rule 4; the bytes
+//!    before are the checkpoint's, not read. A place whose record does not continue the chain from its checksum
+//!    means the two do not belong together, and the whole log is read instead.
 //!
 //! The kill and power-cut runner and the sync table are `v2/tools/log-crash`. Not here: shipping off the machine
 //! (O3), views (R3), packing (V3), a full disk (O10), checkpoints (K5).
@@ -31,7 +36,8 @@ mod record;
 mod storage;
 
 pub use record::{
-    HEAD_LEN, HEADER_LEN, Header, MAX_RECORD, Recovered, Torn, crc32c, encode_record, recover,
+    At, HEAD_LEN, HEADER_LEN, Header, MAX_RECORD, Recovered, Torn, crc32c, encode_record, recover,
+    recover_from,
 };
 pub use storage::{FileStore, Mem, MemDisk, Storage};
 
@@ -55,6 +61,8 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
 struct Marks {
     /// Records on the disk (records `..durable`).
     durable: u64,
+    /// Where they end (rule 8).
+    at: At,
     /// Records off the machine (O3 moves it).
     off_machine: u64,
     /// The failure that stopped the writer, for good.
@@ -112,8 +120,25 @@ pub struct Log<S: Storage + 'static> {
 impl<S: Storage + 'static> Log<S> {
     /// Recovers the log in `storage` (rule 4) and starts its writer. An empty log gets a header for `epoch`.
     /// Returns what recovery found; its records are numbered from 0 and new ones follow them.
-    pub fn open(mut storage: S, epoch: u64) -> R<(Log<S>, Recovered)> {
-        let found = recover(&storage.read()?)?;
+    pub fn open(storage: S, epoch: u64) -> R<(Log<S>, Recovered)> {
+        Log::open_at(storage, epoch, None)
+    }
+
+    /// As [`Log::open`], reading from `at` (a checkpoint's place) when it is given and belongs to this log (rule 8):
+    /// what it returns are the records from `at.record` on (`Recovered::first`), and new ones follow them.
+    pub fn open_at(mut storage: S, epoch: u64, at: Option<At>) -> R<(Log<S>, Recovered)> {
+        let from = match at {
+            Some(a) => {
+                let head = storage.read_from(0, HEADER_LEN)?;
+                let tail = storage.read_from(a.offset, usize::MAX)?;
+                recover_from(&head, &tail, a)?
+            }
+            None => None,
+        };
+        let found = match from {
+            Some(f) => f,
+            None => recover(&storage.read()?)?,
+        };
         let header = match found.header {
             Some(h) if h.epoch > epoch => {
                 return refuse(
@@ -143,19 +168,30 @@ impl<S: Storage + 'static> Log<S> {
             storage.sync()?;
         }
         let shared = Arc::new(Shared::default());
-        let next = found.records.len() as u64;
-        shared.marks().durable = next;
-        let (tx, rx) = channel();
+        let next = found.first + found.records.len() as u64;
         // A new log's first record follows the header: its previous checksum is the salt.
-        let prev = if found.header.is_some() {
-            found.last_crc
-        } else {
-            header.salt
+        let durable = match found.header {
+            Some(_) => At {
+                record: next,
+                offset: found.end as u64,
+                crc: found.last_crc,
+            },
+            None => At {
+                record: 0,
+                offset: HEADER_LEN as u64,
+                crc: header.salt,
+            },
         };
+        {
+            let mut m = shared.marks();
+            m.durable = next;
+            m.at = durable;
+        }
+        let (tx, rx) = channel();
         let (sh, salt) = (shared.clone(), header.salt);
         let writer = std::thread::Builder::new()
             .name("log-writer".into())
-            .spawn(move || write_loop(storage, rx, sh, salt, prev, next))
+            .spawn(move || write_loop(storage, rx, sh, salt, durable))
             .map_err(|e| Refusal {
                 name: "log-io",
                 detail: format!("the writer thread did not start: {e}"),
@@ -197,6 +233,11 @@ impl<S: Storage + 'static> Log<S> {
     /// The durable mark: records `..durable()` are on the disk, and acts in them may be acknowledged.
     pub fn durable(&self) -> u64 {
         self.shared.marks().durable
+    }
+
+    /// Where the durable records end (rule 8): what a checkpoint keeps, so a restart reads the log from there.
+    pub fn durable_at(&self) -> At {
+        self.shared.marks().at
     }
 
     /// Waits until records `..n` are on the disk, or the writer has failed (`log-failed`).
@@ -252,14 +293,13 @@ fn write_loop<S: Storage>(
     rx: Receiver<Vec<u8>>,
     shared: Arc<Shared>,
     salt: u32,
-    mut prev: u32,
-    mut durable: u64,
+    mut at: At,
 ) -> S {
     let mut buf = Vec::new();
     while let Ok(first) = rx.recv() {
         buf.clear();
         let mut n = 0u64;
-        let mut chain = prev;
+        let mut chain = at.crc;
         let mut out = Ok(());
         for bytes in std::iter::once(first).chain(rx.try_iter()) {
             match encode_record(&mut buf, salt, chain, &bytes) {
@@ -277,13 +317,17 @@ fn write_loop<S: Storage>(
         let mut m = shared.marks();
         match out {
             Ok(()) => {
-                prev = chain;
                 // Read by worldd's view tier to time frames from the sync, never by the engine.
                 #[allow(clippy::disallowed_methods)]
-                let at = Instant::now();
-                m.synced = Some((durable, at));
-                durable += n;
-                m.durable = durable;
+                let now = Instant::now();
+                m.synced = Some((at.record, now));
+                at = At {
+                    record: at.record + n,
+                    offset: at.offset + buf.len() as u64,
+                    crc: chain,
+                };
+                m.durable = at.record;
+                m.at = at;
             }
             Err(e) => m.failed = Some(e),
         }

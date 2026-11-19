@@ -43,6 +43,7 @@ import { HUMAN_RADIUS } from '../../../../mars/viewer/engine/world/catalog.ts';
 import { apply, effects, type Change } from '../../../../packages/form-rules/src/effects.ts';
 import { surfaceSlotsOf, slotOccupant } from '../../../../mars/viewer/engine/items/model.ts';
 import { canPoint, TILT, TILT_MORE } from '../../../../mars/viewer/engine/items/watering.ts';
+import { DT } from '../../../../mars/viewer/engine/runtime/runtime.ts';
 import type { Entry, Form } from '../../../../packages/form-rules/src/rules.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -214,8 +215,8 @@ export function createFormsAdapter(h: FormsHost) {
     if (!out.right && typeof gripped === 'string' && out.left !== gripped) out.right = gripped;
     return out;
   };
-  /** What the form needs and does now, asked of @souls/form-rules as the world: the thing's fields as today's store holds
-   *  them, the god things the body holds, the form's argument things, its effector in the thing's frame (whole
+  /** What the form needs and does now, asked of @souls/form-rules as the world at its current time: the thing's fields as
+   *  today's store holds them, the god things the body holds, the form's argument things, its effector in the thing's frame (whole
    *  millimetres) and where each thing is: in a hand, in a place on another thing, or loose in the actor's place. */
   function ask(t: NonNullable<ReturnType<typeof thing>>, id: string, f: FormRef, action: string, bodyId: string, effector: number[], receipt: string): any {
     const args = argsOf(t, id, f, bodyId), kinds: Record<string, Entry> = {}, nodes: Record<string, any> = {};
@@ -240,7 +241,9 @@ export function createFormsAdapter(h: FormsHost) {
       }
       here.push(n);
     }
-    const input = { kinds, act: { this: f.body ? bodyId : id, form: action, args }, state: { actor: bodyId, nodes, moves: moves() } };
+    // the world's time now, in whole microseconds: a timed field (the kettle's heat) is read and set at it
+    const now_us = Math.round(h.engine.world.tick * DT * 1_000_000);
+    const input = { kinds, act: { this: f.body ? bodyId : id, form: action, args }, state: { actor: bodyId, nodes, moves: moves(), now_us } };
     return Object.assign(effects({ ...input, receipt }), { input });
   }
   /** The rules' own verdict for a refusal's `decided` (SA-C3), without the input `ask` keeps beside it. */
