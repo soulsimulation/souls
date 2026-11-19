@@ -4,6 +4,9 @@
 // public stream (`?stream=`, as the page plays it), drawn from above. A drag draws a ghost here and sends one edit on
 // release; the page has no other way to change the world. The world's answer rules: each batch is listed with it.
 //
+// The prayers waiting for the creator (G11, #3335) are listed beside the batches, on the same socket, and answered
+// here as the creator's agent answers them (`prayers.ts`). A prayer's words are shown as text, never as markup.
+//
 // Sign-in is W1's sign-in for test worlds (`Bearer test:<name>`), as the list of worlds signs in; a provider's
 // session rides the same header.
 import init, { wireHello, wireSignIn } from 'replica';
@@ -12,6 +15,7 @@ import type { NodeRec } from '../source/source.ts';
 import { idOf, type Frame, type Op } from './edit.ts';
 import { CreatorSession } from './session.ts';
 import { Drag, refusalText, soulName, type At, type Body } from './drag.ts';
+import { ANSWER_MOST, EVERY_MS, Prayers, prayerRefusal, type Prayer } from './prayers.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('map');
@@ -26,6 +30,7 @@ const UM = 1e-6;
 // The page's copy, from the stream: nodes by id.
 const nodes = new Map<string, NodeRec>();
 let session: CreatorSession | null = null;
+let prayers: Prayers | null = null;
 let placing = false;
 /** Things this panel placed, by id, until the stream shows them: the receipt's id at the spot sent. */
 const placed = new Map<string, At>();
@@ -188,6 +193,67 @@ $<HTMLButtonElement>('place').addEventListener('click', (e) => {
   (e.currentTarget as HTMLElement).classList.toggle('on', placing);
 });
 
+/** The Soul a prayer is from: its body's name when the stream shows it, else a short form of its grant. */
+function prayerFrom(p: Prayer): string {
+  const [scope, n] = p.soul.replace(/^soul-/, '').split('-');
+  const body = nodes.get(`${scope}.${n}`) ?? nodes.get(`${scope}-${n}`);
+  return body?.name ?? `Soul ${scope!.slice(0, 6)}…-${n}`;
+}
+
+/** The waiting prayers, each with Answer; nothing when none wait (as today's panel). */
+let answering: string | null = null;
+function showPrayers() {
+  const box = $<HTMLElement>('prayers');
+  const waiting = prayers?.waiting ?? [];
+  box.replaceChildren();
+  box.dataset.prayers = String(waiting.length);
+  if (!waiting.length) return;
+  const h = document.createElement('div');
+  h.className = 'h';
+  h.textContent = waiting.length === 1 ? '1 prayer waiting' : `${waiting.length} prayers waiting`;
+  const ul = document.createElement('ul');
+  for (const p of waiting) {
+    const li = document.createElement('li');
+    li.dataset.prayer = p.id;
+    const who = document.createElement('b');
+    who.textContent = prayerFrom(p);
+    const words = document.createElement('p');
+    words.append(who, ` ${p.text}`);
+    li.append(words);
+    if (answering === p.id) {
+      const form = document.createElement('form');
+      const input = Object.assign(document.createElement('input'), { maxLength: ANSWER_MOST, placeholder: `Your answer to ${prayerFrom(p)}` });
+      input.dataset.answerText = p.id;
+      const sendIt = Object.assign(document.createElement('button'), { textContent: 'Answer' });
+      sendIt.dataset.answerSend = p.id;
+      const cancel = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Cancel' });
+      const error = Object.assign(document.createElement('div'), { className: 'refused' });
+      cancel.onclick = () => { answering = null; showPrayers(); };
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        sendIt.disabled = true;
+        sendIt.textContent = 'Sending…';
+        void prayers!.answer(p.id, input.value).then((refused) => {
+          if (refused) { error.textContent = prayerRefusal(refused); sendIt.disabled = false; sendIt.textContent = 'Answer'; return; }
+          answering = null;
+          list(`answered a prayer from ${prayerFrom(p)}`).classList.add('ok');
+          showPrayers();
+        });
+      };
+      form.append(input, sendIt, cancel, error);
+      li.append(form);
+      setTimeout(() => input.focus());
+    } else {
+      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Answer' });
+      b.dataset.answer = p.id;
+      b.onclick = () => { answering = p.id; showPrayers(); };
+      li.append(b);
+    }
+    ul.append(li);
+  }
+  box.append(h, ul);
+}
+
 /** The session exchange, then the socket. */
 async function open(name: string) {
   status.textContent = 'asking the gateway for a creator token';
@@ -203,12 +269,16 @@ async function open(name: string) {
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => {
     session = new CreatorSession(ws, idOf(body.grant!.replace(/^creator-/, '')), wireHello(), wireSignIn(body.token!, new Uint8Array(0)), Date.now() * 1000);
+    prayers = new Prayers({ send: (t) => ws.send(t) });
+    prayers.onChange = () => { if (!answering) showPrayers(); };
     session.onOpen = () => {
+      void prayers!.refresh();
+      setInterval(() => void prayers?.refresh(), EVERY_MS);
       status.textContent = 'signed in as the creator · edits sent 0';
       document.body.classList.replace('refused', 'creator') || document.body.classList.add('creator');
     };
   };
-  ws.onmessage = (e) => session?.frame(new Uint8Array(e.data as ArrayBuffer));
+  ws.onmessage = (e) => (typeof e.data === 'string' ? void prayers?.text(e.data) : session?.frame(new Uint8Array(e.data as ArrayBuffer)));
   ws.onclose = () => (status.textContent = `the socket closed${session?.outcome ? ` (${session.outcome})` : ''}`);
 }
 $<HTMLFormElement>('signin').addEventListener('submit', (e) => {
@@ -239,5 +309,5 @@ if (address) {
     error: (m) => (status.textContent = m),
   });
 } else status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
-Object.assign(globalThis, { panel: { nodes, get session() { return session; }, drag } });
+Object.assign(globalThis, { panel: { nodes, get session() { return session; }, get prayers() { return prayers; }, drag } });
 requestAnimationFrame(draw);
