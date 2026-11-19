@@ -48,7 +48,9 @@ test('#3374 a box with no size raises no note; only panels that cover a sized bo
   assert.equal(viewportNote(390,720,{bottom:280}),null);
   // Panels really cover a sized box: one short sentence a visitor understands.
   const note=viewportNote(390,720,{bottom:720})!;
-  assert.equal(note,'Close the panel to see the world.');
+  assert.equal(note,'Close a panel or widen the window to see the world.');
   assert.doesNotMatch(note,/no visible area/);
   assert.equal(viewportNote(1280,720,{right:700,left:600}),note);
+  // The one size that raised it in a browser: a 200x140 window, where the top bar wraps over the whole box.
+  assert.equal(viewportNote(200,140,{top:140}),note);
 });

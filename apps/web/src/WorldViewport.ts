@@ -16,7 +16,7 @@ export function visibleViewport(width: number,height: number,insets?: ViewportIn
  * layout, mid-resize) says nothing: the view waits. Only panels that really cover a sized box get a note. */
 export function viewportNote(width: number,height: number,insets?: ViewportInsets): string | null {
   if (!(size(width)>0 && size(height)>0) || visibleViewport(width,height,insets)) return null;
-  return 'Close the panel to see the world.';
+  return 'Close a panel or widen the window to see the world.';
 }
 
 /** Make the logical target and vertical FOV occupy the unoccluded rectangle.
