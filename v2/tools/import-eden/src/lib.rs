@@ -20,6 +20,9 @@
 //! `Quat::from_yaw_mdeg`. Human words (names) are stored by reference: the field holds the text's SHA-256, and
 //! [`Import::texts`] maps it back. Kinds are T3's `namespace:name@hash`, each named on its own by T3's reader.
 
+// The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; this importer's map is a lookup.
+#![allow(clippy::disallowed_types)]
+
 pub mod json;
 
 use json::Json;

@@ -24,7 +24,7 @@ use crate::accounts::random;
 use replica::encode::{from_hex, to_hex};
 use replica::ids::sha256;
 use rusqlite::{Connection, OptionalExtension, params};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -93,9 +93,9 @@ pub struct Pairing {
     /// The gateway's tokens file, rewritten from the stored hashes after each pairing.
     tokens_file: Option<PathBuf>,
     /// Per account, the times of its wrong short codes.
-    guesses: Mutex<HashMap<String, Vec<u64>>>,
+    guesses: Mutex<BTreeMap<String, Vec<u64>>>,
     /// Per secret hash, the last poll and the interval.
-    polls: Mutex<HashMap<[u8; 32], (u64, u64)>>,
+    polls: Mutex<BTreeMap<[u8; 32], (u64, u64)>>,
 }
 
 /// A grant's text is a Soul's: `soul-<32 hex>-<counter>`.
