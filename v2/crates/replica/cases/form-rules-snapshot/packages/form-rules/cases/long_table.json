@@ -1,0 +1,67 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:long_table: a long table. Anyone wipes it clean; a spill (clean false) is made by something else, a meal.",
+  "cases": [
+    {
+      "name": "wipe_a_spill",
+      "act": {
+        "this": "t1",
+        "form": "wipe"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:long_table",
+            "fields": {
+              "clean": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "wipe_when_already_clean",
+      "act": {
+        "this": "t1",
+        "form": "wipe"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:long_table"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}

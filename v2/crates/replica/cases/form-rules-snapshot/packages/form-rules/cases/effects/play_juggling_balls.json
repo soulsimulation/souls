@@ -1,0 +1,99 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The juggling balls, held in the right hand, juggled twice.",
+ "cases": [
+  {
+   "name": "juggle_twice",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "j1": {
+      "kind": "eden:juggling_balls"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": "j1"
+      },
+      "effector_mm": [
+       0,
+       900,
+       300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "j1",
+      "form": "juggle"
+     },
+     "now_us": 0,
+     "receipt": "rj1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "j1",
+        "field": "juggles",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:juggled",
+        "node": "j1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "j1",
+      "form": "juggle"
+     },
+     "now_us": 30000000,
+     "receipt": "rj2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "j1",
+        "field": "juggles",
+        "n": 1,
+        "to": 2
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "j1": {
+     "kind": "eden:juggling_balls",
+     "fields": {
+      "juggles": 2
+     }
+    }
+   }
+  }
+ ]
+}

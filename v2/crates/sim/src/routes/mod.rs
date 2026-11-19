@@ -19,6 +19,16 @@
 //!   uses a link only when it has every bit the link needs. A ladder needs hands and climb. A shut door needs hands
 //!   besides, read from the door's field when the route is asked for (N4: open or shut is the door's, never the
 //!   link's).
+//! - **Water** (N11c, #3218). The open ground's water patches (N11b's wading ground and water, `OpenGround::cut_water`)
+//!   are pieces of the map too, mapped after everything dry so a dry body's pieces, portals and links keep their
+//!   numbers. Where two pieces of different grounds share a stretch of edge, a shore link joins them, its two ends that
+//!   stretch: dry ground to wading ground a [`Kind::Wade`] (needs [`WADE`]), wading ground or dry ground to water a
+//!   [`Kind::Swim`] (needs [`SWIM`]); wet pieces of one ground share plain portals. Crossing a shore costs the height
+//!   between its ends. A body never comes to a shore whose move it lacks, so its search is the one it had before the
+//!   water was mapped, and a route into water it may not use is refused by name (`link-needs-wade`,
+//!   `link-needs-swim`); but any body may cross a shore out of the water, so none is stranded in it. [`Map::spot`]
+//!   finds dry ground only; [`Map::spot_for`] the ground a body may stand on ([`may_stand`]). A start and goal on one
+//!   piece are the line inside it, unless a body that may wade or swim has a shorter way out across a shore and back.
 //! - **Versions.** A route carries the node, square and version of each patch it crosses, so a later reader can tell
 //!   a route cut on a patch since rebuilt (G3, #2760). The tree keeps no per-node version yet, so the map is given
 //!   one per node, as N3's cache is.
@@ -35,7 +45,9 @@
 //!   clearance (twice the radius plus [`MARGIN`]) is `link-too-narrow` whatever else stops it, and a body refused
 //!   there is told the link, its door and both widths. A floater routes as a walker of its class.
 //!
-//! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), routes across water (N11). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
+//! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), a gait's speed as cost (a route is
+//! the shortest, not the quickest), walking a shore link (the walk skill crosses tree links and steps only). Ground
+//! cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
 // The repeat rule (K12, v2/clippy.toml): the distance and patch maps are lookups on the search's hot path, never
 // iterated, so their order reaches no route.
@@ -43,11 +55,12 @@
 
 pub mod way;
 
+use crate::gaits::Ground;
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;
 use crate::ground::{MARGIN, OpenGround, Piece, SQUARE};
-use crate::links::{Building, End, F_OPEN, Kind, Link, Open, floor_joins, ground_doors};
+use crate::links::{Building, End, F_OPEN, Kind, Link, Open, floor_joins, ground_doors, shore_id};
 use replica::effects::Refusal;
 use replica::encode::Value;
 use replica::ids::Id;
@@ -80,8 +93,25 @@ pub fn needs(kind: Kind) -> Mask {
     match kind {
         Kind::Ladder => HANDS | CLIMB,
         Kind::Doorway | Kind::Stairs | Kind::Ramp | Kind::Step => 0,
+        Kind::Wade => WADE,
+        Kind::Swim => SWIM,
     }
 }
+
+/// Whether a body with abilities `has` may stand on `ground`: dry ground always, wading ground with wading, water with
+/// swimming.
+pub fn may_stand(ground: Ground, has: Mask) -> bool {
+    match ground {
+        Ground::Dry => true,
+        Ground::Wading => has & WADE != 0,
+        Ground::Water => has & SWIM != 0,
+    }
+}
+
+/// How far two edges may lie apart and still be one shore, mm (the grid's rounding).
+const SHORE_OFF: i64 = 2;
+/// The shortest stretch of edge two pieces share that is a portal or a shore, mm.
+const SHORE_MIN: i64 = 10;
 
 /// A patch by its node and, on the open ground, its square.
 type PatchKey = (Id, Option<(i32, i32)>);
@@ -109,6 +139,8 @@ struct PieceRec {
     at: PatchAt,
     frame: u32,
     piece: Piece,
+    /// The water a wet piece of the open ground is of (its index in the scene's waters).
+    water: Option<u32>,
     portals: Vec<u32>,
     /// Per triangle (counter-clockwise), the triangle across each edge `k` (vertex `k` to `k + 1`), or `NONE`.
     adj: Option<Vec<[u32; 3]>>,
@@ -168,6 +200,8 @@ pub struct LinkInfo {
     pub blocked: Option<&'static str>,
     /// How many portals each end has.
     pub ends: [usize; 2],
+    /// The piece each end's first portal lies on.
+    pub pieces: [Option<u32>; 2],
 }
 
 /// Where a body stands: a piece of the map and a point on it (mm, the piece's frame).
@@ -325,7 +359,8 @@ impl Map {
         };
         let mut ground_meets = Vec::new();
         // The open ground, square by square, and each piece's stretches along its square's edges.
-        let open = OpenGround::of(tree, ground, radius)?;
+        let open_ground = OpenGround::of(tree, ground, radius)?;
+        let open = &open_ground;
         let gv = version(ground);
         // Edge stretches by line: (true for x = c, c) → (lo, hi, square, piece).
         let mut lines: BTreeMap<(bool, i64), Vec<Stretch>> = BTreeMap::new();
@@ -450,6 +485,7 @@ impl Map {
         for (b, _) in &buildings {
             m.add_links(b, &all);
         }
+        m.add_water(&open_ground, ground, gv);
         // The open ground's gates are the ground's, replaced only with it.
         m.owned.remove(&gates_at);
         m.seen = vec![(0, 0, NONE, NONE); m.portals.len() + 1];
@@ -471,6 +507,7 @@ impl Map {
                         outline: Vec::new(),
                         vertices: Vec::new(),
                         triangles: Vec::new(),
+                        ground: Ground::Dry,
                     };
                     rec.adj = None;
                     rec.dist = HashMap::new();
@@ -585,11 +622,143 @@ impl Map {
                 at,
                 frame,
                 piece: pc,
+                water: None,
                 portals: Vec::new(),
                 adj: None,
                 dist: HashMap::new(),
             });
         }
+    }
+
+    /// The open ground's water patches (N11c, #3218), mapped after every dry piece, portal and link so that a dry
+    /// body's keep their numbers: wet pieces of one ground that touch (across a square's edge, or where two waters
+    /// meet) share a portal, and pieces of two grounds a shore link whose two ends are the stretch of edge they share.
+    /// Dry ground and wading ground are joined by a [`Kind::Wade`]; wading ground, or dry ground, and swimming water
+    /// by a [`Kind::Swim`]. End 0 is on the drier piece.
+    fn add_water(&mut self, open: &OpenGround, ground: Id, version: u64) {
+        let first_wet = self.pieces.len() as u32;
+        for (i, j) in open.squares() {
+            let at = PatchAt {
+                node: ground,
+                square: Some((i, j)),
+                version,
+            };
+            for (w, pc) in open.cut_water(i, j) {
+                let q = self.pieces.len() as u32;
+                self.by_patch
+                    .entry((ground, Some((i, j))))
+                    .or_default()
+                    .push(q);
+                self.pieces.push(PieceRec {
+                    at,
+                    frame: 0,
+                    piece: pc,
+                    water: Some(w),
+                    portals: Vec::new(),
+                    adj: None,
+                    dist: HashMap::new(),
+                });
+            }
+        }
+        let edges = |pc: &Piece| -> Vec<([i64; 2], [i64; 2])> {
+            pc.outline
+                .iter()
+                .flat_map(|r| {
+                    (0..r.len()).map(move |k| {
+                        let (a, b) = (r[k], r[(k + 1) % r.len()]);
+                        (
+                            [i64::from(a[0]), i64::from(a[2])],
+                            [i64::from(b[0]), i64::from(b[2])],
+                        )
+                    })
+                })
+                .collect()
+        };
+        let wetness = |g: Ground| match g {
+            Ground::Dry => 0,
+            Ground::Wading => 1,
+            Ground::Water => 2,
+        };
+        let first_link = self.links.len();
+        for q in first_wet..self.pieces.len() as u32 {
+            let Some((i, j)) = self.pieces[q as usize].at.square else {
+                continue;
+            };
+            let mine = edges(&self.pieces[q as usize].piece);
+            let near: Vec<u32> = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .filter_map(|(di, dj)| self.by_patch.get(&(ground, Some((i + di, j + dj)))))
+                .flatten()
+                .copied()
+                // Each wet pair once; a dry piece from its wet side.
+                .filter(|&r| r < first_wet || r > q)
+                .collect();
+            for r in near {
+                let theirs = edges(&self.pieces[r as usize].piece);
+                let (gq, gr) = (
+                    self.pieces[q as usize].piece.ground,
+                    self.pieces[r as usize].piece.ground,
+                );
+                for &(a, b) in &mine {
+                    for &(c, d) in &theirs {
+                        let Some((s0, s1)) = shared(a, b, c, d) else {
+                            continue;
+                        };
+                        if gq == gr {
+                            self.add_portal([q, r], s0, s1, NONE, 0);
+                            continue;
+                        }
+                        let (lo, hi) = if wetness(gq) < wetness(gr) {
+                            (q, r)
+                        } else {
+                            (r, q)
+                        };
+                        let kind = if wetness(gq).max(wetness(gr)) == 1 {
+                            Kind::Wade
+                        } else {
+                            Kind::Swim
+                        };
+                        let li = self.links.len() as u32;
+                        let p0 = self.add_portal([lo, NONE], s0, s1, li, 0);
+                        let p1 = self.add_portal([hi, NONE], s0, s1, li, 1);
+                        let dy =
+                            self.portals[p0 as usize].world[1] - self.portals[p1 as usize].world[1];
+                        self.links.push(LinkRec {
+                            id: shore_id(ground, (self.links.len() - first_link) as u64),
+                            kind,
+                            door: None,
+                            blocked: None,
+                            ends: [vec![p0], vec![p1]],
+                            cost: dy.unsigned_abs() as u32,
+                            // A shore is as wide as its stretch of edge: never too narrow (B12).
+                            width: 0,
+                            gone: false,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// The water a piece of the open ground is of, if it is wet (its index in the scene's waters).
+    pub fn water_of(&self, piece: u32) -> Option<u32> {
+        self.pieces[piece as usize].water
+    }
+
+    /// Whether a body with `has` may not take portal `r` onward: the drier end of a shore whose move it lacks. A body
+    /// may always come out of the water, so it is never stranded in it; a body that may not go in never comes to the
+    /// shore, so a dry body's search is as it was before the water was mapped.
+    fn shore_shut(&self, r: u32, has: Mask) -> bool {
+        let p = &self.portals[r as usize];
+        p.link != NONE
+            && p.side == 0
+            && matches!(self.links[p.link as usize].kind, Kind::Wade | Kind::Swim)
+            && needs(self.links[p.link as usize].kind) & !has != 0
+    }
+
+    /// Whether crossing link `l` from its end `side` comes out of the water: a shore crossed from its wetter end.
+    fn ashore(&self, l: u32, side: u8) -> bool {
+        side == 1 && matches!(self.links[l as usize].kind, Kind::Wade | Kind::Swim)
     }
 
     /// The portals of link `l`'s end `e` (its side `k`): on the floor's piece it lies on (a stair's or a ladder's end,
@@ -690,9 +859,10 @@ impl Map {
     /// Whether the point `p` (mm, the ground's frame) lies on a piece of the open ground's square `sq`, within the
     /// grid's rounding: where a doorway's segment there is a portal.
     pub fn on_square(&self, ground: Id, sq: (i32, i32), p: [i64; 2]) -> bool {
-        self.by_patch
-            .get(&(ground, Some(sq)))
-            .is_some_and(|qs| qs.iter().any(|&q| self.off_piece(q, p) <= MEET_OFF))
+        self.by_patch.get(&(ground, Some(sq))).is_some_and(|qs| {
+            qs.iter()
+                .any(|&q| self.dry(q) && self.off_piece(q, p) <= MEET_OFF)
+        })
     }
 
     /// How many pieces, portals and links the map holds.
@@ -755,8 +925,28 @@ impl Map {
                 door: l.door.is_some(),
                 blocked: l.blocked,
                 ends: [l.ends[0].len(), l.ends[1].len()],
+                pieces: [0, 1].map(|k| {
+                    l.ends[k]
+                        .first()
+                        .map(|&p| self.portals[p as usize].pieces[0])
+                }),
             })
             .collect()
+    }
+
+    /// The pieces the ends of the `k`th link (in [`Map::links`]' order) lie on, both ends together.
+    pub fn link_pieces(&self, k: usize) -> Vec<u32> {
+        self.links[k]
+            .ends
+            .iter()
+            .flatten()
+            .map(|&p| self.portals[p as usize].pieces[0])
+            .collect()
+    }
+
+    /// Whether the map holds a floor's patch for `node`.
+    pub fn is_floor(&self, node: Id) -> bool {
+        self.by_patch.contains_key(&(node, None))
     }
 
     /// A piece of the map.
@@ -785,8 +975,17 @@ impl Map {
             .collect()
     }
 
-    /// The spot at `at` (µm, the node's frame) on the patch of `node` (a floor, or the open ground).
+    fn dry(&self, q: u32) -> bool {
+        self.pieces[q as usize].piece.ground == Ground::Dry
+    }
+
+    /// The spot at `at` (µm, the node's frame) on the patch of `node` (a floor, or the open ground's dry ground).
     pub fn spot(&self, node: Id, at: Vec3) -> Option<Spot> {
+        self.spot_for(node, at, 0)
+    }
+
+    /// As [`Map::spot`], on ground a body with `has` may stand on: wading ground with wading, water with swimming.
+    pub fn spot_for(&self, node: Id, at: Vec3, has: Mask) -> Option<Spot> {
         let p = [mm(at.x), mm(at.z)];
         let square = (
             p[0].div_euclid(SQUARE) as i32,
@@ -797,6 +996,7 @@ impl Map {
             .get(&(node, None))
             .or_else(|| self.by_patch.get(&(node, Some(square))))?;
         list.iter()
+            .filter(|&&q| may_stand(self.pieces[q as usize].piece.ground, has))
             .filter_map(|&q| {
                 let y = self.pieces[q as usize]
                     .piece
@@ -831,6 +1031,7 @@ impl Map {
         let y = mm(at.y);
         // The open ground is one level, its plan at 0; a body on it stands at the terrain's height (N11a, #2735).
         list.iter()
+            .filter(|&&q| self.dry(q))
             .filter(|&&q| {
                 open || self.pieces[q as usize]
                     .piece
@@ -998,6 +1199,12 @@ impl Map {
         d
     }
 
+    /// The length of the line inside piece `q` from `a` to `b` (mm), uncached.
+    fn run(&mut self, q: u32, a: [i64; 2], b: [i64; 2]) -> u32 {
+        let line = self.line(q, a, b);
+        line.windows(2).map(|w| len2(w[0], w[1])).sum::<i64>() as u32
+    }
+
     /// For a link too narrow for this map's class: its door, if one stands in it, and both widths.
     fn widths(&self, l: u32, why: &str) -> String {
         let link = &self.links[l as usize];
@@ -1056,6 +1263,9 @@ impl Map {
         let goal_w = self.world(to.piece, to.at);
         let goal_xz = [to.at[0], to.at[2]];
         let start_xz = [from.at[0], from.at[2]];
+        // From a piece back to it (a shore left and come back to): the start's and the goal's legs are lines inside
+        // it, not straight, or the way round a pond would look as short as the way across.
+        let same = from.piece == to.piece;
         let mut heap: BinaryHeap<Reverse<(u32, u32, u32)>> = BinaryHeap::new();
         let relax = |seen: &mut Vec<(u32, u32, u32, u32)>,
                      closed: &[u32],
@@ -1074,7 +1284,15 @@ impl Map {
         let h_of = |m: &Map, p: u32| (len3(m.portals[p as usize].world, goal_w)) as u32;
         for k in 0..self.pieces[from.piece as usize].portals.len() {
             let p = self.pieces[from.piece as usize].portals[k];
-            let g = len2(start_xz, self.portals[p as usize].mid()) as u32;
+            if self.shore_shut(p, has) {
+                continue;
+            }
+            let mid = self.portals[p as usize].mid();
+            let g = if same {
+                self.run(from.piece, start_xz, mid)
+            } else {
+                len2(start_xz, mid) as u32
+            };
             let h = h_of(self, p);
             relax(
                 &mut self.seen,
@@ -1106,8 +1324,15 @@ impl Map {
                 if q == NONE {
                     continue;
                 }
-                if q == to.piece {
-                    let d = len2(self.portals[u as usize].mid(), goal_xz) as u32;
+                // From the start's own piece back to it, only after leaving it: its line inside the piece is the
+                // direct route, which [`Map::route`] weighs against this search.
+                if q == to.piece && !(same && self.seen[u as usize].3 == q) {
+                    let mid = self.portals[u as usize].mid();
+                    let d = if same {
+                        self.run(q, mid, goal_xz)
+                    } else {
+                        len2(mid, goal_xz) as u32
+                    };
                     relax(
                         &mut self.seen,
                         &self.closed,
@@ -1121,7 +1346,7 @@ impl Map {
                 }
                 for k in 0..self.pieces[q as usize].portals.len() {
                     let r = self.pieces[q as usize].portals[k];
-                    if r == u {
+                    if r == u || self.shore_shut(r, has) {
                         continue;
                     }
                     let d = self.between(q, u, r);
@@ -1143,7 +1368,7 @@ impl Map {
             // went in by, a doorway used as a bridge between two squares' pieces of the open ground, which no walk
             // follows (#3187). Ground there is reached across the pieces.
             if l != NONE && self.seen[u as usize].3 != LINK | l {
-                if let Some(why) = self.refuse(tree, l, has) {
+                if let Some(why) = self.refuse(tree, l, has).filter(|_| !self.ashore(l, side)) {
                     let far = self.links[l as usize].ends[1 - side as usize]
                         .iter()
                         .map(|&r| len3(self.portals[r as usize].world, goal_w))
@@ -1195,9 +1420,9 @@ impl Map {
     ) -> Result<Route, Refusal> {
         let goal_xz = [to.at[0], to.at[2]];
         let start_xz = [from.at[0], from.at[2]];
-        if from.piece == to.piece {
+        let direct = (from.piece == to.piece).then(|| {
             let first_line = self.line(from.piece, start_xz, goal_xz);
-            return Ok(Route {
+            Route {
                 size: self.size,
                 hops: vec![Hop::Patch {
                     at: self.pieces[from.piece as usize].at,
@@ -1207,9 +1432,25 @@ impl Map {
                 first_line,
                 waypoints: Vec::new(),
                 searched: 0,
+            }
+        });
+        // On one piece, the line inside it, unless a shore this body may cross leaves it: across a pond may be shorter
+        // than round it.
+        let shore = has & (WADE | SWIM) != 0
+            && self.pieces[from.piece as usize].portals.iter().any(|&p| {
+                let l = self.portals[p as usize].link;
+                l != NONE && matches!(self.links[l as usize].kind, Kind::Wade | Kind::Swim)
             });
-        }
+        let direct = match direct {
+            Some(d) if !shore => return Ok(d),
+            d => d,
+        };
         let (found, searched, failed) = self.search(tree, from, to, has);
+        if let Some(d) = direct
+            && (!found || u64::from(self.seen[self.portals.len()].1) >= d.length)
+        {
+            return Ok(d);
+        }
         if !found {
             // The link that failed: the first this body cannot use on the route a body with every ability takes;
             // when there is none, of the links it came to, the one whose far end is nearest the goal.
@@ -1280,6 +1521,30 @@ impl Map {
             searched,
         })
     }
+}
+
+/// The stretch of edge `a`–`b` that edge `c`–`d` lies along, within [`SHORE_OFF`], if it is at least [`SHORE_MIN`]
+/// long (mm).
+fn shared(a: [i64; 2], b: [i64; 2], c: [i64; 2], d: [i64; 2]) -> Option<([i64; 2], [i64; 2])> {
+    let u = [b[0] - a[0], b[1] - a[1]];
+    let l2 = u[0] * u[0] + u[1] * u[1];
+    let l = l2.isqrt();
+    if l == 0 || cross(a, b, c).abs() > SHORE_OFF * l || cross(a, b, d).abs() > SHORE_OFF * l {
+        return None;
+    }
+    let t = |p: [i64; 2]| (p[0] - a[0]) * u[0] + (p[1] - a[1]) * u[1];
+    let (tc, td) = (t(c), t(d));
+    let (lo, hi) = (tc.min(td).max(0), tc.max(td).min(l2));
+    if (hi - lo) < SHORE_MIN * l {
+        return None;
+    }
+    let at = |t: i64| {
+        [
+            a[0] + (i128::from(u[0]) * i128::from(t) / i128::from(l2)) as i64,
+            a[1] + (i128::from(u[1]) * i128::from(t) / i128::from(l2)) as i64,
+        ]
+    };
+    Some((at(lo), at(hi)))
 }
 
 fn vert(pc: &Piece, k: u32) -> [i64; 2] {

@@ -1,0 +1,163 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:cup_of_coffee (core/cup-of-coffee-pack@1, 2 placed): a full cup, 200 g, sipped while held, 40 g a sip, five sips; the sips are counted.",
+ "cases": [
+  {
+   "name": "cup_of_coffee_five_sips",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:cup_of_coffee",
+      "fields": {}
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    },
+    "now_us": 0
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "sip"
+     },
+     "now_us": 0,
+     "receipt": "rsip0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "coffee",
+        "n": 1,
+        "to": 160
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "sips",
+        "n": 2,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sipped",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:sip_counted",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sip"
+     },
+     "now_us": 1000000,
+     "receipt": "rsip1000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sip"
+     },
+     "now_us": 2000000,
+     "receipt": "rsip2000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sip"
+     },
+     "now_us": 3000000,
+     "receipt": "rsip3000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sip"
+     },
+     "now_us": 4000000,
+     "receipt": "rsip4000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sip"
+     },
+     "now_us": 6000000,
+     "receipt": "rsip6000000",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:cup_of_coffee",
+     "fields": {
+      "coffee": 0,
+      "sips": 5
+     }
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,437 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:rack_upright",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 1,
+   "type": "int",
+   "unit": "count",
+   "default": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "stand_front": {
+   "role": "stand",
+   "at_mm": [0, 0, 500]
+  },
+  "grip_low": {
+   "role": "grip",
+   "at_mm": [0, 439, 0]
+  },
+  "grip_high": {
+   "role": "grip",
+   "at_mm": [0, 1999, 0]
+  },
+  "seat_front_l_0": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 305, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_0": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 305, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_0": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 305, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_0": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 305, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_1": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 457, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_1": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 457, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_1": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 457, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_1": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 457, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_2": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 610, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_2": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 610, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_2": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 610, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_2": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 610, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_3": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 762, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_3": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 762, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_3": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 762, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_3": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 762, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_4": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 914, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_4": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 914, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_4": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 914, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_4": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 914, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_5": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1067, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_5": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1067, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_5": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1067, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_5": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1067, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_6": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1219, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_6": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1219, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_6": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1219, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_6": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1219, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_7": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1372, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_7": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1372, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_7": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1372, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_7": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1372, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_8": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1524, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_8": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1524, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_8": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1524, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_8": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1524, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_9": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1676, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_9": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1676, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_9": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1676, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_9": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1676, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_10": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1829, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_10": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1829, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_10": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1829, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_10": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1829, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_11": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1981, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_11": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1981, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_11": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 1981, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_11": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 1981, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_12": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 2134, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_12": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 2134, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_12": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 2134, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_12": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 2134, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_front_l_13": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 2286, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_front_r_13": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 2286, 38],
+   "yaw_mdeg": 0
+  },
+  "seat_back_l_13": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [-572, 2286, -38],
+   "yaw_mdeg": 180000
+  },
+  "seat_back_r_13": {
+   "role": "joint",
+   "connector": "beam_seat",
+   "mates": "beam_end",
+   "at_mm": [572, 2286, -38],
+   "yaw_mdeg": 180000
+  }
+ },
+ "geometry": {
+  "bounds_mm": [1219, 2438, 76]
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "card"
+ },
+ "card": {
+  "text": "card"
+ }
+}

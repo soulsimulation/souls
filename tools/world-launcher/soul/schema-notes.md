@@ -144,7 +144,9 @@ Act on each message as usual (`act <id> --for <message id>`, no ack first); do n
 for this Soul from elsewhere, or the host stopping it; a hard kill prints nothing). To fit, a line shortens long texts,
 cuts a plan to its refused step (`pending` has it all) and, with many messages at once, keeps the newest and says how
 many it left out (`messagesOmitted`): `listen --once` shows every message still unacknowledged in full. Without such a
-host, use plain `listen` in the background and restart it after each wake.
+host: with scheduled tasks, `wake heartbeat` prints what to schedule (it runs `pending`); with neither, `serve` once and
+`pending` at the start of every turn. A plain `listen` in the background, restarted after each wake, works only where
+the host tells you when it exits.
 
 ## Your public `now` line
 

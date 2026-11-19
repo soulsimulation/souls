@@ -13,7 +13,7 @@ use replica::encode::{Name, Value, encode};
 use replica::ids::{Hash, Id, Purpose, Scope};
 use replica::pose::{Frame, Quat, Vec3};
 use replica::sky::{self, Calendar, DAY_US, days_from_civil};
-use replica::speech::{SAID, length_of};
+use replica::speech::{Reach, SAID, length_of};
 use sim::controller::Line;
 use sim::daylight;
 use sim::links::Doors;
@@ -121,6 +121,7 @@ fn bodies(placed: &Placed) -> Result<Bodies, replica::effects::Refusal> {
         Line {
             words: words(),
             length: length_of("good evening"),
+            reach: Reach::Talk,
             replace: false,
         },
     )?;

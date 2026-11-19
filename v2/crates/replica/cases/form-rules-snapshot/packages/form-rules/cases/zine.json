@@ -1,0 +1,1029 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:zine (from #1698). A draft's title and three pages are words by reference, each written (and rewritten) while it is a draft. Binding takes six seconds and the one binding, makes the zine bound and links the binder as its author; a bound zine's words are permanent. Refused as the original refused: anything on a bound zine ('This zine is bound; title and pages are permanent.'), binding without the binding, a title or any page ('Supply a title and all three nonempty pages; one unused binding is required.'), something held ('Empty your hands before authoring or binding the zine.'). The original's page view is a viewer's choice, not a form.",
+  "cases": [
+    {
+      "name": "write_title_every_need_met",
+      "act": {
+        "this": "z1",
+        "form": "write_title",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "write_title_bound_is_permanent",
+      "act": {
+        "this": "z1",
+        "form": "write_title",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              },
+              "stage": "bound",
+              "binding": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "stage",
+          "found": "bound",
+          "wanted": {
+            "is": "draft"
+          }
+        },
+        "fix": null,
+        "says": "bound_fixed"
+      }
+    },
+    {
+      "name": "write_title_holding_something",
+      "act": {
+        "this": "z1",
+        "form": "write_title",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "write_page_1_every_need_met",
+      "act": {
+        "this": "z1",
+        "form": "write_page_1",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "write_page_1_bound_is_permanent",
+      "act": {
+        "this": "z1",
+        "form": "write_page_1",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              },
+              "stage": "bound",
+              "binding": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "stage",
+          "found": "bound",
+          "wanted": {
+            "is": "draft"
+          }
+        },
+        "fix": null,
+        "says": "bound_fixed"
+      }
+    },
+    {
+      "name": "write_page_1_holding_something",
+      "act": {
+        "this": "z1",
+        "form": "write_page_1",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "write_page_2_every_need_met",
+      "act": {
+        "this": "z1",
+        "form": "write_page_2",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "write_page_2_bound_is_permanent",
+      "act": {
+        "this": "z1",
+        "form": "write_page_2",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              },
+              "stage": "bound",
+              "binding": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "stage",
+          "found": "bound",
+          "wanted": {
+            "is": "draft"
+          }
+        },
+        "fix": null,
+        "says": "bound_fixed"
+      }
+    },
+    {
+      "name": "write_page_2_holding_something",
+      "act": {
+        "this": "z1",
+        "form": "write_page_2",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "write_page_3_every_need_met",
+      "act": {
+        "this": "z1",
+        "form": "write_page_3",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "write_page_3_bound_is_permanent",
+      "act": {
+        "this": "z1",
+        "form": "write_page_3",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              },
+              "stage": "bound",
+              "binding": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "stage",
+          "found": "bound",
+          "wanted": {
+            "is": "draft"
+          }
+        },
+        "fix": null,
+        "says": "bound_fixed"
+      }
+    },
+    {
+      "name": "write_page_3_holding_something",
+      "act": {
+        "this": "z1",
+        "form": "write_page_3",
+        "args": {
+          "words": "w9"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "bind_every_need_met",
+      "act": {
+        "this": "z1",
+        "form": "bind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bind_bound_is_permanent",
+      "act": {
+        "this": "z1",
+        "form": "bind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              },
+              "stage": "bound",
+              "binding": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "stage",
+          "found": "bound",
+          "wanted": {
+            "is": "draft"
+          }
+        },
+        "fix": null,
+        "says": "bound_fixed"
+      }
+    },
+    {
+      "name": "bind_no_binding_left",
+      "act": {
+        "this": "z1",
+        "form": "bind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              },
+              "binding": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "binding",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null,
+        "says": "needs_all"
+      }
+    },
+    {
+      "name": "bind_untitled",
+      "act": {
+        "this": "z1",
+        "form": "bind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {
+          "field": "title",
+          "found": null,
+          "wanted": {
+            "not": null
+          }
+        },
+        "fix": null,
+        "says": "needs_all"
+      }
+    },
+    {
+      "name": "bind_page_1_blank",
+      "act": {
+        "this": "z1",
+        "form": "bind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3,
+        "detail": {
+          "field": "page_1",
+          "found": null,
+          "wanted": {
+            "not": null
+          }
+        },
+        "fix": null,
+        "says": "needs_all"
+      }
+    },
+    {
+      "name": "bind_page_2_blank",
+      "act": {
+        "this": "z1",
+        "form": "bind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_3": {
+                "text": "w3"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 4,
+        "detail": {
+          "field": "page_2",
+          "found": null,
+          "wanted": {
+            "not": null
+          }
+        },
+        "fix": null,
+        "says": "needs_all"
+      }
+    },
+    {
+      "name": "bind_page_3_blank",
+      "act": {
+        "this": "z1",
+        "form": "bind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              }
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 5,
+        "detail": {
+          "field": "page_3",
+          "found": null,
+          "wanted": {
+            "not": null
+          }
+        },
+        "fix": null,
+        "says": "needs_all"
+      }
+    },
+    {
+      "name": "bind_holding_something",
+      "act": {
+        "this": "z1",
+        "form": "bind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine",
+            "fields": {
+              "title": {
+                "text": "w0"
+              },
+              "page_1": {
+                "text": "w1"
+              },
+              "page_2": {
+                "text": "w2"
+              },
+              "page_3": {
+                "text": "w3"
+              }
+            }
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 6,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "zine_take_every_need_met",
+      "act": {
+        "this": "z1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "zine_take_both_hands_full",
+      "act": {
+        "this": "z1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "z1": {
+            "kind": "eden:zine"
+          },
+          "h1": {
+            "kind": "eden:zine"
+          },
+          "h2": {
+            "kind": "eden:zine"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}
