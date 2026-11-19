@@ -29,7 +29,7 @@
 //!
 //! Not here: forks (K6), handing intents back (K13), client sync by hash (R5), shipping (O3).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -69,7 +69,7 @@ struct Blob {
 
 /// Every record a checkpoint reaches, by hash: what the writer writes, and what a restore hands it back.
 #[derive(Clone, Debug, Default)]
-pub struct Blobs(HashMap<Vec<u8>, Blob>);
+pub struct Blobs(BTreeMap<Vec<u8>, Blob>);
 
 impl Blobs {
     pub fn len(&self) -> usize {
@@ -300,7 +300,7 @@ fn read_one(bytes: &[u8]) -> R<(Tree, Root, Blobs)> {
             _ => return refuse("checkpoint-root-bad", "not [audience, hash]"),
         }
     }
-    let mut stored: HashMap<Vec<u8>, Vec<u8>> = HashMap::with_capacity(recs.len());
+    let mut stored: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
     for r in recs {
         match r {
             Value::Array(mut p) if p.len() == 2 => match (p.pop(), p.pop()) {
@@ -320,7 +320,7 @@ fn read_one(bytes: &[u8]) -> R<(Tree, Root, Blobs)> {
     })?;
     // Every record it holds was checked on the way down; the writer carries them on.
     let mut blobs = Blobs::default();
-    let tops: HashSet<&Vec<u8>> = audiences.iter().map(|(_, h)| h).collect();
+    let tops: BTreeSet<&Vec<u8>> = audiences.iter().map(|(_, h)| h).collect();
     for (h, b) in stored {
         let field = if tops.contains(&h) { 2 } else { 10 };
         blobs.put(h, b, field)?;
@@ -378,10 +378,16 @@ pub fn replay(tree: &mut Tree, header: &Header, records: &[Vec<u8>], from: u64) 
     let from = usize::try_from(from)
         .unwrap_or(usize::MAX)
         .min(records.len());
-    for bytes in &records[from..] {
+    let mut n = 0;
+    // Input records (K12's recorder) are what the world was handed, not what it did: replay passes them by.
+    for bytes in records[from..]
+        .iter()
+        .filter(|b| !crate::recorder::is_input(b))
+    {
         tree.apply(header, &Part::read(bytes)?)?;
+        n += 1;
     }
-    Ok((records.len() - from) as u64)
+    Ok(n)
 }
 
 /// What the writer has done.
@@ -575,7 +581,7 @@ fn write_one(dir: &Path, job: Job, blobs: &mut Blobs) -> R<(u64, u64)> {
         blobs.put(h, bytes, below)?;
     }
     // Every record the root reaches; the rest are dropped.
-    let mut reached: HashSet<Vec<u8>> = HashSet::new();
+    let mut reached: BTreeSet<Vec<u8>> = BTreeSet::new();
     let mut stack: Vec<Vec<u8>> = job.root.audiences.iter().map(|(_, h)| h.clone()).collect();
     while let Some(h) = stack.pop() {
         let Some(b) = blobs.0.get(&h) else {

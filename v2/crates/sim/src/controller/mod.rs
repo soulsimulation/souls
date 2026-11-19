@@ -725,6 +725,22 @@ impl Controller {
         Ok(())
     }
 
+    /// The world's own rule when `body`'s node's ground was rebuilt (G3, #2760): it stands as `placed`, found again on
+    /// the new ground where it stood (`moved` when that is anywhere else: never a move), or, standing on none
+    /// (`None`), stands still until it is walked out.
+    pub fn regrounded(&mut self, body: Id, placed: Option<Moved>) -> R<()> {
+        let s = self.slot(body)?;
+        match placed {
+            Some(m) if m.pose.position != s.moved.pose.position => {
+                return refuse("moved", replica::world_model::show(body));
+            }
+            Some(m) => s.moved = m,
+            None => (s.input.velocity, s.moved.linear) = (Vec3::ZERO, Vec3::ZERO),
+        }
+        s.touched = true;
+        Ok(())
+    }
+
     /// `body` as the mover last left it, and the link it is being carried across, if any: [`Controller::body`] and
     /// [`Controller::carrying`] in one lookup.
     pub fn seen(&self, body: Id) -> Option<(&Moved, Option<Id>)> {

@@ -34,7 +34,7 @@ pub mod sizes;
 use crate::encode::{Name, Value, encode};
 use crate::ids::{Hash, KindRefusal, KindSource, name_kinds};
 use crate::world_model::Kind as Admits;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub const SECTION_OWNER: u64 = 2;
@@ -195,7 +195,7 @@ impl std::error::Error for KindError {}
 #[derive(Clone, Debug, Default)]
 pub struct Kinds {
     by_hash: BTreeMap<Hash, KindDef>,
-    by_name: HashMap<String, Hash>,
+    by_name: BTreeMap<String, Hash>,
     refused: Vec<KindError>,
 }
 
@@ -656,6 +656,17 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             .collect(),
     };
 
+    // How a thing moves (section 18, `{1: how}`): held in one or two hands, or not held (B4, #2739).
+    let hands = match s.get(&crate::world_model::SECTION_MOTION) {
+        None => None,
+        Some(Value::Map(m)) => match text(m.get(&1)).as_ref().map(Name::as_str) {
+            Some("one_hand") => Some(1),
+            Some("two_hands") => Some(2),
+            _ => None,
+        },
+        Some(_) => return Err(bad("kind-motion", 18, None, "{1: how}".into())),
+    };
+
     let body = match s.get(&body::SECTION_BODY) {
         None => None,
         Some(v) => {
@@ -679,6 +690,7 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             owner,
             children,
             slots,
+            hands,
         },
         slots: named_slots,
         links,

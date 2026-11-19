@@ -50,7 +50,7 @@
 //! Not here: amounts, making and removing (F4), a walk across a link (the walk's crossings are not
 //! carried here yet), accepting the intent (I4), queueing for a reserved thing (B7), things for several users.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use replica::audience;
 use replica::effects::{
@@ -122,7 +122,7 @@ const KEY: &str = "souls:effect";
 const STARTED: &str = "souls:form-started";
 const ENDED: &str = "souls:form-ended";
 /// The reservation's link type: from the body to the thing.
-const RESERVES: &str = "souls:reserves";
+pub(crate) const RESERVES: &str = "souls:reserves";
 
 /// An intent's keys in the log.
 struct Kept {
@@ -202,7 +202,7 @@ struct Open {
 pub struct Forms {
     runs: BTreeMap<RunId, FormRun>,
     by_body: BTreeMap<Id, RunId>,
-    by_timer: HashMap<Id, RunId>,
+    by_timer: BTreeMap<Id, RunId>,
     by_intent: BTreeMap<Id, RunId>,
     walks: Vec<Run>,
     last: RunId,

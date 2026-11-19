@@ -23,7 +23,7 @@
 // v2/clippy.toml).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -178,7 +178,7 @@ impl Hist {
 
 /// A queue's items by key, with the instant each entered: its oldest item's age is read by the health thread.
 #[derive(Default)]
-pub struct Queue(Mutex<HashMap<u64, u64>>);
+pub struct Queue(Mutex<BTreeMap<u64, u64>>);
 
 impl Queue {
     pub fn enter(&self, key: u64, at: u64) {
