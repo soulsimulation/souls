@@ -61,7 +61,9 @@ pub fn run(args: &[String]) -> i32 {
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
     if args.iter().any(|a| a == "--testworld") {
-        cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| worldd::testbodies::bodies()));
+        cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| {
+            worldd::testbodies::bodies()
+        }));
     }
     cfg.measures = !args.iter().any(|a| a == "--no-measures");
     cfg.health =

@@ -175,19 +175,23 @@ fn thing(record: &Cbor, entry: &Value) -> Value {
     ])
 }
 
-/// The changes a yes candidate's form makes: its effects as F2's binder binds them (`skills::form_runner`), the one
-/// binding the form runner uses, or the binder's refusal by name.
+/// The changes a yes candidate's form makes: its effects as the form runner's binder binds them
+/// (`skills::form_runner`, F2 and F4), or the binder's refusal by name. A world with no bodies has no hands or runner
+/// to work out an amount, a take, a make or a remove against: those are the runner's, `effect-needs-the-runner`.
 fn prepare(this: Id, entry: &Value, form: &str) -> Result<Vec<Change>, &'static str> {
     let effects = form_runner::bind_effects(entry, form).map_err(|r| r.name)?;
-    Ok(effects
+    effects
         .into_iter()
-        .map(|e| Change::Set {
-            node: this,
-            field: e.field,
-            to: e.to,
-            by: None,
+        .map(|e| match e {
+            form_runner::Effect::Set { field, to } => Ok(Change::Set {
+                node: this,
+                field,
+                to,
+                by: None,
+            }),
+            _ => Err("effect-needs-the-runner"),
         })
-        .collect())
+        .collect()
 }
 
 /// Checks one candidate on `copy`.

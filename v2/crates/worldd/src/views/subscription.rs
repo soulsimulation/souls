@@ -450,6 +450,11 @@ impl Hub {
                     if !s.hearers.is_empty() {
                         said.push((bytes_of(e.to_value())?, s.hearers));
                     }
+                } else if let Some(to) = replica::activity::addressed(ev.name.as_str(), &ev.fields)
+                    && !to.is_empty()
+                {
+                    // An offer to each body asked, its decline or lapse to the asker (E8, C2): addressed like speech.
+                    said.push((bytes_of(e.to_value())?, to));
                 }
             }
         }
