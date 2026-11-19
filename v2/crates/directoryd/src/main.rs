@@ -48,6 +48,16 @@ fn main() {
         test_sign_in: config.test_sign_in,
         pairing,
         log: Mutex::new(Box::new(std::io::stderr())),
+        worlds: match directoryd::worlds::list::from_env("directoryd") {
+            Some(Err(e)) => {
+                eprintln!(
+                    "directoryd: refusing to start: worlds: {}: {}",
+                    e.name, e.detail
+                );
+                std::process::exit(2);
+            }
+            w => w.and_then(Result::ok),
+        },
     };
     run(listener, Arc::new(app));
 }

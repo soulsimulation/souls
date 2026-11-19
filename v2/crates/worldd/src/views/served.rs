@@ -11,7 +11,9 @@
 //! - world → gateway: `{1: n, 2: item}`, one of R4's items as its bytes, or `{1: n, 3: name}` when the request is
 //!   refused (`subscribe-unread`, `budget-below-minimum`, `no-scope`).
 //!
-//! The hub knows the bodies its records created; a world's bodies as built, before its first record, are not in it yet.
+//! The hub knows the bodies its records created, and those of the world as built when it is seeded with them
+//! ([`start_with`], `Hub::seed`). Started with K16's store (`Hub::with_words`), it sends each utterance a subscriber
+//! hears with its words, read for that subscriber's audiences (C6, #3390).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
@@ -64,10 +66,15 @@ impl Feed {
 
 /// Starts the view tier's thread with an empty hub.
 pub fn start() -> R<Feed> {
+    start_with(Hub::new())
+}
+
+/// Starts the view tier's thread with `hub`: one that reads utterances' words, seeded with the world as built (C6).
+pub fn start_with(hub: Hub) -> R<Feed> {
     let (tx, rx) = channel();
     std::thread::Builder::new()
         .name("view-tier".into())
-        .spawn(move || run(&rx))
+        .spawn(move || run(hub, &rx))
         .map_err(|e| Refusal {
             name: "view-tier",
             detail: format!("the thread did not start: {e}"),
@@ -87,8 +94,7 @@ fn audiences(v: &Value) -> R<BTreeSet<Id>> {
 }
 
 /// The view tier's thread: a fault in a record is named and the tier goes on; the clock never waits on it.
-fn run(rx: &Receiver<Cmd>) {
-    let mut hub = Hub::new();
+fn run(mut hub: Hub, rx: &Receiver<Cmd>) {
     // (connection, gateway's number) -> (hub's number, where its items go).
     let mut subs: BTreeMap<(u64, u64), Held> = BTreeMap::new();
     while let Ok(cmd) = rx.recv() {
@@ -234,6 +240,7 @@ mod tests {
     use replica::intents::{Intent, Target};
     use sim::log::Mem;
     use std::collections::BTreeMap;
+    use std::sync::Arc;
     use std::time::Duration;
 
     const LINEAGE: Scope = Scope([9; 16]);
@@ -350,6 +357,129 @@ mod tests {
             kinds.contains(&4),
             "the node's count, from a committed part: {kinds:?}"
         );
+        world.stop();
+    }
+
+    /// A say or a whisper by `body`, its words T8's `{23: words}` in parameter 1.
+    fn words(body: Id, verb: &str, to: Option<Id>, words: &str, sequence: u64) -> Vec<u8> {
+        let p = Value::Map([(23, Value::Bytes(words.as_bytes().to_vec()))].into());
+        let i = Intent {
+            actor: Actor::Soul(body),
+            verb: Name::new(verb).unwrap(),
+            target: to.map(Target::Node),
+            parameters: [(1, p)].into(),
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+        };
+        encode(&i.to_value()).unwrap()
+    }
+
+    #[test]
+    fn c6_a1_a_soul_hears_what_is_said_near_it_with_its_words_and_a_whisper_only_its_listener() {
+        let w = toggles::World::build(1, 3, 0);
+        let [a, b, c] = [w.pairs[0].0, w.pairs[1].0, w.pairs[2].0];
+        let text = Arc::new(crate::words::in_memory(LINEAGE).unwrap());
+        let mut hub = Hub::with_words(Arc::clone(&text));
+        hub.seed(w.replica.tree());
+        let feed = start_with(hub).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.tick = Duration::from_millis(10);
+        cfg.measures = false;
+        cfg.served = Some(feed.clone());
+        cfg.text = Some(text);
+        let world =
+            answers::start(w.replica, toggles::rules(), Mem::with(Vec::new()), cfg).unwrap();
+
+        let (ours, mut gateway) = UnixStream::pair().unwrap();
+        std::thread::spawn(move || serve(&feed, 1, ours));
+        // Each Soul follows its own body, in its own audience, as the gateway subscribes it (numbers 1 to 3).
+        for (n, body) in [(1u64, a), (2, b), (3, c)] {
+            let scope = Value::Map([(2, body.to_value())].into());
+            let request = Value::Map(
+                [
+                    (1, Value::Array(vec![scope])),
+                    (2, Value::Uint(3)),
+                    (3, Value::Uint(8_000)),
+                ]
+                .into(),
+            );
+            let f = encode(&Value::Map(
+                [
+                    (1, Value::Uint(n)),
+                    (2, request),
+                    (3, Value::Array(vec![body.to_value()])),
+                ]
+                .into(),
+            ))
+            .unwrap();
+            gateway
+                .write_all(&u32::try_from(f.len()).unwrap().to_be_bytes())
+                .unwrap();
+            gateway.write_all(&f).unwrap();
+        }
+        gateway
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let said = "the bread is still warm";
+        let whispered = "meet me by the door";
+        for (seq, intent) in [
+            (1, words(a, "local:say", None, said, 1)),
+            (2, words(a, "local:whisper", Some(c), whispered, 2)),
+        ] {
+            let (reply, answer) = channel();
+            assert!(world.door().arrive(intent, reply), "intent {seq} taken");
+            answer
+                .recv_timeout(Duration::from_secs(5))
+                .expect("an answer");
+        }
+        // Every utterance each subscription was sent: (its number, the speaker, the words).
+        let mut heard: Vec<(u64, Id, Option<String>)> = Vec::new();
+        // Four are due (the say to each of the three, the whisper to C); one more round would show a fifth.
+        let mut rounds_after = 0;
+        for _ in 0..30 {
+            while let Some(m) = read(&mut gateway) {
+                let (Some(Value::Uint(n)), Some(Value::Bytes(item))) = (m.get(&1), m.get(&2))
+                else {
+                    continue;
+                };
+                if let Some(h) = replica::speech::heard(item).unwrap() {
+                    let w = h.words.map(|w| String::from_utf8(w).unwrap());
+                    heard.push((*n, h.speaker, w));
+                }
+            }
+            if heard.len() >= 4 {
+                rounds_after += 1;
+                if rounds_after > 1 {
+                    break;
+                }
+            }
+        }
+        let to = |n: u64| -> Vec<Option<&str>> {
+            heard
+                .iter()
+                .filter(|h| h.0 == n)
+                .map(|h| h.2.as_deref())
+                .collect()
+        };
+        assert!(heard.iter().all(|h| h.1 == a), "all said by A: {heard:?}");
+        assert_eq!(to(1), vec![Some(said)], "A hears its say, not its whisper");
+        assert_eq!(
+            to(2),
+            vec![Some(said)],
+            "B hears the say, never the whisper"
+        );
+        assert_eq!(to(3), vec![Some(said), Some(whispered)], "C hears both");
         world.stop();
     }
 }

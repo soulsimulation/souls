@@ -3,7 +3,7 @@ name = "ops"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Operations tools in Rust (Engine v2, #2635): deploy and roll back one world (O7, #2804); moving a live world to another machine and its kill table (O9, #2828); a world restored from the bucket alone (O12, #2807)."
+description = "Operations tools in Rust (Engine v2, #2635): deploy and roll back one world (O7, #2804); the gateway's upgrade (O16, #2809); moving a live world to another machine and its kill table (O9, #2828); a world restored from the bucket alone (O12, #2807)."
 
 [[bin]]
 name = "ops"
@@ -23,6 +23,16 @@ path = "src/plant.rs"
 [[bin]]
 name = "o7-run"
 path = "src/run.rs"
+
+# `gateway-upgrade <new gatewayd> <world>...`: the gateway's upgrade, never in the same step as a world's deploy (O16).
+[[bin]]
+name = "gateway-upgrade"
+path = "src/gateway_upgrade.rs"
+
+# The O16 run: the gateway upgraded, then killed, under 1,000 agents from the shared shapes.
+[[bin]]
+name = "o16-run"
+path = "src/gateway_run.rs"
 
 [dependencies]
 replica = { path = "../../crates/replica" }

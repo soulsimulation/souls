@@ -70,8 +70,9 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 # second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
 step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts'
 # The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
-# worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts).
-step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts'
+# worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts). A still world is drawn
+# at once and kept live (V5b, web/src/source/still.test.ts).
+step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts web/src/source/still.test.ts'
 
 # The ids goldens (T3, #2640): the same WASM build in Node gives fixtures/ids/goldens.txt exactly, as the native build
 # does in `cargo test` (crates/replica/tests/ids.rs).
@@ -147,6 +148,10 @@ step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --lock
 step client-reflex node --test client/src/reflex/*.test.mjs
 # The MCP endpoint on v2 (R21, #3334): six tools, each answer the thin command's; 401, 405, 413; the card and page.
 step client-mcp bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/mcp/*.test.mjs'
+# A creator's terrain (G5, #2762): a landform's patches by today's packages/ground (zod is its one dependency; this job
+# runs no pnpm install), and its expansion into one edit.
+step creator-terrain bash -c 'npm install --no-save --no-package-lock --no-audit --no-fund --prefix ../packages/ground zod@4.6.7 &&
+  node --test tools/terrain/*.test.ts client/src/creator/terrain/*.test.mjs'
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&

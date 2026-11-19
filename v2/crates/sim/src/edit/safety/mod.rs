@@ -207,6 +207,8 @@ pub fn guard(
     ground: Option<Id>,
     part: &Part,
 ) -> Result<Guard, String> {
+    // It cuts the ground on both sides of the change: never on the clock thread (G3b, #3449).
+    crate::commit::off_clock();
     let mut after = before.frozen();
     after
         .apply(header, part)
