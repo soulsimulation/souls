@@ -8,8 +8,8 @@ mod watchdog;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("fork") => std::process::exit(fork::run(&args)),
         Some("gateway-link") => std::process::exit(gateway_link::run(&args)),
+        Some("fork") => std::process::exit(fork::run(&args)),
         // The schemas this build reads and writes, by hash (T6), which a rollback compares (O7, #2804).
         Some("schemas") => {
             let h = replica::effects::schema_hash();
