@@ -11,12 +11,14 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
+use replica::audience::references;
 use replica::effects::{Actor, Part};
 use replica::encode::{Name, Value, decode, encode, from_hex, to_hex};
-use replica::ids::{Id, Scope, Version};
+use replica::ids::{Id, Minter, Scope, Version};
 use replica::intents::{Intent, Target};
 use replica::rules::json;
 use sim::log::{FileStore, Log};
+use sim::text::{Grade, Store};
 use worldd::answers::{self, STATE};
 
 fn worldd() -> Command {
@@ -43,23 +45,28 @@ fn serve(dir: &Path, socket: &Path) -> Served {
     serve_with(dir, socket, &[])
 }
 
+/// `worldd serve` with `more` arguments and no backup settings.
 fn serve_with(dir: &Path, socket: &Path, more: &[&std::ffi::OsStr]) -> Served {
     serve_env(dir, socket, more, &[])
 }
 
+/// `worldd serve` with `more` arguments and no backup settings but `env`'s.
 fn serve_env(dir: &Path, socket: &Path, more: &[&std::ffi::OsStr], env: &[(&str, &str)]) -> Served {
-    let mut child = worldd()
-        .args(["serve", "--dir"])
+    let mut c = worldd();
+    c.args(["serve", "--dir"])
         .arg(dir)
         .arg("--socket")
         .arg(socket)
         .args(["--checkpoint-every", "2048"])
         .args(more)
-        .envs(env.iter().copied())
+        .env_remove("SOULS_BACKUP_URL")
+        .env_remove("SOULS_BACKUP_KEY_FILE")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("worldd serve starts");
+        .stderr(Stdio::piped());
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    let mut child = c.spawn().expect("worldd serve starts");
     let (tx, lines) = channel();
     let all = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let out = child.stdout.take().expect("stdout");
@@ -125,14 +132,58 @@ fn walk(
 ) {
     let i =
         |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    let to = Value::Array(vec![i(x_m * 1_000_000), i(0), i(z_m * 1_000_000)]);
+    send(
+        s,
+        body,
+        lineage,
+        ground,
+        BTreeMap::from([(1, to)]),
+        sequence,
+    );
+}
+
+/// A walk in place carrying `words` (V1b: a value under T8's field 23 is kept in the world's text store and the
+/// intent logged with its reference). A served world's Souls are not yet nodes a say can come from (C3's joins), so
+/// the words ride on a walk, as V1b's toggle carries its sender's.
+fn walk_with_words(
+    s: &mut UnixStream,
+    body: Id,
+    lineage: Scope,
+    ground: Id,
+    sequence: u64,
+    words: &str,
+) {
+    let i =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    let to = Value::Array(vec![i(-40_000_000), i(0), i(30_000_000)]);
+    let w = Value::Map(BTreeMap::from([(
+        worldd::words::WORDS,
+        Value::Bytes(words.as_bytes().to_vec()),
+    )]));
+    send(
+        s,
+        body,
+        lineage,
+        ground,
+        BTreeMap::from([(1, to), (2, w)]),
+        sequence,
+    );
+}
+
+fn send(
+    s: &mut UnixStream,
+    body: Id,
+    lineage: Scope,
+    ground: Id,
+    parameters: BTreeMap<u64, Value>,
+    sequence: u64,
+) {
     let intent = Intent {
         actor: Actor::Soul(body),
         verb: Name::new("eden:walk").expect("a name"),
         target: Some(Target::Node(ground)),
-        parameters: BTreeMap::from([(
-            1,
-            Value::Array(vec![i(x_m * 1_000_000), i(0), i(z_m * 1_000_000)]),
-        )]),
+        parameters,
         sequence,
         basis: Version {
             lineage,
@@ -527,4 +578,170 @@ fn ships_history_across_three_kills(d: &Path, spec: &str, env: &[(&str, &str)]) 
         .iter()
         .flat_map(|a| a.lock().map(|l| l.clone()).unwrap_or_default())
         .collect()
+}
+
+/// Every text-store reference the log at `log` holds (its parts' intents carry them in place of words).
+fn references_in(log: &Path) -> Vec<Id> {
+    let (l, found) = Log::open(FileStore::open(log).expect("the log"), 1).expect("opens");
+    drop(l.close());
+    let mut out = std::collections::BTreeSet::new();
+    for r in found.records.iter().filter(|r| !sim::recorder::is_input(r)) {
+        out.extend(references(&Value::Map(
+            Part::read(r).expect("a part").rest.clone(),
+        )));
+    }
+    out.into_iter().collect()
+}
+
+/// O20b (#3523) A1: `worldd serve` keeps a world's words in `<dir>/log.text`. Sentences said before a SIGKILL read
+/// after the world is started again, and one erased while it is down stays refused `removed` across the next start.
+#[test]
+fn o20b_a1_served_words_outlive_sigkill_and_erased_stay_refused() {
+    let d = scratch("o20b");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let lines = ["the bread is still warm", "a sentence someone erased"];
+    let w = serve(&dir, &socket);
+    w.line("worldd: started at tick");
+    let mut s = connect(&socket);
+    for (n, l) in lines.iter().enumerate() {
+        walk_with_words(&mut s, body, root.scope(), ground, n as u64 + 1, l);
+        assert_eq!(answer(&mut s), (1, String::new()), "{l:?}: a receipt");
+    }
+    // SIGKILL, then a start that opens the store again, then SIGKILL again.
+    w.kill();
+    let w = serve(&dir, &socket);
+    println!("A1: {}", w.line("worldd: started at tick"));
+    w.kill();
+    let refs = references_in(&dir.join("log"));
+    assert_eq!(refs.len(), 2, "two sentences, each logged by its reference");
+    let store = || {
+        Store::open_dir(
+            &dir.join("log.text"),
+            Minter::new(worldd::words::scope(root.scope())),
+        )
+        .expect("the world's text store on the disk")
+    };
+    let t = store();
+    let read = |t: &Store, r: Id| String::from_utf8(t.read(r, &[body]).expect("reads")).unwrap();
+    let mut refs: Vec<(String, Id)> = refs.into_iter().map(|r| (read(&t, r), r)).collect();
+    refs.sort_by_key(|(l, _)| lines.iter().position(|x| x == l));
+    let got: Vec<&str> = refs.iter().map(|(l, _)| l.as_str()).collect();
+    assert_eq!(got, lines, "both sentences read after the restart");
+    let refs: Vec<Id> = refs.into_iter().map(|(_, r)| r).collect();
+    t.remove(refs[1], body, 0, Grade::Erased).expect("erased");
+    t.close();
+    let w = serve(&dir, &socket);
+    w.line("worldd: started at tick");
+    w.kill();
+    let t = store();
+    assert_eq!(
+        t.read(refs[0], &[body]).expect("reads"),
+        lines[0].as_bytes()
+    );
+    assert_eq!(
+        t.read(refs[1], &[body]).unwrap_err().name,
+        "removed",
+        "erased words stay erased"
+    );
+    t.close();
+    println!(
+        "A1: {:?} reads after two restarts; the erased sentence is refused `removed`",
+        lines[0]
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// O20b (#3523) A2, A3: `worldd serve` runs O20's shipper for the world's own stores. With no bucket set it serves as
+/// before and says so once (A3). With a folder standing in for the offsite bucket it ships its words under the world's
+/// lineage, and O12's restore step (`backup::restore`, the world's lines) brings a sentence said while it ran back into
+/// a fresh folder, where it reads (A2).
+// A real process on the real clock: the wait for its copy is real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn o20b_a2_a3_served_world_ships_its_words_and_they_restore() {
+    let d = scratch("o20s");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let w = serve(&dir, &socket);
+    let said = w.line("worldd: backup: ");
+    println!("A3: {said}");
+    assert!(said.contains("no bucket"), "{said}");
+    w.line("worldd: started at tick");
+    w.kill();
+
+    let bucket = d.join("bucket");
+    let pass = d.join("recovery.key");
+    std::fs::write(&pass, "a recovery passphrase for the test\n").unwrap();
+    let url = format!("folder:{}", bucket.display());
+    let w = serve_env(
+        &dir,
+        &socket,
+        &[],
+        &[
+            ("SOULS_BACKUP_URL", &url),
+            ("SOULS_BACKUP_KEY_FILE", pass.to_str().unwrap()),
+            ("SOULS_BACKUP_SHIP_S", "1"),
+        ],
+    );
+    println!("A2: {}", w.line("worldd: backup: shipping"));
+    w.line("worldd: started at tick");
+    let lineage = to_hex(&root.scope().0);
+    let folder = directoryd::directory::folder::Folder::new(bucket.clone());
+    let text_key = format!("store/worlds/{lineage}/text");
+    let etag = |k: &str| {
+        use directoryd::directory::store::Store as _;
+        folder.get(k).unwrap().map(|o| o.etag)
+    };
+    let wait = |what: &str, ok: &dyn Fn() -> bool| {
+        let end = Instant::now() + Duration::from_secs(30);
+        while !ok() {
+            assert!(Instant::now() < end, "{what} within 30 s");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    wait("the first copy", &|| etag(&text_key).is_some());
+    let first = etag(&text_key);
+    let line = "the well is deeper than it looks";
+    let mut s = connect(&socket);
+    walk_with_words(&mut s, body, root.scope(), ground, 1, line);
+    assert_eq!(answer(&mut s), (1, String::new()), "a receipt");
+    wait("the copy with the sentence", &|| etag(&text_key) != first);
+    w.kill();
+
+    // Machine-b: a fresh folder, the bucket and the passphrase alone.
+    let refs = references_in(&dir.join("log"));
+    let b = d.join("b");
+    let prefix = format!("worlds/{lineage}/");
+    let stores: Vec<_> = backup::owned_by("worldd", &[&lineage])
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.path.starts_with(&prefix))
+        .collect();
+    let key = backup::Key::from_passphrase(b"a recovery passphrase for the test").unwrap();
+    let restored = backup::restore(&folder, Some(&key), &stores, &b, &prefix).expect("restores");
+    println!(
+        "A2: restored {:?}; keys {:?}",
+        restored
+            .iter()
+            .map(|r| (&r.name, r.files, r.bytes))
+            .collect::<Vec<_>>(),
+        directoryd::directory::folder::Folder::keys(&folder, "store/")
+    );
+    let t = Store::open_dir(
+        &b.join("log.text"),
+        Minter::new(worldd::words::scope(root.scope())),
+    )
+    .expect("the restored text store");
+    let back: Vec<Vec<u8>> = refs
+        .iter()
+        .filter_map(|r| t.read(*r, &[body]).ok())
+        .collect();
+    t.close();
+    assert_eq!(
+        back,
+        vec![line.as_bytes().to_vec()],
+        "the sentence reads on machine-b"
+    );
+    let _ = std::fs::remove_dir_all(&d);
 }

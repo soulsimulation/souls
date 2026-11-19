@@ -336,9 +336,8 @@ async fn main() {
     );
     let pairs = toggles::World::build(1, BODIES, 0).pairs;
     let probe_pair = pairs[AGENTS];
-    let mut probe = Probe {
-        intent: toggle(probe_pair.0, probe_pair.1, 0, 5_000_000),
-    };
+    // The run's own probe body, so its canary also wants a commit: the `refuse` plant answers sync asks.
+    let mut probe = Probe::Act(Box::new(toggle(probe_pair.0, probe_pair.1, 0, 5_000_000)));
     let canary = Canary {
         window: Duration::from_secs(5),
         start_within: Duration::from_secs(3),

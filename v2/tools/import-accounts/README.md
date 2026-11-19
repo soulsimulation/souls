@@ -28,6 +28,9 @@ cargo run -p import-accounts --release -- <backup set> [--world <file.db>]… --
   today's preset puts in another family is counted per preset in the row (`no kind`), and its preset and hash are kept
   for B15 to map.
 - **Each world** keeps its creator's account (`world_creators_v1`); the creator's principal is the account's.
+- **Ownership (V13c):** each Soul brought is recorded as its account's in W1's `account_grants_v1` (its `soul-…`
+  grant, and its own body as the one the page follows), and each creator account as owning its `creator-…` grant, so
+  a signed-in owner's session exchanges for a view of them (V13b).
 - **Private:** the old-to-new Soul ids (`imported_souls_v1`, for R18), the aliases and the Souls' details stay in the
   account store and are never posted. The births and the directory hold no account id; the row prints counts only.
 - **The row.** Accounts (stage, old worlds', aliases, conflicts, all equal), then per world: live, retired (not
