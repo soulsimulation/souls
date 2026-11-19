@@ -1,6 +1,7 @@
 //! Pairing over HTTP (W2). Bodies are JSON both ways; the card is the one HTML page.
 //!
-//! - `POST /v1/pair/request` `{secret_hash, device, label, soul | new: true, scope: "soul", force?}` →
+//! - `POST /v1/pair/request` `{secret_hash, device, label, soul | new: true, scope: "soul", force?}`, or a
+//!   creator's `{secret_hash, device, label, creator, scope: "creator", force?}` (G7) →
 //!   `{code, link, interval}`. No sign-in: the daemon asks.
 //! - `POST /v1/pair/poll` `{secret}` → `{pending: "authorization_pending" | "slow_down", interval?}`,
 //!   `{refused, device?}` or, once, `{token, grant}`.
@@ -84,7 +85,8 @@ pub fn route(
                 .and_then(|h| from_hex(&h).ok())
                 .and_then(|h| h.try_into().ok());
             let new = b.get("new").and_then(Value::as_bool) == Some(true);
-            let soul = text(&b, "soul");
+            // A creator's request names its grant as `creator` (G7); a Soul's as `soul`.
+            let soul = text(&b, "soul").or_else(|| text(&b, "creator"));
             let (Some(secret_hash), Some(device), Some(label)) =
                 (secret_hash, text(&b, "device"), text(&b, "label"))
             else {

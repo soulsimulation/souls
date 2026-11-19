@@ -1,0 +1,104 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:rain_collector",
+  "owner": "thing",
+  "state": {
+    "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 4000, "audience": { "rule": "everyone" } },
+    "covered": { "n": 2, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "place": { "n": 1, "from": "place", "most": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 800] },
+    "tap": { "role": "outlet", "at_mm": [0, 430, 410] }
+  },
+  "geometry": { "bounds_mm": [800, 950, 900] },
+  "forms": {
+    "uncover": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "covered", "is": true },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "wait", "us": 4000000 }
+      ],
+      "effects": [{ "change": "set", "field": "covered", "to": false, "event": "uncovered" }]
+    },
+    "cover": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "covered", "is": false },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "wait", "us": 4000000 }
+      ],
+      "effects": [{ "change": "set", "field": "covered", "to": true, "event": "covered" }]
+    },
+    "collect": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "hand", "empty": true, "says": "put_down_first" },
+        { "need": "state", "field": "covered", "is": false, "says": "uncover_first" },
+        { "need": "state", "field": "water", "at_most": 3000, "says": "no_room" },
+        { "need": "state", "link": "place", "field": "rain", "at_least": 101, "says": "no_rain" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "wait", "us": 4000000 }
+      ],
+      "effects": [{ "change": "set", "field": "water", "by": 1000, "event": "rain_collected" }]
+    },
+    "draw": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "into": { "type": "thing", "select": { "of": "things", "kind": "eden:pitcher", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "hand", "holds": "eden:pitcher" },
+        { "need": "state", "field": "water", "at_least": 1 }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "fill", "at": "tap", "toward": { "arg": "into" } }
+      ],
+      "effects": [{ "change": "transfer", "field": "water", "from": "this", "into": { "arg": "into" }, "amount": "room", "event": "drawn" }]
+    }
+  },
+  "motion": { "how": "pushed_by_one" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:rain_collector",
+    "table": [
+      { "part": "fill", "field": "water", "do": "scale", "axis": "y", "range": [0, 4000], "to": [0, 1000] },
+      { "part": "lid", "field": "covered", "do": "show", "at": { "true": 1, "false": 0 } },
+      { "part": "flip", "field": "covered", "do": "show", "at": { "true": 0, "false": 1 } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,350,0],"size":[660,60,660],"tint":"wood"},{"kind":"box","at":[-320,590,0],"size":[40,480,660],"tint":"wood"},{"kind":"box","at":[320,590,0],"size":[40,480,660],"tint":"wood"},{"kind":"box","at":[0,590,-320],"size":[600,480,40],"tint":"wood"},{"kind":"box","at":[0,590,320],"size":[600,480,40],"tint":"wood"},{"kind":"box","at":[-250,170,-250],"size":[70,340,70],"tint":"dark"},{"kind":"box","at":[250,170,-250],"size":[70,340,70],"tint":"dark"},{"kind":"box","at":[-250,170,250],"size":[70,340,70],"tint":"dark"},{"kind":"box","at":[250,170,250],"size":[70,340,70],"tint":"dark"},{"kind":"box","at":[0,580,0],"size":[580,400,580],"tint":"water","material":"water","role":"fill","pivot":[0,380,0]},{"kind":"box","at":[0,850,0],"size":[700,50,700],"tint":"lid","role":"lid"},{"kind":"box","at":[0,470,-380],"size":[700,700,50],"tint":"lid","role":"flip"},{"kind":"box","at":[200,590,345],"size":[50,460,12],"tint":"glass"},{"kind":"box","at":[200,580,352],"size":[36,400,6],"tint":"water","role":"fill","pivot":[200,380,352]},{"kind":"box","at":[0,400,370],"size":[70,60,140],"tint":"metal"},{"kind":"box","at":[0,430,410],"size":[130,25,25],"tint":"metal"}],"palette":{"wood":"#997047","dark":"#49392d","lid":"#5d7867","water":"#5f9abd","metal":"#8c989b","glass":"#d9e6e8"},"tags":["water","camping","collector","object"]}
+  },
+  "text": {
+    "card": "A rain barrel of four litres: uncover it, draw water from its tap.",
+    "water": "water",
+    "barrel": "barrel",
+    "rain": "rain",
+    "howto_draw": "Hold a pitcher and draw from the tap; it takes what the barrel has, up to what the pitcher holds.",
+    "howto_collect": "While it rains, uncover the inlet and spend four seconds at the barrel with empty hands: it gathers a litre.",
+    "put_down_first": "Put down what you hold before working on the rain inlet.",
+    "uncover_first": "Uncover the rain inlet first.",
+    "no_room": "The collector has less than one litre of room; draw some water first.",
+    "no_rain": "There is no collectable rain now; wait for authoritative rainy weather."
+  },
+  "card": { "text": "card", "category": "water", "synonyms": ["barrel", "rain"] },
+  "howtos": {
+    "draw": { "text": "howto_draw", "steps": [{ "form": "draw" }] },
+    "collect": { "text": "howto_collect", "steps": [{ "form": "uncover" }, { "form": "collect" }] }
+  }
+}

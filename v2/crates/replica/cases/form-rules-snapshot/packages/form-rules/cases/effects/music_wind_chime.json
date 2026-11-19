@@ -1,0 +1,120 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The wind chime pulled three times, a few seconds apart.",
+ "cases": [
+  {
+   "name": "ring_three_times",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     },
+     "w1": {
+      "kind": "eden:wind_chime"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "w1",
+      "form": "ring"
+     },
+     "now_us": 0,
+     "receipt": "rw1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "w1",
+        "field": "rings",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:rang",
+        "node": "w1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "w1",
+      "form": "ring"
+     },
+     "now_us": 3000000,
+     "receipt": "rw2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "w1",
+        "field": "rings",
+        "n": 1,
+        "to": 2
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "w1",
+      "form": "ring"
+     },
+     "now_us": 6000000,
+     "receipt": "rw3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "w1",
+        "field": "rings",
+        "n": 1,
+        "to": 3
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "w1": {
+     "kind": "eden:wind_chime",
+     "fields": {
+      "rings": 3
+     }
+    }
+   }
+  }
+ ]
+}

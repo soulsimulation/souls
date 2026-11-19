@@ -1,0 +1,76 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:laundry_board",
+  "owner": "thing",
+  "state": {
+    "soap": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "audience": {"rule": "everyone"}
+    },
+    "water": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [200, 0, 800]
+    }
+  },
+  "slots": {
+    "linen": {
+      "admits": "thing",
+      "kinds": ["eden:camp_linen"],
+      "most": 1,
+      "at_mm": [200, 1000, 0],
+      "fits_mm": [440, 80, 340]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [1100, 1020, 700]
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:laundry_board",
+    "table": [
+      {
+        "part": "fill",
+        "field": "water",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "arm.l",
+        "field": "soap",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-460,460,-260],"size":[60,920,60],"tint":"wood"},{"kind":"box","at":[-460,460,260],"size":[60,920,60],"tint":"wood"},{"kind":"box","at":[460,460,-260],"size":[60,920,60],"tint":"wood"},{"kind":"box","at":[460,460,260],"size":[60,920,60],"tint":"wood"},{"kind":"box","at":[0,940,0],"size":[1100,40,700],"tint":"wood"},{"kind":"box","at":[200,980,0],"size":[600,40,500],"tint":"board"},{"kind":"box","at":[-350,970,-120],"size":[220,20,250],"tint":"enamel"},{"kind":"box","at":[-350,985,-120],"size":[210,10,240],"tint":"water","role":"fill"},{"kind":"box","at":[-350,980,200],"size":[220,40,120],"tint":"enamel"},{"kind":"box","at":[-350,1010,200],"size":[150,20,80],"tint":"soap","role":"arm.l"}],"palette":{"wood":"#79553b","board":"#c3a077","enamel":"#e9e1c8","soap":"#e0c87f","water":"#4998ba"},"tags":["camping","laundry","washboard","object"]}
+  },
+  "text": {
+    "card": "A camp washboard with one soap charge and one of water: linen is washed here.",
+    "camp": "camp",
+    "laundry": "laundry",
+    "washboard": "washboard"
+  },
+  "card": {
+    "text": "card",
+    "category": "camp",
+    "synonyms": ["laundry", "washboard"]
+  }
+}

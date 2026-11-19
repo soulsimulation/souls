@@ -1,0 +1,69 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:armchair (SA-X24): one seat; lean its back back and sit up again. One Soul pushes it.",
+  "cases": [
+    {
+      "name": "armchair_two_souls_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:armchair" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "seat" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:armchair", "slots": { "seat": ["b1"] } } }
+    },
+    {
+      "name": "armchair_recline_sit_up",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "t1"] },
+          "t1": { "kind": "eden:armchair" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "recline" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "reclined", "n": 1, "to": 1 }],
+            "events": [{ "event": "eden:leaned_back", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "recline" },
+          "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "field_differs", "need": 0 }
+        },
+        {
+          "act": { "this": "t1", "form": "sit_up" },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "reclined", "n": 1, "to": 0 }],
+            "events": [{ "event": "eden:sat_up", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:armchair", "fields": { "reclined": 0 } } }
+    }
+  ]
+}

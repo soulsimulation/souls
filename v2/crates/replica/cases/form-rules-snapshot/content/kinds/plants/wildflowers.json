@@ -1,0 +1,44 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wildflowers",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      4000,
+      600,
+      4000
+    ]
+  },
+  "areas": {
+    "meadow": {
+      "at_mm": [
+        0,
+        0,
+        0
+      ],
+      "radius_mm": 2000,
+      "allows": {
+        "sit": "on",
+        "lie": "on"
+      }
+    }
+  },
+  "looks": {
+    "model": "look:wildflowers",
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[0,10,0],"size":[4000,20,4000],"round":0,"tint":"ground"},{"kind":"cyl","at":[-1800,150,-1800],"r":10,"h":300,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1800,300,-1800],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-1067,180,-509],"r":10,"h":360,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1067,360,-509],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-334,210,782],"r":10,"h":420,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-334,420,782],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[399,240,-1527],"r":10,"h":480,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[399,480,-1527],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[1132,150,-236],"r":10,"h":300,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1132,300,-236],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-1735,180,1055],"r":10,"h":360,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1735,360,1055],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-1002,210,-1254],"r":10,"h":420,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1002,420,-1254],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-269,240,37],"r":10,"h":480,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-269,480,37],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[464,150,1328],"r":10,"h":300,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[464,300,1328],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[1197,180,-981],"r":10,"h":360,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1197,360,-981],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-1670,210,310],"r":10,"h":420,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1670,420,310],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-937,240,1601],"r":10,"h":480,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-937,480,1601],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-204,150,-708],"r":10,"h":300,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-204,300,-708],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[529,180,583],"r":10,"h":360,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[529,360,583],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[1262,210,-1726],"r":10,"h":420,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1262,420,-1726],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-1605,240,-435],"r":10,"h":480,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1605,480,-435],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-872,150,856],"r":10,"h":300,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-872,300,856],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-139,180,-1453],"r":10,"h":360,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-139,360,-1453],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[594,210,-162],"r":10,"h":420,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[594,420,-162],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[1327,240,1129],"r":10,"h":480,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1327,480,1129],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-1540,150,-1180],"r":10,"h":300,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1540,300,-1180],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-807,180,111],"r":10,"h":360,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-807,360,111],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-74,210,1402],"r":10,"h":420,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-74,420,1402],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[659,240,-907],"r":10,"h":480,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[659,480,-907],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cone","at":[-1800,150,-1800],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[-823,150,-257],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[154,150,1286],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[1131,150,-771],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[-1492,150,772],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[-515,150,-1285],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[462,150,258],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[1439,150,-1799],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[-1184,150,-256],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[-207,150,1287],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[770,150,-770],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[1747,150,773],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[-876,150,-1284],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[101,150,259],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[1078,150,-1798],"r":90,"h":300,"segments":5,"tint":"grass"},{"kind":"cone","at":[-1545,150,-255],"r":90,"h":300,"segments":5,"tint":"grass"}],"palette":{"ground":"#6d8f45","stalk":"#4f7a34","grass":"#7aa04e","petal":"#e8d44d","petal2":"#c873c8","petal3":"#f2f2f2"},"tags":["plant","wildflowers","meadow","area"]}
+  },
+  "text": {
+    "card": "A meadow of grasses and wildflowers in drifts: sit or lie in it.",
+    "place": "place",
+    "meadow": "meadow",
+    "flowers": "flowers"
+  },
+  "card": {
+    "text": "card",
+    "category": "place",
+    "synonyms": [
+      "meadow",
+      "flowers"
+    ]
+  }
+}
