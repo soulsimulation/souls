@@ -18,9 +18,10 @@
 //!   time at each tick: a late tick steps them more than once, never skips a step. Move phases are timers on K9's due
 //!   list, fired against the same time.
 //!
-//! - **In the log** (K18, #3160). Each tick's part lists the bodies whose standing pose changed ([`Bodies::moved`]);
-//!   a restart builds each where the log last had it standing ([`Bodies::add_body_at`]). A body in a seat is logged
-//!   only while it stands, so a restart stands it where it last stood.
+//! - **In the log** (K18, #3160). Each tick's part lists the bodies whose pose changed ([`Bodies::moved`]), a body in
+//!   a seat with its stance ([`row`]); a restart builds each where the log last had it standing
+//!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
+//!   the seat is held in the slots table again and a rise or another sit sees it.
 //!
 //! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
@@ -174,8 +175,40 @@ pub struct Bodies {
     logged: BTreeMap<Id, Pose>,
 }
 
-/// Where the log last had each body standing: the poses a restart builds its bodies at (K18, #3160).
-pub type Placed = BTreeMap<Id, Pose>;
+/// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
+/// K18c, #3176). What a restart builds its bodies at.
+pub type Placed = BTreeMap<Id, (Pose, Option<Stance>)>;
+
+/// A body's row in a tick's part (K18's `answers::BODIES`): `[body, pose]`, or `[body, pose, stance]` in a seat
+/// (1 sit, 2 lie).
+pub fn row(body: Id, pose: &Pose, stance: Option<Stance>) -> Value {
+    let mut r = vec![body.to_value(), pose.to_value()];
+    match stance {
+        Some(Stance::Sit) => r.push(Value::Uint(1)),
+        Some(Stance::Lie) => r.push(Value::Uint(2)),
+        _ => {}
+    }
+    Value::Array(r)
+}
+
+/// A row read back: the body, its pose and its stance in a seat.
+pub fn read_row(v: &Value) -> Option<(Id, Pose, Option<Stance>)> {
+    let Value::Array(p) = v else { return None };
+    let (id, pose, rest) = match p.as_slice() {
+        [id, pose, rest @ ..] => (id, pose, rest),
+        _ => return None,
+    };
+    let stance = match rest {
+        [Value::Uint(1)] => Some(Stance::Sit),
+        [Value::Uint(2)] => Some(Stance::Lie),
+        _ => None,
+    };
+    Some((
+        replica::effects::read_id(id).ok()?,
+        Pose::from_value(pose).ok()?,
+        stance,
+    ))
+}
 
 fn load(text: &str) -> R<Move> {
     let v = decode(&fixture_bytes(text)?)
@@ -223,9 +256,10 @@ impl Bodies {
     }
 
     /// Adds a body of `family`: where the log last had it standing (`placed`, K18 #3160), else as the mover placed it.
+    /// A body that sat is added standing as the mover placed it; [`Bodies::seat_placed`] then seats it.
     pub fn add_body_at(&mut self, family: Family, body: Moved, placed: &Placed) -> R<()> {
         let body = match placed.get(&body.id) {
-            Some(p) => match p.support {
+            Some((p, _)) => match p.support {
                 Support::Surface { surface, .. } => match self.town.surfaces.get(&surface) {
                     Some(s) => s.place(body.id, p.frame, p.position, p.orientation)?,
                     None => body,
@@ -238,29 +272,77 @@ impl Bodies {
         self.add_body(family, body)
     }
 
-    /// The bodies standing on a surface whose pose changed since the last call, in id order: what the tick's record
-    /// keeps of them (K18), so a restart stands each where it last stood. A body in a seat is not listed while it
-    /// sits.
-    pub fn moved(&mut self) -> Vec<(Id, Pose)> {
+    /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back
+    /// into it from where it was added, at body time `at`, and its seat is held again. A seat gone or taken leaves it
+    /// standing, named in the result.
+    pub fn seat_placed(&mut self, placed: &Placed, at: Micros) -> Vec<(Id, Refusal)> {
         let mut out = Vec::new();
-        for b in self.runner.controller.bodies() {
-            if !matches!(b.pose.support, Support::Surface { .. }) {
+        for (&body, (pose, stance)) in placed {
+            if pose.support != Support::Slot || self.runner.controller.body(body).is_none() {
                 continue;
             }
-            if self.logged.get(&b.id) != Some(&b.pose) {
-                self.logged.insert(b.id, b.pose);
-                out.push((b.id, b.pose));
+            let thing = pose.frame.node;
+            let r = self.slots.restore(
+                &mut self.runner.controller,
+                body,
+                thing,
+                stance.unwrap_or(Stance::Sit),
+                at,
+            );
+            match r {
+                Ok(()) => {
+                    if let Some(b) = self.runner.controller.body(body) {
+                        self.logged.insert(body, b.pose);
+                    }
+                }
+                Err(e) => out.push((body, e)),
             }
         }
         out
     }
 
-    /// Every body's pose as the controller holds it, in id order: part of the zone's state hash.
+    /// Every body in id order, those the controller steps and those resting in a seat's slot (which it keeps apart),
+    /// each with its stance when in a slot.
+    fn every(&self) -> Placed {
+        let c = &self.runner.controller;
+        let mut out: Placed = c.bodies().map(|b| (b.id, (b.pose, None))).collect();
+        for (body, _, stance) in self.slots.seated() {
+            if let Some(b) = c.body(body)
+                && b.pose.support == Support::Slot
+            {
+                out.insert(body, (b.pose, Some(stance)));
+            }
+        }
+        out
+    }
+
+    /// Where each body is now, a seated one with its stance: what a checkpoint carries (K18c, #3176).
+    pub fn placed(&self) -> Placed {
+        self.every()
+    }
+
+    /// The bodies whose pose changed since the last call, in id order, a body in a seat's slot with its stance: what
+    /// the tick's record keeps of them (K18), so a restart stands each where it last stood or seats it again.
+    pub fn moved(&mut self) -> Vec<(Id, Pose, Option<Stance>)> {
+        let mut out = Vec::new();
+        for (id, (pose, stance)) in self.every() {
+            if !matches!(pose.support, Support::Surface { .. } | Support::Slot) {
+                continue;
+            }
+            if self.logged.get(&id) != Some(&pose) {
+                self.logged.insert(id, pose);
+                out.push((id, pose, stance));
+            }
+        }
+        out
+    }
+
+    /// Every body's pose as the controller holds it, in id order, a seated one's included (K18c): part of the zone's
+    /// state hash.
     pub fn poses(&self) -> Vec<(Id, Pose)> {
-        self.runner
-            .controller
-            .bodies()
-            .map(|b| (b.id, b.pose))
+        self.every()
+            .into_iter()
+            .map(|(id, (p, _))| (id, p))
             .collect()
     }
 
