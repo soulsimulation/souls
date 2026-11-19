@@ -8,6 +8,8 @@
 pub mod close;
 /// The form runner (F1, #2766).
 pub mod form_runner;
+/// The three standing orders (B7, #2726).
+pub mod orders;
 /// N7's walk through the host (T9b #3120).
 pub mod route;
 pub mod scan;
