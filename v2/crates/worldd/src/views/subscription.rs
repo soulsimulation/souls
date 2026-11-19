@@ -51,7 +51,7 @@ use replica::pose::Vec3;
 use replica::speech::{HEARD_WORDS, SAID, Said};
 use replica::tree::Tree;
 use replica::views::{Grant, Level, ORDER, SAMPLE_US, Scope as ViewScope, Subscription, grant};
-use replica::world_model::Audience;
+use replica::world_model::{Audience, End};
 use sim::text::Store;
 
 use super::interest::{Interest, Places, Table};
@@ -388,6 +388,9 @@ pub struct Hub {
     words: Option<Arc<Store>>,
     /// The `souls:member` links held now: link → (body, activity) (B5, E26a).
     member_links: BTreeMap<Id, (Id, Id)>,
+    /// Authoritative C3 links, indexed both ways; multiple owners fail closed.
+    owner_links: BTreeMap<Id, (Id, Id)>,
+    body_owners: BTreeMap<Id, BTreeMap<Id, Id>>,
 }
 
 impl Hub {
@@ -410,13 +413,38 @@ impl Hub {
         while let Some(h) = todo.pop() {
             todo.extend(tree.children(h).unwrap_or_default());
             for e in tree.links_of(h).unwrap_or_default() {
-                if tree.ty(e).as_str() == MEMBER
-                    && let Some((_, ends, _, _)) = tree.link(e.link)
-                {
-                    self.member_links.insert(e.link, (ends[0], ends[1]));
+                if let Some((ty, ends, owner, _)) = tree.link(e.link) {
+                    if ty.as_str() == MEMBER {
+                        self.member_links.insert(e.link, (ends[0], ends[1]));
+                    } else if ty.as_str() == "souls:body-of" {
+                        self.ownership(e.link, ends, owner);
+                    }
                 }
             }
         }
+    }
+
+    fn unown(&mut self, link: Id) {
+        if let Some((body, _)) = self.owner_links.remove(&link)
+            && let Some(owners) = self.body_owners.get_mut(&body)
+        {
+            owners.remove(&link);
+            if owners.is_empty() {
+                self.body_owners.remove(&body);
+            }
+        }
+    }
+
+    fn ownership(&mut self, link: Id, ends: [Id; 2], owner: End) {
+        self.unown(link);
+        if owner != End::First || ends[0] == ends[1] || !self.places.is_body(ends[0]) {
+            return;
+        }
+        self.owner_links.insert(link, (ends[0], ends[1]));
+        self.body_owners
+            .entry(ends[0])
+            .or_default()
+            .insert(link, ends[1]);
     }
 
     /// Keeps the membership links an entry makes and ends (E26a).
@@ -427,11 +455,30 @@ impl Hub {
                 Change::Link { link, ty, ends, .. } if ty.as_str() == MEMBER => {
                     self.member_links.insert(*link, (ends[0], ends[1]));
                 }
+                Change::Link {
+                    link,
+                    ty,
+                    ends,
+                    owner,
+                    ..
+                } if ty.as_str() == "souls:body-of" => {
+                    self.ownership(*link, *ends, *owner);
+                }
                 Change::Unlink { link } => {
                     self.member_links.remove(link);
+                    self.unown(*link);
                 }
                 Change::Remove { node } => {
-                    self.member_links.retain(|_, (b, a)| b != node && a != node)
+                    self.member_links.retain(|_, (b, a)| b != node && a != node);
+                    let gone: Vec<_> = self
+                        .owner_links
+                        .iter()
+                        .filter(|(_, (b, principal))| b == node || principal == node)
+                        .map(|(link, _)| *link)
+                        .collect();
+                    for link in gone {
+                        self.unown(link);
+                    }
                 }
                 _ => {}
             }
@@ -448,6 +495,14 @@ impl Hub {
             .map(|(body, _)| *body)
             .collect();
         ids.insert(id);
+        let principals: Vec<_> = ids
+            .iter()
+            .filter_map(|body| {
+                let owners = self.body_owners.get(body)?;
+                (owners.len() == 1).then(|| *owners.values().next().unwrap())
+            })
+            .collect();
+        ids.extend(principals);
         Some(Arc::new(ids))
     }
 
@@ -885,4 +940,158 @@ pub fn cell_bytes(
 ) -> R<(usize, Option<usize>)> {
     let ns = node_second(node, second, now, prev)?;
     Ok((ns.cells.len(), ns.changes.map(|c| c.len())))
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+    use replica::effects::{Actor, Cause, ChangeRec, Envelope, Header, Rest, schema_hash};
+    use replica::encode::Name;
+    use replica::ids::{Hash, Purpose, Scope as IdScope};
+    use replica::pose::{Frame, Pose, Quat, Support};
+
+    fn id(n: u64) -> Id {
+        Id::new(IdScope([0x65; 16]), n).unwrap()
+    }
+    fn name(s: &str) -> Name {
+        Name::new(s).unwrap()
+    }
+    fn effect(changes: Vec<Change>) -> Effect {
+        Effect {
+            envelope: Envelope {
+                sequence: 0,
+                at: 0,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience: Audience::Everyone,
+                node: id(1),
+            },
+            body: Body::Changes(
+                changes
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: Rest::new(),
+                    })
+                    .collect(),
+            ),
+            events: None,
+            rest: Rest::new(),
+        }
+    }
+    fn owned(link: Id, soul: Id, owner: End) -> Change {
+        Change::Link {
+            link,
+            ty: name("souls:body-of"),
+            ends: [id(2), soul],
+            owner,
+            audience: Audience::Everyone,
+        }
+    }
+
+    #[test]
+    fn ownership_replays_and_never_comes_from_follow_targets() {
+        let body_kind = name(&format!("souls:body@1220{}", "00".repeat(32)));
+        let ground_kind = name(&format!("test:ground@1220{}", "00".repeat(32)));
+        let mut kinds = vec![body_kind.clone(), ground_kind.clone()];
+        kinds.sort();
+        let header = Header::read(
+            &encode(&Value::Map(BTreeMap::from([
+                (
+                    1,
+                    Value::Bytes(Hash::of(Purpose::Fixture, b"c30/ownership").to_bytes()),
+                ),
+                (2, Value::Bytes(schema_hash().to_bytes())),
+                (3, Value::Bytes(id(1).scope().0.to_vec())),
+                (4, id(1).to_value()),
+                (5, Value::Uint(0)),
+                (
+                    6,
+                    Value::Array(kinds.into_iter().map(Value::Text).collect()),
+                ),
+                (7, Value::Array(vec![])),
+            ])))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut tree = Tree::start(id(1), ground_kind);
+        let mut live = Hub::new();
+        live.seed(&tree);
+        let birth = effect(vec![
+            Change::Create {
+                node: id(2),
+                kind: body_kind,
+                pose: Pose {
+                    frame: Frame {
+                        node: id(1),
+                        slot: None,
+                    },
+                    position: Vec3::ZERO,
+                    orientation: Quat::IDENTITY,
+                    support: Support::Surface {
+                        surface: id(1),
+                        height: 0,
+                    },
+                },
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            },
+            owned(id(3), id(4), End::First),
+        ]);
+        let part = replica::views::entry_part(&header, &birth).unwrap();
+        tree.apply(&header, &part).unwrap();
+        live.tick(&part).unwrap();
+        let mut replay = Hub::new();
+        replay.seed(&tree);
+        assert_eq!(
+            live.readers(Audience::Of(id(2))),
+            replay.readers(Audience::Of(id(2)))
+        );
+        let reader = |h: &mut Hub, principal| {
+            let sub = h
+                .subscribe_as(
+                    Request {
+                        scopes: vec![Scope::Follow(id(2))],
+                        level: Level::Full,
+                        budget: 10_000_000,
+                    },
+                    BTreeSet::from([principal]),
+                )
+                .unwrap();
+            h.subs[sub]
+                .as_ref()
+                .unwrap()
+                .sees(&h.readers(Audience::Of(id(2))))
+        };
+        assert!(
+            reader(&mut live, id(4)),
+            "the body's owner reads its private audience"
+        );
+        assert!(
+            !reader(&mut live, id(5)),
+            "following another body confers no private authority"
+        );
+        assert!(
+            reader(&mut live, id(2)),
+            "legacy direct body audiences remain valid"
+        );
+        live.members_apply(&effect(vec![owned(id(6), id(5), End::First)]));
+        assert!(
+            !reader(&mut live, id(4)) && !reader(&mut live, id(5)),
+            "ambiguous ownership fails closed"
+        );
+        live.members_apply(&effect(vec![Change::Unlink { link: id(3) }]));
+        assert!(
+            !reader(&mut live, id(4)) && reader(&mut live, id(5)),
+            "replacement revokes the prior principal"
+        );
+        live.members_apply(&effect(vec![owned(id(6), id(4), End::Second)]));
+        assert!(
+            !reader(&mut live, id(4)) && !reader(&mut live, id(5)),
+            "invalid ownership revokes aliases"
+        );
+        live.members_apply(&effect(vec![owned(id(7), id(4), End::First)]));
+        live.members_apply(&effect(vec![Change::Remove { node: id(2) }]));
+        assert!(!reader(&mut live, id(4)), "removal revokes the alias");
+    }
 }

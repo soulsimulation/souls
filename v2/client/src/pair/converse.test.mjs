@@ -130,7 +130,17 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
       assert.equal(a.ok, true, `${label} ${JSON.stringify(req)}: ${JSON.stringify(a)}`);
       const sent = a.sent?.length ?? 1;
       try {
-        await waitFor(async () => { const st = await request(rt.socket, { op: 'status' }); return st.connected && st.unanswered.length === 0 && st.answered >= before + sent && st; });
+        await waitFor(async () => {
+          const events = await ask({ op: 'wait', seconds: 0 });
+          for (const e of events.events ?? []) {
+            s.events.push(e);
+            if (e.kind === 'heard') s.heard.push(e);
+            assert.ok(!(e.kind === 'answer' && e.answer === 5 && e.sequence === null),
+              `gateway unread refusal: ${e.reason}`);
+          }
+          const st = await request(rt.socket, { op: 'status' });
+          return st.connected && st.unanswered.length === 0 && st.answered >= before + sent && st;
+        });
       } catch (e) {
         const st = await request(rt.socket, { op: 'status' });
         console.log(label, 'unanswered', JSON.stringify({ connected: st.connected, sequence: st.sequence, unanswered: st.unanswered, answered: st.answered }), 'receipts', JSON.stringify(receipts(receiptsDir).slice(n).map((r) => ({ outcome: r.outcome, code: r.code ?? r.reason }))));

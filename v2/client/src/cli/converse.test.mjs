@@ -61,7 +61,7 @@ test('an invitation reaches the body asked; a decline or a lapse is named to the
   assert.equal(offerNote({ name: 'souls:said', fields: {} }, me), null);
 });
 
-test('the offer\'s parameters on the wire: the kind and role as names, the bodies asked as ids', async () => {
+test('the offer\'s bounded kind pin on the wire, the role as a name and bodies as ids', async () => {
   const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
   const wire = await import(pathToFileURL(join(pkg, 'replica.js')).href);
   wire.initSync({ module: readFileSync(join(pkg, 'replica_bg.wasm')) });
@@ -70,10 +70,16 @@ test('the offer\'s parameters on the wire: the kind and role as names, the bodie
     undefined, undefined, params);
   const bytes = Buffer.from(send(JSON.stringify(offer.params)));
   const plain = Buffer.from(send(undefined));
-  // The parameters as the world reads them (`worldd::engine`): 1 and 2 names, 3 a list of ids.
-  const p = Buffer.from(wire.encode_diagnostic(`{1: "${KIND}", 2: "${OPENER}", 3: [[h'${S}', 3]]}`));
+  // The kind splits its plain name and binary hash; every text stays at most 64 bytes.
+  const p = Buffer.from(wire.encode_diagnostic(`{1: ["${KIND.split('@')[0]}", h'${KIND.split('@')[1]}'], 2: "${OPENER}", 3: [[h'${S}', 3]]}`));
   assert.ok(bytes.includes(p.subarray(1)), 'the parameters map, encoded as the world reads it');
   assert.ok(bytes.length > plain.length && !plain.includes(Buffer.from(KIND)));
+  for (const kind of [KIND.slice(0, -1), KIND.replace('@1220', '@1320'), KIND.replace('@1220', '@1220A')]) {
+    assert.throws(() => send(JSON.stringify({ ...offer.params, 1: kind })), /activity-kind-bad-pin/);
+  }
+  assert.throws(() => send(JSON.stringify({ ...offer.params, 2: 'x'.repeat(65) })), /intent.text-too-long/);
+  assert.throws(() => wire.wireIntent(Buffer.from(S, 'hex'), 2n, 'eden:use', 1n, new Uint8Array(), 9n,
+    offer.target, undefined, undefined, JSON.stringify(offer.params)), /intent.text-too-long/);
   assert.throws(() => send('{"one": 1}'), /params-not-numbered/);
   assert.throws(() => send('{"1": {"a": 1}}'), /param-unsupported/);
 });

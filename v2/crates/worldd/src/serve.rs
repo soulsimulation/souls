@@ -358,6 +358,11 @@ fn humanoid() -> R<Family> {
             leg("souls:leg-right")?,
             hand("souls:hand-left", 1)?,
             hand("souls:hand-right", 2)?,
+            Resource {
+                name: n("souls:voice")?,
+                class: Class::Voice,
+                slot: None,
+            },
         ],
     })
 }
@@ -923,4 +928,19 @@ fn serve(args: &[String]) -> R<()> {
         std::thread::spawn(move || answers::serve(door, stream));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod conversation_tests {
+    use super::*;
+
+    #[test]
+    fn served_body_can_claim_each_conversation_role() {
+        let kind = conversation().unwrap();
+        let body = replica::bodies::Body::new(humanoid().unwrap());
+        for role in &kind.roles {
+            let held = body.plan(1, &kind.shape(role)).unwrap();
+            assert_eq!(held.holds, vec![Name::new("souls:voice").unwrap()]);
+        }
+    }
 }

@@ -363,21 +363,44 @@ pub fn wire_intent(
             })
         })
         .collect::<Result<_, _>>()?;
+    let mut parameters: BTreeMap<_, _> = words
+        .map(|w| {
+            (
+                1,
+                Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
+            )
+        })
+        .into_iter()
+        .chain((!args.is_empty()).then_some((1, Value::Array(args))))
+        .chain(numbered(params.as_deref(), &node)?)
+        .collect();
+    // An activity kind is pinned as a name and a binary hash, like an edit's kind: no text exceeds I2's limit.
+    if matches!(verb.as_str(), "activity:offer" | "activity:propose")
+        && let Some(Value::Text(kind)) = parameters.get(&1)
+        && let Some((plain, hash)) = kind.as_str().split_once('@')
+    {
+        let bytes = from_hex(hash).map_err(|_| JsError::new("activity-kind-bad-pin"))?;
+        if plain.is_empty()
+            || plain.len() > crate::intent_decode::LIMITS.text_bytes as usize
+            || bytes.len() != 34
+            || bytes[..2] != [0x12, 0x20]
+            || hash != to_hex(&bytes)
+        {
+            return Err(JsError::new("activity-kind-bad-pin"));
+        }
+        parameters.insert(
+            1,
+            Value::Array(vec![
+                Value::Text(Name::new(plain).ok_or_else(|| JsError::new("activity-kind-bad-pin"))?),
+                Value::Bytes(bytes),
+            ]),
+        );
+    }
     let intent = Intent {
         actor: Actor::Soul(id),
         verb,
         target,
-        parameters: words
-            .map(|w| {
-                (
-                    1,
-                    Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
-                )
-            })
-            .into_iter()
-            .chain((!args.is_empty()).then_some((1, Value::Array(args))))
-            .chain(numbered(params.as_deref(), &node)?)
-            .collect(),
+        parameters,
         sequence,
         basis,
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
@@ -387,7 +410,7 @@ pub fn wire_intent(
         body: None,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
-    Intent::read(&bytes).map_err(js)?;
+    crate::intent_decode::decode(&bytes).map_err(js)?;
     Ok(bytes)
 }
 

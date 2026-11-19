@@ -216,9 +216,19 @@ function current() {
   signedIn = true;
   attempt = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
-  if (ws && !ws.hearing) { ws.hearing = true; ws.send(wire.wireSubscribe(scope, seat.grant.counter, BigInt(HEARING_BUDGET))); }
+  hearing();
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
   follow();
+}
+
+/** Follow this principal's current body; the world alone resolves private audience authority. */
+function hearing() {
+  if (!ws || !signedIn) return;
+  const body = [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id ?? ME;
+  if (ws.hearing === body) return;
+  const [s, n] = body.split('-');
+  ws.send(wire.wireSubscribe(unhex(s), BigInt(n), BigInt(HEARING_BUDGET)));
+  ws.hearing = body;
 }
 
 /**
@@ -282,6 +292,7 @@ function syncAnswer(sock, n, refused, bytes) {
   cutAt = null;
   const { waiters } = syncing;
   syncing = null;
+  hearing();
   for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
