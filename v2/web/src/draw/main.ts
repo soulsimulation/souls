@@ -13,6 +13,7 @@ import { support } from './support.ts';
 import { pageThings } from '../things/page.ts';
 import { HistoryPage, readMoment } from '../history/page.ts';
 import { WorldSound } from '../sound/sound.ts';
+import { pageSouls } from '../souls/page.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -49,7 +50,8 @@ const world = new WorldView();
 scene.add(world.group);
 const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
-Object.assign(globalThis, { v2: { renderer, scene, cam, world, things, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
+const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
+Object.assign(globalThis, { v2: { renderer, scene, cam, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
 loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 
@@ -76,6 +78,7 @@ const live = (address: string) => new StreamSource(address).start({
     world.apply(p.nodes, p.removed, p.samples);
     things.apply(p.nodes, p.removed);
     sound.part(p.nodes, p.removed, p.samples, p.happened ?? []);
+    souls.apply(p);
     newestTo = p.to;
     played++;
     if (p.hash !== null) (hashes++, p.hash && hashesEqual++);
@@ -123,6 +126,7 @@ renderer.setAnimationLoop((now) => {
   renderer.render(scene, cam.camera);
   const c = cam.camera, fwd = c.getWorldDirection(new THREE.Vector3());
   sound.frame(t, { pos: c.position.toArray(), forward: fwd.toArray(), up: c.up.toArray() });
+  if (t !== null) souls.draw(t, cam.camera);
   if (history) return void (status.textContent = `${history.status()}\nbodies drawn      ${drawn}   frames a second ${fps.toFixed(0)}`);
   if (!address && !moment) return;
   status.textContent = t === null || worldNow === null

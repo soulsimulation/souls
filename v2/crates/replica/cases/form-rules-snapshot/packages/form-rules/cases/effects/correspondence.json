@@ -1,0 +1,239 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Sealed correspondence (from #1685): a blank letter cannot be sealed (write it first); it is written, sealed and opened; once opened it is never sealed or written again, and it is carried with its words intact.",
+  "cases": [
+    {
+      "name": "write_seal_open_then_never_again",
+      "state": {
+        "actor": "b1",
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        },
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:sealed_letter"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              120,
+              300
+            ]
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "l1",
+            "form": "seal"
+          },
+          "receipt": "r0",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0,
+            "fix": {
+              "form": "write"
+            }
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "write",
+            "args": {
+              "words": "w1"
+            }
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "words",
+                "n": 1,
+                "to": {
+                  "text": "w1"
+                }
+              },
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "stage",
+                "n": 2,
+                "to": "written"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:letter_written",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:letter_composed",
+                "node": "l1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "seal"
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "stage",
+                "n": 2,
+                "to": "sealed"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:letter_sealed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "open_seal"
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "stage",
+                "n": 2,
+                "to": "opened"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:seal_broken",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "seal"
+          },
+          "receipt": "r4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0,
+            "fix": null
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "write",
+            "args": {
+              "words": "w2"
+            }
+          },
+          "receipt": "r5",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "take"
+          },
+          "receipt": "r6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "l1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "l1": {
+          "kind": "eden:sealed_letter",
+          "fields": {
+            "words": {
+              "text": "w1"
+            },
+            "stage": "opened"
+          }
+        }
+      }
+    }
+  ]
+}

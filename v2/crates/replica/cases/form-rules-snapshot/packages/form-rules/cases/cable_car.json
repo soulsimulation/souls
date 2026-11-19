@@ -1,0 +1,490 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:cable_car (eden-cable-car@1, 1 placed, scenery today): two cabins of six between the valley and the mountain station.",
+ "cases": [
+  {
+   "name": "cable_car_ride_standing_still_free_seat",
+   "act": {
+    "this": "t1",
+    "form": "ride",
+    "args": {
+     "seat": "red_cabin"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:cable_car",
+      "fields": {
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "cable_car_ride_while_under_way_is_refused",
+   "act": {
+    "this": "t1",
+    "form": "ride",
+    "args": {
+     "seat": "red_cabin"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:cable_car",
+      "fields": {
+       "under_way": true
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "under_way",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "cable_car_ride_seat_full_names_the_other",
+   "act": {
+    "this": "t1",
+    "form": "ride",
+    "args": {
+     "seat": "red_cabin"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:cable_car",
+      "fields": {
+       "under_way": false
+      },
+      "slots": {
+       "red_cabin": [
+        "b2",
+        "b3",
+        "b4",
+        "b5",
+        "b6",
+        "b7"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b4": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b5": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b6": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b7": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "t1",
+     "slot": "red_cabin"
+    },
+    "fix": {
+     "form": "ride",
+     "args": {
+      "seat": "yellow_cabin"
+     }
+    }
+   }
+  },
+  {
+   "name": "cable_car_board_standing_still_free_seat",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "red_cabin"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:cable_car",
+      "fields": {
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "cable_car_board_while_under_way_is_refused",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "red_cabin"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:cable_car",
+      "fields": {
+       "under_way": true
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "under_way",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "cable_car_board_seat_full_names_the_other",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "red_cabin"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:cable_car",
+      "fields": {
+       "under_way": false
+      },
+      "slots": {
+       "red_cabin": [
+        "b2",
+        "b3",
+        "b4",
+        "b5",
+        "b6",
+        "b7"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b4": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b5": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b6": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b7": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "t1",
+     "slot": "red_cabin"
+    },
+    "fix": {
+     "form": "board",
+     "args": {
+      "seat": "yellow_cabin"
+     }
+    }
+   }
+  }
+ ]
+}

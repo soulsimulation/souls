@@ -155,6 +155,11 @@ struct World {
     acts: Activities,
 }
 
+/// Where body `i` stands: a metre apart in rows of 40, so a hall of 300 (E8) fits the ground.
+fn spot(i: usize) -> Vec3 {
+    Vec3::new((i % 40) as i64 * 1_000_000, 0, (i / 40) as i64 * 1_000_000)
+}
+
 fn controller(root: Id, bodies: &[Id]) -> Controller {
     let corners = vec![
         [-50_000, 0, -50_000],
@@ -168,11 +173,12 @@ fn controller(root: Id, bodies: &[Id]) -> Controller {
             outline: vec![corners.clone()],
             vertices: corners,
             triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: crate::gaits::Ground::Dry,
         }],
     );
     let mut c = Controller::new();
     for (i, b) in bodies.iter().enumerate() {
-        let at = Vec3::new(i as i64 * 1_000_000, 0, 0);
+        let at = spot(i);
         let frame = Frame {
             node: root,
             slot: None,
@@ -218,7 +224,7 @@ fn world(k: usize, seed: u8) -> World {
                         node: root,
                         slot: None,
                     },
-                    position: Vec3::new(i as i64 * 1_000_000, 0, 0),
+                    position: spot(i),
                     orientation: Quat::IDENTITY,
                     support: Support::Surface {
                         surface: root,
@@ -706,3 +712,7 @@ fn a4_after_a_restart_mid_activity_both_still_belong_and_either_can_leave() {
     assert!(w.free(b0) && w.tree.handle(act).is_none());
     println!("a4: restored mid-move; 2 members, every claim the activity's; both left at once");
 }
+
+/// E8 (#2779): offers, accepted, declined and lapsed, on this file's world.
+mod call;
+mod offers;

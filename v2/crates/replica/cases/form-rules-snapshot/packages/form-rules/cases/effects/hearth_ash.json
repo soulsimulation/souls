@@ -1,0 +1,208 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "Hearth ash (from #1761): with the hearth out, a Soul with empty hands clears all four measures into the empty bucket on it (two sets that sum to zero), lights the cleared hearth and puts it out, then takes the same bucket with its ash in it. Clearing while lit is refused.",
+ "cases": [
+  {
+   "name": "clear_light_refuse_put_out_take_bucket",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "h1"
+      ]
+     },
+     "h1": {
+      "kind": "eden:ash_hearth",
+      "slots": {
+       "bucket": [
+        "a1"
+       ]
+      }
+     },
+     "a1": {
+      "kind": "eden:ash_bucket"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "h1",
+      "form": "clear_ash",
+      "args": {
+       "bucket": "a1",
+       "amount": 4
+      }
+     },
+     "receipt": "rh1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "h1",
+        "field": "ash",
+        "n": 2,
+        "to": 0,
+        "by": -4
+       },
+       {
+        "change": "set",
+        "node": "a1",
+        "field": "ash",
+        "n": 1,
+        "to": 4,
+        "by": 4
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:ash_cleared",
+        "node": "h1",
+        "changes": [
+         0,
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "h1",
+      "form": "light"
+     },
+     "receipt": "rh2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "h1",
+        "field": "lit",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lit",
+        "node": "h1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "h1",
+      "form": "clear_ash",
+      "args": {
+       "bucket": "a1",
+       "amount": 1
+      }
+     },
+     "receipt": "rh3",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "says": "put_out_first"
+     }
+    },
+    {
+     "act": {
+      "this": "h1",
+      "form": "put_out"
+     },
+     "receipt": "rh4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "h1",
+        "field": "lit",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:put_out",
+        "node": "h1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "a1",
+      "form": "take"
+     },
+     "receipt": "rh5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "a1",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:taken",
+        "node": "a1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "h1": {
+     "kind": "eden:ash_hearth",
+     "fields": {
+      "ash": 0,
+      "lit": 0
+     },
+     "slots": {
+      "bucket": []
+     }
+    },
+    "a1": {
+     "kind": "eden:ash_bucket",
+     "fields": {
+      "ash": 4
+     }
+    },
+    "b1": {
+     "hands": {
+      "left": "a1",
+      "right": null
+     }
+    }
+   }
+  }
+ ]
+}
