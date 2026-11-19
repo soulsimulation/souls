@@ -3,10 +3,12 @@
 //!
 //! **The world folder** (`seed` writes it; everything after is the world's own):
 //!
-//! - `world.json`: `{"format": "souls/world/1", "name", "souls": [[counter, x mm, z mm], ...], "souls_scope"}`. The
-//!   name is the world's instance name, `<lineage hex>-<zone scope hex>-<zone counter>` (`worldd@<name>`). With
+//! - `world.json`: `{"format": "souls/world/1", "name", "souls": [[counter, x mm, z mm], ...], "souls_scope",
+//!   "entry": [x mm, z mm]}`. The name is the world's instance name, `<lineage hex>-<zone scope hex>-<zone counter>`
+//!   (`worldd@<name>`); the entry is where Souls' bodies are born (C3), `seed`'s `--at`. With
 //!   `"creator": "<32 hex>-<n>"` (`seed --creator`, G7b #3477) the world takes that creator's edit intents (G1b),
-//!   checked against its own kinds; `world.kinds`, written at each start, is those kinds' text for the creator's client.
+//!   checked against its own kinds. `world.kinds` keeps the unchanged pinned kinds text and explicit
+//!   `# souls-boot-body <full place kind>` lines for C3's boot-time body admission, for the creator's local checks.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
 //!   live world). The world as built is read from it at each start: its header and the walkers' town.
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
@@ -30,8 +32,22 @@
 //! (`answers::start`), which restores the newest checkpoint and replays the records after it. It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the stream's tier, off the clock
-//! thread. The Souls in `world.json` stand on the open ground at their places on a first start, where the log last had
-//! them after it.
+//! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
+//! `world.json`'s Souls are their tokens' grants (`souls.tokens`), born as any Soul is.
+//!
+//! **Joins and leaves** (C3, #3367): no Soul stands in the world until it acts. A Soul's first intent, sent with
+//! its token through the gateway, births its body by K10 (`answers::Join`): a `souls:body` node on the open ground by
+//! the world's entry (`world.json`'s `entry`), linked to its Soul. `life:join` names it
+//! (words 1 and 2: its name and description); `life:leave` retires it. A restart stands each body where the log last
+//! had it, and its Soul finds it again by its link. A token the directory pairs later is added to `tokens` and the
+//! gateway reads the file again: no restart.
+//!
+//! **Seats** (C17, #3453). A start registers the seats the world's entries declare on its things for the gateway's sit,
+//! lie and rise and a form's sit ([`places`]): every slot admitting a body that a thing's kind's entry declares is a
+//! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
+//! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
+//! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
+//! within a form's reach (C15's rule), so a rise sets the body down where it can stand.
 //!
 //! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
 //! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
@@ -45,8 +61,7 @@
 //! day's bundle index is written again each time a bundle closes. A restart archives again from record 0: what was
 //! stored is passed over when the same and written over when made from more records ([`Again`]).
 //!
-//! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town), joins and leaves
-//! (C3), generic acts (C2).
+//! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town).
 
 // The process reads the wall clock once for the stream's anchor (V1 rule 5); the engine never does.
 #![allow(clippy::disallowed_methods)]
@@ -66,17 +81,18 @@ use replica::bodies::{Class, Family, Resource};
 use replica::effects::{Effect, Refusal};
 use replica::encode::{Name, Value, encode, from_hex, to_hex};
 use replica::ids::{Id, Scope, sha256};
-use replica::pose::{Frame, Quat, Vec3};
+use replica::pose::{Frame, Vec3};
 use replica::rules::json::{self, Value as Json};
 use replica::stream;
 use replica::views::{Key, Level, Redactions};
-use replica::world_model::{Audience, parse_kinds};
+use replica::world_model::{Audience, parse_kinds, plain};
 use sim::links::Doors;
 use sim::log::{FileStore, Log};
 use sim::recorder;
+use sim::slots::PlaceAt;
 use sim::walk::town::Town;
 use supervisor::bucket::Under;
-use worldd::answers::{self, Config};
+use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::checkers::Rules;
 use worldd::shipping::{self, Item, Shipper, Wall};
@@ -147,8 +163,10 @@ struct Built {
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
     rules: replica::tree::Rules,
-    /// The kind lines the rules were read from, one a line: the text a creator's client keeps (G7b, #3477).
+    /// The kind lines and boot body admissions the creator's client keeps (G7b, #3477).
     kinds_text: String,
+    /// A Soul's body kind, its full name (C3).
+    body_kind: String,
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built.
@@ -163,10 +181,30 @@ fn build(facts: &str) -> R<Built> {
     im.rules
         .kinds
         .extend(parse_kinds(&root_kind).map_err(|e| format!("the root's kind: {e:?}"))?);
+    // Register and export the same generated body definition; pinned imported definitions keep their bytes.
+    let body_kind_text = "{1: \"souls:body\", 2: \"family\", 6: {1: [\"thing\"], 2: [\"thing\"]}}";
+    let body = parse_kinds(body_kind_text).map_err(|e| format!("the body's kind: {e:?}"))?;
+    let body_kind = body.keys().next().cloned().ok_or("the body's kind")?;
+    im.rules.kinds.extend(body);
+    let mut boot_body = Vec::new();
+    for (name, kind) in im.rules.kinds.iter_mut() {
+        if plain(name) == import_eden::GROUND {
+            kind.children.insert("body".into());
+            boot_body.push(name.clone());
+        }
+    }
     let mut kinds_text = String::new();
-    for line in im.kind_lines.iter().chain([&root_kind]) {
+    for line in im
+        .kind_lines
+        .iter()
+        .map(String::as_str)
+        .chain([root_kind.as_str(), body_kind_text])
+    {
         kinds_text.push_str(line);
         kinds_text.push('\n');
+    }
+    for name in boot_body {
+        kinds_text.push_str(&format!("# souls-boot-body {name}\n"));
     }
     let (root, ground) = match (im.nodes.get("world"), im.nodes.get("ground")) {
         (Some(r), Some(g)) => (*r, *g),
@@ -196,6 +234,7 @@ fn build(facts: &str) -> R<Built> {
         root,
         rules,
         kinds_text,
+        body_kind,
     })
 }
 
@@ -266,6 +305,17 @@ fn humanoid() -> R<Family> {
             leg("souls:leg-right")?,
             hand("souls:hand-left", 1)?,
             hand("souls:hand-right", 2)?,
+            // The eyes and the voice B2's humanoid has (a look claims the gaze, a cheer the voice: C23).
+            Resource {
+                name: n("souls:eyes")?,
+                class: Class::Gaze,
+                slot: None,
+            },
+            Resource {
+                name: n("souls:voice")?,
+                class: Class::Voice,
+                slot: None,
+            },
         ],
     })
 }
@@ -310,6 +360,10 @@ fn seed_in(args: &[String]) -> R<String> {
     if let Some(e) = arg(args, "--entries") {
         let mut found = Vec::new();
         entries(Path::new(e), &mut found)?;
+        // Stand points a body can stand on: each moved clear of its own kind's solids, named here (C13, #3440).
+        for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
+            println!("stand point: {line}");
+        }
         for (kind, v) in &found {
             let p = dir
                 .join("entries")
@@ -356,9 +410,12 @@ fn seed_in(args: &[String]) -> R<String> {
         None => String::new(),
     };
     let meta = format!(
-        "{{\"format\": \"souls/world/1\", \"name\": \"{name}\", \"souls_scope\": \"{}\", \"souls\": [{}]{creator}}}\n",
+        "{{\"format\": \"souls/world/1\", \"name\": \"{name}\", \"souls_scope\": \"{}\", \"souls\": [{}], \
+         \"entry\": [{}, {}]{creator}}}\n",
         to_hex(&scope),
-        rows.join(", ")
+        rows.join(", "),
+        (x * 1000.0) as i64,
+        (z * 1000.0) as i64
     );
     std::fs::write(dir.join("world.json"), meta).map_err(io(&dir))?;
     Ok(name)
@@ -397,12 +454,58 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
         .collect()
 }
 
-/// The world's bodies: each Soul on the open ground, where the log last had it on a restart.
+/// The seats the world's entries `kinds` declare on its things ([`import_eden::body_slots`]), each placed on the floor a
+/// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
+/// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
+/// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground. Returns the
+/// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
+/// floor above the thing) and the stand points moved.
+fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
+    let (found, all) = import_eden::body_slots(&town.tree, kinds);
+    let view = town.view();
+    let (mut out, mut moved) = (Vec::new(), 0);
+    for s in &found {
+        let Some((floor, point, facing)) = view.on_floor(s.thing, s.at) else {
+            continue;
+        };
+        let mut place = PlaceAt {
+            thing: s.thing,
+            place: replica::moves::Place {
+                slot: s.slot,
+                height: s.at.y.max(0),
+                stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
+            },
+            point,
+            facing,
+            floor,
+        };
+        // The stand point on the floor, at the floor's height under the seat.
+        let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
+        let [w, x, y, z] = facing.parts();
+        let back = replica::pose::Quat::new(w, -x, -y, -z);
+        if let (Ok(stand), Ok(back)) = (stand, back)
+            && view.stand_near(floor, stand, 1, None).is_none()
+            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
+            && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
+        {
+            place.place.stand = [d.x, d.z];
+            moved += 1;
+        }
+        out.push(place);
+    }
+    let left = found.len() - out.len();
+    let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
+    things.dedup();
+    (out, things.len(), all, left, moved)
+}
+
+/// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
+/// where the log last had it. The world's seats are added ([`places`]).
 fn bodies(
     town: Town,
     ground: Id,
-    souls: &[(Id, i64, i64)],
     placed: &Placed,
+    places: Vec<PlaceAt>,
 ) -> Result<Bodies, Refusal> {
     let family = humanoid().map_err(|e| Refusal {
         name: "family",
@@ -413,15 +516,16 @@ fn bodies(
         slot: None,
     };
     let mut at = Vec::new();
-    for (id, x, z) in souls {
-        at.push(town.surfaces[&ground].place(
-            *id,
-            frame,
-            Vec3::new(x * 1000, 0, z * 1000),
-            Quat::IDENTITY,
-        )?);
+    for (id, (pose, _)) in placed {
+        // Stood on the ground at its last place unless its own floor holds it there (`add_body_at`).
+        if let Ok(a) = town.surfaces[&ground].place(*id, frame, pose.position, pose.orientation) {
+            at.push(a);
+        }
     }
     let mut b = Bodies::new(town, 50_000)?;
+    for s in places {
+        b.add_place(s)?;
+    }
     for a in at {
         b.add_body_at(family.clone(), a, placed)?;
     }
@@ -667,6 +771,14 @@ fn serve(args: &[String]) -> R<()> {
         kinds.len(),
         souls.len()
     );
+    let mut built = built;
+    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
+    println!(
+        "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
+         moved to clear ground",
+        places.len(),
+        things
+    );
     let rules = Rules {
         kinds: Json::Obj(kinds),
         moves,
@@ -739,8 +851,25 @@ fn serve(args: &[String]) -> R<()> {
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
     let (town, ground) = (built.town, built.ground);
+    // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
+    let int = |v: &Json| match v {
+        Json::Int(n) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let entry = match meta.get("entry").and_then(Json::arr) {
+        Some([x, z]) => int(x).zip(int(z)),
+        _ => None,
+    }
+    .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
+    .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
+    cfg.join = Some(Join {
+        entry: (ground, entry),
+        family: humanoid()?,
+        kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
+        per_tick: 8,
+    });
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
-        bodies(town, ground, &souls, placed)
+        bodies(town, ground, placed, places.clone())
     }));
     let empty = Replica::start(built.header.stored()).map_err(refusal)?;
     let world = answers::start(empty.frozen(), rules, store, cfg).map_err(refusal)?;
@@ -822,4 +951,55 @@ fn serve(args: &[String]) -> R<()> {
         std::thread::spawn(move || answers::serve(door, stream));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn creator_export_preserves_pins_and_names_the_boot_body_admission() {
+        let facts = testworld::generate(1, 0).expect("test world").text;
+        let imported = import_eden::load(&facts).expect("loads");
+        let built = build(&facts).expect("builds");
+        let prefix = imported.kind_lines.join("\n") + "\n";
+        assert!(
+            built.kinds_text.starts_with(&prefix),
+            "imported kind bytes are unchanged"
+        );
+        let mut exported = std::collections::BTreeMap::new();
+        for line in built.kinds_text.lines() {
+            exported.extend(parse_kinds(line).expect("a kind or boot annotation"));
+        }
+        assert_eq!(
+            exported.keys().collect::<Vec<_>>(),
+            built.rules.kinds.keys().collect::<Vec<_>>(),
+            "exported pins match the runtime, including its generated body"
+        );
+        assert_eq!(exported[&built.body_kind].owner, "family");
+        let extended: Vec<_> = built
+            .kinds_text
+            .lines()
+            .filter_map(|l| l.strip_prefix("# souls-boot-body "))
+            .collect();
+        let ground: Vec<_> = built
+            .rules
+            .kinds
+            .iter()
+            .filter(|(n, _)| plain(n) == import_eden::GROUND)
+            .collect();
+        assert_eq!(extended.len(), ground.len());
+        assert!(!extended.is_empty());
+        for (name, runtime) in ground {
+            assert!(runtime.children.contains("body"));
+            assert!(
+                !exported[name].children.contains("body"),
+                "the pinned definition itself was not rewritten"
+            );
+            assert!(
+                extended.contains(&name.as_str()),
+                "the exact runtime extension is explicit"
+            );
+        }
+    }
 }

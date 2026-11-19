@@ -185,6 +185,42 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   console.log(`edits: ${all.sent} sent, ${all.answered} answered`);
 });
 
+test('boot-body admission is shared by describe and local checks without revising kind pins', async () => {
+  await connected();
+  const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+  wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+  const original = JSON.parse(wire.editKinds(KINDS));
+  const placeKind = Object.keys(original).find((n) => n.startsWith('souls:place@'));
+  const itemKind = Object.keys(original).find((n) => n.startsWith('souls:item@'));
+  assert.ok(!original[placeKind].admits.includes('body'));
+  const file = join(home, 'kinds', 'local.kinds'), source = KINDS + `# souls-boot-body ${placeKind}\n`;
+  const initial = await god('describe'), place = initial.nodes.find((n) => n.kind === 'souls:place');
+  assert.ok(place, JSON.stringify(initial));
+  assert.equal((await god('check', 'place', 'souls:body', '--in', place.id)).code, 'edit.child-not-admitted');
+  writeFileSync(file, source);
+  try {
+    const described = await god('describe');
+    assert.deepEqual(Object.keys(described.kinds).sort(), Object.keys(original).sort(), 'all full hashes remain unchanged');
+    assert.deepEqual(described.kinds[placeKind].admits, ['body', 'souls:room']);
+    const before = relay.up;
+    const checked = await god('check', 'place', 'souls:body', '--in', place.id);
+    assert.equal(checked.ok, true, JSON.stringify(checked));
+    assert.equal(checked.kinds, true);
+    assert.equal(relay.up, before, 'the boot admission is checked locally without a world request');
+    const copy = new wire.Copy();
+    const ops = JSON.stringify([{ op: 'remove', node: place.id }]);
+    for (const annotation of ['# souls-boot-body', '# souls-boot-body unknown@pin', `# souls-boot-body ${itemKind}`, `# souls-boot-body ${placeKind} thing`]) {
+      const invalid = KINDS + annotation + '\n';
+      assert.throws(() => wire.editKinds(invalid), /kinds-text/);
+      assert.equal(JSON.parse(wire.editCheck(copy, ops, invalid)).code, 'edit.kinds-text');
+    }
+    copy.free();
+  } finally {
+    writeFileSync(file, KINDS);
+  }
+  assert.deepEqual(JSON.parse(wire.editKinds(KINDS)), original, 'absent-annotation behavior is unchanged');
+});
+
 test('coexisting pinned revisions stay described and checkable by full name', async () => {
   const revisions = '{1: "creator:fixture", 2: "thing", 19: "first"}\n{1: "creator:fixture", 2: "thing", 19: "second"}\n';
   const file = join(home, 'kinds', 'local.kinds');

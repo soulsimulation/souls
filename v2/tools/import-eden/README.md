@@ -37,7 +37,21 @@ is a link from the room it opens from to the room, the floor (a balcony) or the 
 keeps the link's id; a stair is a link between two floors; each named place that is not a room is a node under the
 open ground, holding nobody; the open ground holds the terrain, every 64 m tile's 1 m heights and class bytes as
 exported (N1b, #3197). Today's ids, refs and hashes are stored as bytes, and names by reference (SHA-256), since
-a log's only text is `namespace:name`.
+a log's only text is `namespace:name`. Kinds are named as the world's Soul Actions entries (`content/kinds`) name them
+(C12, `kind_name`): the facts' `core:<name>` and `eden:eden_<name>` load as `eden:<name>`, so each thing finds its
+entry.
+
+Things on another thing's floor (C27, #3509): a thing at the root that stands within a step (220 mm) of a building's
+own floor, one with a room on its level or raised more than a step (a pavilion's, a bandstand's, a deck's), and a
+thing in a building's slot that lies on one of its floors (a roof terrace's tables and benches), is placed on that
+floor, in the room there that holds it. The open ground is cut out under such a floor and a roof is no ground, so
+otherwise nobody could stand by them. A lawn's or a path's low floor is ground cover and keeps its things on the
+open ground, and so does a decor thing (a cableway reaches far past its valley station).
+
+Stand points (C13, #3440): `clear_stand_points` moves each entry's stand point that lies within a body's clearance
+(radius 280 mm, the cut's margin 60 and 20 for rounding) of its own kind's solids straight out until a body can stand
+there, and returns one line for each point moved or left; `worldd seed --entries` applies it and prints those lines
+(`stand point: …`), so the world's copy of the entries is moved and `content/kinds` is not.
 
 One thing per slot (C9, #3397): today a slot may hold several things (a desk's top, a hall's planter spots), the tree
 one. The first thing in the facts keeps the slot; each later one stays a plain child of the same parent at its own

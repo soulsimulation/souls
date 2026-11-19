@@ -586,13 +586,37 @@ fn json_str(s: &str) -> String {
 /// Ordinary kinds text names its references together. An imported world's lines are independently named instead
 /// (`import_eden::name_kind`), and may hold several revisions of one plain name. Keep each under its full hash.
 fn creator_kinds(text: &str) -> Result<BTreeMap<String, Kind>, crate::world_model::Refusal> {
-    parse_kinds(text).or_else(|_| {
+    let mut kinds = parse_kinds(text).or_else(|_| -> Result<_, crate::world_model::Refusal> {
         let mut kinds = BTreeMap::new();
         for line in text.lines() {
             kinds.extend(parse_kinds(line)?);
         }
         Ok(kinds)
-    })
+    })?;
+    // C3 extends body admission at boot without revising imported kind definitions. The world's export names
+    // those exact full place kinds; both description and local checks apply the same in-memory extension.
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("# souls-boot-body"))
+    {
+        let target = line
+            .strip_prefix("# souls-boot-body ")
+            .filter(|s| !s.is_empty() && s.split_whitespace().count() == 1 && *s == s.trim())
+            .ok_or_else(|| {
+                crate::world_model::Refusal::Source("malformed boot-body admission".into())
+            })?;
+        let kind = kinds
+            .get_mut(target)
+            .filter(|k| k.owner == "place")
+            .ok_or_else(|| {
+                crate::world_model::Refusal::Source(
+                    "boot-body target must be an existing full place kind".into(),
+                )
+            })?;
+        kind.children.insert("body".into());
+    }
+    Ok(kinds)
 }
 
 /// The kinds a world pins, from its kinds text, as JSON `{"<full name>": {"owner": .., "admits": [..], "slots":

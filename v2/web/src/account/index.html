@@ -28,6 +28,16 @@
       .mine .buttons button { margin: 0; } .danger { background: #a33; border-color: #a33; }
       #settings { margin-top: 12px; padding: 16px; background: #182029; border-radius: 6px; }
       [hidden] { display: none !important; }
+      /* Phones and touch screens (W14): every control at least 44 px, as today's pages (apps/web world-chrome.css). */
+      @media (max-width: 700px), (pointer: coarse) {
+        input:not([type=checkbox]), button { min-height: 44px; min-width: 44px; box-sizing: border-box; }
+        label.switch { min-height: 44px; padding: 0; }
+        input[type=checkbox] { width: 20px; height: 20px; }
+      }
+      @media (max-width: 700px) {
+        li.mine { display: grid; grid-template-columns: 48px 1fr; }
+        .mine .buttons { grid-column: 1 / -1; margin-left: 0; }
+      }
     </style>
   </head>
   <body>

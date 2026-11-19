@@ -18,6 +18,13 @@
 //! the gateway answers the intent itself, `intent.expired` when the expiry came first and `act.timed-out` otherwise,
 //! and drops it, so it is never sent again ([`deadlines`]). While the world is reachable it answers by its own
 //! deadline; the gateway steps in only [`WEDGED`] after it, for a world that takes intents and never answers.
+//!
+//! **In progress** (C20, #3469). A form's act runs as long as its walk and its own steps take, from its start (a
+//! walk across the town, a long read). When one is still running at its [`DEADLINE`], the world says so with a
+//! progress answer, T10's accepted with how long the act has left (`worldd::answers::progress`), well inside
+//! [`WEDGED`]: the gateway passes it on to the actor and moves the intent's deadline to
+//! the world's, so it answers in-flight acts with progress, not `act.timed-out`. The intent stays kept until its
+//! answer comes; an intent the world has said nothing of still has [`DEADLINE`].
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -47,7 +54,8 @@ pub const FRAME_MOST: usize = 16 << 20;
 /// How long the gateway waits between attempts to reach the world.
 const RETRY: Duration = Duration::from_millis(20);
 
-/// The longest an act stays open after it is received, µs: the world's deadline (`worldd::answers::Config`).
+/// The longest an act stays open after it is received, µs, unless the world says it is in progress: the world's
+/// deadline at an act's arrival (`worldd::answers::Config`).
 pub const DEADLINE: u64 = 10_000_000;
 /// How long past an intent's deadline a reachable world has to answer it before the gateway does, µs.
 pub const WEDGED: u64 = 20_000_000;
@@ -195,6 +203,18 @@ impl Link {
         s.pending.remove(&n).map(|p| (p.received, p.handed))
     }
 
+    /// The world said the intent is in progress, with `left` µs until its deadline (C20): it stays kept, now due
+    /// `left` after `now` (the steady clock), answered [`TIMED_OUT`] then if the world has not. When it was received
+    /// and handed on, if it is still kept.
+    fn progress(&self, key: &[u8], sequence: u64, left: u64, now: u64) -> Option<(u64, u64)> {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let n = *s.index.get(&(key.to_vec(), sequence))?;
+        let p = s.pending.get_mut(&n)?;
+        p.due = now.saturating_add(left);
+        p.reason = TIMED_OUT;
+        Some((p.received, p.handed))
+    }
+
     /// Takes every kept intent past its deadline at `now` (the steady clock) while the world is away, or [`WEDGED`]
     /// past it while it is reachable: its actor's bytes, actor, sequence and the answer's name. None is sent again.
     pub fn overdue(&self, now: u64) -> Vec<(Vec<u8>, Actor, u64, &'static str)> {
@@ -307,6 +327,13 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
                 continue;
             }
             let at = times::stamp();
+            if let Some((key, sequence, cursor, left)) = read_progress(&frame) {
+                if let Some((received, handed)) = gw.link.progress(&key, sequence, left, at) {
+                    let frame = times::read_from_world(frame, received, handed, at);
+                    gw.deliver(key, cursor, frame);
+                }
+                continue;
+            }
             match read_answer(&frame) {
                 Some((key, sequence, version, cursor, outcome)) => {
                     if let Some((received, handed)) = gw.link.answered(&key, sequence, &version) {
@@ -344,6 +371,23 @@ pub fn sync_refused(n: Value, name: &str) -> Vec<u8> {
         [(wire::ASK, n), (wire::REFUSED, Value::Text(name))].into(),
     ))
     .unwrap_or_default()
+}
+
+/// A progress answer's actor (as bytes), sequence, cursor and µs left (C20): kind 3 with field 5.
+fn read_progress(frame: &[u8]) -> Option<(Vec<u8>, u64, Cursor, u64)> {
+    let Value::Map(m) = decode(frame).ok()?.value else {
+        return None;
+    };
+    let Value::Map(answer) = m.get(&2)? else {
+        return None;
+    };
+    let (Some(Value::Uint(3)), Some(Value::Uint(left)), Some(Value::Uint(sequence))) =
+        (answer.get(&3), answer.get(&5), answer.get(&2))
+    else {
+        return None;
+    };
+    let cursor = Cursor::from_value(m.get(&1)?)?;
+    Some((encode(answer.get(&1)?).ok()?, *sequence, cursor, *left))
 }
 
 /// An answer frame's actor (as bytes), sequence, version, cursor and outcome (a refusal is kind 2 or 5).
