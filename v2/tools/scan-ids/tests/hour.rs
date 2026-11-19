@@ -104,6 +104,8 @@ fn a2_an_hour_of_acts_under_a_principal_leaves_no_account_identity_in_the_log_or
             Box::new(Keys(keys)),
         )),
         test_sign_in: false,
+        view_key: None,
+        origin: None,
         mailbox_key: None,
         pairing: None,
         log: Mutex::new(Box::new(log.clone())),

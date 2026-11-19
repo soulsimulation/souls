@@ -7,6 +7,7 @@ import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
 import type { NodeRec, PartRec, Pointer, SaidRec } from './source.ts';
 import { happenedInPart } from '../sound/record.ts';
+import { skyFields } from '../sky/record.ts';
 
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
 const post = (m: Msg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
@@ -60,6 +61,8 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
   if (f.has(NAME)) rec.name = refOf(f.get(NAME));
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
+  const sky = skyFields(f); // V19: the world node's day, night and weather
+  if (sky) rec.sky = sky;
   return rec;
 }
 

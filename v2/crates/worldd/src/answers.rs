@@ -820,7 +820,12 @@ fn bind_spot(s: Box<SpotAct>, body: Id, actor: Actor) -> Result<Asked, String> {
         },
         (Bound::Stand(_), true, _) => return Err("spot.not-a-slot".into()),
     };
-    Ok(Asked { body, actor, ask })
+    Ok(Asked {
+        body,
+        actor,
+        ask,
+        fallbacks: Vec::new(),
+    })
 }
 
 impl Clock {
@@ -1177,10 +1182,18 @@ impl Clock {
 
     /// Writes the entry of open move `id`: event `event` with `{1: body, 2: how (once it ended; its name's bytes, since
     /// an event's text is a namespaced name), 3: [x, y, z] µm,
-    /// 4: the node of its frame}`, where the body stands or sits. Its cause is the intent, so the receipt finds it.
+    /// 4: the node of its frame}`, where the body stands or sits. A move started also names the candidate of its ranked
+    /// list it took (C14): `5: its rank` (0 the intent's own) and `6: its target`. Its cause is the intent, so the
+    /// receipt finds it.
     fn note(&mut self, id: Id, event: &str, how: Option<&str>, at: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let mut fields = BTreeMap::from([(1, o.body.to_value())]);
+        if let Some((rank, target)) = self.bodies.as_mut().and_then(|b| b.took(id)) {
+            fields.insert(5, Value::Uint(rank as u64));
+            if let Some(t) = target {
+                fields.insert(6, t.to_value());
+            }
+        }
         if let Some(h) = how {
             fields.insert(2, Value::Bytes(h.as_bytes().to_vec()));
         }
@@ -1445,7 +1458,12 @@ impl Clock {
         for (id, r) in started {
             match r {
                 Ok(()) => self.note(id, MOVE_STARTED, None, now),
-                Err(r) => self.settle(id, Err(r.name.to_owned()), now),
+                Err(r) => {
+                    if let Some(b) = self.bodies.as_mut() {
+                        b.took(id);
+                    }
+                    self.settle(id, Err(r.name.to_owned()), now);
+                }
             }
         }
     }

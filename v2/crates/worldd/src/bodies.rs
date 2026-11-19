@@ -41,11 +41,15 @@ use replica::effects::{Actor, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode};
 use replica::host::Progress;
 use replica::ids::{Id, Minter, Scope};
-use replica::intents::{Intent, Target as Aim};
+use replica::intents::Intent;
+use replica::move_check::{self, Seen, Verdict};
 use replica::moves::{Effector, Move};
 use replica::pose::{Pose, Support, Vec3};
+use replica::select::{self, Spot};
 use replica::speech::Said;
 use replica::time::Micros;
+use sim::commit::bind::{Bound, Slot, bind};
+use sim::commit::spot;
 use sim::controller::Stance;
 use sim::host::Runner;
 use sim::host::{Planned, Wants};
@@ -68,74 +72,30 @@ const LIE: &str = include_str!("../../replica/fixtures/moves/lie.diag");
 /// A walk's speed, µm a second.
 pub const WALK: i64 = 1_400_000;
 
-/// What a move intent asks.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Ask {
-    /// Walk to `point` (µm, the frame of `node`), or, with no point, to the stand point of `node`'s seat.
-    Walk {
-        node: Id,
-        point: Option<Vec3>,
-    },
-    /// Sit on the seat of `thing`.
-    Sit {
-        thing: Id,
-    },
-    /// Lie down in the slot of `thing`.
-    Lie {
-        thing: Id,
-    },
-    Rise,
-}
+pub use replica::move_check::Ask;
 
-/// A move intent read: who moves, and what it asks.
+/// A move intent read: who moves, and what it asks, then its ranked fallbacks (moves of the same form on other
+/// targets, C14 #3442).
 #[derive(Clone, Debug)]
 pub struct Asked {
     pub body: Id,
     pub actor: Actor,
     pub ask: Ask,
+    pub fallbacks: Vec<Ask>,
 }
 
-fn int(v: &Value) -> Option<i64> {
-    match v {
-        Value::Uint(u) => i64::try_from(*u).ok(),
-        Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
-        _ => None,
-    }
-}
-
-/// Reads a move intent: `None` when its verb is not a move, else the ask or the reason it is not one. A walk's point
-/// is parameter 1, `[x, y, z]` µm in its target's frame.
+/// Reads a move intent (`replica::move_check::read`, the client's own reading): `None` when its verb is not a move,
+/// else the ask and its fallbacks or the reason it is not one. A walk's point is parameter 1, `[x, y, z]` µm in its
+/// target's frame.
 pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
-    let node = match &intent.target {
-        Some(Aim::Node(n)) => Some(*n),
-        _ => None,
-    };
-    // A form's verb (T10 rule 4: `souls:` verbs are the engine's own), by its form: `eden:sit` as the T10 fixtures.
-    let form = match intent.verb.as_str().split_once(':') {
-        Some((ns, form)) if ns != "souls" => form,
-        _ => return None,
-    };
-    let ask = match form {
-        "walk" => node.ok_or("move.no-target").and_then(|node| {
-            let point = match intent.parameters.get(&1) {
-                None => None,
-                Some(Value::Array(p)) => match p.iter().map(int).collect::<Option<Vec<_>>>() {
-                    Some(p) if p.len() == 3 => Some(Vec3::new(p[0], p[1], p[2])),
-                    _ => return Err("move.bad-point"),
-                },
-                Some(_) => return Err("move.bad-point"),
-            };
-            Ok(Ask::Walk { node, point })
-        }),
-        "sit" => node.ok_or("move.no-target").map(|thing| Ask::Sit { thing }),
-        "lie" => node.ok_or("move.no-target").map(|thing| Ask::Lie { thing }),
-        "rise" => Ok(Ask::Rise),
-        _ => return None,
-    };
-    Some(ask.map(|ask| Asked {
-        body,
-        actor: intent.actor,
-        ask,
+    Some(move_check::read(intent)?.map(|mut asks| {
+        let ask = asks.remove(0);
+        Asked {
+            body,
+            actor: intent.actor,
+            ask,
+            fallbacks: asks,
+        }
     }))
 }
 
@@ -193,6 +153,8 @@ pub struct Bodies {
     live: BTreeMap<Id, (Id, Live)>,
     /// Intents ended between steps (a walk replaced): the intent and how.
     ended: Vec<(Id, Result<(), String>)>,
+    /// The candidate each started intent took: its rank in the ranked list and its target (C14).
+    took: BTreeMap<Id, (usize, Option<Id>)>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
     /// The planner thread: route searches and reach distances, off the clock (K18b, #3175).
@@ -299,6 +261,7 @@ impl Bodies {
             rise: load(RISE)?,
             live: BTreeMap::new(),
             ended: Vec::new(),
+            took: BTreeMap::new(),
             logged: BTreeMap::new(),
             hearing: Hearing::new(),
             heard: Vec::new(),
@@ -483,9 +446,83 @@ impl Bodies {
         }
     }
 
+    /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
+    /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
+    /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
+    fn goal(&self, node: Id, point: Option<Vec3>) -> R<Target> {
+        if let Some(p) = point {
+            return Ok(Target::new(node, p));
+        }
+        if let Some(s) = self.slots.place(node) {
+            return s.stand().map(|p| Target::new(s.floor, p));
+        }
+        let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
+        match spot::once(&r) {
+            spot::Spot::Stand(t) => Ok(t),
+            spot::Spot::Slot { .. } => Err(refusal("move.no-point", node)),
+        }
+    }
+
+    /// What the world knows of `ask` by `body`, for `replica::move_check::check`, the check a client runs (R8).
+    fn seen(&self, body: Id, ask: &Ask) -> Seen {
+        let t = ask.target();
+        Seen {
+            has: t.is_some_and(|t| {
+                self.slots.place(t).is_some() || self.town.tree.handle(t).is_some()
+            }),
+            seated: Some(self.slots.held_by(body).is_some()),
+            free: t.map(|t| self.slots.holder(t).is_none()),
+        }
+    }
+
+    /// The candidate of `a`'s ranked list that is taken, and its rank (C14): a sit's or a lie's through I5's
+    /// selector (`sim::commit::bind`, named slots: the first free one binds), a walk's the first with somewhere to go.
+    fn bind(&self, a: &Asked) -> R<(usize, Ask)> {
+        if a.fallbacks.is_empty() {
+            return Ok((0, a.ask.clone()));
+        }
+        let list: Vec<&Ask> = std::iter::once(&a.ask).chain(&a.fallbacks).collect();
+        match a.ask {
+            Ask::Sit { .. } | Ask::Lie { .. } => {
+                let slots: Vec<Slot> = list
+                    .iter()
+                    .filter_map(|k| k.target().map(Slot::Named))
+                    .collect();
+                let free = |t: Id| self.slots.place(t).is_some() && self.slots.holder(t).is_none();
+                match bind(&slots, free, 0, true) {
+                    Bound::Slot { rank, .. } => Ok((rank, list[rank].clone())),
+                    Bound::Ended(n) => Err(Refusal {
+                        name: n,
+                        detail: format!("none of the {} free", slots.len()),
+                    }),
+                    Bound::Recheck { .. } => Err(refusal("place-taken", a.body)),
+                }
+            }
+            Ask::Walk { .. } => {
+                let mut last = None;
+                for (rank, k) in list.iter().enumerate() {
+                    if let Ask::Walk { node, point } = k {
+                        match self.goal(*node, *point) {
+                            Ok(_) => return Ok((rank, (*k).clone())),
+                            Err(r) => last = Some(r),
+                        }
+                    }
+                }
+                Err(last.unwrap_or_else(|| refusal("move.no-point", a.body)))
+            }
+            Ask::Rise => Ok((0, Ask::Rise)),
+        }
+    }
+
+    /// The candidate intent `id` took when it started, its rank in its ranked list and its target, read once.
+    pub fn took(&mut self, id: Id) -> Option<(usize, Option<Id>)> {
+        self.took.remove(&id)
+    }
+
     /// Starts one tick's moves, each for its intent, at body time: refused ones come back with their reason by name.
-    /// A walk starts now (its place and legs come from the planner); a sit or a rise waits for its reach, and comes
-    /// back from the first call after the planner found it (K18b).
+    /// A ranked list is bound first, the move taken is checked as a client checks it (`replica::move_check`), then
+    /// started (C14). A walk starts now (its place and legs come from the planner); a sit or a rise waits for its
+    /// reach, and comes back from the first call after the planner found it (K18b).
     pub fn start(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
         let mut out = Vec::new();
         let mut asked = Vec::new();
@@ -494,16 +531,21 @@ impl Bodies {
                 out.push((id, Err(refusal("body-unknown", a.body))));
                 continue;
             }
-            match a.ask {
+            let (rank, ask) = match self.bind(&a) {
+                Ok(t) => t,
+                Err(r) => {
+                    out.push((id, Err(r)));
+                    continue;
+                }
+            };
+            if let Verdict::No(n) = move_check::check(&ask, &self.seen(a.body, &ask)) {
+                out.push((id, Err(refusal(n, ask.target().unwrap_or(a.body)))));
+                continue;
+            }
+            self.took.insert(id, (rank, ask.target()));
+            match ask {
                 Ask::Walk { node, point } => {
-                    let goal = match point {
-                        Some(p) => Ok(Target::new(node, p)),
-                        None => match self.slots.place(node).map(|s| (s.floor, s.stand())) {
-                            Some((floor, Ok(p))) => Ok(Target::new(floor, p)),
-                            Some((_, Err(r))) => Err(r),
-                            None => Err(refusal("move.no-point", node)),
-                        },
-                    };
+                    let goal = self.goal(node, point);
                     self.replace(a.body);
                     let walk = Box::new(Route::sent(WALK, self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
