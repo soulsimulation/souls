@@ -1211,7 +1211,7 @@ impl Clock {
                     self.unsealed = true;
                     // The edit checker's town is built again from a copy with this edit (G1e).
                     if let Some(w) = &self.walkers {
-                        w.committed(self.replica.version());
+                        w.committed(Arc::clone(&c.part), self.replica.version());
                     }
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
@@ -2555,17 +2555,19 @@ fn edit_checker(
         .spawn(move || {
             let mut town = buildsafe::TownCopy::new(world.kinds.clone());
             loop {
-                let (id, e) = match rx.recv_timeout(EDIT_IDLE) {
-                    Ok(next) => next,
-                    Err(RecvTimeoutError::Timeout) => {
-                        let edited = walkers.edited();
-                        let copy = publisher.wait_for(edited, Duration::from_secs(1));
-                        town.on(&copy, buildsafe::open_ground(&copy), edited);
-                        continue;
-                    }
-                    Err(RecvTimeoutError::Disconnected) => break,
-                };
+                let next = rx.recv_timeout(EDIT_IDLE);
+                if let Err(RecvTimeoutError::Disconnected) = next {
+                    break;
+                }
+                // Each edit committed since, on the town; a copy that holds them all, for a town built whole.
+                let committed = walkers.take();
                 let edited = walkers.edited();
+                let Ok((id, e)) = next else {
+                    // No edit waits: the town is built, or kept, ahead of the next.
+                    let copy = publisher.wait_for(edited, Duration::from_secs(1));
+                    town.on(&copy, buildsafe::open_ground(&copy), &committed);
+                    continue;
+                };
                 let copy = publisher.wait_for(e.planned.max(edited), Duration::from_secs(1));
                 let ground = buildsafe::open_ground(&copy);
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
@@ -2581,7 +2583,7 @@ fn edit_checker(
                     }),
                 };
                 let checked = checked
-                    .and_then(|c| match town.on(&copy, ground, edited) {
+                    .and_then(|c| match town.on(&copy, ground, &committed) {
                         Some(t) => sim::edit::plan_on(c, &copy, &Known::of(t)),
                         None => sim::edit::plan(c, &copy, ground),
                     })
