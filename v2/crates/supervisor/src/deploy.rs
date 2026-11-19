@@ -20,7 +20,8 @@
 // Deploying is operations, not the engine: its windows and timelines are wall-clock time (the wall-clock rule, K7).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -28,8 +29,10 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use directoryd::directory::store::Store;
+use replica::effects::{Actor, read_id};
+use replica::encode::Name;
 use replica::encode::{Value, decode, encode, to_hex};
-use replica::ids::sha256;
+use replica::ids::{Id, Scope, sha256};
 use replica::intents::Intent;
 use replica::sync::wire;
 use sim::log::{FileStore, Log, recover};
@@ -91,21 +94,25 @@ pub fn now_us() -> i64 {
 
 /// What the canary sends a world, again and again: a healthy world answers it within `answer_within`.
 ///
-/// A release's probe is [`Probe::Ask`] (O18c, #3524): R5b's sync ask for the world's root hash, `{20: n, 21: []}`. It
-/// needs no actor and no body, so it never drives anyone's Soul: a Soul has one controller, its owner's agent. The
-/// world answers it on its clock thread, behind every tick record already handed to its answers thread, so a world
-/// that does not serve, whose clock is stuck or whose disk does not sync leaves it unanswered; it is never an intent,
-/// so it reaches no log and no recorder. [`Probe::Act`] is an act of a body the caller owns (a test world's), for runs
-/// that also want a commit: sent with a new sequence and expiry each time, real microseconds, so they only grow.
+/// Releases use [`Probe::Operator`]: a separate unpaired identity enters through C3/K10, commits an ordinary
+/// `eden:describe` on its own body, and retires through the same lifecycle. A durable, locked recovery receipt
+/// precedes every send, so interrupted watches recover the same pending actor before creating another body.
+/// [`Probe::Ask`] remains the non-mutating root-sync diagnostic; [`Probe::Act`] is for a caller-owned test body.
 pub enum Probe {
     /// The sync ask's number, counted up.
     Ask(u64),
     Act(Box<Intent>),
+    /// O18d: a fresh, unpaired operator identity, with crash recovery owned by its deployment receipt.
+    Operator(OperatorProbe),
 }
 
 impl Probe {
+    pub fn operator(receipt: &Path) -> Result<Self, String> {
+        OperatorProbe::open(receipt).map(Self::Operator)
+    }
+
     /// The bytes to send, and the number its answer carries.
-    fn next(&mut self) -> (Vec<u8>, u64) {
+    fn next(&mut self) -> Option<(Vec<u8>, u64)> {
         match self {
             Probe::Ask(n) => {
                 *n += 1;
@@ -113,17 +120,18 @@ impl Probe {
                     (wire::ASK, Value::Uint(*n)),
                     (wire::IDS, Value::Array(Vec::new())),
                 ];
-                (encode(&Value::Map(ask.into())).unwrap_or_default(), *n)
+                Some((encode(&Value::Map(ask.into())).unwrap_or_default(), *n))
             }
             Probe::Act(intent) => {
                 let t = now_us();
                 intent.sequence = intent.sequence.max(t as u64 - 1) + 1;
                 intent.expiry = t + 5_000_000;
-                (
+                Some((
                     encode(&intent.to_value()).unwrap_or_default(),
                     intent.sequence,
-                )
+                ))
             }
+            Probe::Operator(_) => None,
         }
     }
 
@@ -151,7 +159,301 @@ impl Probe {
                 })
             }
             Probe::Act(_) => read_answer(frame).and_then(|(q, e)| (q == n).then_some(e)),
+            Probe::Operator(_) => None,
         }
+    }
+}
+
+/// A narrow recovery receipt, not a user profile or pairing. The stable sibling lock is held even while the
+/// receipt is atomically replaced; two watches can never share the identity or its sequence.
+pub struct OperatorProbe {
+    receipt: PathBuf,
+    _lock: File,
+    actor: Id,
+    sequence: u64,
+    pending: bool,
+    joined: bool,
+    basis: Option<Value>,
+}
+
+impl OperatorProbe {
+    fn open(receipt: &Path) -> Result<Self, String> {
+        let parent = receipt.parent().ok_or("canary.probe-receipt: no parent")?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("canary.probe-receipt: {e}"))?;
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(receipt.with_extension("probe.lock"))
+            .map_err(|e| format!("canary.probe-receipt: {e}"))?;
+        lock.try_lock()
+            .map_err(|_| "canary.probe-busy: another watch owns the probe".to_owned())?;
+        let saved = match std::fs::read(receipt) {
+            Ok(b) => {
+                let Value::Map(m) = decode(&b)
+                    .map_err(|_| "canary.probe-receipt: invalid record")?
+                    .value
+                else {
+                    return Err("canary.probe-receipt: invalid record".into());
+                };
+                let actor = m
+                    .get(&1)
+                    .and_then(|v| read_id(v).ok())
+                    .ok_or("canary.probe-receipt: no actor")?;
+                let (Some(Value::Uint(sequence)), Some(Value::Uint(1..=3))) =
+                    (m.get(&2), m.get(&3))
+                else {
+                    return Err("canary.probe-receipt: invalid pending phase".into());
+                };
+                Some((actor, *sequence))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(format!("canary.probe-receipt: {e}")),
+        };
+        let (actor, sequence, pending) = match saved {
+            Some((actor, sequence)) => (actor, sequence, true),
+            None => {
+                let mut scope = [0; 16];
+                File::open("/dev/urandom")
+                    .and_then(|mut f| f.read_exact(&mut scope))
+                    .map_err(|e| format!("canary.probe-identity: {e}"))?;
+                (
+                    Id::new(Scope(scope), 1).ok_or("canary.probe-identity: invalid identity")?,
+                    0,
+                    false,
+                )
+            }
+        };
+        Ok(Self {
+            receipt: receipt.to_path_buf(),
+            _lock: lock,
+            actor,
+            sequence,
+            pending,
+            joined: false,
+            basis: None,
+        })
+    }
+
+    fn save(&mut self, phase: u64) -> Result<(), String> {
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, self.actor.to_value()),
+            (2, Value::Uint(self.sequence)),
+            (3, Value::Uint(phase)),
+        ])))
+        .map_err(|e| format!("canary.probe-receipt: {e}"))?;
+        let temporary = self.receipt.with_extension("probe.tmp");
+        let mut f = File::create(&temporary).map_err(|e| format!("canary.probe-receipt: {e}"))?;
+        f.write_all(&bytes)
+            .and_then(|()| f.sync_all())
+            .map_err(|e| format!("canary.probe-receipt: {e}"))?;
+        std::fs::rename(&temporary, &self.receipt)
+            .map_err(|e| format!("canary.probe-receipt: {e}"))?;
+        self.sync_parent()?;
+        self.pending = true;
+        Ok(())
+    }
+
+    fn sync_parent(&self) -> Result<(), String> {
+        File::open(
+            self.receipt
+                .parent()
+                .ok_or("canary.probe-receipt: no parent")?,
+        )
+        .and_then(|f| f.sync_all())
+        .map_err(|e| format!("canary.probe-receipt: {e}"))
+    }
+
+    fn version(&mut self, s: &mut UnixStream, within: Duration) -> Result<(), String> {
+        self.sequence = self
+            .sequence
+            .checked_add(1)
+            .ok_or("canary.probe-sequence-exhausted")?;
+        let n = self.sequence;
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (wire::ASK, Value::Uint(n)),
+            (wire::IDS, Value::Array(Vec::new())),
+        ])))
+        .map_err(|e| format!("canary.probe-encoding: {e}"))?;
+        if !send(s, &bytes) {
+            return Err("canary.not-serving: the socket closed".into());
+        }
+        let until = Instant::now() + within;
+        loop {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err("canary.unanswered: operator probe".into());
+            }
+            let frame = read_or_closed(s, left).map_err(|timeout| {
+                if timeout {
+                    "canary.unanswered: probe version"
+                } else {
+                    "canary.not-serving: the socket closed"
+                }
+            })?;
+            let Ok(Value::Map(m)) = decode(&frame).map(|d| d.value) else {
+                continue;
+            };
+            if m.get(&wire::ASK) != Some(&Value::Uint(n)) {
+                continue;
+            }
+            let Some(Value::Array(v)) = m.get(&1) else {
+                return Err("canary.refused: no world version".into());
+            };
+            if v.len() != 4 {
+                return Err("canary.refused: invalid world version".into());
+            }
+            self.basis = Some(Value::Array(v.clone()));
+            return Ok(());
+        }
+    }
+
+    fn act(
+        &mut self,
+        s: &mut UnixStream,
+        verb: &str,
+        phase: u64,
+        words: &[(u64, &str)],
+        within: Duration,
+    ) -> Result<(), String> {
+        self.sequence = self
+            .sequence
+            .checked_add(1)
+            .ok_or("canary.probe-sequence-exhausted")?;
+        // The receipt precedes IO: even a lost join acknowledgement is recoverable under this same actor.
+        self.save(phase)?;
+        let intent = Intent {
+            actor: Actor::Soul(self.actor),
+            verb: Name::new(verb).ok_or("canary.probe-verb")?,
+            target: None,
+            parameters: words
+                .iter()
+                .map(|(k, text)| {
+                    (
+                        *k,
+                        Value::Map(BTreeMap::from([(
+                            23,
+                            Value::Bytes(text.as_bytes().to_vec()),
+                        )])),
+                    )
+                })
+                .collect(),
+            sequence: self.sequence,
+            basis: self.basis.clone().ok_or("canary.probe-version")?,
+            expiry: now_us() + 5_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+        };
+        let bytes =
+            encode(&intent.to_value()).map_err(|e| format!("canary.probe-encoding: {e}"))?;
+        if !send(s, &bytes) {
+            return Err("canary.not-serving: the socket closed".into());
+        }
+        let until = Instant::now() + within;
+        loop {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err("canary.unanswered: operator probe".into());
+            }
+            let frame = read_or_closed(s, left).map_err(|timeout| {
+                if timeout {
+                    "canary.unanswered: operator act"
+                } else {
+                    "canary.not-serving: the socket closed"
+                }
+            })?;
+            let Ok(Value::Map(m)) = decode(&frame).map(|d| d.value) else {
+                continue;
+            };
+            let Some(Value::Map(a)) = m.get(&2) else {
+                continue;
+            };
+            if a.get(&2) != Some(&Value::Uint(self.sequence)) {
+                continue;
+            }
+            let actor = Value::Map(BTreeMap::from([
+                (1, Value::Uint(1)),
+                (2, self.actor.to_value()),
+            ]));
+            if a.get(&1) != Some(&actor) {
+                return Err("canary.refused: wrong probe actor".into());
+            }
+            match a.get(&3) {
+                Some(Value::Uint(1)) => {
+                    let entries = match a.get(&5) {
+                        Some(Value::Array(v)) => v,
+                        _ => return Err("canary.refused: no committed entries".into()),
+                    };
+                    // An idempotent join is a lifecycle acknowledgement, not the canary's legal-act proof.
+                    // Describe and retirement must still name their committed effects.
+                    if (verb != "life:join" && entries.is_empty())
+                        || entries.iter().any(|v| !matches!(v, Value::Uint(_)))
+                        || a.get(&4).and_then(|v| read_id(v).ok()).is_none()
+                    {
+                        return Err("canary.refused: no committed probe receipt".into());
+                    }
+                    return Ok(());
+                }
+                Some(Value::Uint(2)) => {
+                    let reason = match a.get(&4) {
+                        Some(Value::Text(n)) => n.as_str(),
+                        _ => "unnamed",
+                    };
+                    return Err(format!("canary.refused: {reason}"));
+                }
+                Some(Value::Uint(3)) => continue,
+                _ => return Err("canary.refused: an unnamed probe answer".into()),
+            }
+        }
+    }
+
+    fn join(&mut self, s: &mut UnixStream, within: Duration) -> Result<(), String> {
+        self.act(
+            s,
+            "life:join",
+            1,
+            &[
+                (1, "Operator release probe"),
+                (2, "Temporary operator-owned canary body"),
+            ],
+            within,
+        )?;
+        self.joined = true;
+        Ok(())
+    }
+
+    fn sample(&mut self, s: &mut UnixStream, within: Duration) -> Result<(), String> {
+        self.version(s, within)?;
+        if !self.joined {
+            self.join(s, within)?;
+        }
+        self.act(
+            s,
+            "eden:describe",
+            2,
+            &[(2, "Operator release canary: committed legal action")],
+            within,
+        )
+    }
+
+    fn retire(&mut self, s: &mut UnixStream, within: Duration) -> Result<(), String> {
+        if !self.pending {
+            return Ok(());
+        }
+        self.version(s, within)?;
+        // An uncertain birth must first reach its ordinary join barrier. An early not-embodied leave could race
+        // the queued birth and would NOT prove cleanup. Repeated join is C3's own idempotent naming operation.
+        if !self.joined {
+            self.join(s, within)?;
+        }
+        self.act(s, "life:leave", 3, &[], within)?;
+        std::fs::remove_file(&self.receipt).map_err(|e| format!("canary.probe-receipt: {e}"))?;
+        self.sync_parent()?;
+        self.pending = false;
+        self.joined = false;
+        Ok(())
     }
 }
 
@@ -237,7 +539,10 @@ pub struct Canary {
 
 /// Sends the probe and waits for its answer; the fault by name when it is not a receipt in time.
 fn probe_once(s: &mut UnixStream, probe: &mut Probe, within: Duration) -> Result<(), String> {
-    let (bytes, seq) = probe.next();
+    if let Probe::Operator(p) = probe {
+        return p.sample(s, within);
+    }
+    let (bytes, seq) = probe.next().ok_or("canary.probe: no request")?;
     if !send(s, &bytes) {
         return Err("canary.not-serving: the socket closed".into());
     }
@@ -272,6 +577,37 @@ fn probe_once(s: &mut UnixStream, probe: &mut Probe, within: Duration) -> Result
 /// Watches the world behind `socket` for the canary's window; `Ok` when it stayed healthy, else the first fault.
 /// With `until_healthy`, ends `Ok` at the first receipt instead (a rolled-back world serving again).
 pub fn watch(
+    socket: &Path,
+    c: &Canary,
+    probe: &mut Probe,
+    until_healthy: bool,
+) -> Result<(), String> {
+    // A new watch resolves its interrupted predecessor before it can birth anything else. Failure preserves the
+    // exact owned identity for the rollback's watch; neither an unknown body nor a lost ACK discards the receipt.
+    cleanup_operator(socket, c, probe)?;
+    let result = watch_inner(socket, c, probe, until_healthy);
+    let cleanup = cleanup_operator(socket, c, probe);
+    match (result, cleanup) {
+        (Ok(()), r) => r,
+        (Err(e), Ok(())) => Err(e),
+        (Err(e), Err(cleanup)) => Err(format!("{e}; {cleanup}")),
+    }
+}
+
+fn cleanup_operator(socket: &Path, c: &Canary, probe: &mut Probe) -> Result<(), String> {
+    let Probe::Operator(p) = probe else {
+        return Ok(());
+    };
+    if !p.pending {
+        return Ok(());
+    }
+    let mut s = connect(socket, c.start_within)
+        .ok_or("canary.probe-pending: retirement awaits the world serving again")?;
+    p.retire(&mut s, c.answer_within)
+        .map_err(|e| format!("canary.probe-pending: {e}"))
+}
+
+fn watch_inner(
     socket: &Path,
     c: &Canary,
     probe: &mut Probe,
@@ -379,6 +715,11 @@ pub fn rehearse(
         }
     }
     let total: usize = fed.iter().map(Vec::len).sum();
+    let receipt = scratch.join("operator.probe");
+    if matches!(probe, Probe::Operator(_)) && receipt.exists() {
+        let mut previous = Probe::operator(&receipt)?;
+        cleanup_operator(&socket_path(scratch), c, &mut previous)?;
+    }
     let _ = std::fs::remove_dir_all(scratch);
     std::fs::create_dir_all(scratch).map_err(|e| format!("rehearsal.scratch: {e}"))?;
     for name in FOLDER {
@@ -448,7 +789,21 @@ pub fn rehearse(
             total - ended
         ));
     }
-    probe_once(&mut s, probe, c.answer_within).map_err(|e| format!("rehearsal.{e}"))?;
+    // Rehearsal owns a different identity from the live window, and uses the same recoverable lifecycle contract.
+    let mut own = if matches!(probe, Probe::Operator(_)) {
+        Some(Probe::operator(&receipt)?)
+    } else {
+        None
+    };
+    let checking = own.as_mut().unwrap_or(probe);
+    let checked = probe_once(&mut s, checking, c.answer_within);
+    let cleaned = cleanup_operator(&socket_path(scratch), c, checking);
+    match (checked, cleaned) {
+        (Ok(()), r) => r,
+        (Err(e), Ok(())) => Err(e),
+        (Err(e), Err(cleanup)) => Err(format!("{e}; {cleanup}")),
+    }
+    .map_err(|e| format!("rehearsal.{e}"))?;
     let after = std::fs::read(served).unwrap_or_default();
     let served_kept =
         after.len() >= served_len && to_hex(&sha256(&after[..served_len])) == served_sha;
