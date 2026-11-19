@@ -1,0 +1,81 @@
+# Takes Engine v2 worlds back from a bad build (Engine v2 O18, #2811), with no shell on the machine: for each world,
+# O7's `deploy rollback`, which refuses (rollback.wrong-from, changing nothing) unless the world is pinned to `from`,
+# and refuses a build that cannot read what the bad one wrote. Code rolls back; data never does. Docs:
+# v2/docs/release.md#a-rollback.
+#   gh workflow run rollback-v2.yml --ref main -f to=<good build> -f from=<live build> -f worlds="<world> ..." [-f target=production]
+name: rollback-v2
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: The build to go back to (1220 and 64 hex), on the machine
+        required: true
+      from:
+        description: The build the worlds run now (1220 and 64 hex)
+        required: true
+      worlds:
+        description: The worlds to take back, separated by spaces
+        required: true
+      target:
+        description: The GitHub environment that names the machine (scratch or production)
+        type: choice
+        options: [scratch, production]
+        default: scratch
+permissions:
+  contents: read
+# its own group: a rollback never waits behind a release
+concurrency:
+  group: rollback-v2
+  cancel-in-progress: false
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.target }}
+    steps:
+      - name: Inputs
+        env:
+          REF: ${{ github.ref }}
+          TO: ${{ inputs.to }}
+          FROM: ${{ inputs.from }}
+          WORLDS: ${{ inputs.worlds }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          [ -n "$SIM_DEPLOY_HOST" ] && [ -n "$SIM_DEPLOY_USER" ] || { echo "::error::the environment names no machine (SIM_DEPLOY_HOST, SIM_DEPLOY_USER)"; exit 1; }
+          echo "::add-mask::$SIM_DEPLOY_HOST"
+          echo "::add-mask::$SIM_DEPLOY_USER"
+          [ "$REF" = refs/heads/main ] || { echo "::error::rollback-v2 runs from main only (got $REF)"; exit 1; }
+          [[ "$TO" =~ ^1220[0-9a-f]{64}$ && "$FROM" =~ ^1220[0-9a-f]{64}$ && "$TO" != "$FROM" ]] || { echo "::error::to and from: two different builds, 1220 and 64 hex"; exit 1; }
+          [[ "$WORLDS" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+(\ [0-9a-f]{32}-[0-9a-f]{32}-[0-9]+)*$ ]] || { echo "::error::worlds: world names (<32 hex>-<32 hex>-<n>) separated by spaces"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SIM_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+          printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
+            "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
+      - name: deploy rollback, world by world
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          TO: ${{ inputs.to }}
+          FROM: ${{ inputs.from }}
+          WORLDS: ${{ inputs.worlds }}
+        run: |
+          set +e
+          # shellcheck disable=SC2086 # the worlds, one argument each
+          bash v2/tools/ops/release/release.sh remote rollback "$TO" "$FROM" $WORLDS > "$RUNNER_TEMP/rollback.txt" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/rollback.txt"
+          { echo "rollback exit $status"; echo '```'; cat "$RUNNER_TEMP/rollback.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - name: Remove deploy credentials
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -9,7 +9,12 @@
 //! The probe file holds one intent (T10's bytes) of an act a healthy world gives a receipt; it is sent with a new
 //! sequence and expiry each time. The machine's folder is `$WORLDS_ROOT`; the directory is the object store the
 //! `DIRECTORY_STORE_*` variables name, or `$WORLDS_ROOT/directory`. Prints the timeline and how it ended; exits 0
-//! when the new build is kept or the rollback served, 1 otherwise.
+//! when the new build is kept or the rollback served, 1 otherwise. It holds the machine's step (`step.rs`) shared while
+//! it runs, and refuses `deploy.gateway-upgrading` while the gateway is upgraded (O16, #2809).
+// Operations, not the engine: the rollback's timeline is wall-clock time (the wall-clock rule, K7).
+#![allow(clippy::disallowed_methods)]
+
+mod step;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -50,6 +55,11 @@ fn main() {
     let num = |n: &str, d: u64| get(n).map_or(d, |v| v.parse().unwrap_or_else(|_| fail(n)));
     let root = std::env::var_os("WORLDS_ROOT")
         .map_or_else(|| PathBuf::from("/var/lib/souls/worlds"), PathBuf::from);
+    // Never in the same step as the gateway's upgrade.
+    let _step = step::deploying(&root).unwrap_or_else(|e| {
+        println!("refused: {e}");
+        std::process::exit(1)
+    });
     let s3;
     let folder;
     let store: &dyn Store = match S3::from_env() {
@@ -79,10 +89,18 @@ fn main() {
     if rollback {
         let from = from_hex(get("--from").unwrap_or_else(|| fail("no --from build")))
             .unwrap_or_else(|e| fail(e));
+        // Only the live build is taken back (O18, #2811): the world's pin must be `--from`.
+        let live = supervisor::pin(store, &root, &world).map_or_else(|e| fail(e), |(b, _)| b);
+        if live != from {
+            let live = replica::encode::to_hex(&live);
+            println!("refused: rollback.wrong-from: the world is pinned to {live}, not --from");
+            std::process::exit(1)
+        }
         // Whether the build being left wrote anything is not known here: assume it did, so the schemas are compared.
         let mut tl = Timeline::default();
+        let t0 = std::time::Instant::now();
         let r = d.roll_back(&build, &from, true, &mut unit, &mut probe, &mut |s| {
-            tl.0.push((0, s))
+            tl.0.push((t0.elapsed().as_millis(), s))
         });
         print(&tl);
         match r {

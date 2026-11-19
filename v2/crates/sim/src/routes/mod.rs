@@ -92,7 +92,7 @@ const LACKS: [(Mask, &str); 4] = [
 pub fn needs(kind: Kind) -> Mask {
     match kind {
         Kind::Ladder => HANDS | CLIMB,
-        Kind::Doorway | Kind::Stairs | Kind::Ramp | Kind::Step => 0,
+        Kind::Doorway | Kind::Stairs | Kind::Ramp | Kind::Step | Kind::Boarding => 0,
         Kind::Wade => WADE,
         Kind::Swim => SWIM,
     }
@@ -135,6 +135,7 @@ pub struct PatchAt {
     pub version: u64,
 }
 
+#[derive(Clone)]
 struct PieceRec {
     at: PatchAt,
     frame: u32,
@@ -150,6 +151,7 @@ struct PieceRec {
 
 /// Where a body leaves a piece: a segment (mm, x and z in the piece's frame) on one piece, or on two (a square's
 /// edge, both in the ground's frame), or a link's end.
+#[derive(Clone)]
 struct Portal {
     pieces: [u32; 2],
     a: [i64; 2],
@@ -166,6 +168,7 @@ impl Portal {
     }
 }
 
+#[derive(Clone)]
 struct LinkRec {
     id: Id,
     kind: Kind,
@@ -182,7 +185,7 @@ struct LinkRec {
 }
 
 /// What of the map a building put there: its floors, its links, and its ends that lie on no piece.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Owned {
     floors: Vec<Id>,
     links: Vec<u32>,
@@ -248,6 +251,7 @@ impl Route {
 }
 
 /// The map of a world's walkable ground and links for one size class.
+#[derive(Clone)]
 pub struct Map {
     /// The size class its ground is cut for.
     pub size: Size,
@@ -1179,14 +1183,16 @@ impl Map {
             .collect()
     }
 
-    /// The pieces the ends of the `k`th link (in [`Map::links`]' order) lie on, both ends together.
-    pub fn link_pieces(&self, k: usize) -> Vec<u32> {
-        self.links[k]
-            .ends
-            .iter()
-            .flatten()
-            .map(|&p| self.portals[p as usize].pieces[0])
-            .collect()
+    /// The pieces the ends of each link lie on, both ends together, in [`Map::links`]' order (gone links left out).
+    pub fn link_pieces(&self) -> Vec<Vec<u32>> {
+        let pieces = |l: &LinkRec| {
+            l.ends
+                .iter()
+                .flatten()
+                .map(|&p| self.portals[p as usize].pieces[0])
+                .collect()
+        };
+        self.links.iter().filter(|l| !l.gone).map(pieces).collect()
     }
 
     /// Whether the map holds a floor's patch for `node`.

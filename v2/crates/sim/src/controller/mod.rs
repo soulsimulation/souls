@@ -596,6 +596,17 @@ impl Controller {
         Ok(())
     }
 
+    /// Takes `body` out, its claims, input and place among the near with it (a retirement, K10 #2673).
+    pub fn remove(&mut self, body: Id) -> bool {
+        self.woken.remove(&body);
+        self.near.remove_body(body);
+        let was = self
+            .bodies
+            .remove(&body)
+            .or_else(|| self.rested.remove(&body));
+        was.is_some()
+    }
+
     fn slot(&mut self, body: Id) -> R<&mut Slot> {
         if let Some(s) = self.rested.get_mut(&body) {
             self.woken.insert(body);
@@ -767,6 +778,11 @@ impl Controller {
     /// The bodies as the mover last left them, in id order.
     pub fn bodies(&self) -> impl Iterator<Item = &Moved> {
         self.bodies.values().map(|s| &s.moved)
+    }
+
+    /// Every body the controller holds, each once: those it steps and those resting in a slot (seated, lying, rising).
+    pub fn ids(&self) -> impl Iterator<Item = Id> + '_ {
+        self.bodies.keys().chain(self.rested.keys()).copied()
     }
 
     /// Sets one part of `body`'s input, if `driver` holds its resources (`resource-not-held`, `resource-missing`).
