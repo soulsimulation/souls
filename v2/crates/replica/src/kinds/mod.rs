@@ -737,13 +737,10 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         }
     };
 
-    let geometry = match s.get(&place::SECTION_GEOMETRY) {
-        None => None,
-        Some(v) => Some(
-            place::Geometry::read(v)
-                .map_err(|reason| bad("kind-geometry", place::SECTION_GEOMETRY, None, reason))?,
-        ),
-    };
+    // Section 7 is in the hash whatever it holds; one not in E4's shape is not read, as an unread section is not.
+    let geometry = s
+        .get(&place::SECTION_GEOMETRY)
+        .and_then(|v| place::Geometry::read(v).ok());
 
     Ok(Sections {
         body,
