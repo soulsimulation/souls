@@ -62,6 +62,9 @@ export const ALLOWED = {
   directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim'],
   // O1 (#2730): the launcher reads a world's pin from its directory record.
   supervisor: ['replica', 'directoryd'],
+  // Uploads (G6, #2747): PNG pixel data inflated with a bound on its output; the child's rlimits on Linux; G1's commit
+  // and K4's log in its tests.
+  assets: ['replica', 'miniz_oxide', 'libc', 'sim'],
 };
 
 const rsFiles = dir => readdirSync(dir, { recursive: true }).filter(f => /\.rs$/.test(f)).map(f => join(dir, f));
