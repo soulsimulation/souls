@@ -152,7 +152,7 @@ async function snapshot(wire, gateway, token) {
 
 test('A1/A2: the pub at 08:00 and published shop opening fire within one world tick across a served rate change', { timeout: 120_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'r15b-')), home = join(dir, 'h'), world = join(dir, 'w'), socket = join(dir, 'w.sock');
-  const SOUL = 's_r15b', procs = [], output = [];
+  const SOUL = 's_r15b', procs = [], output = [], timing = {};
   const env = { PATH: process.env.PATH, BRAIN_MODE: 'fake', SOULS_HOME: home };
   const rt = runtimeOf(home, SOUL);
   const run = (name, args) => {
@@ -194,6 +194,7 @@ test('A1/A2: the pub at 08:00 and published shop opening fire within one world t
     const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
     wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
     const before = await snapshot(wire, gateway, tokens[1]);
+    timing.before = clockOf(before);
     const record = (copy, id) => {
       const todo = Object.values(JSON.parse(copy.roots()));
       while (todo.length) {
@@ -222,6 +223,7 @@ test('A1/A2: the pub at 08:00 and published shop opening fire within one world t
     chmodSync(join(home, 'credentials.json'), 0o600);
     const pub = addEntry(schedule, { when: '08:00', does: act }, Date.now());
     const opens = addEntry(schedule, { when: `world ${opening}us`, does: act }, Date.now());
+    timing.keys = { pub: pub.key, shop: opens.key };
     await call(home, SOUL, { op: 'status' }, { pkg: PKG, within: 30_000, ms: 30_000 });
     await waitFor(async () => (await ask({ op: 'status' })).connected);
     await waitFor(() => JSON.parse(readFileSync(rt.state, 'utf8')).schedule?.targets?.[pub.key]);
@@ -233,6 +235,7 @@ test('A1/A2: the pub at 08:00 and published shop opening fire within one world t
       return (await ask({ op: 'status' })).clock?.rate[0] === 2;
     });
     const after = await snapshot(wire, gateway, tokens[1]);
+    timing.after = clockOf(after);
     assert.deepEqual(clockOf(after), w.clock, 'new actual published mapping after restart');
     for (const [field, value] of fixture.fields) assert.deepEqual(rootRecord(after).get(6).get(field), value, `field ${field} survives restart`);
     const current = JSON.parse(readFileSync(rt.state, 'utf8')).schedule.targets[pub.key];
@@ -262,7 +265,26 @@ test('A1/A2: the pub at 08:00 and published shop opening fire within one world t
     }
     console.log(JSON.stringify(report));
   } catch (err) {
-    err.message += `\n${output.map((out) => out()).join('\n')}`;
+    // Existing observations only: SEND is separate from scheduled/answer completion; sync timings are not traced.
+    let saved = {}, trace = [];
+    try { saved = JSON.parse(readFileSync(rt.state, 'utf8')).schedule ?? {}; } catch { /* no saved schedule */ }
+    try { trace = readFileSync(join(rt.dir, 'trace.jsonl'), 'utf8').trim().split('\n').slice(-80).map(JSON.parse); } catch { /* no complete trace */ }
+    const occurrences = Object.entries(timing.keys ?? {}).map(([name, key]) => {
+      const target = saved.targets?.[key], mark = saved.marks?.[key];
+      return { name, target: target && { worldUs: target.worldUs, realMs: target.realMs },
+        mark: mark && { at: mark.at, late: mark.late, sequence: mark.sequence } };
+    });
+    const observations = trace.filter((r) => ['send', 'scheduled', 'answer'].includes(r.k))
+      .map(({ k, t, seq }) => ({ k, t, seq }));
+    const scrub = (text) => text
+      .replace(/(?:soul-|creator-)[^\s"']+/g, '<token>')
+      .replace(/\b[0-9a-f]{32}(?:-[0-9a-f]{32})?-\d+\b/gi, '<fixture-id>')
+      .replace(/\b(?:https?|wss?):\/\/[^\s]+/g, '<address>')
+      .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, '<address>')
+      .replace(/(?:\/[^/\s"'<>]+)+/g, '<path>');
+    const evidence = { mapping: { before: timing.before, after: timing.after }, occurrences, observations,
+      childOutput: output.map((out) => scrub(out().slice(-2048))) };
+    err.message = `${scrub(err.message)}\nR15b bounded synthetic timing observations: ${JSON.stringify(evidence)}`;
     throw err;
   } finally {
     await ask({ op: 'stop' }).catch(() => {});
