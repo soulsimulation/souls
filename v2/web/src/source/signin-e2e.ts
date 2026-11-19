@@ -7,7 +7,11 @@
 // In v2: `cargo build -p directoryd && cargo build --release -p gatewayd --example owner_view`, then in v2/web
 // `node src/source/signin-e2e.ts --directoryd ../target/debug/directoryd --view ../target/release/examples/owner_view
 // --dir <scratch dir> [--seconds 10]`. Prints one JSON line and exits 0 when every check holds.
-import { spawn, type ChildProcess } from 'node:child_process';
+//
+// V13c (#3418): add `--import ../target/debug/import-accounts` (`cargo build -p import-accounts`) and Ada's Soul is an
+// imported one: the import records it as hers, and her session alone opens its view; no `--test-own`.
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -25,18 +29,51 @@ mkdirSync(dir, { recursive: true });
 const keyFile = join(dir, 'view.key');
 writeFileSync(keyFile, randomBytes(32).toString('hex'));
 
+/** A backup set where the test person Ada owns one live Soul, imported; the store, and her Soul's grant and body. */
+function importAda(bin: string) {
+  const set = join(dir, 'set');
+  mkdirSync(join(set, 'worlds'), { recursive: true });
+  const ada = 'acct_00000000-0000-4000-8000-0000000000ad';
+  for (const [file, rows] of [['accounts.sqlite', [ada]], ['forks-accounts.sqlite', []]] as const) {
+    const db = new DatabaseSync(join(set, file));
+    db.exec('CREATE TABLE provider_accounts_v1(account_id TEXT PRIMARY KEY, issuer TEXT, subject TEXT, created_at INTEGER)');
+    for (const id of rows) db.prepare("INSERT INTO provider_accounts_v1 VALUES (?, 'test:local', 'Ada', 0)").run(id);
+    db.close();
+  }
+  writeFileSync(join(set, 'worlds.json'), JSON.stringify([{ slug: 'garden', owner: ada }]));
+  const world = new DatabaseSync(join(set, 'worlds', 'garden.db'));
+  world.exec(`CREATE TABLE worlds(id TEXT PRIMARY KEY); CREATE TABLE snapshots(world_id TEXT, tick INTEGER, snapshot TEXT);
+    CREATE TABLE souls(id TEXT, world_id TEXT, owner TEXT, entity_id TEXT, name TEXT, description TEXT, retired_at INTEGER,
+    created_at INTEGER); INSERT INTO worlds VALUES ('garden');`);
+  world.prepare("INSERT INTO souls VALUES ('s1', 'garden', ?, 'e1', 'Ada''s Soul', '', NULL, 0)").run(ada);
+  world.close();
+  const out = join(dir, 'out');
+  execFileSync(bin, [set, '--out', out], { stdio: 'ignore' });
+  const store = new DatabaseSync(join(out, 'accounts.sqlite'), { readOnly: true });
+  const row = store.prepare("SELECT grant_text, follow FROM account_grants_v1 WHERE account_id = ? AND grant_text LIKE 'soul-%'").get(ada) as
+    { grant_text: string; follow: string };
+  store.close();
+  return { store: join(out, 'accounts.sqlite'), grant: row.grant_text, follow: row.follow };
+}
+
 const children: ChildProcess[] = [];
 const firstLine = (c: ChildProcess) => new Promise<string>((ok) => createInterface({ input: c.stdout! }).once('line', ok));
 let directoryLog = '';
 try {
+  // V13c (#3418): with `--import <import-accounts>`, Ada's Soul is an imported one: a backup in today's shape where
+  // the test person Ada owns one Soul, brought in by X11's import, which records it as hers. Soul 1 is that Soul.
+  const imported = arg('--import') ? importAda(resolve(arg('--import')!)) : null;
   // The local world: a gateway and view tier, soul 1's body and five others walking; soul 2 has private fields too.
-  const world = spawn(resolve(arg('--view')!), ['--bodies', '5', '--seconds', String(seconds + 20), '--dir', dir, '--view-key', keyFile]);
+  const world = spawn(resolve(arg('--view')!), ['--bodies', '5', '--seconds', String(seconds + 20), '--dir', dir, '--view-key', keyFile,
+    ...(imported ? ['--soul1', imported.follow] : [])]);
   children.push(world);
   world.stderr!.resume();
   const w = JSON.parse(await firstLine(world)) as { url: string; follow: string; grant1: string; soul1: string; soul2: string };
-  // The directory, with the test sign-in for a local world: Ada owns soul 1, whose body is followed.
+  // The directory, with the test sign-in for a local world: Ada owns soul 1, whose body is followed (as the import
+  // recorded it, or `--test-own`).
   const directory = spawn(resolve(arg('--directoryd')!), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1:5173',
-    '--store', join(dir, 'accounts.sqlite'), '--test-sign-in', '--view-key', keyFile, '--test-own', `Ada=${w.grant1}@${w.follow}`]);
+    '--store', imported?.store ?? join(dir, 'accounts.sqlite'), '--test-sign-in', '--view-key', keyFile,
+    ...(imported ? [] : ['--test-own', `Ada=${w.grant1}@${w.follow}`])]);
   children.push(directory);
   directory.stderr!.on('data', (b) => (directoryLog += b));
   const at = (await firstLine(directory)).replace('listening on ', '');
@@ -54,13 +91,14 @@ try {
   const seen = Object.fromEntries(src.seen);
   const mac = g.token.slice(-64);
   const out = {
+    imported: !!imported, importedGrant: imported ? g.owned.some((o) => o.grant === imported.grant && o.follow === imported.follow) : null,
     exchanged: g.token.startsWith('view.'), expiresIn: g.expires - Math.floor(Date.now() / 1000), owned: g.owned.length,
     followChosen: follow === w.follow, up: src.up || parts > 0, parts, followedSamples: followed,
     public: seen.public ?? 0, ownPrivate: seen[w.soul1] ?? 0, anothersPrivate: seen[w.soul2] ?? 0,
     tokenInAddress: w.url.includes(mac) || origin.includes(mac), tokenInDirectoryLog: directoryLog.includes(mac), error,
   };
   console.log(JSON.stringify(out));
-  const ok = out.exchanged && out.followChosen && parts > 0 && followed > 0 && out.ownPrivate > 0 && out.anothersPrivate === 0
+  const ok = out.importedGrant !== false && out.exchanged && out.followChosen && parts > 0 && followed > 0 && out.ownPrivate > 0 && out.anothersPrivate === 0
     && !out.tokenInAddress && !out.tokenInDirectoryLog && !error;
   process.exitCode = ok ? 0 : 1;
 } finally {

@@ -12,6 +12,7 @@
 //! a way newly cut off with nobody shut in is not refused, as G2 does today.
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -21,22 +22,29 @@ use gatewayd::receipts::Receipts;
 use gatewayd::token::{Grant, Token, Tokens};
 use gatewayd::{Gateway, Log, resume, socket, world_link};
 use replica::apply::Replica;
+use replica::bodies::{Class, Family, Resource};
 use replica::edit::wire::{VERB, parameters};
 use replica::edit::{self, Edit, Op, Ref, Spot};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest, schema_hash,
 };
+use replica::effects::{Header, Refusal};
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
+use replica::intents::Target;
 use replica::intents::{Hello, Intent, PROTOCOL};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, Kind, parse_kinds, show};
 use sim::edit::safety::Who;
 use sim::ground::scene::{F_OUTLINE, F_SLOTS, F_SOLIDS};
+use sim::links::Doors;
+use sim::walk::town::Town;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use worldd::answers::{self, Config};
+use worldd::bodies::Bodies;
 use worldd::buildsafe;
 use worldd::checkers::toggles;
 
@@ -521,4 +529,220 @@ async fn g1c_unsafe_edits_through_the_gateway_are_refused_by_name_and_nothing_is
     assert!(built.version > start);
     println!("refusals 3, receipts 1");
     world.stop();
+}
+
+// ---- G1d (#3462): BUILDSAFE sees walking Souls ----
+
+/// How many walk beside the creator's edits (A3).
+const WALKERS: u64 = 20;
+
+fn humanoid() -> Family {
+    let leg = |n: &str| Resource {
+        name: Name::new(n).unwrap(),
+        class: Class::Locomotion,
+        slot: None,
+    };
+    Family {
+        name: Name::new("souls:humanoid").unwrap(),
+        resources: vec![leg("souls:leg-left"), leg("souls:leg-right")],
+    }
+}
+
+/// Walker `i`: its body, and its row, z µm. Each walks east along its row from x -12 m to x 12 m (17 s at 1.4 m/s),
+/// on the open ground's 30 m square: rows 1 m apart north and south of the three Souls on the tree, and two between.
+fn walker(i: u64) -> (Id, i64) {
+    let i_ = i as i64;
+    let z = match i_ {
+        0..=8 => 6 + i_,
+        9..=17 => 3 - i_,
+        _ => i_ - 18,
+    };
+    (Id::new(Scope([0x3d; 16]), 1 + i).unwrap(), z * M)
+}
+
+/// The world's bodies: a town over the replica's own tree (so the controller's frames are the tree's nodes) and the
+/// walkers standing at the west ends of their rows. None of them is on the tree.
+fn walkers(
+    tree: Tree,
+    header: Header,
+    kinds: BTreeMap<String, Kind>,
+    ground: Id,
+) -> Result<Bodies, Refusal> {
+    let rules = Rules {
+        kinds,
+        souls: Default::default(),
+        audiences: BTreeMap::new(),
+    };
+    let next = tree.to_state().next;
+    let town = Town::new(tree, ground, Doors::new(header, rules, next)).map_err(|e| Refusal {
+        name: "town",
+        detail: e,
+    })?;
+    let mut bodies = Bodies::new(town, 50_000)?;
+    for i in 0..WALKERS {
+        let (body, z) = walker(i);
+        let frame = Frame {
+            node: ground,
+            slot: None,
+        };
+        let at = bodies.town.surfaces[&ground].place(
+            body,
+            frame,
+            Vec3::new(-12 * M, 0, z),
+            Quat::IDENTITY,
+        )?;
+        bodies.add_body(humanoid(), at)?;
+    }
+    Ok(bodies)
+}
+
+/// A walk intent for walker `i` to the east end of its row, written on the world's socket (I1's framing).
+fn walk(out: &mut std::os::unix::net::UnixStream, ground: Id, i: u64) {
+    let (body, z) = walker(i);
+    let i = Intent {
+        actor: Actor::Soul(body),
+        verb: Name::new("eden:walk").unwrap(),
+        target: Some(Target::Node(ground)),
+        parameters: BTreeMap::from([(1, row(&[12 * M, 0, z]))]),
+        sequence: 1,
+        basis: basis(0),
+        expiry: answers::now() + 60_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+    };
+    let bytes = encode(&i.to_value()).unwrap();
+    out.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    out.write_all(&bytes).unwrap();
+}
+
+/// A2 and A3: twenty Souls walking (I4b's controller, on no tree). Through the gateway, a wall where walker 0 is
+/// walking and a wall across the next corner of its line (the end of its straight walk, 24 m ahead) are each refused
+/// `edit.would-bury`, nothing committed; walls beside the walkers commit. No tick of the world exceeds 50 ms.
+#[tokio::test(flavor = "multi_thread")]
+async fn g1d_a_wall_where_a_soul_walks_or_across_its_next_corner_is_refused() {
+    let b = build();
+    let start = b.replica.version();
+    let creator = actor(0xc0, Actor::Creator);
+    let Actor::Creator(creator_id) = creator else {
+        unreachable!()
+    };
+    let (tree, header, kinds, ground) = (
+        b.replica.tree().frozen(),
+        b.replica.header().clone(),
+        b.kinds.clone(),
+        b.ground,
+    );
+    let (_, row0) = walker(0);
+    let on_the_walk = place_box(
+        &b,
+        -10 * M,
+        row0,
+        Value::Array(vec![solid(0, 0, 2_500, 100)]),
+    );
+    let at_the_corner = place_box(&b, 12 * M, row0, Value::Array(vec![solid(0, 0, 100, 300)]));
+    let beside: Vec<Op> = (0..5)
+        .map(|k| {
+            place_box(
+                &b,
+                (-10 + 5 * k) * M,
+                2 * M + M / 2,
+                Value::Array(vec![solid(0, 0, 500, 100)]),
+            )
+        })
+        .collect();
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.edits = Some(edit::World {
+        creator: creator_id,
+        kinds: b.kinds.clone(),
+    });
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| {
+        walkers(tree, header, kinds, ground)
+    }));
+    let store = sim::log::Mem::with(Vec::new());
+    let world = answers::start(b.replica, toggles::rules(), store.clone(), cfg).unwrap();
+
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("gw-g1d-walkers.sock");
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let d = door.clone();
+            std::thread::spawn(move || answers::serve(d, stream));
+        }
+    });
+    let mut tokens = Tokens::default();
+    let token = Token::issue(Grant::Actor(creator)).unwrap();
+    tokens.add(Grant::Actor(creator), token.hash());
+    let log: Log = std::sync::Arc::new(|_: &str| {});
+    let gw = Gateway::with_receipts(tokens, BUILD.to_vec(), log, Receipts::off());
+    tokio::spawn(world_link::run(gw.clone(), path.clone()));
+    let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}{}", tcp.local_addr().unwrap(), socket::PATH);
+    tokio::spawn(axum::serve(tcp, socket::router(gw.clone())).into_future());
+    while !gw.link.up() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    // The Souls set off; their walks answer at their ends, long after this test.
+    let mut souls = std::os::unix::net::UnixStream::connect(&path).unwrap();
+    for i in 0..WALKERS {
+        walk(&mut souls, b.ground, i);
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let mut ws = connect(&url, &token).await;
+    let mut sequence = 0;
+    for (what, op) in [
+        ("where it walks", on_the_walk),
+        ("across its next corner", at_the_corner),
+    ] {
+        sequence += 1;
+        let got = send(&mut ws, edit_intent(creator, sequence, start, &[op])).await;
+        assert_eq!(
+            (got.kind, got.reason.as_str()),
+            (2, "edit.would-bury"),
+            "{what}: {got:?}"
+        );
+    }
+    for op in beside {
+        sequence += 1;
+        let got = send(&mut ws, edit_intent(creator, sequence, start, &[op])).await;
+        assert_eq!(got.kind, 1, "a wall beside the walkers commits: {got:?}");
+    }
+    // The walkers walk on a while longer under the clock's eye.
+    tokio::time::sleep(Duration::from_millis(1_000)).await;
+    let m = world.measures.clone().expect("measures");
+    let longest = m.ticks.quantile(1.0);
+    let phases: Vec<u64> = m.phases.iter().map(|h| h.quantile(1.0)).collect();
+    println!(
+        "refusals 2, receipts 5; the longest tick {longest} us, each phase's longest {phases:?}"
+    );
+    // A speed bar, held in an optimized build (`cargo test --release`): an unoptimized one under a parallel `cargo
+    // test` spends most of a tick stepping and starting the walks (the bodies' phase), not on the edits.
+    if !cfg!(debug_assertions) {
+        assert!(longest <= 50_000, "no tick over 50 ms: {longest} us");
+    }
+    world.stop();
+    // Nothing of the two refused edits was committed: the log holds the five walls beside the walkers only.
+    let boxes = kind(&b.kinds, "g1c:box");
+    let log = store.0.lock().unwrap().bytes.clone();
+    let mut placed = 0;
+    for r in sim::log::recover(&log).unwrap().records {
+        // The tick records' parts; K12's input records beside them hold no effects.
+        let Ok(part) = Part::read(&r) else { continue };
+        for e in part.effects {
+            if let Body::Changes(cs) = &e.body {
+                placed += cs
+                    .iter()
+                    .filter(|c| matches!(&c.change, Change::Create { kind, .. } if *kind == boxes))
+                    .count();
+            }
+        }
+    }
+    assert_eq!(placed, 5, "the two refused walls are not in the log");
 }
