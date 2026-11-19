@@ -20,7 +20,7 @@ use crate::effects::{Body, Change, Effect, Header, Part, Refusal, TransferRec};
 use crate::encode::{Name, Value, encode};
 use crate::hash::{Chain, audience, node_value, state_hash, step_hash};
 use crate::ids::{Hash, Id, Purpose};
-use crate::tree::Tree;
+use crate::tree::{Sealed, Tree};
 use crate::world_model::Audience;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -167,6 +167,11 @@ impl Replica {
 
     pub fn tree(&self) -> &Tree {
         &self.tree
+    }
+
+    /// Seals the tree ([`Tree::seal`]): a world serving R5's sync answers from its last seal (R5b, #3164).
+    pub fn seal(&mut self) -> R<Sealed> {
+        self.tree.seal()
     }
 
     /// The version the copy stands at: the number of log entries applied.
