@@ -48,11 +48,12 @@ export const ALLOWED = {
   replica: ['wasm-bindgen'],
   // skills: the world wakes the form runner and steps the walk it starts (F1, #2766; K13a, #2676).
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld', 'skills'],
-  // import-eden: E1's Eden measures load Eden 2026's tree in a test (#2708; dev only). rustix: the machine's steady
-  // clock (CLOCK_MONOTONIC) without unsafe, one clock for the world and its gateway across their local socket, so an
-  // act's stamps form one chain (O4, #2694). skills: the world runs the built-in walk for a move intent; the test
-  // world in its tests (I4b, #3156).
-  worldd: ['replica', 'sim', 'import-eden', 'rustix', 'skills', 'testworld'],
+  // O3 (#2732): the shipper writes pieces to the object store and moves the directory's mark. import-eden: E1's Eden
+  // measures load Eden 2026's tree in a test (#2708; dev only). rustix: the machine's steady clock (CLOCK_MONOTONIC)
+  // without unsafe, one clock for the world and its gateway across their local socket, so an act's stamps form one
+  // chain (O4, #2694). skills: the world runs the built-in walk for a move intent; the test world in its tests (I4b,
+  // #3156).
+  worldd: ['replica', 'sim', 'directoryd', 'import-eden', 'rustix', 'skills', 'testworld'],
   // Agents' sockets (I1, #2683): WebSocket on tokio through axum, a constant-time compare, the OS random source.
   gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util', 'rustix'],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
@@ -61,7 +62,8 @@ export const ALLOWED = {
   // W1 (#2704): RS256 checks and random ids (ring), the one-file account store (rusqlite), JWKS (serde_json, ureq).
   directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim'],
   // O1 (#2730): the launcher reads a world's pin from its directory record.
-  supervisor: ['replica', 'directoryd'],
+  // O7 (#2804): the rehearsal reads a world's log and writes its scratch copy (K4's log).
+  supervisor: ['replica', 'directoryd', 'sim'],
   // Uploads (G6, #2747): PNG pixel data inflated with a bound on its output; the child's rlimits on Linux; G1's commit
   // and K4's log in its tests.
   assets: ['replica', 'miniz_oxide', 'libc', 'sim'],

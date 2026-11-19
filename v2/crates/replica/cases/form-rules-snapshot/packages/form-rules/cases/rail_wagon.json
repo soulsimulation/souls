@@ -1,0 +1,136 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:rail_wagon (core/rail-wagon@1, 4 placed): six seats; it goes where the locomotive pulls it.",
+ "cases": [
+  {
+   "name": "rail_wagon_board_free_seat",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "bench_1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:rail_wagon"
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "rail_wagon_board_seat_taken",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "bench_1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:rail_wagon",
+      "slots": {
+       "bench_1": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 0,
+    "detail": {
+     "node": "t1",
+     "slot": "bench_1"
+    },
+    "fix": {
+     "form": "board",
+     "args": {
+      "seat": "bench_2"
+     }
+    }
+   }
+  }
+ ]
+}
