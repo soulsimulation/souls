@@ -20,6 +20,8 @@ pub mod links;
 pub mod log;
 pub mod mover;
 pub mod moves;
+pub mod random;
+pub mod recorder;
 pub mod refresh;
 pub mod routes;
 pub mod slots;

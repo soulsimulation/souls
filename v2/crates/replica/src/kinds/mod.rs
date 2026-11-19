@@ -34,7 +34,7 @@ pub mod sizes;
 use crate::encode::{Name, Value, encode};
 use crate::ids::{Hash, KindRefusal, KindSource, name_kinds};
 use crate::world_model::Kind as Admits;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub const SECTION_OWNER: u64 = 2;
@@ -202,7 +202,7 @@ impl std::error::Error for KindError {}
 #[derive(Clone, Debug, Default)]
 pub struct Kinds {
     by_hash: BTreeMap<Hash, KindDef>,
-    by_name: HashMap<String, Hash>,
+    by_name: BTreeMap<String, Hash>,
     refused: Vec<KindError>,
 }
 

@@ -7,7 +7,7 @@
 //! its sequences from the log. The world here is I3's toggles world (`checkers::toggles`), `--rooms` rooms of `--bodies`
 //! bodies, each with a toggle, and `--items` items in each room; its log is `--log` (default: the socket's path and
 //! `.log`). With `--testworld` it also has bodies that move (I4b): N2's test world with one Soul and three chairs
-//! (`worldd::testbodies`, B10 #2688).
+//! (`worldd::testbodies`, B10 #2688), and prints `testworld <id> <name>` for the Soul's body, the square and the chairs.
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
 //! [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
@@ -109,7 +109,7 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
              [--bodies <n>] [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
-             [--stall-after <s> --stall-for <s>] [--www <dir>] [--views <path>]"
+             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>] [--views <path>]"
         );
         2
     };
@@ -128,13 +128,23 @@ pub fn run(args: &[String]) -> i32 {
     let views = arg("--views").map_or_else(|| path.with_extension("views"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
     let feed = worldd::views::served::start();
-    cfg.views = feed.as_ref().ok().cloned();
+    cfg.served = feed.as_ref().ok().cloned();
     if let Err(e) = feed.and_then(|f| worldd::views::served::listen(f, &views)) {
         eprintln!("worldd: views: {e}");
         return 1;
     }
     if args.iter().any(|a| a == "--testworld") {
-        cfg.bodies = Some(Box::new(worldd::testbodies::bodies));
+        cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| {
+            worldd::testbodies::bodies()
+        }));
+        // C10 (#3414): the ids a client acts on, `testworld <id> <name>`.
+        for (name, id) in worldd::testbodies::named().unwrap_or_default() {
+            println!(
+                "testworld {}-{} {name}",
+                to_hex(&id.scope().0),
+                id.counter()
+            );
+        }
     }
     cfg.measures = !args.iter().any(|a| a == "--no-measures");
     cfg.health =
@@ -187,6 +197,12 @@ pub fn run(args: &[String]) -> i32 {
             return 1;
         }
     };
+    // K7's watchdog on the world's own loop (K18): no tick for the limit ends the process by name.
+    // `--watchdog-ms` widens it for a debug build's big world (C11's Eden-sized sync test), as `worldd --dir` takes.
+    let limit = arg("--watchdog-ms")
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(crate::watchdog::LIMIT_MS);
+    crate::watchdog::watch(world.beat.clone(), crate::watchdog::Real::start(), limit);
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,

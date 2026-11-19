@@ -15,7 +15,7 @@
 // A run times itself by the wall clock (the wall-clock rule, K7, is the engine's: v2/clippy.toml).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -519,7 +519,7 @@ async fn main() {
     let log = std::fs::read(log_path(&state)).unwrap_or_else(|e| fail(e));
     let found = recover(&log).unwrap_or_else(|e| fail(e));
     let mut logged: BTreeSet<(Id, u64)> = BTreeSet::new();
-    let mut logged_refused: HashMap<String, u64> = HashMap::new();
+    let mut logged_refused: BTreeMap<String, u64> = BTreeMap::new();
     for r in &found.records {
         let Ok(Value::Map(part)) = decode(r).map(|d| d.value) else {
             continue;

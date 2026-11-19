@@ -60,7 +60,7 @@
 
 pub mod amounts;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use replica::audience;
 use replica::effects::{
@@ -213,7 +213,7 @@ struct Open {
 pub struct Forms {
     runs: BTreeMap<RunId, FormRun>,
     by_body: BTreeMap<Id, RunId>,
-    by_timer: HashMap<Id, RunId>,
+    by_timer: BTreeMap<Id, RunId>,
     by_intent: BTreeMap<Id, RunId>,
     walks: Vec<Run>,
     last: RunId,

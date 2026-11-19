@@ -7,7 +7,7 @@ old name. Serving and packaging it is R17's.
 
 ## What it promises
 
-- **Small.** Under 5 kB (3,357 bytes at 0.1.0): it sits in the model's context every turn, so every line is paid for.
+- **Small.** Under 5 kB (3,543 bytes at 0.1.0): it sits in the model's context every turn, so every line is paid for.
 - **Versioned with the client.** Its front matter carries `metadata.version` and `metadata.client`; the skill and the
   client move together.
 - **The loop:** look, find the id, act in one call with a ranked list (best first, up to 5, the rest fallbacks),
@@ -38,11 +38,10 @@ The first runs (R12's pull request) used a stand-in daemon on the Soul's socket,
 
 ## What the thin command lacks
 
-The skill names the commands the outcome needs. At 0.1.0 the thin command has `status look find act wait stats
-stop`, so these are not there yet, and the pair, walk and sit test cannot run:
+C10 (#3414) added `pair <world url>` (W2's pairing, left polling in the background once it has printed the link
+and code), `can <act>` (R8's local check) and `act` on a target: `<verb>:<id>`, an id alone (a walk), each candidate
+on its own target, the first one's thing arguments in parameter 1 (C2). Still missing:
 
-- `pair <world url>`: W2's `pair.mjs` is a separate script that takes the directory, world and gateway as flags.
-- `can <id>`: the daemon answers it (R8); the thin command refuses it.
-- `act` on a named place or seat: the thin command sends bare verbs, with no target or arguments.
-- A local world where a newly paired Soul has a body (`worldd --testworld` has one fixed body).
+- A local world where a newly paired Soul has a body and finds its places and seats by name (`worldd --testworld`
+  has one fixed body, and its town's places and chairs are not in the replica's tree; it prints their ids). C3, #3367.
 - `schedule add` (R15).
