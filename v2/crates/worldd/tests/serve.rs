@@ -11,12 +11,12 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
+use replica::audience::references;
 use replica::effects::{Actor, Part};
 use replica::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use replica::ids::{Id, Minter, Scope, Version};
 use replica::intents::{Intent, Target};
 use replica::rules::json;
-use replica::audience::references;
 use sim::log::{FileStore, Log};
 use sim::text::{Grade, Store};
 use worldd::answers::{self, STATE};
@@ -121,7 +121,14 @@ fn walk(
     let i =
         |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
     let to = Value::Array(vec![i(x_m * 1_000_000), i(0), i(z_m * 1_000_000)]);
-    send(s, body, lineage, ground, BTreeMap::from([(1, to)]), sequence);
+    send(
+        s,
+        body,
+        lineage,
+        ground,
+        BTreeMap::from([(1, to)]),
+        sequence,
+    );
 }
 
 /// A walk in place carrying `words` (V1b: a value under T8's field 23 is kept in the world's text store and the
@@ -142,7 +149,14 @@ fn walk_with_words(
         worldd::words::WORDS,
         Value::Bytes(words.as_bytes().to_vec()),
     )]));
-    send(s, body, lineage, ground, BTreeMap::from([(1, to), (2, w)]), sequence);
+    send(
+        s,
+        body,
+        lineage,
+        ground,
+        BTreeMap::from([(1, to), (2, w)]),
+        sequence,
+    );
 }
 
 fn send(
@@ -376,7 +390,10 @@ fn o20b_a1_served_words_outlive_sigkill_and_erased_stay_refused() {
     w.line("worldd: started at tick");
     w.kill();
     let t = store();
-    assert_eq!(t.read(refs[0], &[body]).expect("reads"), lines[0].as_bytes());
+    assert_eq!(
+        t.read(refs[0], &[body]).expect("reads"),
+        lines[0].as_bytes()
+    );
     assert_eq!(
         t.read(refs[1], &[body]).unwrap_err().name,
         "removed",
@@ -459,7 +476,10 @@ fn o20b_a2_a3_served_world_ships_its_words_and_they_restore() {
     let restored = backup::restore(&folder, Some(&key), &stores, &b, &prefix).expect("restores");
     println!(
         "A2: restored {:?}; keys {:?}",
-        restored.iter().map(|r| (&r.name, r.files, r.bytes)).collect::<Vec<_>>(),
+        restored
+            .iter()
+            .map(|r| (&r.name, r.files, r.bytes))
+            .collect::<Vec<_>>(),
         directoryd::directory::folder::Folder::keys(&folder, "store/")
     );
     let t = Store::open_dir(
@@ -472,6 +492,10 @@ fn o20b_a2_a3_served_world_ships_its_words_and_they_restore() {
         .filter_map(|r| t.read(*r, &[body]).ok())
         .collect();
     t.close();
-    assert_eq!(back, vec![line.as_bytes().to_vec()], "the sentence reads on machine-b");
+    assert_eq!(
+        back,
+        vec![line.as_bytes().to_vec()],
+        "the sentence reads on machine-b"
+    );
     let _ = std::fs::remove_dir_all(&d);
 }

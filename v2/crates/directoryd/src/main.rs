@@ -1,6 +1,6 @@
 //! The directory process (Engine v2, #2635): so far the sign-in (W1, #2704). Arguments: [`start::USAGE`]. It prints
 //! `listening on <address>` once it serves, and refuses to start, with a line saying why, on what [`start::parse`]
-//! refuses.
+//! refuses. It ships its stores to the offsite bucket (O20b, #3523: [`directoryd::backup::run`]).
 
 use directoryd::accounts::serve::{App, key_digest, run};
 use directoryd::accounts::session::{Jwks, Verifier};
@@ -87,7 +87,8 @@ fn main() {
     let owner = Arc::clone(&app);
     let hooks = BTreeMap::from([(
         "accounts".to_owned(),
-        Box::new(move |to: &Path| owner.store.backup(to).map_err(|e| e.to_string())) as backup::Hook,
+        Box::new(move |to: &Path| owner.store.backup(to).map_err(|e| e.to_string()))
+            as backup::Hook,
     )]);
     let root = std::path::absolute(&config.store)
         .ok()

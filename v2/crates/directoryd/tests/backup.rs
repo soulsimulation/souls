@@ -27,17 +27,23 @@ fn start(dir: &Path, env: &[(&str, &Path)]) -> (Child, String) {
     let d = dir.join("directory");
     std::fs::create_dir_all(&d).unwrap();
     let mut c = Command::new(env!("CARGO_BIN_EXE_directoryd"));
-    c.args(["--listen", "127.0.0.1:0", "--public-url", "http://127.0.0.1:8080", "--test-sign-in"])
-        .arg("--store")
-        .arg(d.join("accounts.sqlite"))
-        .arg("--pairing")
-        .arg(d.join("pairing.sqlite"))
-        .arg("--gateway-tokens")
-        .arg(d.join("gateway-tokens"))
-        .env_remove(URL_ENV)
-        .env_remove("SOULS_BACKUP_KEY_FILE")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    c.args([
+        "--listen",
+        "127.0.0.1:0",
+        "--public-url",
+        "http://127.0.0.1:8080",
+        "--test-sign-in",
+    ])
+    .arg("--store")
+    .arg(d.join("accounts.sqlite"))
+    .arg("--pairing")
+    .arg(d.join("pairing.sqlite"))
+    .arg("--gateway-tokens")
+    .arg(d.join("gateway-tokens"))
+    .env_remove(URL_ENV)
+    .env_remove("SOULS_BACKUP_KEY_FILE")
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
     for (k, v) in env {
         c.env(k, v);
     }
@@ -46,7 +52,11 @@ fn start(dir: &Path, env: &[(&str, &Path)]) -> (Child, String) {
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut line)
         .unwrap();
-    let addr = line.trim().strip_prefix("listening on ").expect("listening").to_owned();
+    let addr = line
+        .trim()
+        .strip_prefix("listening on ")
+        .expect("listening")
+        .to_owned();
     (child, addr)
 }
 
@@ -54,7 +64,12 @@ fn stop(mut child: Child) -> String {
     child.kill().unwrap();
     child.wait().unwrap();
     let mut log = String::new();
-    child.stderr.take().unwrap().read_to_string(&mut log).unwrap();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut log)
+        .unwrap();
     log
 }
 
@@ -80,7 +95,10 @@ fn a3_no_bucket_starts_as_before_and_says_so_once() {
     let a = sign_in(&addr, "Ada");
     let log = stop(child);
     println!("A3: directoryd's log:\n{log}");
-    assert!(a["account"].as_str().unwrap().starts_with("acct_"), "it signs in as before");
+    assert!(
+        a["account"].as_str().unwrap().starts_with("acct_"),
+        "it signs in as before"
+    );
     assert_eq!(log.matches("backup: no bucket").count(), 1, "{log}");
     assert!(!log.contains("backup: not shipped"), "{log}");
 }
@@ -126,7 +144,10 @@ fn a2_directoryd_ships_its_stores_and_the_copies_read_back() {
         std::thread::sleep(Duration::from_millis(200));
     };
     let log = stop(child);
-    println!("A2: directoryd's log:\n{log}\nA2: keys {:?}", folder.keys("store/"));
+    println!(
+        "A2: directoryd's log:\n{log}\nA2: keys {:?}",
+        folder.keys("store/")
+    );
     assert!(found, "Ada signs in as {account} from the restored copy");
     assert_eq!(log.matches("backup: shipping").count(), 1, "{log}");
     assert!(!log.contains("backup: not shipped"), "{log}");

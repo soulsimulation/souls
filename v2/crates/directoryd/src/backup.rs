@@ -495,7 +495,11 @@ impl<S: Store> Shipper<S> {
                 continue;
             }
             let local = Entry {
-                path: e.path.strip_prefix(&self.strip).unwrap_or(&e.path).to_owned(),
+                path: e
+                    .path
+                    .strip_prefix(&self.strip)
+                    .unwrap_or(&e.path)
+                    .to_owned(),
                 ..e.clone()
             };
             let Some(files) = copy(&self.root, &local, &self.hooks, &self.staging)? else {
