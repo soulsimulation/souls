@@ -44,6 +44,11 @@
 //     {"op":"event","event":{...}}                    an event as R9's matcher takes it, until frames carry them
 //     {"op":"pending"}                                R20's (#3328) check for a scheduler: `due` when a message is
 //                                                     open or wakes can be handed now; it sends and takes nothing
+//   and E26's (#3329), conversations (`../converse/converse.mjs`): an invitation to this Soul, or a decline or lapse of
+//   its own offer, is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`:
+//     {"op":"converse","do":"start","with":"<body id>","words":"..","private":bool}   the offer and the opening line
+//     {"op":"converse","do":"accept|decline|leave","conversation":"<id>"} | {"do":"say",...,"words":"..","private":bool}
+//     {"op":"converse","do":"list"}       the conversations in the copy
 //   and R16's (#2817), from the world's public history (`history` in its config) and the Soul's memory, the copy as
 //   it is (naming only), so it ends with `at` and not `changed`:
 //     {"op":"history","at":"<place>"} | {"thing":"<id>"} | {"soul":"<id or name>"}, "since"/"until": world µs
@@ -94,6 +99,7 @@ import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { feederFor } from '../memory/feeder.mjs';
+import { KIND_PLAIN, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
@@ -443,6 +449,8 @@ function onEntry(e) {
   const actor = e.actor === ME ? soul : e.actor;
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
+  // E26: an invitation to a conversation, or the answer to this Soul's own, wakes a `wait`.
+  for (const ev of events) { const n = offerNote(ev, ME); if (n) note({ ...n, sequence: e.sequence }); }
   if (events.length) remember([{ sequence: e.sequence, at: e.at, actor, events }]);
 }
 
@@ -492,7 +500,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'stop']);
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
@@ -548,10 +556,11 @@ function actsOf(words) {
 }
 
 /** Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in). */
-function sendIntent(ranked, { target, words, args, basis, expiry }) {
+function sendIntent(ranked, { target, words, args, params, basis, expiry }) {
   state.sequence++;
   const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
-    basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args);
+    basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
+    params ? JSON.stringify(params) : undefined);
   save();
   const sequence = state.sequence, sent = signedIn;
   if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
@@ -653,6 +662,7 @@ async function answer(req) {
       const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
     }
+    case 'converse': return converse(req);
     case 'history': return historyAnswer(req);
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
@@ -669,6 +679,28 @@ async function answer(req) {
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
+}
+
+/**
+ * E26 (#3329): a conversation's intents (`../converse/converse.mjs`), each sent once as `act`'s are, in order; their
+ * answers arrive as events. `list` names the conversations in the copy and those this Soul made private.
+ */
+function converse(req) {
+  state.conversations ??= {};
+  if (req.do === 'list') {
+    return closing({ ok: true }, (rows) => ({
+      conversations: [...rows.values()].filter((r) => r.kind === KIND_PLAIN)
+        .map((r) => ({ id: r.id, ...(state.conversations[r.id]?.private ? { private: true } : {}) })),
+    }));
+  }
+  const place = rowsOf(copy).get(ME)?.parent ?? null;
+  const intents = converseIntents(req, { ns: NS, place, privateOf: (id) => Boolean(state.conversations[id]?.private) });
+  if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
+  if (req.private && req.conversation) state.conversations[req.conversation] = { private: true };
+  if (req.do === 'leave') delete state.conversations[req.conversation];
+  const basis = shownVersion ?? state.cursor;
+  const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, words: i.words, params: i.params, basis }) }));
+  return closing({ ok: true, sent, basis: sequenceOf(basis) }, null, { now: true });
 }
 
 /**
