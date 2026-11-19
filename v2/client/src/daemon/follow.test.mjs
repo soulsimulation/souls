@@ -27,6 +27,7 @@ const WORLDD = process.env.WORLDD ?? join(v2, 'target/debug/worldd');
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const CLI = join(here, '../cli/souls.mjs');
 const SECONDS = Number(process.env.R9B_SECONDS ?? 15);
+const PACE_MS = 250; // between A1's acts: a scripted pace, about four acts a second
 // `worldd gateway-link`'s world mints from scope 2b: the place, the room, then each body and its lamp.
 const WORLD_SCOPE = '2b'.repeat(16);
 const body = (k) => `${WORLD_SCOPE}-${2 + 2 * k}`;
@@ -89,21 +90,29 @@ async function soulOn(k) {
   let signed, sequence = 0;
   const signedIn = new Promise((ok) => { signed = ok; });
   ws.onopen = () => ws.send(wire.wireHello());
-  let step = 'hello';
+  let step = 'hello', closed = null;
+  const seen = []; // the last frames, for a failure's message
   ws.onmessage = (m) => {
     const bytes = new Uint8Array(m.data);
     if (step === 'hello') { wire.wireWorldBuild(bytes); ws.send(wire.wireSignIn(tokens[k], new Uint8Array(), undefined)); step = 'outcome'; return; }
-    const [kind, a, , c, d] = wire.wireFrame(bytes).split(' ');
+    const line = wire.wireFrame(bytes);
+    seen.push(line);
+    if (seen.length > 10) seen.shift();
+    const [kind, a, , c, d] = line.split(' ');
     if (kind === 'outcome') { step = 'stream'; signed(a); return; }
     if (kind === 'answer') { waiting.get(Number(a))?.({ answer: Number(c), reason: d }); waiting.delete(Number(a)); }
   };
+  ws.onclose = (e) => { closed = e.code; };
   await signedIn;
   const scope = new Uint8Array(Buffer.from(WORLD_SCOPE, 'hex'));
   return {
     act(verb, words) {
-      sequence++;
-      ws.send(wire.wireIntent(scope, BigInt(2 + 2 * k), verb, BigInt(sequence), new Uint8Array(), BigInt(Number.MAX_SAFE_INTEGER), '', words, undefined));
-      return new Promise((ok) => waiting.set(sequence, ok));
+      const s = ++sequence;
+      ws.send(wire.wireIntent(scope, BigInt(2 + 2 * k), verb, BigInt(s), new Uint8Array(), BigInt(Number.MAX_SAFE_INTEGER), '', words, undefined));
+      return new Promise((ok, fail) => {
+        const t = setTimeout(() => fail(new Error(`no answer to ${s} (closed ${closed}): ${seen.join(' | ')}`)), 10_000);
+        waiting.set(s, (a) => { clearTimeout(t); ok(a); });
+      });
     },
     close: () => ws.close(),
   };
@@ -166,6 +175,7 @@ test('R9b A1: B applies the entries of the Souls near it; its copy is the world 
     await waitFor(() => placeHash() !== was, 5000);
     await waitFor(current, 5000);
     most = Math.max(most, performance.now() - t);
+    await sleep(PACE_MS);
   }
   const s = await waitFor(current);
   assert.ok(s.entries >= acts, `entries ${s.entries} of ${acts} acts`);
