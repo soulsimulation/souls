@@ -11,6 +11,8 @@
 //! - [`receipts`]: one line per answered intent in the world's receipts file, for the operator's usage roll-up.
 //! - [`views`]: a signed-in socket subscribes to R4's view items for its scope (#3292), on a second local socket to
 //!   the world; its frames are keys 30 to 32.
+//! - Stopping (O16, #2809): on SIGTERM the gateway stops accepting, closes each signed-in socket with 1012 (Service
+//!   Restart) and exits; it keeps nothing a new one does not rebuild (`v2/docs/runbook/gateway-upgrade.md`).
 //!
 //! Frames after the first, as CBOR in T0's profile (`v2/docs/encoding.md`):
 //!
@@ -72,8 +74,14 @@ pub struct Gateway {
     pub log: Log,
     /// The receipts file's writer (`--receipts`), or off.
     pub receipts: Receipts,
+    /// Set once when the gateway stops: every signed-in socket closes with [`RESTART`].
+    pub closing: tokio::sync::watch::Sender<bool>,
     hub: Mutex<Hub>,
 }
+
+/// The close code a socket gets when the gateway stops for an upgrade: 1012, Service Restart. The client reconnects
+/// after a random wait, resumes by cursor and sends again every intent it has no answer for.
+pub const RESTART: u16 = 1012;
 
 #[derive(Default)]
 struct Hub {
@@ -118,6 +126,7 @@ impl Gateway {
             views: views::Views::default(),
             log,
             receipts,
+            closing: tokio::sync::watch::channel(false).0,
             hub: Mutex::new(Hub::default()),
         })
     }
