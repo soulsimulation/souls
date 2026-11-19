@@ -77,9 +77,11 @@ impl Planner {
             out.searched += 1;
             out.lines.insert(body.id, (*to, self.town.line(body, *to)));
         }
-        for (body, at, place, [s, stand]) in &w.reach {
-            out.reach
-                .insert((*body, *place), [reach(*at, *s), reach(*at, *stand)]);
+        for q in &w.reach {
+            out.reach.insert(
+                (q.body, q.thing, q.slot, q.order),
+                [reach(q.at, q.points[0]), reach(q.at, q.points[1])],
+            );
         }
         out
     }

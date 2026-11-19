@@ -142,3 +142,36 @@ fn timing_the_clock_tick_with_and_without_the_planner() {
         pct(&mut off, 99),
     );
 }
+
+#[test]
+fn reach_answers_keep_exact_slot_and_order_identity_off_clock() {
+    use sim::host::{ReachQuestion, Wants};
+    let mut planner = Thread::spawn(Planner::new(town())).unwrap();
+    sim::commit::mark_clock_thread();
+    let (body, thing, old, current) = (id(50_001), id(50_002), id(50_003), id(50_004));
+    let q = |slot, order, x| ReachQuestion {
+        body,
+        thing,
+        slot,
+        order,
+        at: Vec3::ZERO,
+        points: [Vec3::new(x, 0, 0); 2],
+    };
+    planner.send(Wants {
+        reach: vec![
+            q(1, old, 0),
+            q(1, current, 3_000_000),
+            q(2, current, 5_000_000),
+        ],
+        ..Wants::default()
+    });
+    let got = planner.take(None);
+    assert_eq!(
+        got.reach.len(),
+        3,
+        "neither a different slot nor a replacement order overwrites another answer"
+    );
+    assert_eq!(got.reach[&(body, thing, 1, old)], [0, 0]);
+    assert_eq!(got.reach[&(body, thing, 1, current)], [3_000_000; 2]);
+    assert_eq!(got.reach[&(body, thing, 2, current)], [5_000_000; 2]);
+}

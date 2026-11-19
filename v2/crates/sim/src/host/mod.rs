@@ -626,6 +626,20 @@ fn route_value(count: u64, legs: &[Leg]) -> Value {
     Value::Array(vec![Value::Uint(count), Value::Array(legs)])
 }
 
+/// One exact slot's reach question, tied to the pending move's order so an older answer cannot serve a new move.
+#[derive(Clone, Debug)]
+pub struct ReachQuestion {
+    pub body: Id,
+    pub at: Vec3,
+    pub thing: Id,
+    pub slot: u64,
+    pub order: Id,
+    pub points: [Vec3; 2],
+}
+
+/// Body, fixture, exact slot, and move order.
+pub type ReachKey = (Id, Id, u64, Id);
+
 /// What a tick asks the world's planner (K18b, #3175), read as of the tick's start, for the planner to answer
 /// before the next tick: the route searches the clock does not run.
 #[derive(Clone, Debug, Default)]
@@ -639,8 +653,8 @@ pub struct Wants {
     /// The walkers that need a new line and whose straight way to the leg's end was not clear: the body as it stood
     /// and the leg's end.
     pub lines: Vec<(Moved, Vec3)>,
-    /// Reach questions (B2, B3) for the world's own use: a body, its point, a seat, and the seat's two points.
-    pub reach: Vec<(Id, Vec3, Id, [Vec3; 2])>,
+    /// Reach questions (B2, B3), retaining exact slot and pending move identity.
+    pub reach: Vec<ReachQuestion>,
 }
 
 /// A walk's place and legs, or a refusal's name.
@@ -657,8 +671,8 @@ pub struct Planned {
     /// Each walker's line (#3167's, found by the planning call `View::search`) toward the leg's end it asked for, or
     /// the search's refusal.
     pub lines: Found,
-    /// Straight distances, µm, from a body's point to a seat's seat and stand points, by body and seat.
-    pub reach: BTreeMap<(Id, Id), [i64; 2]>,
+    /// Straight distances, µm, for exactly the body, fixture, slot and move order asked.
+    pub reach: BTreeMap<ReachKey, [i64; 2]>,
     /// Route searches run for these answers (legs and lines).
     pub searched: u64,
 }

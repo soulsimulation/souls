@@ -482,8 +482,13 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
 
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
 /// where the log last had it. The planner keeps its own town and all declared seats are registered.
-fn bodies(town: Town, planner: Town, ground: Id, placed: &Placed, places: Vec<PlaceAt>) -> Result<Bodies, Refusal> {
-
+fn bodies(
+    town: Town,
+    planner: Town,
+    ground: Id,
+    placed: &Placed,
+    places: Vec<PlaceAt>,
+) -> Result<Bodies, Refusal> {
     let family = humanoid().map_err(|e| Refusal {
         name: "family",
         detail: e,
@@ -878,7 +883,6 @@ fn serve(args: &[String]) -> R<()> {
     });
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
         bodies(town, planner, ground, placed, places.clone())
-
     }));
     let empty = Replica::start(built.header.stored()).map_err(refusal)?;
     let world = answers::start(empty.frozen(), rules, store, cfg).map_err(refusal)?;

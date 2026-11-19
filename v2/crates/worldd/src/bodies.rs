@@ -57,7 +57,7 @@ use sim::commit::bind::{Bound, Slot, bind};
 use sim::commit::spot;
 use sim::controller::Stance;
 use sim::host::Runner;
-use sim::host::{Planned, Wants};
+use sim::host::{Planned, ReachKey, ReachQuestion, Wants};
 use sim::life::{Born, Life, Retired, Standing};
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
@@ -128,27 +128,28 @@ enum Live {
     Place(Instance),
 }
 
-/// The reach distances the planner found (K18b): by body and place, µm to the place's slot and stand points. The clock
-/// reads them and computes none.
-struct Reached<'a>(&'a BTreeMap<(Id, Id), [i64; 2]>);
-
+/// Only the exact slot and pending move's planner answer may supply a reach check.
+struct Reached<'a> {
+    cache: &'a BTreeMap<ReachKey, [i64; 2]>,
+    order: Option<Id>,
+    slot: Option<u64>,
+}
 
 impl Reach for Reached<'_> {
     fn distance(
         &self,
         body: Id,
-        _: &Effector,
-        _: Option<&Name>,
+        _effector: &Effector,
+        _part: Option<&Name>,
         target: Id,
         point: &Name,
     ) -> Option<i64> {
-        let [place, stand] = self.0.get(&(body, target))?;
+        let [place, stand] = self.cache.get(&(body, target, self.slot?, self.order?))?;
         match point.as_str() {
             "souls:slot" => Some(*place),
             "souls:stand" => Some(*stand),
             _ => None,
         }
-
     }
 }
 
@@ -195,7 +196,7 @@ pub struct Bodies {
     /// The planner's answers for the next tick.
     planned: Planned,
     /// The reach distances last found, by body and seat.
-    reached: BTreeMap<(Id, Id), [i64; 2]>,
+    reached: BTreeMap<ReachKey, [i64; 2]>,
     /// Sits and rises waiting for their reach, in the order asked.
     waiting: Vec<Waiting>,
     /// Every body's interest set (B11, R4), kept as the bodies move.
@@ -406,24 +407,36 @@ impl Bodies {
         self.runner.now = now;
     }
 
-    /// The reach questions for the planner: each body's point (its feet, or its seat's point while it is in one) and
-    /// its seat's seat and stand points, µm, as the bodies stand now.
-    fn reach_of(&self, pairs: Vec<(Id, Id)>) -> Vec<(Id, Vec3, Id, [Vec3; 2])> {
-
+    /// Ask each candidate slot with its own identity. Both contacts use the stand point across x/z (C17/C19),
+    /// never seat height or another slot's geometry. Availability remains authoritative at commit.
+    fn reach_of(&self, pairs: Vec<(Id, Id, Id)>) -> Vec<ReachQuestion> {
         let c = &self.runner.controller;
-        pairs
-            .into_iter()
-            .filter_map(|(b, t)| {
-                let p = c.body(b)?.pose;
-                let at = match (p.support, self.slots.held_by(b)) {
-                    (Support::Slot, Some(h)) => self.slots.place(h)?.point,
-                    _ => p.position,
-                };
-                let s = self.slots.place(t)?;
-                Some((b, at, t, [s.point, s.stand().ok()?]))
-            })
-            .collect()
-
+        let mut questions = Vec::new();
+        for (body, thing, order) in pairs {
+            let Some(p) = c.body(body).map(|b| b.pose) else {
+                continue;
+            };
+            let at = match (p.support, self.slots.held_place(body)) {
+                (Support::Slot, Some(s)) => match s.stand() {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                },
+                _ => p.position,
+            };
+            for s in self.slots.places_of(thing) {
+                let Ok(stand) = s.stand() else { continue };
+                let stand = Vec3::new(stand.x, 0, stand.z);
+                questions.push(ReachQuestion {
+                    body,
+                    at: Vec3::new(at.x, 0, at.z),
+                    thing,
+                    slot: s.place.slot,
+                    order,
+                    points: [stand, stand],
+                });
+            }
+        }
+        questions
     }
 
     /// Route searches the planner ran so far, off the clock (K18b).
@@ -441,7 +454,7 @@ impl Bodies {
     /// batch out, waiting at most [`Bodies::wait`] for each; a shortfall is kept for the recorder.
     fn take(&mut self) {
         let at = self.runner.now;
-        let p = match self.schedule.remove(&at) {
+        let mut p = match self.schedule.remove(&at) {
             Some(n) => self
                 .planner
                 .take_n(usize::try_from(n).unwrap_or(usize::MAX)),
@@ -455,6 +468,20 @@ impl Bodies {
                 p
             }
         };
+        // A replaced move's in-flight answer cannot be used by a newer order on the same body/fixture/slot.
+        p.reach.retain(|(body, thing, slot, order), _| {
+            self.waiting
+                .iter()
+                .any(|w| w.body == *body && w.place == Some(*thing) && w.id == *order)
+                || (self
+                    .live
+                    .get(body)
+                    .is_some_and(|(id, l)| id == order && matches!(l, Live::Place(_)))
+                    && self
+                        .slots
+                        .held_place(*body)
+                        .is_some_and(|p| p.thing == *thing && p.place.slot == *slot))
+        });
         self.reached.extend(p.reach.iter().map(|(k, v)| (*k, *v)));
         self.planned.merge(p);
     }
@@ -627,13 +654,12 @@ impl Bodies {
         // The asks waiting from earlier ticks whose reach is back are committed; the new asks' reach goes to the
         // planner, for a later tick.
         out.extend(self.commit_waiting());
-        let pairs: Vec<(Id, Id)> = asked
+        let pairs: Vec<(Id, Id, Id)> = asked
             .iter()
-            .filter_map(|w| Some((w.body, w.place?)))
+            .filter_map(|w| Some((w.body, w.place?, w.id)))
             .collect();
-        for (b, t) in &pairs {
-            self.reached.remove(&(*b, *t));
-        }
+        self.reached
+            .retain(|(body, _, _, _), _| !asked.iter().any(|w| w.body == *body));
         if !pairs.is_empty() {
             let reach = self.reach_of(pairs);
             self.planner.send(Wants {
@@ -655,8 +681,11 @@ impl Bodies {
             // Ready: its reach is back, or there is none to ask (no such seat or body: B3 refuses it by name).
             .partition(|w| {
                 w.place.is_none_or(|t| {
-                    self.reached.contains_key(&(w.body, t))
-                        || self.reach_of(vec![(w.body, t)]).is_empty()
+                    self.slots
+                        .places_of(t)
+                        .filter(|p| p.stand().is_ok())
+                        .all(|p| self.reached.contains_key(&(w.body, t, p.place.slot, w.id)))
+                        || self.reach_of(vec![(w.body, t, w.id)]).is_empty()
                 })
             });
         self.waiting = still;
@@ -666,48 +695,57 @@ impl Bodies {
                 sits.push((w.id, w.body, thing, stance));
                 continue;
             }
+            let reach = Reached {
+                cache: &self.reached,
+                order: Some(w.id),
+                slot: self.slots.held_place(w.body).map(|p| p.place.slot),
+            };
             let r = self.slots.rise(
                 &mut self.runner.controller,
                 &mut self.due,
                 &mut self.mint,
                 &mut self.moves,
-                &Reached(&self.reached),
+                &reach,
                 w.body,
                 &self.rise,
                 now,
             );
             out.push((w.id, self.started(w.id, w.body, r)));
         }
-        if !sits.is_empty() {
-            let requests: Vec<Request> = sits
-                .iter()
-                .map(|&(_, body, thing, stance)| Request {
-                    body,
-                    thing,
-                    mv: if stance == Stance::Lie {
-                        &self.lie
-                    } else {
-                        &self.sit
-                    },
-                    stance,
-                })
-                .collect();
-            let done = self.slots.commit(
-                &mut self.runner.controller,
-                &mut self.due,
-                &mut self.mint,
-                &mut self.moves,
-                &Reached(&self.reached),
-                &requests,
-                now,
-            );
-            // Sits and lies, taken in B3's stable order, and each matched back to its intent by its body.
-            for (body, r) in done {
-                if let Some(&(id, ..)) = sits.iter().find(|s| s.1 == body) {
-                    out.push((id, self.started(id, body, r)));
-                }
-            }
-
+        // Preserve C19's stable request order and nearest currently free slot; each distance is keyed to that slot.
+        sits.sort_by_key(|s| (s.1, s.2));
+        for (id, body, thing, stance) in sits {
+            let slot = self.slots.free(&self.runner.controller, body, thing);
+            let reach = Reached {
+                cache: &self.reached,
+                order: Some(id),
+                slot,
+            };
+            let request = Request {
+                body,
+                thing,
+                slot,
+                mv: if stance == Stance::Lie {
+                    &self.lie
+                } else {
+                    &self.sit
+                },
+                stance,
+            };
+            let r = self
+                .slots
+                .commit(
+                    &mut self.runner.controller,
+                    &mut self.due,
+                    &mut self.mint,
+                    &mut self.moves,
+                    &reach,
+                    &[request],
+                    now,
+                )
+                .pop()
+                .map_or_else(|| Err(refusal("place-unknown", thing)), |(_, r)| r);
+            out.push((id, self.started(id, body, r)));
         }
         out
     }
@@ -729,13 +767,17 @@ impl Bodies {
             // host and the controller.
             let at = self.runner.now;
             while let Some(t) = self.due.fire(at + 1) {
-
+                let reach = Reached {
+                    cache: &self.reached,
+                    order: self.live.get(&t.node).map(|(id, _)| *id),
+                    slot: self.slots.held_place(t.node).map(|p| p.place.slot),
+                };
                 let fired = self.slots.fire(
                     &mut self.runner.controller,
                     &mut self.due,
                     &mut self.mint,
                     &mut self.moves,
-                    &Reached(&self.reached),
+                    &reach,
                     &self.town.surfaces,
                     &t,
                 );
@@ -761,11 +803,11 @@ impl Bodies {
             let planned = std::mem::take(&mut self.planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
-            let seated: Vec<(Id, Id)> = self
+            let seated: Vec<(Id, Id, Id)> = self
                 .live
                 .iter()
                 .filter(|(_, (_, l))| matches!(l, Live::Place(_)))
-                .filter_map(|(b, _)| Some((*b, self.slots.held_by(*b)?)))
+                .filter_map(|(b, (id, _))| Some((*b, self.slots.held_by(*b)?, *id)))
                 .collect();
             wants.reach = self.reach_of(seated);
             self.planner.send(wants);
