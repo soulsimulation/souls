@@ -13,6 +13,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeGuide } from '../home/guide.mjs';
 import { CREDENTIALS, Refused, findHome } from '../home/home.mjs';
 
 const SLOW_DOWN = 5;
@@ -74,7 +75,10 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     const creds = existsSync(credFile) ? readJson(credFile) : {};
     creds.souls = { ...creds.souls, [id]: { ...creds.souls?.[id], [world]: { token: got.token } } };
     writePrivate(credFile, creds);
-    return { soul: id, grant: got.grant };
+    // R19: the folder's guide names who lives here now. The Soul is paired whether or not the guide could be written.
+    let guide;
+    try { guide = writeGuide(home); } catch (e) { guide = { failed: String(e.message ?? e).slice(0, 120) }; }
+    return { soul: id, grant: got.grant, guide };
   }
 }
 
