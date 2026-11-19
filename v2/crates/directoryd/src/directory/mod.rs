@@ -20,6 +20,7 @@
 
 pub mod folder;
 pub mod s3;
+pub mod stand_in;
 pub mod store;
 
 use std::collections::BTreeMap;

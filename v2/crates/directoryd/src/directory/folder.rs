@@ -115,4 +115,9 @@ impl Store for Folder {
             Err(e) => refuse("store-error", format!("{key}: {e}")),
         }
     }
+
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        self.reach()?;
+        Ok(self.keys(prefix))
+    }
 }

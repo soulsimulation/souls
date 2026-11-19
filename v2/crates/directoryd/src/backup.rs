@@ -554,6 +554,13 @@ impl Store for Bucket {
             Bucket::Folder(f) => f.put(key, bytes, when),
         }
     }
+
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        match self {
+            Bucket::S3(s) => s.list(prefix),
+            Bucket::Folder(f) => f.list(prefix),
+        }
+    }
 }
 
 impl Bucket {
@@ -567,46 +574,27 @@ impl Bucket {
         }))
     }
 
-    /// `folder:<path>`, or the offsite URL's form `[s3:]http(s)://<host>/<bucket>[/<prefix>]` with the keys from
-    /// `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` and the region from `AWS_DEFAULT_REGION` (default `auto`, R2's).
-    /// A refusal never repeats the URL: its host is a machine's address.
-    pub fn parse(url: &str, var: impl Fn(&str) -> String) -> R<Bucket> {
-        if let Some(p) = url.strip_prefix("folder:") {
-            return Ok(Bucket::Folder(Folder::new(PathBuf::from(p))));
-        }
-        let form = || {
-            refuse(
-                "backup-settings",
-                format!("{URL_ENV} is s3:https://<host>/<bucket>[/<prefix>] or folder:<path>"),
-            )
-        };
-        let u = url.strip_prefix("s3:").unwrap_or(url);
-        let Some((scheme, rest)) = u.split_once("://") else {
-            return form();
-        };
-        let mut parts = rest.splitn(3, '/');
-        let (Some(host), Some(bucket)) = (parts.next(), parts.next()) else {
-            return form();
-        };
-        let prefix = match parts.next().map(|p| p.trim_matches('/')) {
-            Some(p) if !p.is_empty() => format!("{p}/"),
-            _ => String::new(),
-        };
-        let region = Some(var("AWS_DEFAULT_REGION"))
-            .filter(|r| !r.is_empty())
-            .unwrap_or_else(|| "auto".to_owned());
-        S3::new(
-            &format!("{scheme}://{host}"),
-            bucket,
-            &region,
-            &var("AWS_ACCESS_KEY_ID"),
-            &var("AWS_SECRET_ACCESS_KEY"),
-            &prefix,
-        )
-        .map(Bucket::S3)
+    /// [`Bucket::parse`] with the keys from the process environment (O3c's store setting, #3529).
+    pub fn from_spec(spec: &str) -> R<Bucket> {
+        Bucket::parse(spec, |k| std::env::var(k).unwrap_or_default())
     }
 
-    fn what(&self) -> &'static str {
+    /// `folder:<path>` (or a bare path), or the offsite URL's form `[s3:]http(s)://<host>/<bucket>[/<prefix>]`
+    /// ([`S3::from_url`]: the keys from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, the region from
+    /// `AWS_DEFAULT_REGION`, default `auto`, R2's). A refusal never repeats the URL: its host is a machine's address.
+    pub fn parse(spec: &str, var: impl Fn(&str) -> String) -> R<Bucket> {
+        let spec = spec.trim();
+        if let Some(p) = spec.strip_prefix("folder:") {
+            return Ok(Bucket::Folder(Folder::new(PathBuf::from(p))));
+        }
+        if spec.starts_with("s3:") || spec.contains("://") {
+            return S3::from_url(spec, var).map(Bucket::S3);
+        }
+        Ok(Bucket::Folder(Folder::new(PathBuf::from(spec))))
+    }
+
+    /// What kind of store this is, for a line a person reads; never its address or its keys.
+    pub fn what(&self) -> &'static str {
         match self {
             Bucket::S3(_) => "the offsite bucket",
             Bucket::Folder(_) => "a folder standing in for the offsite bucket",
