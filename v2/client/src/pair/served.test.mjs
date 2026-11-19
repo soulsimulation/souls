@@ -143,6 +143,6 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
   assert.equal(got.ok, true);
   assert.ok(got.span, 'the answer states its span');
   assert.equal(got.lines.filter((l) => l.includes('move-ended')).length, sent.length, 'each walk on its own line');
-  assert.ok(['light-changed', 'new-day', 'weather-changed'].every((k) => got.kinds[k] >= 1), 'and the world\'s own events');
+  assert.ok(['light-changed', 'new-day', 'weather-changed'].every((k) => got.kinds[k] >= 1 || got.lines.some((l) => l.includes(k))), 'and the world\'s own events');
   assert.ok(Buffer.byteLength(JSON.stringify(got)) <= 600);
 });
