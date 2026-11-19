@@ -375,7 +375,7 @@ pub fn counts_key(span: Span) -> String {
 /// bytes as it closes: an hour of [`SPLIT`] events or more when a later hour's event arrives; the day's object, its
 /// counts and the year's when a later day's does. [`Indexer::finish`] gives what is open. A quiet world so writes
 /// three objects a day.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Indexer {
     redactions: Redactions,
     hour: Option<EventIndex>,

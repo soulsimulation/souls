@@ -3,7 +3,7 @@
 //! form or a move.
 //!
 //! - **Bound once.** [`bind`] turns a form's steps into a closed list of [`Step`]s, all or none, before the run
-//!   starts: a step kind not built yet is refused by name (`step-not-built`), as is a point the kind does not declare
+//!   starts: a step kind not in the list is refused by name (`step-unknown`), as is a point the kind does not declare
 //!   (`point-unknown`). The node the form is done at may be a thing, a body or a kind of ground (E21): the runner only
 //!   reads its position.
 //! - **A cursor over the steps.** A step starts a walk (N7's walk skill, [`crate::route::Route`]) or a move (B2's,
@@ -69,6 +69,18 @@
 //!   A `walk_to` asks the world for its legs ([`Host::legs`]): the point carried onto the floor a body stands on and
 //!   the route there across doors and stairs; before a sit, to a place within [`SIT_REACH`] of the stand point.
 //!
+//! - **Every step shape** (C25, #3496). A form with no steps lands its effects at once and ends `done`. A `walk_to`
+//!   may name a thing or part argument as its point ([`bind_in`] takes the act's thing arguments too). A `rise` asks
+//!   the world to stand the body up ([`Next::Rise`]): out of its seat by B3's rise, the form's `reparent` of the actor
+//!   to `here` being its hand-off; from a ground posture; at once for a body already standing. A `settle` asks for a
+//!   ground posture where the body stands ([`Next::Settle`]). A `use_held` is a hand step on the thing the body holds,
+//!   ended `not-held` when it holds none.
+//! - **Every effect content uses** (C24, #3495). A `timer` starts a form of the node later ([`Effect::Timer`]); a
+//!   `set` with a `rate` writes a timed field's three numbers ([`Effect::Timed`]); a link has its kind's `most`; a
+//!   set's value is checked against its field (`out-of-range`, `not-allowed`) and an enum's value is written as a
+//!   name in the kind's namespace; a `reparent` no step carries is a take or a put of a thing, or the actor staying
+//!   `here` ([`Effect::Here`]). A body goes into a slot only by a `sit` or `lie` step (`body-moves-by-step`).
+//!
 //! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
 
 use std::collections::BTreeMap;
@@ -85,9 +97,8 @@ use replica::time::Micros;
 use crate::route::{Leg, Route};
 
 /// One step of a form, bound. The closed list is SA-F1's (`walk_to`, `sit`, `rise`, `move`, `take`, `put`,
-/// `use_held`, `wait`, `settle`); the kinds F1 builds are these, and F4's `take` and `put` are bound as a `move`
-/// (their transfer is an effect, [`Effect::Take`] and [`Effect::Put`]), or as a [`Step::Hand`] when they name no
-/// move. The rest are refused by name at bind.
+/// `use_held`, `wait`, `settle`), every one built (C25, #3496): F4's `take` and `put` are bound as a `move` (their
+/// transfer is an effect, [`Effect::Take`] and [`Effect::Put`]), or as a [`Step::Hand`] when they name no move.
 ///
 /// Where a step aims (F14, #3384): a name the kind declares (a point, a slot's stand point or its place, or a placed
 /// area), the same through a name argument (`{"arg": ...}` of type `part`, `slot` or `field`), or a thing argument
@@ -113,6 +124,16 @@ pub enum Step {
     /// Sit, or lie, in slot `slot` of the node (C17): B3's seat taken by B2's sit or lie move, as the gateway's sit
     /// takes it. It lies when the slot's posture is `lie` or the step is a `lie`.
     Sit { slot: u64, lie: bool },
+    /// Rise (C25, #3496): out of the body's seat by B3's rise, onto its stand point; up from a ground posture a
+    /// `settle` took; nothing for a body already standing, as today's `stand` is. The form's `reparent` of the actor
+    /// to `here` is the rise's own hand-off.
+    Rise,
+    /// Settle (C25, SA-G3): a ground posture, sitting or lying, taken where the body stands, with no slot. It holds
+    /// until a rise or the body's next walk.
+    Settle { lie: bool },
+    /// Use the thing the form is done at, held in the body's hand (C25): a hand step with no move of its own, at once;
+    /// `not-held` when the body does not hold it.
+    UseHeld,
 }
 
 /// How far from a point a walk to it may end, µm, when a body cannot stand on the point itself (C15, #3447): an arm
@@ -137,9 +158,6 @@ pub enum Arg {
 
 /// A form's arguments by name.
 pub type Args = BTreeMap<String, Arg>;
-
-/// The step kinds of SA-F1's closed list that later tasks build. A form that has one is refused `step-not-built`.
-pub const NOT_BUILT: [&str; 3] = ["rise", "use_held", "settle"];
 
 fn name(t: &str) -> Name {
     Name::new(t).unwrap_or_else(|| unreachable!("a fixed name"))
@@ -291,16 +309,13 @@ pub fn bind(entry: &Value, form: &str) -> Result<Vec<Step>, Refusal> {
 
 /// Binds form `form` of the kind `entry` into its steps, all or none, with its act's arguments `args` (F14): a step's
 /// point (`walk_to.point`, a move's `at`) is a declared name or an argument ([`Step`]); a move with no `at` aims at the
-/// node with the move's own contact. Refused: `form-unknown`, `form-has-no-steps`, `step-not-built` (with the step's
-/// kind), `step-unknown`, `step-malformed`, `point-unknown`, `arg-missing`.
+/// node with the move's own contact. A form with no steps binds to none: its effects land at once (C25, #3496).
+/// Refused: `form-unknown`, `step-unknown`, `step-malformed`, `point-unknown`, `arg-missing`.
 pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Refusal> {
     let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
         return refuse("form-unknown", form);
     };
     let steps = f.get("steps").and_then(Value::arr).unwrap_or(&[]);
-    if steps.is_empty() {
-        return refuse("form-has-no-steps", form);
-    }
     steps
         .iter()
         .map(|s| {
@@ -369,7 +384,13 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                     }
                     _ => refuse("step-malformed", "wait.us: whole microseconds above zero"),
                 },
-                k if NOT_BUILT.contains(&k) => refuse("step-not-built", k),
+                "rise" => Ok(Step::Rise),
+                "settle" => match s.get("posture").and_then(Value::str) {
+                    Some("sit") => Ok(Step::Settle { lie: false }),
+                    Some("lie") => Ok(Step::Settle { lie: true }),
+                    _ => refuse("step-malformed", "settle.posture: sit or lie"),
+                },
+                "use_held" => Ok(Step::UseHeld),
                 k => refuse("step-unknown", k),
             }
         })
@@ -421,11 +442,31 @@ pub enum Effect {
     /// A `put` step's transfer (B4's, at its contact): `what`, held by the body, into slot `slot` of the node.
     Put { what: Of, slot: u64 },
     /// A link of type `ty` (the tree's, `replica::audience::link_type`) from the actor to the node, owned by the node
-    /// and seen by everyone (F15): its end the actor's Soul when `soul`, else its body.
-    Link { ty: Name, soul: bool },
+    /// and seen by everyone (F15): its end the actor's Soul when `soul`, else its body. At most `most` of that type
+    /// on the node (the kind's `most`, C24).
+    Link {
+        ty: Name,
+        soul: bool,
+        most: Option<u64>,
+    },
     /// The node's own links of type `ty` taken down (F15): the actor's (its Soul's when `soul`, else its body's), or
     /// every one when `all`.
     Unlink { ty: Name, soul: bool, all: bool },
+    /// Form `form` (`namespace:form`) of the node, started by the world `after` µs from the effect's instant (C24); it
+    /// replaces that form's timer pending on the node.
+    Timer { form: Name, after: Micros },
+    /// A timed field (F5's three numbers) settled to the effect's instant and given rate `per_s`, from value `to`
+    /// when given (C24).
+    Timed {
+        field: u64,
+        to: Option<i64>,
+        per_s: i64,
+        default: replica::timed::Timed,
+        bounds: replica::timed::Bounds,
+    },
+    /// The actor stays where it is (a `reparent` of the actor `here` no step carries, C24): nothing moves, and a body
+    /// in a slot of the node is refused `body-seated`.
+    Here,
 }
 
 /// A thing an effect names: the node the form is done at, or a thing argument, bound to its id.
@@ -501,30 +542,55 @@ fn set_field<'a>(e: &'a Value, args: &'a Args) -> Result<&'a str, Refusal> {
     }
 }
 
-/// The value a `set` writes to field `field` (F14), as the entry format allows it: a whole number or a flag, a value
-/// of an `enum` field (a name, refused `value-unknown` when the field does not list it), no words (`null`, `{}`) for a
-/// `text` field, and through an argument the same, a thing's id or words' reference (`{21: id}`, K16) for a `text`
-/// field. Refused `effect-malformed` otherwise.
+/// The namespace of the kind `entry` names (`eden` for `eden:bed`).
+fn namespace(entry: &Value) -> &str {
+    entry
+        .get("kind")
+        .and_then(Value::str)
+        .and_then(|k| k.split_once(':'))
+        .map_or("souls", |(ns, _)| ns)
+}
+
+/// The value a `set` writes to field `field` (F14), as the entry format allows it: a whole number (refused
+/// `out-of-range` outside the field's `min` and `max`, C24) or a flag, a value of an `enum` field (refused
+/// `not-allowed` when the field does not list it, and written as a name in the kind's namespace, `eden:seed`: the
+/// log's only text is a name, C24), no words (`null`, `{}`) for a `text` field, and through an argument the same, a
+/// thing's id or words' reference (`{21: id}`, K16) for a `text` field. A name for a `text` field is `not-allowed`.
+/// Refused `effect-malformed` otherwise.
 fn set_to(entry: &Value, field: &str, to: &Value, args: &Args) -> Result<encode::Value, Refusal> {
     let def = entry.get("state").and_then(|s| s.get(field));
     let ty = def.and_then(|d| d.get("type")).and_then(Value::str);
     let named = |v: &str| {
+        let bare = v.split_once(':').map_or(v, |(_, b)| b);
         let listed = def
             .and_then(|d| d.get("values"))
             .and_then(Value::arr)
             .unwrap_or(&[])
             .iter()
-            .any(|x| x.str() == Some(v));
-        match (ty, listed, Name::new(v)) {
+            .any(|x| x.str() == Some(bare));
+        match (
+            ty,
+            listed,
+            Name::new(&format!("{}:{bare}", namespace(entry))),
+        ) {
             (Some("enum"), true, Some(n)) => Ok(encode::Value::Text(n)),
-            (Some("enum"), _, _) => refuse("value-unknown", format!("{field}: {v}")),
+            (Some("enum" | "text"), _, _) => refuse("not-allowed", format!("{field}: {v}")),
             _ => refuse("effect-malformed", format!("set.to: {field} takes no name")),
         }
     };
-    let int = |n: i128| match (u64::try_from(n), i64::try_from(n)) {
-        (Ok(u), _) => Ok(encode::Value::Uint(u)),
-        (_, Ok(i)) => Ok(encode::Value::Nint(i.unsigned_abs() - 1)),
-        _ => refuse("effect-malformed", "set.to: out of range"),
+    let bound = |k: &str| match def.and_then(|d| d.get(k)) {
+        Some(Value::Int(n)) => Some(*n),
+        _ => None,
+    };
+    let int = |n: i128| {
+        if bound("min").is_some_and(|m| n < m) || bound("max").is_some_and(|m| n > m) {
+            return refuse("out-of-range", format!("{field}: {n}"));
+        }
+        match (u64::try_from(n), i64::try_from(n)) {
+            (Ok(u), _) => Ok(encode::Value::Uint(u)),
+            (_, Ok(i)) => Ok(encode::Value::Nint(i.unsigned_abs() - 1)),
+            _ => refuse("effect-malformed", "set.to: out of range"),
+        }
     };
     match to {
         Value::Bool(b) => Ok(encode::Value::Uint(u64::from(*b))),
@@ -583,7 +649,7 @@ pub fn bind_effects_with(
 
 /// A form's arguments as an intent carries them (C12, #3427): things by id, and slots of the node by number, 1, 2, ...
 /// in the entry's order, each as the slot's name ([`Arg::Name`]). A number the kind has no slot for is `slot-unknown`.
-fn args_in(
+pub fn args_in(
     entry: &Value,
     things: &BTreeMap<String, Id>,
     slots: &BTreeMap<String, u64>,
@@ -607,14 +673,16 @@ fn args_in(
     Ok(args)
 }
 
-/// [`bind_with`], with the form's slot arguments by number (C12): a `walk_to` naming a slot argument walks to that
-/// slot's `stand` point, or to the slot itself when it names none.
+/// [`bind_with`], with the form's thing arguments by id and its slot arguments by number (C12): a `walk_to` naming a
+/// slot argument walks to that slot's `stand` point, or to the slot itself when it names none; one naming a thing
+/// argument walks to that thing (C25, #3496).
 pub fn bind_in(
     entry: &Value,
     form: &str,
+    things: &BTreeMap<String, Id>,
     slots: &BTreeMap<String, u64>,
 ) -> Result<Vec<Step>, Refusal> {
-    bind_with(entry, form, &args_in(entry, &BTreeMap::new(), slots)?)
+    bind_with(entry, form, &args_in(entry, things, slots)?)
 }
 
 /// [`bind_effects_args`], with the form's thing arguments by id and its slot arguments by number (C12).
@@ -631,14 +699,17 @@ pub fn bind_effects_in(
 /// transfer, in step order, then the form's `effects`: `set ... to` on the node (a field by name or through a field
 /// argument; the value as [`set_to`] reads it, F14), `transfer`, `create` into the actor's hand or a slot (`into`:
 /// `"actor_hand"` or a slot's name), `remove`, and `link` and `unlink` (`from`: `"actor"`, or `"all"` to unlink) of a
-/// link the kind declares (F15). Refused: `effect-not-built` for any other change (a `create` `here` is E4's, a link
-/// not seen by everyone T8's), `field-unknown`, `slot-unknown`, `link-unknown`, `arg-missing`, `value-unknown`,
-/// `effect-malformed` for a value the field cannot take, or an amount that is not a whole number above zero or
+/// link the kind declares (F15), a `timer` (a form of the node the world starts later, C24), a `set` with a `rate`
+/// ([`Effect::Timed`], C24) and a `reparent` no step carries (C24). Refused: `effect-not-built` for any other change
+/// (a `create` `here` is E4's, a link not seen by everyone T8's), `field-unknown`, `slot-unknown`, `link-unknown`,
+/// `form-unknown`, `arg-missing`, `out-of-range` and `not-allowed` for a value the field does not take,
+/// `effect-malformed` for a value that is no value at all, or an amount that is not a whole number above zero or
 /// `"room"`.
 /// A `put` names its slot, or a slot argument (`{"arg": a}`). A `take` or `put` with no `what` moves the thing the
 /// form's `reparent` effect into the same place names (the actor's hand, or that slot), else the node itself; that
-/// `reparent` is the step's transfer, bound once (C12, #3427). A `reparent` no take or put carries is
-/// `effect-not-built`.
+/// `reparent` is the step's transfer, bound once (C12, #3427). A `reparent` no take, put, sit or lie carries is bound
+/// alone (C24): a thing into the hand or a slot as a take or a put, the actor `here` as [`Effect::Here`]; the actor
+/// into a slot is refused `body-moves-by-step`.
 pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<Effect>, Refusal> {
     let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
         return refuse("form-unknown", form);
@@ -659,6 +730,15 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
         .filter_map(|s| s.get("slot").and_then(&reparent))
         .filter(|&i| effects[i].get("what").and_then(Value::str) == Some("actor"))
         .collect();
+    // So is a rise's (C25, #3496): the form's `reparent` of the actor to `here` is the body handed out of its seat.
+    if steps
+        .iter()
+        .any(|s| s.get("step").and_then(Value::str) == Some("rise"))
+        && let Some(i) = reparent(&Value::Str("here".into()))
+        && effects[i].get("what").and_then(Value::str) == Some("actor")
+    {
+        carried.push(i);
+    }
     let mut what = |s: &Value, into: &Value| match (s.get("what"), reparent(into)) {
         (Some(w), _) => of(Some(w), args),
         (None, Some(i)) => {
@@ -702,6 +782,7 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
         }
         let change = text(e.get("change"), "effect.change")?;
         out.push(match (change, e.get("to")) {
+            ("set", _) if e.get("rate").is_some() => timed(entry, e)?,
             ("set", Some(to)) => {
                 let name = set_field(e, args)?;
                 Effect::Set {
@@ -754,10 +835,116 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
                 what: of(e.get("what"), args)?,
             },
             ("link" | "unlink", _) => link(entry, change, e)?,
+            ("timer", _) => {
+                let form = text(e.get("form"), "timer.form")?;
+                let after = match e.get("after_us") {
+                    Some(Value::Int(n)) if *n > 0 => i64::try_from(*n).ok(),
+                    _ => None,
+                }
+                .ok_or_else(|| Refusal {
+                    name: "effect-malformed",
+                    detail: "timer.after_us: whole microseconds above zero".into(),
+                })?;
+                if entry.get("forms").and_then(|fs| fs.get(form)).is_none() {
+                    return refuse("form-unknown", form);
+                }
+                Effect::Timer {
+                    form: a_name(&format!("{}:{form}", namespace(entry)))?,
+                    after,
+                }
+            }
+            ("reparent", _) => reparent_alone(entry, e, args)?,
             (other, _) => return refuse("effect-not-built", other),
         });
     }
     Ok(out)
+}
+
+/// A `set` with a `rate` on a timed field (C24): F5's three numbers, settled at the effect's instant and given the
+/// rate, from `to` when given (`out-of-range` outside the field's `min` and `max`).
+fn timed(entry: &Value, e: &Value) -> Result<Effect, Refusal> {
+    let name = text(e.get("field"), "effect.field")?;
+    let def = entry.get("state").and_then(|s| s.get(name));
+    let int = |v: Option<&Value>| match v {
+        Some(Value::Int(n)) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let three = def.and_then(|d| d.get("default"));
+    let at = |k: &str| int(three.and_then(|t| t.get(k)));
+    let (Some(per_s), Some(value), Some(rate), Some(set_us)) =
+        (int(e.get("rate")), at("value"), at("per_s"), at("set_us"))
+    else {
+        return refuse(
+            "effect-malformed",
+            format!("set {name}: a timed field and a whole rate"),
+        );
+    };
+    let to = match e.get("to") {
+        None => None,
+        Some(v) => Some(int(Some(v)).ok_or_else(|| Refusal {
+            name: "effect-malformed",
+            detail: "set.to: a whole number".into(),
+        })?),
+    };
+    let bounds = replica::timed::Bounds {
+        min: int(def.and_then(|d| d.get("min"))),
+        max: int(def.and_then(|d| d.get("max"))),
+    };
+    if to.is_some_and(|t| bounds.min.is_some_and(|m| t < m) || bounds.max.is_some_and(|m| t > m)) {
+        return refuse("out-of-range", format!("{name}: {to:?}"));
+    }
+    Ok(Effect::Timed {
+        field: field_n(entry, name)?,
+        to,
+        per_s,
+        default: replica::timed::Timed {
+            value,
+            per_s: rate,
+            set_us,
+        },
+        bounds,
+    })
+}
+
+/// A `reparent` no step carries (C24): a thing into the actor's hand is a take, into a slot (by name or a slot
+/// argument) a put; the actor `here` stays ([`Effect::Here`]). A body goes into a slot only by a `sit` or `lie` step,
+/// never by an effect (`body-moves-by-step`), and a thing set down `here` is E4's (`no-slot-here`).
+fn reparent_alone(entry: &Value, e: &Value, args: &Args) -> Result<Effect, Refusal> {
+    let into = e.get("into").ok_or_else(|| Refusal {
+        name: "effect-malformed",
+        detail: "reparent.into: a place".into(),
+    })?;
+    let actor = e.get("what").and_then(Value::str) == Some("actor");
+    match (actor, into.str()) {
+        (true, Some("here")) => Ok(Effect::Here),
+        (true, _) => refuse(
+            "body-moves-by-step",
+            "a body goes into a slot by a sit or lie step, not by an effect",
+        ),
+        (false, Some("actor_hand")) => Ok(Effect::Take {
+            what: of(e.get("what"), args)?,
+        }),
+        (false, Some("here")) => refuse(
+            "no-slot-here",
+            "a thing set down where there is no slot (E4)",
+        ),
+        (false, _) => {
+            let slot = match into.get("arg").and_then(Value::str) {
+                Some(a) => match args.get(a) {
+                    Some(Arg::Name(n)) => slot_n(entry, n)?,
+                    Some(_) => {
+                        return refuse("effect-malformed", format!("argument {a} is not a slot"));
+                    }
+                    None => return refuse("arg-missing", a),
+                },
+                None => slot_n(entry, text(Some(into), "reparent.into")?)?,
+            };
+            Ok(Effect::Put {
+                what: of(e.get("what"), args)?,
+                slot,
+            })
+        }
+    }
 }
 
 /// A `link` or `unlink` effect `e` of the kind `entry` (F15): its link `link` read from the kind's `links`.
@@ -779,7 +966,14 @@ fn link(entry: &Value, change: &str, e: &Value) -> Result<Effect, Refusal> {
         ("link", Some("actor")) if rule != "everyone" => {
             refuse("effect-not-built", format!("a {t} link seen by {rule}"))
         }
-        ("link", Some("actor")) => Ok(Effect::Link { ty, soul }),
+        ("link", Some("actor")) => Ok(Effect::Link {
+            ty,
+            soul,
+            most: match def.get("most") {
+                Some(Value::Int(n)) => u64::try_from(*n).ok(),
+                _ => None,
+            },
+        }),
         ("unlink", Some(from @ ("actor" | "all"))) => Ok(Effect::Unlink {
             ty,
             soul,
@@ -1007,6 +1201,11 @@ pub enum Next {
     /// Take the seat in slot `slot` of `node` by B2's sit (or lie) move through B3's seats, as the gateway's sit
     /// does (C17), then wake the runner with [`Woke::Contact`] at the hand-off and [`Woke::Moved`] at its end.
     Sit { node: Id, slot: u64, lie: bool },
+    /// Rise (C25): out of the body's seat by B3's rise, or up from a ground posture, then wake the runner with
+    /// [`Woke::Moved`]; at once `done` for a body standing.
+    Rise,
+    /// Take a ground posture where the body stands (C25), then wake the runner with [`Woke::Moved`].
+    Settle { lie: bool },
     /// Nothing until the next wake.
     Sleep,
     /// The run is over, with its name. Whatever the run started and has not ended (a walk, a move, a timer) the world
@@ -1035,9 +1234,12 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(steps: Vec<Step>, node: Id, limits: Limits) -> Runner {
-        let hand = steps
-            .iter()
-            .position(|s| matches!(s, Step::Move { .. } | Step::Hand | Step::Sit { .. }));
+        let hand = steps.iter().position(|s| {
+            matches!(
+                s,
+                Step::Move { .. } | Step::Hand | Step::Sit { .. } | Step::UseHeld
+            )
+        });
         Runner {
             steps,
             node,
@@ -1158,6 +1360,25 @@ impl Runner {
                 self.timer = Some(host.set_timer(us, name("souls:form-wait")));
                 Next::Sleep
             }
+            Step::Rise | Step::Settle { .. } => {
+                self.timer =
+                    Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
+                match step {
+                    Step::Settle { lie } => Next::Settle { lie },
+                    _ => Next::Rise,
+                }
+            }
+            // The thing is in the body's hand: its parent in the tree is the body (B4's take).
+            Step::UseHeld => {
+                let body = host.body();
+                if host.read(self.node).and_then(|n| n.parent) != Some(body) {
+                    return self.end(host, name("not-held"));
+                }
+                if self.hand == Some(self.at) {
+                    self.effect_now();
+                }
+                self.advance(host)
+            }
         }
     }
 
@@ -1175,7 +1396,10 @@ impl Runner {
         let step = self.steps.get(self.at).cloned();
         // A move is left at its next phase boundary; anything else at once. A run left has no effect from then on.
         if why == Woke::Leave {
-            if matches!(step, Some(Step::Move { .. } | Step::Sit { .. })) {
+            if matches!(
+                step,
+                Some(Step::Move { .. } | Step::Sit { .. } | Step::Rise)
+            ) {
                 self.leaving = true;
                 return Next::Sleep;
             }
@@ -1211,7 +1435,10 @@ impl Runner {
                 self.effect_now();
                 Next::Sleep
             }
-            (Woke::Moved(how), Some(Step::Move { .. } | Step::Sit { .. })) => {
+            (
+                Woke::Moved(how),
+                Some(Step::Move { .. } | Step::Sit { .. } | Step::Rise | Step::Settle { .. }),
+            ) => {
                 if how.as_str() == "done" {
                     self.advance(host)
                 } else {

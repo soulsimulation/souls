@@ -15,9 +15,12 @@
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
+//! - `log.text/`: K16's text store, every word said in the world (O20b, #3523).
 //! - `views/`: V1's stream of the zone's root (full, everyone), written by a view tier of the process's own, and
 //!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
-//!   folder (history is V3's, not written here yet), which the page reads for `?world=`.
+//!   folder, which the page reads for `?world=` and pairing for the Soul's `history` (R16b, #3480). With a store
+//!   (below) the history is the archive's, `../../s/h/<world name>/<lineage hex>/`: the origin serves worlds under
+//!   `w/` and the store beside them under `s/`, as the page's own links do (V9).
 //! - `gateway.sock`: the gateway's local socket (I1's framing, `answers::serve`), unless `--socket` or
 //!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
 //!   name is 67). `health.json`: O4's.
@@ -37,8 +40,8 @@
 //! gateway reads the file again: no restart.
 //!
 //! **Seats** (C17, #3453). A start registers the seats the world's entries declare on its things for the gateway's sit,
-//! lie and rise and a form's sit ([`places`]): each thing whose kind's entry has a slot admitting a body gets its first
-//! such slot as a seat (B3 holds one seat per thing), its point carried up the tree onto the floor a body stands on.
+//! lie and rise and a form's sit ([`places`]): every slot admitting a body that a thing's kind's entry declares is a
+//! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
 //! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
 //! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
 //! within a form's reach (C15's rule), so a rise sets the body down where it can stand.
@@ -417,9 +420,9 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
 /// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
 /// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
 /// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground. Returns the
-/// seats, the count of every body slot on those things, the seats that could not be placed (no floor above the
-/// thing) and the stand points moved.
-fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize) {
+/// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
+/// floor above the thing) and the stand points moved.
+fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
     let (found, all) = import_eden::body_slots(&town.tree, kinds);
     let view = town.view();
     let (mut out, mut moved) = (Vec::new(), 0);
@@ -453,7 +456,9 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
         out.push(place);
     }
     let left = found.len() - out.len();
-    (out, all, left, moved)
+    let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
+    things.dedup();
+    (out, things.len(), all, left, moved)
 }
 
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
@@ -490,6 +495,9 @@ fn bodies(
 }
 
 type Bucket = Shared<supervisor::bucket::Bucket>;
+
+/// How often a running world's open event index is written, at most (R16b): a question sees acts this old.
+const VIEWS_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The archive's store on a restart (O3b): V3's shelf starts from record 0 again and writes its bundles and indexes
 /// as new. A create refused because the key exists is passed when the bytes are the same, and otherwise writes over
@@ -554,22 +562,34 @@ fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Resu
 }
 
 /// V3's archiver on a thread of its own: each part as it comes, and the day's bundle index written again each time a
-/// bundle closes, so a running world's bundles are found before its day ends.
+/// bundle closes, so a running world's bundles are found before its day ends. The open day's event index and counts
+/// (V4) are written as they stand at most each [`VIEWS_EVERY`] while new parts come, so R16's `history` reads a
+/// running world's day (R16b, #3480).
 fn archiving(
     mut a: Archiver<Again>,
     rx: Receiver<(u64, Vec<u8>)>,
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
     std::thread::spawn(move || {
         let mut indexed = a.shelf.writes.bundles;
+        let (mut fresh, mut viewed) = (false, std::time::Instant::now());
         loop {
             match rx.recv_timeout(shipping::POLL * 20) {
-                Ok((n, bytes)) => a.push(n, bytes)?,
+                Ok((n, bytes)) => {
+                    a.push(n, bytes)?;
+                    fresh = true;
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return a.flush(),
             }
             if a.shelf.writes.bundles != indexed {
                 a.shelf.flush()?;
                 indexed = a.shelf.writes.bundles;
+            }
+            if fresh && viewed.elapsed() >= VIEWS_EVERY {
+                for (k, v) in a.open_views()? {
+                    a.shelf.put_view(&k, &v)?;
+                }
+                (fresh, viewed) = (false, std::time::Instant::now());
             }
         }
     })
@@ -587,7 +607,7 @@ fn off_machine(
     records: &[Vec<u8>],
 ) -> R<Off> {
     let store: Bucket = Shared(Arc::new(
-        supervisor::bucket::Bucket::from_env(spec).map_err(refusal)?,
+        supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
     ));
     println!("store: {}", store.0.what());
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
@@ -714,12 +734,12 @@ fn serve(args: &[String]) -> R<()> {
         souls.len()
     );
     let mut built = built;
-    let (places, all, left, moved) = places(&mut built.town, &kinds);
+    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
         places.len(),
-        places.len() + left
+        things
     );
     let rules = Rules {
         kinds: Json::Obj(kinds),
@@ -760,6 +780,22 @@ fn serve(args: &[String]) -> R<()> {
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
+    // K16's text store on the disk, `<dir>/log.text` beside the log as `gateway-link` keeps it (O20b, #3523): a
+    // world's words outlive a restart, and O20's shipper has them to ship.
+    let text = sim::text::Store::open_dir(
+        &dir.join("log.text"),
+        replica::ids::Minter::new(worldd::words::scope(built.root.scope())),
+    )
+    .map_err(|e| format!("the text store: {}", refusal(e)))?;
+    cfg.text = Some(Arc::new(text));
+    // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
+    // restore reads them back (O20b, #3523); with no bucket set it says so once and ships nothing.
+    let lineage = to_hex(&built.root.scope().0);
+    let stores = directoryd::backup::owned_by("worldd", &[&lineage]).map_err(refusal)?;
+    let strip = format!("worlds/{lineage}/");
+    let backup = directoryd::backup::run("worldd", dir.clone(), stores, Default::default(), &strip)
+        .map_err(|e| format!("refusing to start: {}", refusal(e)))?;
+    println!("{backup}");
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.root.scope()));
@@ -819,8 +855,13 @@ fn serve(args: &[String]) -> R<()> {
     let now = answers::now();
     let writer =
         Writer::create(&views, &built.header, &key, (now, (now / 1000) as u64)).map_err(refusal)?;
+    // The history the world advertises (R16b): the archive's when it runs, as the origin serves the store.
+    let history = match off.as_ref().and_then(|o| o.archive.as_ref()) {
+        Some(_) => format!("../../s/h/{name}/{}/", to_hex(&built.root.scope().0)),
+        None => "history/".to_owned(),
+    };
     let pointer = format!(
-        "{{\"stream\": \"views/{}/\", \"history\": \"history/\"}}\n",
+        "{{\"stream\": \"views/{}/\", \"history\": \"{history}\"}}\n",
         stream::dir(&built.header, &key)
     );
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;

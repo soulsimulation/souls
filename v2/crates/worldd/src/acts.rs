@@ -29,13 +29,23 @@
 //!   `sim::forms::span`): a walk across the town and a long pause are its own time, not the 10 s an act gets at its
 //!   arrival.
 //!
+//! - **Timers and values** (C24, #3495). A form's `timer` written to the log ([`Acts::out`]) goes on the forms' due
+//!   list; when it fires its clear is written and its form starts on its node with the world as actor, keyed by the
+//!   timer ([`Acts::fired`]). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
+//!   its sets.
+//! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
+//!   ([`sim::walk::stall::Watch`]): one that gains less than a quarter metre toward its goal over 3 s of world time
+//!   ends `walk.blocked` in that tick, its body's driver released, and the act's ending entry names the nearest thing
+//!   or edge in its way ([`sim::walk::stall::blocker`]).
+//!
 //! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
 //! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use replica::effects::{Actor, Effect, Refusal};
+use replica::effects::{Actor, Body, Effect, Refusal, TimerRec};
 use replica::encode::Name;
 use replica::host::{Answer, Ask, F_CROSSING, Seen};
 use replica::ids::{Id, Minter, Scope};
@@ -49,8 +59,9 @@ use sim::forms::{Asked, Forms, Intent, Places, RunId, World};
 use sim::host::{Geometry, Staged};
 use sim::mover::Body as Moved;
 use sim::moves::{Moves, Reach};
-use sim::timers::DueList;
+use sim::timers::{DueList, Timer};
 use sim::walk::Leg;
+use sim::walk::stall::{Watch, blocker};
 use sim::walk::town::View;
 use skills::form_runner::Limits;
 
@@ -62,6 +73,9 @@ type R<T> = Result<T, Refusal>;
 /// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
 /// or `deadline-passed` by then.
 pub const WALK_MOST: Micros = 180_000_000;
+
+/// The ending of a form's walk that stopped making progress (C21, #3484).
+pub const BLOCKED: &str = "walk.blocked";
 
 /// The runner's limits for a form's run here: the walk's [`WALK_MOST`], the rest the runner's own. A run's act is
 /// given their sum as its deadline (`sim::forms::span`).
@@ -79,6 +93,9 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
+/// A walker's ask for its way (C21): the node it stands on, where it stands, the corner it aims at and its leg's end.
+type Way = (Id, [i64; 2], [i64; 2], [i64; 2]);
+
 /// What the runner sees: the bodies as the controller had them at the call, the town's corners and the tree.
 struct Sight<'a> {
     bodies: BTreeMap<Id, Moved>,
@@ -91,6 +108,9 @@ struct Sight<'a> {
     kinds: &'a Json,
     /// The thing argument each body's run moves at or toward ([`AT_ARG`]).
     toward: &'a BTreeMap<Id, Id>,
+    /// Each walker that asked its way this call (C21): the node it stands on, where it stands, the corner it aims at
+    /// and its leg's end, x and z µm.
+    asked: RefCell<BTreeMap<Id, Way>>,
 }
 
 impl Sight<'_> {
@@ -126,6 +146,10 @@ impl Geometry for Sight<'_> {
                     None => [to.x, to.z],
                 };
                 let y = if [x, z] == [to.x, to.z] { to.y } else { 0 };
+                let here = [me.pose.position.x, me.pose.position.z];
+                self.asked
+                    .borrow_mut()
+                    .insert(body, (sim::walk::node_of(me), here, [x, z], [to.x, to.z]));
                 Some(Answer::Point(Vec3::new(x, y, z)))
             }
             Ask::Near { .. } => Some(Answer::Near(Vec::new())),
@@ -357,6 +381,8 @@ fn targets(entry: &Json, form: &str, args: &Args) -> R<(Json, Option<Id>)> {
 pub struct Args {
     pub things: BTreeMap<String, Id>,
     pub slots: BTreeMap<String, u64>,
+    /// Value arguments (C24): a value by name, words by their reference, as a set's `{"arg": a}` reads them (F14).
+    pub values: skills::form_runner::Args,
 }
 
 /// The forms in progress, and what they reach that the bodies do not hold.
@@ -374,6 +400,14 @@ pub struct Acts {
     runs: BTreeMap<RunId, Id>,
     /// The thing argument each body's run moves at or toward (C23).
     toward: BTreeMap<Id, Id>,
+    /// The forms' timers (C24) pending on the due list, by id: each starts its form on its node when it fires.
+    timers: BTreeMap<Id, (Id, Name)>,
+    /// Each form a timer started since the last call, by the timer's id: its run, or its refusal by name (C24).
+    pub fired: Vec<(Id, R<Asked>)>,
+    /// The form's walks watched for progress (C21).
+    watch: Watch,
+    /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
+    blocked: BTreeMap<Id, String>,
 }
 
 /// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
@@ -419,6 +453,10 @@ impl Acts {
             own: Controller::new(),
             runs: BTreeMap::new(),
             toward: BTreeMap::new(),
+            timers: BTreeMap::new(),
+            fired: Vec::new(),
+            watch: Watch::new(),
+            blocked: BTreeMap::new(),
         }
     }
 
@@ -457,6 +495,7 @@ impl Acts {
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
             kinds: &self.kinds,
             toward: &self.toward,
+            asked: RefCell::new(BTreeMap::new()),
         };
         let mut w = World {
             tree,
@@ -521,7 +560,7 @@ impl Acts {
             }
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
-                if args.things.is_empty() && args.slots.is_empty() {
+                if args.things.is_empty() && args.slots.is_empty() && args.values.is_empty() {
                     return forms.commit(
                         w,
                         &audiences,
@@ -535,10 +574,11 @@ impl Acts {
                         now,
                     );
                 }
-                // Thing and slot arguments (F4, C12): bound here, as `Forms::commit` binds none yet.
-                let steps = skills::form_runner::bind_in(&entry, form, &args.slots)?;
-                let effects =
-                    skills::form_runner::bind_effects_in(&entry, form, &args.things, &args.slots)?;
+                // Thing, slot and value arguments (F4, C12, C24, C25): bound here, as `Forms::commit` binds none yet.
+                let steps = skills::form_runner::bind_in(&entry, form, &args.things, &args.slots)?;
+                let mut all = skills::form_runner::args_in(&entry, &args.things, &args.slots)?;
+                all.extend(args.values.clone());
+                let effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 forms.start(w, body, *node, intent, steps, effects, limits(), now)
             });
@@ -567,15 +607,35 @@ impl Acts {
         let _ = self.with(tree, bodies, 0, |forms, w| forms.leave(w, body, now));
     }
 
-    /// The forms' part of a tick at world time `now`: their walks, then every timer of theirs due by `now`.
+    /// The forms' part of a tick at world time `now`: their walks, each one that stalled ended [`BLOCKED`] (C21), then
+    /// every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
         let mut bodies = bodies;
-        self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
+        let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
+        let mut watch = std::mem::take(&mut self.watch);
+        let mut blocked = Vec::new();
+        let fired = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
             forms.tick(w, now);
-            while let Some(t) = w.due.fire(now) {
-                forms.fire(w, &t);
+            let asked = std::mem::take(&mut *w.geometry.asked.borrow_mut());
+            watch.keep(&asked.keys().copied().collect());
+            for (body, (node, here, aim, to)) in asked {
+                if watch.seen(body, here, aim, to, now) && forms.stall(w, body, BLOCKED, now) {
+                    blocked.push((body, blocker(w.tree, node, here)));
+                }
             }
+            let mut fired = Vec::new();
+            while let Some(t) = w.due.fire(now) {
+                if !forms.fire(w, &t) && timers.contains(&t.id) {
+                    fired.push(t);
+                }
+            }
+            fired
         });
+        self.watch = watch;
+        self.blocked.extend(blocked);
+        for t in fired {
+            self.timer_fired(tree, bodies.as_deref_mut(), &t, tick);
+        }
         // The walks' crossings, carried by the town's links as the bodies' own walks are (C17).
         let mut staged = Staged::default();
         staged.crossings.append(&mut self.forms.crossings);
@@ -586,16 +646,97 @@ impl Acts {
         }
     }
 
-    /// What the forms wrote, to be numbered and applied.
-    pub fn out(&mut self) -> Vec<Effect> {
-        std::mem::take(&mut self.forms.out)
+    /// A form's timer fired (C24): its clear is written, and its form is started on its node with the world as
+    /// actor, keyed by the timer; its run or its refusal by name is kept in [`Acts::fired`].
+    fn timer_fired(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, t: &Timer, tick: u64) {
+        let Some((node, form)) = self.timers.remove(&t.id) else {
+            return;
+        };
+        self.forms.out.push(Effect {
+            envelope: replica::effects::Envelope {
+                sequence: 0,
+                at: t.due,
+                cause: replica::effects::Cause::World,
+                actor: Actor::World,
+                audience: replica::world_model::Audience::Everyone,
+                node,
+            },
+            body: Body::Timers(vec![TimerRec::Clear { timer: t.id }]),
+            events: None,
+            rest: replica::effects::Rest::new(),
+        });
+        let name = form
+            .as_str()
+            .split_once(':')
+            .map_or(form.as_str(), |(_, f)| f);
+        let entry = tree
+            .handle(node)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.kinds.get(plain(n.kind())).cloned());
+        let asked = match entry {
+            None => Err(refusal("thing-missing", replica::world_model::show(node))),
+            Some(entry) => {
+                let intent = Intent {
+                    id: t.id,
+                    expiry: t.due,
+                    actor: Actor::World,
+                    digest: replica::ids::sha256(
+                        &replica::encode::encode(&t.id.to_value()).unwrap_or_default(),
+                    ),
+                };
+                self.with(tree, bodies, tick, |forms, w| {
+                    let steps = skills::form_runner::bind(&entry, name)?;
+                    let effects = skills::form_runner::bind_effects(&entry, name)?;
+                    forms.start(w, node, node, intent, steps, effects, limits(), t.due)
+                })
+            }
+        };
+        if let Ok(Asked::Started(run) | Asked::Running(run)) = &asked {
+            self.runs.insert(*run, t.id);
+        }
+        self.fired.push((t.id, asked));
     }
 
-    /// Runs that ended since the last call: each one's intent and its ending's name.
-    pub fn ended(&mut self) -> Vec<(Id, String)> {
+    /// What the forms wrote, to be numbered and applied. The forms' timers set there go on the due list, and those
+    /// cleared come off it (C24).
+    pub fn out(&mut self) -> Vec<Effect> {
+        let out = std::mem::take(&mut self.forms.out);
+        for e in &out {
+            let Body::Timers(ts) = &e.body else { continue };
+            for t in ts {
+                match t {
+                    TimerRec::Set { timer, due, name } => {
+                        let set = self.due.set(Timer {
+                            node: e.envelope.node,
+                            id: *timer,
+                            due: *due,
+                            name: name.clone(),
+                        });
+                        if set.is_ok() {
+                            self.timers.insert(*timer, (e.envelope.node, name.clone()));
+                        }
+                    }
+                    TimerRec::Clear { timer } => {
+                        if self.timers.remove(timer).is_some() {
+                            let _ = self.due.clear(e.envelope.node, *timer);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Runs that ended since the last call: each one's intent, its ending's name and, for [`BLOCKED`], what blocked
+    /// its walk.
+    pub fn ended(&mut self) -> Vec<(Id, String, Option<String>)> {
         std::mem::take(&mut self.forms.ended)
             .into_iter()
-            .filter_map(|e| Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned())))
+            .filter_map(|e| {
+                let why = self.blocked.remove(&e.body);
+                let why = why.filter(|_| e.how.as_str() == BLOCKED);
+                Some((self.runs.remove(&e.run)?, e.how.as_str().to_owned(), why))
+            })
             .collect()
     }
 }

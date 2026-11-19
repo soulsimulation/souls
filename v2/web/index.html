@@ -10,6 +10,22 @@
       #status { position: fixed; left: 12px; top: 12px; padding: 8px 10px; background: rgba(16, 20, 26, 0.78);
         font: 13px/1.45 ui-monospace, Menlo, monospace; border-radius: 4px; pointer-events: none; white-space: pre; }
       #status b { font-weight: 600; }
+      /* Phones and touch screens (W14), as today's pages (apps/web world-chrome.css): every control at least 44 px; the
+         sound bar wraps across the top with a Soul's page under it; the New Soul card sits above the find box and its
+         button. The controls are styled inline by their modules, so these rules carry !important. */
+      @media (max-width: 700px), (pointer: coarse) {
+        button, select, input { min-height: 44px !important; min-width: 44px !important; box-sizing: border-box !important; }
+        #soul-page > button { width: 44px; height: 44px; margin: -10px -10px 0 0; }
+      }
+      @media (max-width: 700px) {
+        #sound-bar { left: 8px; flex-wrap: wrap; justify-content: flex-end; }
+        #sound-bar > button, #sound-bar > select { white-space: nowrap; }
+        #status { top: 108px; max-width: calc(100vw - 24px); overflow: hidden; font-size: 11px; }
+        #soul-page { top: 108px !important; left: 8px !important; right: 8px !important; width: auto !important;
+          max-height: calc(50vh - 120px) !important; background: rgba(16, 20, 26, 0.97) !important; }
+        #new-soul-card { bottom: 68px !important; }
+        #creator-panel { top: 108px !important; }
+      }
     </style>
   </head>
   <body>

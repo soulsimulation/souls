@@ -33,6 +33,16 @@ pub const F_SEED: u64 = 64;
 /// A creator's weather holds until this world time (G5); the table resumes there.
 pub const F_WEATHER_UNTIL: u64 = 65;
 
+/// How the sky is drawn (V19c, #3521): settings no rule reads, carried for a page to draw today's sky. The month and
+/// day the sky is drawn on, `[month, day]`, whatever the calendar's date (today's `state.time.calendar`: Eden's sky is
+/// always 5 June); the year and the hour stay the calendar's.
+pub const F_SKY_DATE: u64 = 66;
+/// The sky palette's name (today's `state.sky.palette`, as `souls:<palette>`).
+pub const F_PALETTE: u64 = 67;
+/// The morning mist: `[peak, half-width, strength]`, the peak and half-width in µs after local midnight and the
+/// strength 0 to 100 (today's `morningMist`: 06:30, 2.5 h, 100).
+pub const F_MIST: u64 = 68;
+
 /// The light now, and the world time it next changes.
 pub const F_LIGHT: u64 = 70;
 pub const F_LIGHT_NEXT: u64 = 71;
@@ -203,9 +213,112 @@ impl Sky {
     }
 }
 
+/// The morning mist's shape: its peak and half-width (µs after local midnight) and its strength, 0 to 100.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Mist {
+    pub peak: Micros,
+    pub half: Micros,
+    pub strength: i64,
+}
+
+/// How a world's sky is drawn (V19c): each setting optional; a world without them is drawn on its calendar's date,
+/// with the default sky and no morning mist.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Presentation {
+    pub date: Option<[i64; 2]>,
+    pub palette: Option<Name>,
+    pub mist: Option<Mist>,
+}
+
+impl Presentation {
+    /// The settings the world node's fields hold; a malformed one reads as absent.
+    pub fn read(f: &BTreeMap<u64, Value>) -> Presentation {
+        let date = match f.get(&F_SKY_DATE) {
+            Some(Value::Array(d)) if d.len() == 2 => as_int(&d[0])
+                .zip(as_int(&d[1]))
+                .map(|(m, d)| [m, d])
+                .filter(|&[m, d]| month_day(m, d)),
+            _ => None,
+        };
+        let palette = match f.get(&F_PALETTE) {
+            Some(Value::Text(n)) => Some(n.clone()),
+            _ => None,
+        };
+        let mist = match f.get(&F_MIST) {
+            Some(Value::Array(v)) if v.len() == 3 => {
+                match (as_int(&v[0]), as_int(&v[1]), as_int(&v[2])) {
+                    (Some(peak), Some(half), Some(strength)) => Some(Mist {
+                        peak,
+                        half,
+                        strength,
+                    })
+                    .filter(|m| {
+                        (0..DAY_US).contains(&m.peak)
+                            && m.half > 0
+                            && (0..=100).contains(&m.strength)
+                    }),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        Presentation {
+            date,
+            palette,
+            mist,
+        }
+    }
+
+    /// The settings as the world node's fields (the ones set).
+    pub fn fields(&self) -> Vec<(u64, Value)> {
+        let mut f = Vec::new();
+        f.extend(
+            self.date
+                .map(|[m, d]| (F_SKY_DATE, Value::Array(vec![int(m), int(d)]))),
+        );
+        f.extend(self.palette.clone().map(|n| (F_PALETTE, Value::Text(n))));
+        f.extend(self.mist.map(|m| {
+            let v = vec![int(m.peak), int(m.half), int(m.strength)];
+            (F_MIST, Value::Array(v))
+        }));
+        f
+    }
+}
+
+/// A month and day some year has (29 February included).
+fn month_day(m: i64, d: i64) -> bool {
+    const DAYS: [i64; 12] = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    (1..=12).contains(&m) && (1..=DAYS[(m - 1) as usize]).contains(&d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_presentation_round_trips_and_refuses_malformed_settings() {
+        let p = Presentation {
+            date: Some([6, 5]),
+            palette: Name::new("souls:eden-summer"),
+            mist: Some(Mist {
+                peak: 23_400_000_000,
+                half: 9_000_000_000,
+                strength: 100,
+            }),
+        };
+        let f: BTreeMap<u64, Value> = p.fields().into_iter().collect();
+        assert_eq!(Presentation::read(&f), p);
+        assert_eq!(
+            Presentation::read(&BTreeMap::new()),
+            Presentation::default()
+        );
+        assert!(Presentation::default().fields().is_empty());
+        let bad = BTreeMap::from([
+            (F_SKY_DATE, Value::Array(vec![int(2), int(30)])),
+            (F_MIST, Value::Array(vec![int(DAY_US), int(1), int(50)])),
+        ]);
+        assert_eq!(Presentation::read(&bad), Presentation::default());
+    }
 
     #[test]
     fn civil_dates_round_trip() {
