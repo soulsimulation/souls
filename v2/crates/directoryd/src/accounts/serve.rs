@@ -336,6 +336,16 @@ fn prayer_json(p: &super::prayers::Prayer) -> Value {
            "answered_at": p.answered_at})
 }
 
+/// The worlds a creator grant is the creator of, by the list of worlds when there is one ([`super::prayers::creator_worlds`]).
+fn creator_worlds_of(grant: &str, app: &App) -> Option<Vec<String>> {
+    let rows = app
+        .worlds
+        .as_ref()
+        .and_then(|w| w.creators().ok())
+        .unwrap_or_default();
+    super::prayers::creator_worlds(grant, &rows)
+}
+
 /// A prayer request from the gateway (G11): the socket's own frame and grant. Always a 200 whose body is the reply the
 /// gateway gives back to that socket, a refusal included, so the asker hears it by name. Its log note holds no text.
 fn prayers(req: &Request, app: &App) -> (u16, Value, String) {
@@ -354,16 +364,19 @@ fn prayers(req: &Request, app: &App) -> (u16, Value, String) {
             .store
             .prayers_of(&grant)
             .map(|v| Ok(json!({"prayers": v.iter().map(prayer_json).collect::<Vec<_>>()}))),
-        "prayers" => {
-            let all = b.get("all").and_then(Value::as_bool).unwrap_or(false);
-            app.store.prayers_to(&grant, all).map(|r| {
-                r.map(|v| json!({"prayers": v.iter().map(prayer_json).collect::<Vec<_>>()}))
-            })
-        }
-        _ => app
-            .store
-            .answer(&grant, &text("id"), &text("text"), now())
-            .map(|r| r.map(|p| json!({"prayer": prayer_json(&p)}))),
+        _ => match creator_worlds_of(&grant, app) {
+            None => Ok(Err("prayer.not-the-creator")),
+            Some(worlds) if kind == "prayers" => {
+                let all = b.get("all").and_then(Value::as_bool).unwrap_or(false);
+                app.store
+                    .prayers_to(&worlds, all)
+                    .map(|v| Ok(json!({"prayers": v.iter().map(prayer_json).collect::<Vec<_>>()})))
+            }
+            Some(worlds) => app
+                .store
+                .answer(&worlds, &text("id"), &text("text"), now())
+                .map(|r| r.map(|p| json!({"prayer": prayer_json(&p)}))),
+        },
     };
     let (mut reply, note) = match answer {
         Ok(Ok(v)) => (v, format!("{kind} ok")),
