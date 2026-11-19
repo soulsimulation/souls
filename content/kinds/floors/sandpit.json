@@ -1,0 +1,83 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sandpit",
+  "owner": "thing",
+  "state": {"castle":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "points": {"edge":{"role":"stand","at_mm":[0,0,1450]}},
+  "geometry": {"bounds_mm":[2460,400,2460]},
+  "forms": {
+    "build_sandcastle": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"castle","is":false},{"need":"hand","free":true}],
+      "steps": [{"step":"walk_to","point":"edge"},{"step":"wait","us":20000000}],
+      "effects": [{"change":"set","field":"castle","to":true,"event":"built_a_sandcastle"}]
+    },
+    "knock_down": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"castle","is":true}],
+      "steps": [{"step":"walk_to","point":"edge"}],
+      "effects": [{"change":"set","field":"castle","to":false,"event":"knocked_the_sandcastle_down"}]
+    }
+  },
+  "areas": {"sand":{"allows":{"sit":"on"}}},
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:sandpit",
+    "table": [{"part":"flip","field":"castle","do":"show","at":{"true":1,"false":0}}],
+    "shape": {
+      "round": 20,
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [0,20,-1200],
+          "polygon": [[-1230,-30],[1230,-30],[1230,30],[-1230,30]],
+          "h": 260,
+          "tint": "wood"
+        },
+        {
+          "kind": "extrude",
+          "at": [0,20,1200],
+          "polygon": [[-1230,-30],[1230,-30],[1230,30],[-1230,30]],
+          "h": 260,
+          "tint": "wood"
+        },
+        {
+          "kind": "extrude",
+          "at": [-1200,20,0],
+          "polygon": [[-30,-1130],[30,-1130],[30,1130],[-30,1130]],
+          "h": 260,
+          "tint": "wood"
+        },
+        {
+          "kind": "extrude",
+          "at": [1200,20,0],
+          "polygon": [[-30,-1130],[30,-1130],[30,1130],[-30,1130]],
+          "h": 260,
+          "tint": "wood"
+        },
+        {"kind":"box","at":[0,120,0],"size":[2300,200,2300],"round":0,"tint":"sand"},
+        {"kind":"cyl","at":[500,310,300],"r":100,"h":180,"segments":8,"r2":120,"tint":"bucket"},
+        {"kind":"box","at":[-400,250,-300],"size":[80,20,400],"round":0,"tint":"spade","yaw":34377},
+        {"kind":"box","at":[-300,290,300],"size":[320,140,320],"tint":"castle","role":"flip"},
+        {"kind":"cyl","at":[-460,330,140],"r":60,"h":220,"segments":8,"tint":"castle","role":"flip"},
+        {"kind":"cyl","at":[-140,330,140],"r":60,"h":220,"segments":8,"tint":"castle","role":"flip"},
+        {"kind":"cyl","at":[-460,330,460],"r":60,"h":220,"segments":8,"tint":"castle","role":"flip"},
+        {"kind":"cyl","at":[-140,330,460],"r":60,"h":220,"segments":8,"tint":"castle","role":"flip"}
+      ],
+      "palette": {"wood":"#a47a4c","sand":"#e6d39a","bucket":"#3a8fd9","spade":"#d9534f","castle":"#d8bf7e"},
+      "tags": ["play","sandpit","playground","sand"]
+    }
+  },
+  "text": {
+    "card": "A wooden sandpit with a bucket and spade: build a sandcastle, knock it down.",
+    "play": "play",
+    "sandbox": "sandbox",
+    "sandcastle": "sandcastle",
+    "howto_build": "Build a sandcastle, then knock it down."
+  },
+  "card": {"text":"card","category":"play","synonyms":["sandbox","sandcastle"]},
+  "howtos": {"build":{"text":"howto_build","steps":[{"form":"build_sandcastle"},{"form":"knock_down"}]}}
+}

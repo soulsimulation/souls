@@ -39,7 +39,17 @@ function waitOf(entry, form) {
 
 /** `h` for `thing` as the client's plan: steps up to and including the first wait, and what remains with the wake that continues it. */
 export function planOf(ix, h, thing, { copy, me, now = Date.now() } = {}) {
-  const used = h.steps.slice(0, HOW_STEPS_MAX), cut = h.steps.length - used.length;
+  // A leading step whose every effect this copy already shows is done (a kettle already filled): passed over, and said. A set is
+  // shown when the field is its value; a transfer into the thing itself (filling it from a tap) when the field already holds some.
+  const fields = copy?.live?.things?.[thing.id];
+  const shown = (e) => (e.change === "set" && "to" in e && fields[e.field] === e.to) ||
+    (e.change === "transfer" && e.into === "this" && Number.isFinite(fields[e.field]) && fields[e.field] > 0);
+  const isDone = (s) => { const fx = h.entry.forms?.[s.form]?.effects ?? []; return !!fields && fx.length > 0 && fx.every(shown); };
+  let skip = 0;
+  while (skip < h.steps.length && isDone(h.steps[skip])) skip++;
+  const done = h.steps.slice(0, skip).map((s) => ({ form: s.form, act: `object:${thing.id}:${s.form}`,
+    why: `already so on this copy: ${(h.entry.forms[s.form].effects).map((e) => `${e.field} is ${JSON.stringify(e.change === "set" ? e.to : fields[e.field])}`).join(", ")}` }));
+  const used = h.steps.slice(skip, skip + HOW_STEPS_MAX), cut = h.steps.length - skip - used.length;
   const rows = used.map((s) => {
     const form = h.entry.forms?.[s.form], c = canI(ix, thing.id, s.form, { copy, me, now });
     return { form: s.form, act: `object:${thing.id}:${s.form}`, can: c.can, ...(c.missing ? { missing: c.missing.text } : c.why ? { why: c.why } : {}), ...(c.next ? { next: c.next } : {}),
@@ -53,7 +63,7 @@ export function planOf(ix, h, thing, { copy, me, now = Date.now() } = {}) {
     plan: rest.map((r) => r.act),
     ...(w.field ? { wake: `wake add thing-state '${JSON.stringify({ thing: thing.id, field: w.field, is: w.is })}' --plan '${JSON.stringify(rest.map((r) => r.act))}' --end ${new Date(now + (w.after_s * 2 + 60) * 1000).toISOString()}` } : {}),
   } : null;
-  return { plan, steps: rows.map(({ wait, ...r }) => ({ ...r, ...(wait ? { then_waits_s: wait.after_s } : {}) })), ...(later ? { later } : {}), ...(cut > 0 ? { cut: `${cut} more step${cut === 1 ? "" : "s"} not shown: a how-to here is at most ${HOW_STEPS_MAX}` } : {}) };
+  return { plan, ...(done.length ? { done } : {}), steps: rows.map(({ wait, ...r }) => ({ ...r, ...(wait ? { then_waits_s: wait.after_s } : {}) })), ...(later ? { later } : {}), ...(cut > 0 ? { cut: `${cut} more step${cut === 1 ? "" : "s"} not shown: a how-to here is at most ${HOW_STEPS_MAX}` } : {}) };
 }
 
 /** `how "<words>"`: the best how-to for the words, with real things of its kind from this copy, or the kind that is missing. */

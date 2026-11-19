@@ -1,0 +1,56 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:notebook_line",
+  "owner": "thing",
+  "state": {
+    "words": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "writer": { "n": 1, "from": "soul", "most": 1, "most_per": 2, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "line": { "role": "contact", "at_mm": [0, 4, 0] }
+  },
+  "geometry": { "bounds_mm": [380, 8, 30] },
+  "forms": {
+    "write": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "words": { "type": "text" } },
+      "needs": [
+        { "need": "unlinked", "link": "writer" },
+        { "need": "within_reach", "point": "line" }
+      ],
+      "steps": [{ "step": "move", "move": "slide", "at": "line" }],
+      "effects": [
+        { "change": "link", "link": "writer", "from": "actor", "event": "line_signed" },
+        { "change": "set", "field": "words", "to": { "arg": "words" }, "event": "line_written" }
+      ]
+    },
+    "cross_out": {
+      "who": { "link": "writer" },
+      "starts": "act",
+      "needs": [
+        { "need": "linked", "link": "writer", "end": "actor", "says": "not_your_line" },
+        { "need": "within_reach", "point": "line" }
+      ],
+      "steps": [{ "step": "move", "move": "slide", "at": "line" }],
+      "effects": [
+        { "change": "unlink", "link": "writer", "from": "actor", "event": "line_crossed_out" },
+        { "change": "set", "field": "words", "to": null, "event": "line_cleared" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:notebook_line",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,1,0],"size":[380,2,30],"tint":"page"},{"kind":"box","at":[-60,3,0],"size":[240,2,4],"tint":"ink"}],"palette":{"page":"#f4eedc","ink":"#23305c"},"tags":["page","object"]}
+  },
+  "text": {
+    "card": "One signed line in a notebook; only its writer crosses it out.",
+    "not_your_line": "You have no line in this notebook; only its writer crosses a line out.",
+    "line": "line"
+  },
+  "card": { "text": "card", "category": "line" }
+}

@@ -1,0 +1,20 @@
+[package]
+name = "gatewayd"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "Agents' sockets (Engine v2, #2635): held apart from the world, so a world restarts without closing one (I1, #2683)."
+
+[dependencies]
+replica = { path = "../replica" }
+# WebSocket through axum's upgrade, one task per socket (I1's design).
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+# Constant-time compare of token hashes; a token's 32 bytes from the operating system's random source.
+subtle = "2.6"
+getrandom = "0.3"
+rustix = { version = "1", default-features = false, features = ["time", "std"] }
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }

@@ -3,7 +3,7 @@
   "kind": "test:street_lamp",
   "owner": "thing",
   "state": {
-    "lit": { "n": 1, "type": "bool", "default": false, "audience": "public" }
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": {"rule": "everyone"} }
   },
   "geometry": { "bounds_mm": [300, 4000, 300] },
   "reactions": {

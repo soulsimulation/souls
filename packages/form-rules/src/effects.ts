@@ -6,33 +6,44 @@
 // made. `apply` applies such a result to plain state: all of it or none, and once per receipt.
 //
 // - An amount moved between two things is two `set` changes on one field, each carrying its signed `by`
-//   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not.
-// - Holding is a parent: take and put are `reparent` into or out of a hand or a slot.
+//   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not. An amount
+//   moved between two fields of one thing (`into_field`: a stock into a well) is two sets on that thing, and balances
+//   the same way.
+// - Holding is a parent: take and put are `reparent` into or out of a hand, a slot or the actor's place (`here`).
+//   What is moved is the actor, this thing, a thing argument of the form, or the one thing at the end of a link.
 // - A made thing appears where its form names: a slot, the actor's hand, or `here`, loose in the actor's
 //   place (the spot is Engine v2's set-down, E4, and is not chosen here). Its id comes from the receipt.
 // - Effects are worked out in order on a copy, so a later effect sees an earlier one, and a form whose
 //   changes would not all apply is refused with the effect that failed.
-// - A timer is not a change to state: it is returned beside the changes, with its event.
+// - A stock's take (an entry's `stock` section names the form) is one event: the `create` into the actor's hand,
+//   marked with the stock's name, and a `set` of the count with `by: -1`. The make is the other side of that `by`,
+//   so `apply` counts it, and nothing is made from nothing. An empty stock is refused `empty`, a closed container
+//   `closed` (the actor is not linked by the link its `closed` audience names), each before the rules are asked.
+// - A timer is not a change to state: it is returned beside the changes, with its event. A timer is named by the
+//   form it starts; starting one replaces the node's pending timer of that form, which it names in `replaces`, so the
+//   engine clears it (Engine v2 T6 rule 15: a clear is "fired or cancelled"). A lamp put out early and lit again is
+//   not put out by the earlier timer.
 // - Every value is one Engine v2's encoding profile holds (T0, v2/docs/encoding.md): whole numbers and names,
 //   never a float, a boolean or null. A flag is 0 or 1, text is a key by reference `{text: <key>}` (never
 //   words), and a value that is missing is left out: a `set` without `to` clears the field to its default.
 // - An event's name is `namespace:name`, the declaring kind's namespace before the name its entry writes.
 // No float decides anything; nothing here imports more than the rules.
 
-import { decide, measure, type Entry, type DrawRow, type Input, type Node, type Verdict } from './rules.ts';
+import { decide, measure, valueAt, type Entry, type DrawRow, type Input, type Node, type Verdict } from './rules.ts';
 
 export type Place = { node: string; slot: string } | { node: string; hand: string } | { node: string };
 export type Change =
   | { change: 'set'; node: string; field: string; n: number; to?: unknown; by?: number }
   | { change: 'link' | 'unlink'; node: string; link: string; n: number; end: string }
   | { change: 'reparent'; node: string; to: Place }
-  | { change: 'create'; node: string; kind: string; to: Place }
+  | { change: 'create'; node: string; kind: string; to: Place; stock?: string; carries?: string[]; fields?: Record<string, unknown> }
   | { change: 'remove'; node: string };
 /** The generic changes, Engine v2 T6's list less the motion sample. */
 export const CHANGES = Object.freeze(['set', 'link', 'unlink', 'reparent', 'create', 'remove']);
 /** `outcome` is set on the event of a draw: the name of the row the world drew. */
 export type Event = { event: string; node: string; changes: number[]; outcome?: string };
-export type Timer = { node: string; form: string; after_us: number; event: number };
+/** `replaces`: the ids of this node's pending timers of the same form, cleared by this one (present only when there are any). */
+export type Timer = { node: string; form: string; after_us: number; event: number; replaces?: string[] };
 export type Done = { verdict: 'yes'; receipt: string; actor: string; changes: Change[]; events: Event[]; timers: Timer[] };
 /**
  * A draw was asked and the world has not answered: the client's answer for the outcome. `could_be` is the whole table
@@ -46,6 +57,35 @@ export type State = Input['state'] & { applied?: string[] };
 const has = (o: unknown, k: string): boolean => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
 const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() : []);
 const arg = (v: unknown, args: Record<string, unknown>) => (v && typeof v === 'object' && has(v, 'arg') ? args[(v as { arg: string }).arg] : v);
+
+type Stock = { name: string; kind: string; count: string; take: string; carries?: string[] };
+type Closed = { audience?: { rule?: string; link?: string } };
+const stockOf = (entry: Entry, form: string): Stock | undefined => {
+  const all = (entry as { stock?: Record<string, Omit<Stock, 'name'>> }).stock ?? {};
+  const name = sorted(all).find((k) => all[k].take === form);
+  return name === undefined ? undefined : { ...all[name], name };
+};
+/** Whether `actor` has opened `node`: a kind with no `closed` section is always open; else the actor is linked by the audience's link. */
+function opened(entry: Entry, node: Node, actor: string): boolean {
+  const closed = (entry as { closed?: Closed }).closed;
+  if (!closed) return true;
+  const a = closed.audience;
+  if (a?.rule === 'everyone') return true;
+  return a?.rule === 'linked' && typeof a.link === 'string' && (node.links?.[a.link] ?? []).includes(actor);
+}
+const countOf = (entry: Entry, node: Node, field: string): unknown => (has(node.fields, field) ? node.fields![field] : entry.state?.[field]?.default);
+
+/**
+ * What a container is known to hold, as the actor may see it: one row per stock (its name, kind, count and the
+ * text fields its things carry), or null while the container is closed to the actor.
+ */
+export function stockList(kinds: Record<string, Entry>, state: Input['state'], node: string): { stock: string; kind: string; count: unknown; carries: string[] }[] | null {
+  const n = has(state.nodes, node) ? state.nodes[node] : undefined;
+  const entry = n?.kind && has(kinds, n.kind) ? kinds[n.kind] : undefined;
+  if (!n || !entry || !opened(entry, n, state.actor)) return null;
+  const all = (entry as { stock?: Record<string, Stock> }).stock ?? {};
+  return sorted(all).map((name) => ({ stock: name, kind: all[name].kind, count: countOf(entry, n, all[name].count), carries: all[name].carries ?? [] }));
+}
 
 /** A field's value as it is stored: a flag 0 or 1, text a key by reference, and nothing (undefined) for a missing value. */
 function stored(def: { type?: string }, v: unknown): unknown {
@@ -85,9 +125,11 @@ export function outsideProfile(v: unknown, at = '', depth = 0): { at: string; re
 export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: number[] }): Done | Refused | Verdict | Unknown {
   const refuse = (effect: number, reason: string, detail: Record<string, unknown> = {}): Refused => ({ verdict: 'no', reason, effect, detail });
   if (!input || typeof input.receipt !== 'string' || !input.receipt) return refuse(-1, 'bad_input', { what: 'no_receipt' });
+  const { kinds, act, state, receipt } = input;
+  const pre = stockRefusal(kinds, act, state);
+  if (pre) return pre;
   const verdict = decide({ ...input, asker: { sees: 'all' } });
   if (verdict.verdict !== 'yes') return verdict;
-  const { kinds, act, state, receipt } = input;
   const self = act.this, actor = state.actor, args = act.args ?? {};
   const entry = kinds[state.nodes[self].kind!];
   const namespace = entry.kind.slice(0, entry.kind.indexOf(':') + 1);
@@ -117,7 +159,18 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     }
     return slotPlace(into);
   };
-  const subject = (what: unknown) => (what === 'actor' ? actor : what === 'this' ? self : null);
+  // The node an effect moves or removes: the actor, this thing, a thing argument of the form (a body's pick_up), or
+  // `{link}`: the one thing at the end of that link of this node (what a give hands over, SA-G4); never a body.
+  const subject = (what: unknown): string | null => {
+    if (what === 'actor' || what === 'this') return what === 'actor' ? actor : self;
+    if (has(what, 'arg')) {
+      const id = args[(what as { arg: string }).arg];
+      return typeof id === 'string' && has(work, id) ? id : null;
+    }
+    const link = what && typeof what === 'object' ? (what as { link?: unknown }).link : undefined;
+    const ends = typeof link === 'string' ? ((work[self].links?.[link] ?? []) as string[]) : [];
+    return ends.length === 1 && has(work, ends[0]) && !has(work[ends[0]], 'hands') ? ends[0] : null;
+  };
 
   const effectList = entry.forms![act.form].effects ?? [];
   for (let i = 0; i < effectList.length; i++) {
@@ -143,30 +196,70 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     } else {
     if (!e || typeof e.event !== 'string') return refuse(i, 'bad_input', { what: 'no_event' });
     if (e.change === 'set') {
-      const def = has(entry.state, e.field ?? '') ? entry.state![e.field!] : undefined;
-      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: e.field ?? null });
+      // A field argument names one of the form's own fields (the rules refused any other choice); the change names the field.
+      const named = arg(e.field, args);
+      const field = typeof named === 'string' ? named : '';
+      const def = has(entry.state, field) ? entry.state![field] : undefined;
+      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: (named ?? null) as unknown });
+      if (def.type === 'timed') {
+        // a timed value is settled at the act's time and given its new rate: the three stored numbers are rewritten
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
+        const now = valueAt(def, held, state.now_us);
+        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: field });
+        // a set may also give the value from now on (a planter watered full), else the value settles where it is
+        if (e.to !== undefined && !Number.isSafeInteger(e.to)) return refuse(i, 'bad_input', { what: 'malformed_value', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to: { value: e.to === undefined ? now : e.to as number, per_s: e.rate!, set_us: state.now_us! } });
+      } else if (has(e, 'by')) {
+        // a count or an amount used up (a sip): the field's value plus `by`, within its bounds; nothing balances it
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
+        const to = Number.isSafeInteger(held) && Number.isSafeInteger(e.by) ? (held as number) + e.by! : null;
+        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to });
+      } else {
       const to = stored(def, arg(e.to, args));
-      out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });
+      out.push({ change: 'set', node: self, field: field, n: def.n, ...(to === undefined ? {} : { to }) });
+      }
     } else if (e.change === 'transfer') {
       const m = measure(kinds, work, self, args, e);
       if ('bad' in m) return refuse(i, 'bad_input', { what: m.bad, ...m.detail });
-      if (m.room !== null && m.moved > m.room) return refuse(i, 'no_room', { node: m.into, field: m.field, room: m.room, amount: m.moved });
-      out.push({ change: 'set', node: m.from, field: m.field, n: m.fromDef.n, to: m.there - m.moved, by: -m.moved });
-      out.push({ change: 'set', node: m.into, field: m.field, n: m.intoDef.n, to: m.has + m.moved, by: m.moved });
+      if (m.room !== null && m.moved > m.room) return refuse(i, 'no_room', { node: m.into, field: m.intoField, room: m.room, amount: m.moved });
+      out.push({ change: 'set', node: m.from, field: m.field, n: m.fromDef.n, to: m.there - m.moved, by: 0 - m.moved });
+      out.push({ change: 'set', node: m.into, field: m.intoField, n: m.intoDef.n, to: m.has + m.moved, by: m.moved });
     } else if (e.change === 'link' || e.change === 'unlink') {
       const def = has(entry.links, e.link ?? '') ? entry.links![e.link!] : undefined;
       if (!def) return refuse(i, 'bad_input', { what: 'no_such_link', link: e.link ?? null });
       const ends = work[self].links?.[e.link!] ?? [];
       if (e.change === 'link' && ends.includes(actor)) return refuse(i, 'already_linked', { link: e.link });
       if (e.change === 'link' && ends.length >= def.most) return refuse(i, 'link_full', { link: e.link, most: def.most });
-      if (e.change === 'unlink' && !ends.includes(actor)) return refuse(i, 'not_linked', { link: e.link });
-      out.push({ change: e.change, node: self, link: e.link!, n: def.n, end: actor });
+      // `from: "all"` frees every end of the link on this thing, each its own unlink, all of them this thing's own links
+      // (Engine v2 T6: a link's node is its owning end). An empty link frees nothing.
+      if (e.change === 'unlink' && e.from === 'all') for (const end of [...ends].sort() as string[]) out.push({ change: 'unlink', node: self, link: e.link!, n: def.n, end });
+      else {
+        if (e.change === 'unlink' && !ends.includes(actor)) return refuse(i, 'not_linked', { link: e.link });
+        out.push({ change: e.change, node: self, link: e.link!, n: def.n, end: actor });
+      }
     } else if (e.change === 'reparent' || e.change === 'create') {
       const to = place(e.into);
       if (typeof to === 'string') return refuse(i, to === 'no_free_hand' || to === 'slot_taken' ? to : 'bad_input', { what: to });
       if (e.change === 'create') {
         if (typeof e.kind !== 'string' || !has(kinds, e.kind)) return refuse(i, 'bad_input', { what: 'no_such_kind', kind: e.kind ?? null });
-        out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to });
+        // Fields of the made thing chosen at the bench (a candle's shape and colour): T6's create carries its fields.
+        const fields: Record<string, unknown> = {};
+        for (const x of Array.isArray(e.set) ? e.set : []) {
+          const def = has(kinds[e.kind].state, x?.field) ? kinds[e.kind].state![x.field] : undefined;
+          const v = arg(x?.to, args);
+          const ok = def && (def.type === 'bool' ? typeof v === 'boolean' : def.type === 'enum' ? (def as { values?: unknown[] }).values?.includes(v) : def.type === 'int' && Number.isSafeInteger(v));
+          if (!ok) return refuse(i, 'bad_input', { what: def ? 'not_a_value' : 'no_such_field', kind: e.kind, field: x?.field ?? null });
+          fields[x.field] = stored(def, v);
+        }
+        const stock = stockOf(entry, act.form);
+        if (stock && stock.kind === e.kind && e.into === 'actor_hand') {
+          const def = entry.state?.[stock.count];
+          const count = countOf(entry, work[self], stock.count);
+          if (!def || !Number.isSafeInteger(count) || (count as number) < 1) return refuse(i, 'bad_input', { what: 'bad_stock', stock: stock.name });
+          out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to, stock: stock.name, ...(stock.carries?.length ? { carries: [...stock.carries] } : {}), ...(Object.keys(fields).length ? { fields } : {}) });
+          out.push({ change: 'set', node: self, field: stock.count, n: def.n, to: (count as number) - 1, by: -1 });
+        } else out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to, ...(Object.keys(fields).length ? { fields } : {}) });
       } else {
         const node = subject(e.what);
         if (!node) return refuse(i, 'bad_input', { what: 'malformed_subject' });
@@ -178,7 +271,8 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
       out.push({ change: 'remove', node });
     } else if (e.change === 'timer') {
       if (typeof e.form !== 'string' || !Number.isSafeInteger(e.after_us) || e.after_us! <= 0) return refuse(i, 'bad_input', { what: 'malformed_timer' });
-      done.timers.push({ node: self, form: e.form, after_us: e.after_us!, event: done.events.length });
+      const pending = (Array.isArray(work[self].timers) ? work[self].timers! : []).filter((t) => t && t.form === e.form).map((t) => t.id);
+      done.timers.push({ node: self, form: e.form, after_us: e.after_us!, event: done.events.length, ...(pending.length ? { replaces: pending } : {}) });
     } else return refuse(i, 'bad_input', { what: 'unknown_change', change: e.change ?? null });
 
     event = { event: e.event.includes(':') ? e.event : namespace + e.event, node: self, changes: [] };
@@ -194,6 +288,19 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
     done.events.push(event);
   }
   return done;
+}
+
+/** A take from an empty stock or a closed container, refused by name before the rules are asked. */
+function stockRefusal(kinds: Record<string, Entry>, act: Input['act'], state: Input['state']): Refused | null {
+  const n = act && state?.nodes && has(state.nodes, act.this) ? state.nodes[act.this] : undefined;
+  const entry = n?.kind && has(kinds, n.kind) ? kinds[n.kind] : undefined;
+  const stock = entry && has(entry.forms, act.form) ? (stockOf(entry, act.form)) : undefined;
+  if (!n || !entry || !stock) return null;
+  const effect = (entry.forms![act.form].effects ?? []).findIndex((e) => e.change === 'create' && e.kind === stock.kind);
+  const no = (reason: string): Refused => ({ verdict: 'no', reason, effect: Math.max(effect, 0), detail: { kind: entry.kind, stock: stock.name } });
+  if (!opened(entry, n, state.actor)) return no('closed');
+  const count = countOf(entry, n, stock.count);
+  return Number.isSafeInteger(count) && (count as number) < 1 ? no('empty') : null;
 }
 
 /**
@@ -218,6 +325,8 @@ export function apply(
   for (const event of result.events ?? []) {
     let sum = 0n;
     for (const k of event.changes) {
+      // A thing made from a stock is the other side of the count's `by`.
+      if ((changes[k] as { change?: string; stock?: unknown } | undefined)?.change === 'create' && typeof (changes[k] as { stock?: unknown }).stock === 'string') sum += 1n;
       const by = (changes[k] as { by?: unknown } | undefined)?.by;
       if (by === undefined) continue;
       if (!Number.isSafeInteger(by)) return { ok: false, reason: 'not_whole_number', change: k };
@@ -320,7 +429,7 @@ function applyChange(nodes: Record<string, Node>, c: Change): string | null {
     case 'create':
       if (node) return 'node_exists';
       if (typeof c.kind !== 'string') return 'malformed_change';
-      nodes[c.node] = { kind: c.kind };
+      nodes[c.node] = { kind: c.kind, ...(c.fields ? { fields: { ...c.fields } } : {}) };
       return attach(nodes, c.to, c.node);
     case 'remove': {
       if (!node) return 'no_such_node';

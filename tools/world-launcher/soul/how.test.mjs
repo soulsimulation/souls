@@ -34,19 +34,20 @@ const run = (dir, ...args) => new Promise((res) => execFile(process.execPath, [C
 const KETTLE_THING = [{ id: "kettle", name: "Kettle", kind: "eden:kettle", place: "hall", at: [1, 0] }];
 
 test("A1: how for tea returns at most six steps naming real things, cut at the wait, with the rest as a wake entry", async (t) => {
-  const w = await world({ things: KETTLE_THING, truth: { kettle: { water: "cold", heating: false } } });
+  const w = await world({ things: KETTLE_THING, truth: { kettle: { water: 1000, heating: false } } });
   t.after(() => w.server.close());
   const r = (await run(home(w.url), "how", "tea")).out;
   assert.equal(r.how, "tea");
-  assert.match(r.text, /Switch the kettle on/);
+  assert.match(r.text, /Fill the kettle at a tap, switch it on/);
   assert.equal(r.with.thing, "kettle");
+  assert.deepEqual(r.done, [{ form: "fill", act: "object:kettle:fill", why: "already so on this copy: water is 1000" }], "a kettle already filled passes over fill and says so");
   assert.ok(r.steps.length >= 1 && r.steps.length <= HOW_STEPS_MAX);
   assert.deepEqual(r.steps.map((s) => s.act), ["object:kettle:switch_on", "object:kettle:pour"], "each step is a form of a real thing");
   assert.equal(r.steps[0].can, "yes", "the first step is checked on this copy");
   assert.equal(r.steps[0].then_waits_s, 150, "switching on starts a wait the client schedules; the world never waits");
   assert.deepEqual(r.plan, ["object:kettle:switch_on"], "the plan runs up to the wait");
   assert.deepEqual(r.later.plan, ["object:kettle:pour"]);
-  assert.match(r.later.wake, /^wake add thing-state '\{"thing":"kettle","field":"water","is":"hot"\}' --plan '\["object:kettle:pour"\]' --end \d{4}-/);
+  assert.match(r.later.wake, /^wake add thing-state '\{"thing":"kettle","field":"heating","is":false\}' --plan '\["object:kettle:pour"\]' --end \d{4}-/);
   assert.deepEqual(w.asked, [], "nothing was sent");
 });
 
@@ -62,10 +63,11 @@ test("A2: in a world with no kettle the how-to names the kind", async (t) => {
 });
 
 test("a first step that is not possible is said, and --run starts nothing", async (t) => {
-  const w = await world({ things: KETTLE_THING, truth: { kettle: { water: "empty", heating: false } } });
+  const w = await world({ things: KETTLE_THING, truth: { kettle: { water: 0, heating: false } } });
   t.after(() => w.server.close());
   const dir = home(w.url);
   const r = (await run(dir, "how", "tea")).out;
+  assert.equal(r.steps[0].form, "fill", "an empty kettle's tea starts with fill");
   assert.equal(r.steps[0].can, "no");
   assert.match(r.next, /not possible now/);
   const started = await run(dir, "how", "tea", "--run");

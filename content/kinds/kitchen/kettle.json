@@ -3,8 +3,9 @@
   "kind": "eden:kettle",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "enum", "values": ["empty", "cold", "hot"], "default": "empty", "audience": { "rule": "everyone" } },
-    "heating": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+    "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1700, "audience": { "rule": "everyone" } },
+    "heating": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "heat": { "n": 3, "type": "timed", "unit": "mC", "default": { "value": 25000, "per_s": 0, "set_us": 0 }, "min": 25000, "max": 100000, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [-135, 150, 0] },
@@ -14,28 +15,45 @@
   },
   "geometry": { "bounds_mm": [560, 260, 200] },
   "forms": {
+    "fill": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "from": { "type": "thing", "select": { "of": "things", "kind": "eden:tap", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "held_by_actor" },
+        { "need": "state", "field": "water", "at_most": 0 }
+      ],
+      "steps": [{ "step": "move", "move": "fill", "toward": { "arg": "from" } }],
+      "effects": [{ "change": "transfer", "field": "water", "from": { "arg": "from" }, "into": "this", "amount": "room", "event": "filled" }]
+    },
     "switch_on": {
       "who": "anyone",
       "starts": "act",
       "needs": [
         { "need": "state", "field": "heating", "is": false },
-        { "need": "state", "field": "water", "not": "empty" },
+        { "need": "state", "field": "water", "at_least": 1 },
         { "need": "within_reach", "point": "button" }
       ],
       "steps": [{ "step": "move", "move": "press", "at": "button" }],
       "effects": [
         { "change": "set", "field": "heating", "to": true, "event": "switched_on" },
-        { "change": "timer", "form": "boiled", "after_us": 150000000, "event": "boil_started" }
+        { "change": "set", "field": "heat", "rate": 500, "event": "warming" },
+        { "change": "timer", "form": "boiled", "after_us": 150000000, "event": "will_boil" }
       ]
     },
     "boiled": {
       "who": "world",
       "starts": "timer",
-      "needs": [{ "need": "state", "field": "heating", "is": true }],
+      "needs": [
+        { "need": "state", "field": "heating", "is": true },
+        { "need": "state", "field": "heat", "at_least": 100000 }
+      ],
       "steps": [],
       "effects": [
-        { "change": "set", "field": "water", "to": "hot", "event": "boiled" },
-        { "change": "set", "field": "heating", "to": false, "event": "switched_off" }
+        { "change": "set", "field": "heating", "to": false, "event": "boiled" },
+        { "change": "set", "field": "heat", "rate": -50, "event": "cooling" }
       ]
     },
     "pour": {
@@ -46,19 +64,32 @@
       },
       "needs": [
         { "need": "held_by_actor" },
-        { "need": "state", "field": "water", "not": "empty" }
+        { "need": "state", "field": "water", "at_least": 1 }
       ],
       "steps": [{ "step": "move", "move": "pour", "at": "spout", "toward": { "arg": "into" } }],
-      "effects": [{ "change": "set", "field": "water", "to": "empty", "event": "poured" }]
+      "effects": [{ "change": "transfer", "field": "water", "from": "this", "into": { "arg": "into" }, "amount": "room", "event": "poured" }]
     }
   },
-  "looks": { "model": "look:kettle", "shape": {"round":6,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,12],[84,12],[90,30],[92,70],[88,160],[78,210],[62,226],[0,229]],"segments":20,"tint":"shell"},{"kind":"cyl","at":[0,7,0],"r":86,"h":14,"segments":20,"tint":"dark"},{"kind":"cyl","at":[0,229,0],"r":58,"h":6,"segments":16,"tint":"steel"},{"kind":"sphere","at":[0,242,0],"r":14,"segments":8,"tint":"dark"},{"kind":"sweep","at":[0,0,0],"path":[[82,110,0],[140,130,0],[205,158,0],[262,192,0]],"r":16,"segments":7,"tint":"shell"},{"kind":"cyl","at":[268,196,0],"r":13,"h":6,"segments":8,"tint":"steel","roll":-52000},{"kind":"sweep","at":[0,0,0],"path":[[-70,212,0],[-118,222,0],[-137,190,0],[-137,110,0],[-118,70,0],[-84,60,0]],"r":13,"segments":6,"tint":"dark"},{"kind":"box","at":[-118,236,0],"size":[30,12,20],"round":4,"tint":"switch"}],"palette":{"shell":"#e6dfcf","steel":"#b9bfc3","dark":"#2f2b29","switch":"#d0621f"},"tags":["kitchen","item","kettle","tea","object"]} },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:kettle",
+    "table": [
+      { "part": "fill", "field": "water", "do": "scale", "axis": "y", "range": [0, 1700], "to": [0, 1000] },
+      { "part": "light", "field": "heating", "do": "tint", "at": { "true": "#ff3b14", "false": "#4a4542" } },
+      { "part": "lid", "field": "heat", "do": "steam", "range": [80000, 100000], "to": [0, 1000] }
+    ],
+    "shape": {"round":6,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,12],[84,12],[90,30],[92,70],[88,160],[78,210],[62,226],[0,229]],"segments":20,"tint":"shell"},{"kind":"cyl","at":[0,7,0],"r":86,"h":14,"segments":20,"tint":"dark"},{"kind":"cyl","at":[0,229,0],"r":58,"h":6,"segments":16,"tint":"steel","role":"lid"},{"kind":"sphere","at":[0,242,0],"r":14,"segments":8,"tint":"dark"},{"kind":"sweep","at":[0,0,0],"path":[[82,110,0],[140,130,0],[205,158,0],[262,192,0]],"r":16,"segments":7,"tint":"shell"},{"kind":"cyl","at":[268,196,0],"r":13,"h":6,"segments":8,"tint":"steel","roll":-52000},{"kind":"sweep","at":[0,0,0],"path":[[-70,212,0],[-118,222,0],[-137,190,0],[-137,110,0],[-118,70,0],[-84,60,0]],"r":13,"segments":6,"tint":"dark"},{"kind":"box","at":[-118,236,0],"size":[30,12,20],"round":4,"tint":"switch","role":"light"},{"kind":"box","at":[0,108,91],"size":[28,100,4],"round":2,"tint":"dark"},{"kind":"box","at":[0,106,93],"size":[18,88,3],"round":1,"tint":"water","role":"fill","pivot":[0,62,93]}],"palette":{"shell":"#e6dfcf","steel":"#b9bfc3","dark":"#2f2b29","switch":"#d0621f","water":"#3f8fd0"},"tags":["kitchen","item","kettle","tea","object"]}
+  },
   "text": {
     "card": "A kettle: fill it, switch it on, and it boils water for tea.",
-    "howto_tea": "Switch the kettle on, wait for it to boil, then pour it into a cup."
+    "kitchen": "kitchen",
+    "heat": "heat",
+    "brew": "brew",
+    "howto_tea": "Fill the kettle at a tap, switch it on, wait for it to boil, then pour it into a cup."
   },
-  "card": { "text": "card" },
+  "card": { "text": "card", "category": "kitchen", "synonyms": ["heat", "brew"] },
   "howtos": {
-    "tea": { "text": "howto_tea", "steps": [{ "form": "switch_on" }, { "form": "pour" }] }
+    "tea": { "text": "howto_tea", "steps": [{ "form": "fill" }, { "form": "switch_on" }, { "form": "pour" }] }
   }
 }

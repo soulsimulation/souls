@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { apply, effects, outsideProfile, type Done, type State } from './effects.ts';
+import { apply, effects, outsideProfile, stockList, type Done, type State } from './effects.ts';
 import { generate } from './generate.ts';
 import { CASES, loadEffectCases, loadKinds, mismatches, same } from './load.ts';
 
@@ -13,7 +13,7 @@ for (const [file, c] of cases) {
   test(`${file.slice(CASES.length + 1)}: ${c.name}`, () => {
     let state: State = structuredClone(c.state);
     c.do.forEach((step, k) => {
-      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor }, receipt: step.receipt, draw: step.draw });
+      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor, now_us: step.now_us ?? state.now_us }, receipt: step.receipt, draw: step.draw });
       if (step.expect) assert.deepEqual(mismatches(step.expect, result), [], `step ${k}: ${JSON.stringify(result)}`);
       const once = apply(state, result);
       if (!once.ok) return assert.fail(`step ${k}: ${JSON.stringify(once)}`);
@@ -27,6 +27,7 @@ for (const [file, c] of cases) {
       assert.deepEqual(twice.ok && twice.state, once.state, `step ${k}: applied twice is applied once`);
       state = once.state;
     });
+    for (const l of c.lists ?? []) assert.ok(same(stockList(kinds, { ...state, actor: l.actor ?? state.actor }, l.node), l.expect), `${l.node}: ${JSON.stringify(stockList(kinds, state, l.node))}`);
     for (const [id, want] of Object.entries(c.after ?? {})) assert.ok(same(state.nodes[id] ?? null, want), `${id}: ${JSON.stringify(state.nodes[id] ?? null)}`);
   });
 }
@@ -114,7 +115,7 @@ function results(): Done[] {
   for (const [, c] of cases) {
     let state: State = structuredClone(c.state);
     for (const step of c.do) {
-      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor }, receipt: step.receipt });
+      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor, now_us: step.now_us ?? state.now_us }, receipt: step.receipt });
       const once = apply(state, result);
       if (result.verdict === 'yes' && 'changes' in result && once.ok) (out.push(result), (state = once.state));
     }

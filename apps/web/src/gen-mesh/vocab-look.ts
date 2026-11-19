@@ -64,6 +64,7 @@ function placeParts(root: THREE.Object3D, placed: Record<string, Placement>) {
     // SA-D2: steam and growth are read by the page's plume and plant code from the part and the picture's root; flame is shown or put out here
     if (p.steam_permille !== undefined) { o.userData.lookSteam = p.steam_permille; root.userData.lookSteamPart = o; }
     if (p.growth_permille !== undefined) root.userData.lookGrowth = p.growth_permille;
+    if (p.wilt_permille !== undefined) root.userData.lookWilt = p.wilt_permille;
     const d = Math.PI / 180000;
     o.rotation.set(rest.rot[0] + (p.rotate_mdeg?.[0] ?? 0) * d, rest.rot[1] + (p.rotate_mdeg?.[1] ?? 0) * d, rest.rot[2] + (p.rotate_mdeg?.[2] ?? 0) * d);
     o.position.set(rest.pos[0] + (p.slide_mm?.[0] ?? 0) / 1000, rest.pos[1] + (p.slide_mm?.[1] ?? 0) / 1000, rest.pos[2] + (p.slide_mm?.[2] ?? 0) / 1000);
@@ -141,8 +142,10 @@ export function stationIndex(def: MeshCtx['def'], station: unknown): number {
 function stateRoles(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
   const s = look.state;
   const tuned = typeof s.station === 'string' ? stationIndex(ctx.def, s.station) - 1 : null;
+  // a role the looks table names is posed by the table alone (tableRoles), never here as well
+  const tabled = new Set(tableOf(ctx).flatMap((r) => [r.part, ...Object.values(r.at ?? {})]));
   root.traverse((o) => {
-    const role = o.userData.role as string | undefined; if (!role) return;
+    const role = o.userData.role as string | undefined; if (!role || tabled.has(role)) return;
     if (role === 'door' && s.open !== undefined) o.rotation.y = s.open === true ? -Math.PI * 0.48 : 0;
     if (role === 'lid' && s.open !== undefined) o.rotation.x = s.open === true ? -Math.PI * 0.6 : 0;
     // Soul Actions entry 23: curtains draw back to their outer ends (pleats bunch), a roller blind rolls up to its top

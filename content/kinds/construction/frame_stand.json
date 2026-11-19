@@ -1,0 +1,38 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:frame_stand",
+ "owner": "thing",
+ "slots": {
+  "frame_1": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_upright"
+   ],
+   "most": 1,
+   "at_mm": [0, 100, -150]
+  },
+  "frame_2": {
+   "admits": "thing",
+   "kinds": [
+    "mars:rack_upright"
+   ],
+   "most": 1,
+   "at_mm": [0, 100, 150]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [1419, 300, 600]
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "card"
+ },
+ "card": {
+  "text": "card"
+ }
+}

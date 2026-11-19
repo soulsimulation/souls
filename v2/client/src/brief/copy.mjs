@@ -1,0 +1,97 @@
+// The copy as rows (Engine v2 R7, #2701): the daemon's copy of its scope (R5's `Copy`, in WASM memory) read record by
+// record from its roots down, each record decoded once by its hash. A row is a node: its id, its name, its kind, its
+// parent and the path of names above it, its text quoted, and `own`, its record without its children's hashes, so
+// that two versions of a node compare equal when only something below it changed. A row never carries a position.
+//
+// The records are CBOR in T0's profile (`v2/docs/encoding.md`): unsigned and negative integers, bytes, text, arrays,
+// maps and the simple values; this reader takes those and nothing else.
+
+const SIMPLE = { 20: false, 21: true, 22: null };
+
+/** One CBOR item in T0's profile, as plain values: integers as numbers (BigInt past 2^53), bytes as Uint8Array. */
+export function decode(bytes) {
+  let at = 0;
+  const arg = (info) => {
+    if (info < 24) return info;
+    const n = 1 << (info - 24);
+    if (info > 27) throw new Error('cbor: not in the profile');
+    let v = 0n;
+    for (let k = 0; k < n; k++) v = (v << 8n) | BigInt(bytes[at++]);
+    return v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v;
+  };
+  const item = () => {
+    const b = bytes[at++], major = b >> 5, info = b & 31;
+    if (major === 7) { if (!(info in SIMPLE)) throw new Error('cbor: not in the profile'); return SIMPLE[info]; }
+    const n = arg(info);
+    switch (major) {
+      case 0: return n;
+      case 1: return typeof n === 'bigint' ? -1n - n : -1 - n;
+      case 2: { const out = bytes.slice(at, at + n); at += n; return out; }
+      case 3: { const out = Buffer.from(bytes.subarray(at, at + n)).toString('utf8'); at += n; return out; }
+      case 4: return Array.from({ length: n }, item);
+      case 5: { const m = new Map(); for (let k = 0; k < n; k++) { const key = item(); m.set(key, item()); } return m; }
+      default: throw new Error('cbor: not in the profile');
+    }
+  };
+  const v = item();
+  if (at !== bytes.length) throw new Error('cbor: bytes after the item');
+  return v;
+}
+
+const hex = (b) => Buffer.from(b).toString('hex');
+/** An id `[scope, counter]` as text: `<scope hex>-<counter>`. */
+export const idText = (v) => `${hex(v[0])}-${v[1]}`;
+/** A kind `namespace:name@hash` as its plain name. */
+export const plainKind = (k) => String(k).replace(/@.*$/, '');
+/** A version `[lineage, zone, epoch, sequence]`'s bytes in hex, as its sequence. */
+export const sequenceOf = (versionHex) => (versionHex ? Number(decode(Buffer.from(versionHex, 'hex'))[3]) : 0);
+
+/** Plain JSON for comparing records: bytes as hex, maps as sorted pairs. */
+const plain = (v) => v instanceof Uint8Array ? hex(v) : Array.isArray(v) ? v.map(plain) : v instanceof Map ? [...v].map(([k, x]) => [k, plain(x)]) : typeof v === 'bigint' ? String(v) : v;
+
+const DECODED = new Map(); // hash → { record, own }; a hash names the same record for ever
+const KEEP_DECODED = 50_000;
+function read(copy, hash) {
+  let d = DECODED.get(hash);
+  if (!d) {
+    const bytes = copy.record(hash);
+    if (!bytes) return null;
+    const m = decode(bytes), rest = new Map(m);
+    rest.delete(10);
+    d = { m, own: JSON.stringify(plain(rest)) };
+    if (DECODED.size >= KEEP_DECODED) DECODED.clear();
+    DECODED.set(hash, d);
+  }
+  return d;
+}
+
+/**
+ * The copy's rows by id, walked from its roots (`copy.roots()`): `{ id, name, kind, parent, path, children, text, own }`.
+ * A node is named by its kind's plain name and its counter ("cup 7") unless a text field gives it one; text in its
+ * fields is the world's or a Soul's words and is carried as `text`, to be quoted, never followed.
+ */
+export function rowsOf(copy) {
+  const rows = new Map();
+  const todo = Object.values(JSON.parse(copy.roots())).map((h) => [h, []]);
+  while (todo.length) {
+    const [hash, path] = todo.pop();
+    const d = read(copy, hash);
+    if (!d) continue;
+    const { m } = d, id = idText(m.get(1)), kind = plainKind(m.get(2));
+    const fields = m.get(6) instanceof Map ? m.get(6) : new Map();
+    const text = [...fields.values()].filter((v) => typeof v === 'string');
+    const name = `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    const children = (m.get(10) ?? []).map(hex);
+    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), own: d.own });
+    for (const c of children) todo.push([c, [...path, name]]);
+  }
+  return rows;
+}
+
+/** What changed between two sets of rows: the names added, removed or changed in their own record, in name order. */
+export function changedBetween(before, after) {
+  const out = [];
+  for (const [id, r] of after) if (before.get(id)?.own !== r.own) out.push({ id, name: r.name, ...(before.has(id) ? {} : { added: true }) });
+  for (const [id, r] of before) if (!after.has(id)) out.push({ id, name: r.name, removed: true });
+  return out.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+}

@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, isLauncher, parseCorePlan, groupBusy, SPLIT, WIDE, LOAD_GATE, WIDE_MAX_GATE, COUNTED, target, countedSteps } from './timed-run.mjs';
+import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, isLauncher, parseCorePlan, groupBusy, SPLIT, WIDE, LOAD_GATE, WIDE_MAX_GATE, COUNTED, target, countedSteps, checkBenchArgs, benchBins, benchLines, allowlist, V2_PREPS } from './timed-run.mjs';
 
 const ENV = { INPUT_REF: 'main', INPUT_COMMAND: 'walk', INPUT_REPEATS: '1', INPUT_ARGS: '' };
 
@@ -296,5 +296,40 @@ test('stage, counted: the record, log, score, class and probe log only; world da
     rmSync(dest, { recursive: true });
     put('counted/cand-2/run.json', '{"err":"tok-FAKE-fixture-counted"}');
     assert.throws(() => stage({ out, dest, command: 'counted', scrubWith: sw }), /run\.json holds a Soul token/);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
+test('v2-bench: --bin and plain tokens after --; the bin must be a [[bin]] of the ref\'s bench manifest; build, then cargo run per repeat', () => {
+  const inp = parseInputs({ ...ENV, INPUT_REF: 'agent/2697-view-tier', INPUT_COMMAND: 'v2-bench', INPUT_REPEATS: '2', INPUT_ARGS: '--bin view-tier -- 400 2' });
+  assert.deepEqual(inp, { ref: 'agent/2697-view-tier', command: 'v2-bench', repeats: 2, args: ['--bin', 'view-tier', '--', '400', '2'], runner: 'souls-timed' });
+  assert.deepEqual(benchLines(inp), { build: ['build', '-p', 'bench', '--release', '--locked', '--bin', 'view-tier'], run: ['run', '-p', 'bench', '--release', '--locked', '--bin', 'view-tier', '--', '400', '2'] });
+  assert.deepEqual(benchLines(parseInputs({ ...ENV, INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin tree' })).run, ['run', '-p', 'bench', '--release', '--locked', '--bin', 'tree']);
+  assert.deepEqual(checkBenchArgs('--bin tree -- --rows=10 target/x a.b_c'), ['--bin', 'tree', '--', '--rows=10', 'target/x', 'a.b_c']);
+  for (const a of ['', '400 2', '--bin', '--bin ../x', '--bin View', '--bin a;b', '--bin tree 400', '--bin tree -- $(id)', '--bin tree -- a;b', '--bin tree -- `id`', '--bin tree -- a|b',
+    '--bin tree -- "x"', '--bin tree -- a&&b', '--bin tree -- a~b', '--bin tree -- a>b',`--bin tree -- ${Array(21).fill('1').join(' ')}`])
+    assert.throws(() => checkBenchArgs(a), /input args/, a);
+  assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin tree', INPUT_RUNNER: 'hosted' }), /input runner=/);
+  assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin tree', INPUT_RUNNER: 'souls-wide' }), /input runner=/);
+  const toml = '[package]\nname = "bench"\n\n[[bin]]\nname = "tree"\npath = "src/tree.rs"\n\n[[bin]] # R3\nname="view-tier"\n\n[dependencies]\nname = "not-a-bin"\n[[example]]\nname = "ex"\n';
+  assert.deepEqual(benchBins(toml), ['tree', 'view-tier']);
+  assert.deepEqual(benchBins('[package]\nname = "bench"\n'), []);
+});
+
+test('v2-bench --prep: an allowlisted prep; @<output> only of that prep, filled with its file in the per-run directory, shown as written', () => {
+  const inp = parseInputs({ ...ENV, INPUT_REF: 'agent/3167-corner-cost', INPUT_COMMAND: 'v2-bench', INPUT_ARGS: '--bin walkers --prep eden-facts -- @facts @labels uniform 1 1000 600' });
+  assert.deepEqual(inp.args, ['--bin', 'walkers', '--prep', 'eden-facts', '--', '@facts', '@labels', 'uniform', '1', '1000', '600']);
+  assert.deepEqual(benchLines(inp).build, ['build', '-p', 'bench', '--release', '--locked', '--bin', 'walkers']);
+  assert.deepEqual(benchLines(inp).run.slice(7), ['--', '@facts', '@labels', 'uniform', '1', '1000', '600']);
+  assert.deepEqual(benchLines(inp, join('/p', 'prep')).run.slice(7), ['--', join('/p', 'prep', V2_PREPS['eden-facts'].facts), join('/p', 'prep', V2_PREPS['eden-facts'].labels), 'uniform', '1', '1000', '600']);
+  assert.deepEqual(checkBenchArgs('--bin walkers --prep eden-facts'), ['--bin', 'walkers', '--prep', 'eden-facts']);
+  for (const a of ['--bin walkers --prep', '--bin walkers --prep other -- @facts', '--bin walkers -- @facts', '--bin walkers --prep eden-facts -- @nope', '--bin walkers --prep eden-facts @facts', '--bin walkers --prep eden-facts -- @facts;id', '--prep eden-facts --bin walkers'])
+    assert.throws(() => checkBenchArgs(a), /input args/, a);
+});
+
+test('stage, v2-bench: the record, the build log and each repeat\'s log; the target dir and the bench\'s own files stay', () => {
+  const d = mkdtempSync(join(tmpdir(), 'timed-')), out = join(d, 'out'), put = (f, t) => { mkdirSync(join(out, f, '..'), { recursive: true }); writeFileSync(join(out, f), t); };
+  try {
+    for (const f of ['timed-run.json', 'v2-bench-prep.log', 'v2-bench-build.log', 'v2-bench-r1.log', 'v2-bench-r2.log', 'target/release/view-tier', 'view-tier/log.bin', 'prep/labels.json']) put(f, 'x');
+    assert.deepEqual(allowlist(out, 'v2-bench'), ['timed-run.json', 'v2-bench-prep.log', 'v2-bench-build.log', 'v2-bench-r1.log', 'v2-bench-r2.log']);
   } finally { rmSync(d, { recursive: true, force: true }); }
 });

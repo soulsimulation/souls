@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":109,"group":"object","words":"do yoga on the mat","obvious":3,"things":{"mat":"eden:yoga_mat"},"chain":[{"this":"me","form":"go_to","args":{"place":"mat"}},{"this":"mat","form":"yoga"}]}

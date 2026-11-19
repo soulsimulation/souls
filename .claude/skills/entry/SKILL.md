@@ -75,6 +75,19 @@ It prints one JSON verdict and exits 0 when no gate failed, 1 when one did, 2 on
 Read `failed` first: it names the gates that failed. `ran` lists the gates that ran, `waits` those that could not
 run yet. When `check` fails, `cases` and `look` are skipped: fix the check findings first, each carries its `fix`.
 
+**The run gate on a world.** `pnpm entry run <family> --world <url> [--god <creator folder>]` (`tools/entry/run.mjs`)
+plays the same cases on a running local world, from outside: the creator's god CLI sets each scene, the Soul in
+`SOULS_HOME` sends the act and reads the receipt. A row passes, fails or is skipped with its cause (a form the world
+does not offer, one started by a timer, a start that needs a take); a skip is never a pass.
+Then each form a Soul starts is disturbed: the Soul leaves as each step begins and mid-step, a creator removes the
+thing, the world restarts (a world under a launcher). Each passes when the form ends with a named reason, the Soul is
+free and holds what it held, and the thing, as it stands, can be used again.
+
+**The find gate.** `pnpm entry find <family> --world <url> --kind <name> --form <form> --goal "<goal>"`
+(`tools/entry/find.mjs`) runs a real model on the playtest seat, told only the goal, against a thing placed beside a
+fresh Soul. It reports whether the form finished and the seat's reads, acts and refusals, with the card and without
+(`--arms`). It spends model time: run it only when the task is to measure finding, two repeats.
+
 **The look gate and shapes.** It draws `looks.shape`. Until SA-D3 (#2855) settles how an entry carries a shape,
 the format cannot hold one, so a kind with no shape shows `"waits": "a shape: ..."` instead of a sheet. That is
 not a failure; say so in the pull request.

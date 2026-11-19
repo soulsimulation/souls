@@ -1,0 +1,211 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Eden's garden things (SA-X29, #2919). The greenhouse vent is opened and closed. A log is taken from the firewood stack into the hand, then stacked back (the log removed, the stack one more). The stack count is lowered by the engine in the same batch as the take (stock, SA-F12: the take form never sets it), so the rules alone leave it as it was; the case starts with one log gone.",
+  "cases": [
+    {
+      "name": "open_then_close_the_vent",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "g1"
+            ]
+          },
+          "g1": {
+            "kind": "eden:greenhouse"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              1500,
+              1400,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "g1",
+            "form": "open_vent"
+          },
+          "receipt": "rg1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "vent_open",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:vent_opened",
+                "node": "g1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "g1",
+            "form": "close_vent"
+          },
+          "receipt": "rg2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "g1",
+                "field": "vent_open",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:vent_closed",
+                "node": "g1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "take_a_log_then_stack_it_back",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "f1"
+            ]
+          },
+          "f1": {
+            "kind": "eden:firewood",
+            "fields": {
+              "logs": 11
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "f1",
+            "form": "take_log"
+          },
+          "receipt": "rf1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "create",
+                "node": "rf1.0",
+                "kind": "eden:firewood_log",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                },
+                "stock": "logs"
+              },
+              {
+                "change": "set",
+                "node": "f1",
+                "field": "logs",
+                "n": 1,
+                "to": 10,
+                "by": -1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:log_taken",
+                "node": "f1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "f1",
+            "form": "stack_log",
+            "args": {
+              "log": "rf1.0"
+            }
+          },
+          "receipt": "rf2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "rf1.0"
+              },
+              {
+                "change": "set",
+                "node": "f1",
+                "field": "logs",
+                "n": 1,
+                "to": 11
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:log_stacked",
+                "node": "f1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stack_grew",
+                "node": "f1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    }
+  ]
+}
