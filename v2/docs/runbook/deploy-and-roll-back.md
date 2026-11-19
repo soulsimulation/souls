@@ -24,10 +24,20 @@ the machine, not a person. The code is `v2/crates/supervisor/src/deploy.rs`; the
    `rollback.schema-unread` and the world keeps running the new build: a person decides then. Otherwise the pin goes
    back, the world restarts, and the deploy ends when the old build answers the probe.
 
-**The probe** is R5b's sync ask for the world's root hash (`{20: n, 21: []}`), sent straight to the world's socket. It
-needs no actor and no body, so a release never drives anyone's Soul: a Soul has one controller, its owner's agent
-(O18c, #3524). The world answers it on its clock thread, behind every tick record already handed to its disk, with its
-version and its root's hash; it is never an intent, so it is never logged and no Soul hears of it.
+**The probe** owns one temporary operator body, separate from every user's Soul (O18d, #3575). Its unpaired
+identity enters through ordinary C3/K10 `life:join`, then sends ordinary `eden:describe` to its own body. A sample
+passes only with the exact actor and sequence, a successful receipt with an intent id and nonempty committed entry
+references. A root-hash response alone, or a candidate refusing acts, fails. The ordinary admission, ownership and
+geometry checks still apply. The operator is not paired or added to the user directory.
+
+Every watch ends by retiring its body with ordinary `life:leave`, including failure and rollback. Before sending,
+`deploy` atomically syncs its owned actor, monotonic sequence and pending phase to
+`$WORLDS_ROOT/deploys/<world>.probe`; it clears that receipt only after verified retirement. A stable sibling
+`<world>.probe.lock` prevents concurrent deployments from sharing the actor. If the operator process is interrupted,
+the next watch recovers the same pending identity, confirms any uncertain birth through an idempotent join, and
+retires it before starting a new sample. An unavailable or refusing candidate leaves the receipt named
+`canary.probe-pending` until the rolled-back healthy endpoint can retire it. Do not delete a pending receipt to
+silence that failure. Scratch rehearsal uses its own operator receipt and body on the copied world.
 
 Agents' sockets are the gateway's (I1): they stay open through every restart, intents sent while the world is away
 are answered `world.restarting`, and those the world had not answered are sent again when it is back. Every act the
@@ -65,9 +75,6 @@ a build that reads only an older schema is refused. It prints the timelines, soc
 
 ## Known limits
 
-- The probe proves the world serves, ticks its clock thread and syncs its disk, not that it commits acts: a build
-  that serves and refuses every act passes the canary. The rehearsal's fed intents must each reach a named end, but a
-  refusal is one. A probe act through a body of the probe's own needs births in `worldd serve` (C3).
 - A rehearsal replays the copied log from its start (the folder's checkpoints are not copied): a long-lived world's
   rehearsal start grows with its log, and must stay under 30 s.
 - `deploy` against systemd has not been run on a Linux machine: it was proved on `scratch.sh`'s machine (O18, O18b).
