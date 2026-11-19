@@ -7,7 +7,6 @@ import { PlaybackClock } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { SocketSource } from '../source/socket.ts';
-import { NearClock } from '../source/near.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
@@ -19,11 +18,9 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
 const address = new URLSearchParams(location.search).get('stream');
 const moment = readMoment(location.hash); // V9: a link to a moment opens history
-// V13: a signed-in owner's direct view, `?gateway=<socket>&follow=<body>`, its token in the fragment, taken out at once.
-const q = new URLSearchParams(location.search), token = new URLSearchParams(location.hash.slice(1)).get('token');
-if (token) window.history.replaceState(null, '', location.pathname + location.search);
+const q = new URLSearchParams(location.search), token = new URLSearchParams(location.hash.slice(1)).get('token'); // V13
+if (token) window.history.replaceState(null, '', location.pathname + location.search); // the token leaves the address
 const near = q.get('gateway') && token ? new SocketSource({ url: q.get('gateway')!, token, follow: q.get('follow') ?? '' }) : null;
-const nearClock = new NearClock();
 
 // The GL renderer's name, from a throwaway context, picks the tier before the real one is made (antialiasing is fixed
 // at creation).
@@ -109,9 +106,8 @@ renderer.setAnimationLoop((now) => {
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
   sun.position.copy(sun.target.position).add(SUN);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
-  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null
-    : near ? nearClock.step(dt, near.liveNow(), worldNow, newestTo) : clock.step(dt, worldNow, newestTo);
-  const ck = near ? nearClock : clock;
+  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, newestTo);
+  const ck = near?.clock ?? clock;
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {

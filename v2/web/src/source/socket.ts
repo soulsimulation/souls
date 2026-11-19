@@ -13,6 +13,7 @@
 // - gateway → page: `{31: item}`, R4's item as its bytes; `{32: name}` when the world refused the subscription;
 //   `{4: name}` the sign-in's outcome.
 import { decode, encode } from 'cborg';
+import { NearClock } from './near.ts';
 import type { SampleRec, Source, SourceEvents } from './source.ts';
 
 /** A frame's keys (`gatewayd::views`). */
@@ -116,6 +117,12 @@ export class SocketSource implements Source {
   /** The world time now as the socket tells it: the newest entry's, moved on by the wall time since; null when down. */
   liveNow(): number | null {
     return this.up && this.newest ? this.newest.at + (this.o.now() - this.newest.wallMs) * 1000 : null;
+  }
+
+  /** The page's clock with this socket: V5's `PlaybackClock.step`'s arguments, near live while the socket is up. */
+  readonly clock = new NearClock();
+  step(dtMs: number, worldNow: number, newestTo: number | null): number | null {
+    return this.clock.step(dtMs, this.liveNow(), worldNow, newestTo);
   }
 
   start(on: SourceEvents): void {
