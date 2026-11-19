@@ -241,6 +241,7 @@ dependencies = [
 name = "directoryd"
 version = "0.0.0"
 dependencies = [
+ "assets",
  "replica",
  "ring",
  "rusqlite",
